@@ -3,7 +3,6 @@ import dataclasses
 import functools
 import io
 import json
-import pathlib
 import re
 import sys
 import os
@@ -35,6 +34,7 @@ from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.export.exported_program import (
     ExportedProgram,
     ModuleCallEntry,
@@ -125,16 +125,10 @@ def capture_pre_autograd_graph(
     """
     from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG
 
-    decomp_table = {
-        torch.ops.aten.dropout.default: torch.ops.aten.dropout.default.decompose,
-        torch.ops.aten.batch_norm.default: torch.ops.aten.batch_norm.default.decompose,
-        torch.ops.aten._batch_norm_impl_index.default: torch.ops.aten._batch_norm_impl_index.default.decompose,
-        torch.ops.aten.native_batch_norm.default: torch.ops.aten.native_batch_norm.default.decompose,
-    }
-
     if kwargs is None:
         kwargs = {}
 
+    decomp_table = {op: op.decompose for op in FunctionalTensor.maybe_aliasing_or_mutating_ops}
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         m = torch._dynamo.export(
             f,
@@ -148,12 +142,6 @@ def capture_pre_autograd_graph(
             *args,
             **kwargs,
         )[0]
-
-        def _train(self, mode: bool = True):
-            raise NotImplementedError("Calling train() is not supported yet.")
-
-        def _eval(self, mode: bool = True):
-            raise NotImplementedError("Calling eval() is not supported yet.")
 
         _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
 
@@ -169,14 +157,21 @@ def capture_pre_autograd_graph(
 
         flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
         range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
-        unlifted_m = _create_stateful_graph_module(
+        module = _create_stateful_graph_module(
             m,
             range_constraints=range_constraints,
             equality_constraints=equality_constraints,
         )
-        unlifted_m.train = types.MethodType(_train, m)  # type: ignore[method-assign]
-        unlifted_m.eval = types.MethodType(_eval, m)  # type: ignore[method-assign]
-        return unlifted_m
+
+    def _train(self, mode: bool = True):
+        raise NotImplementedError("Calling train() is not supported yet.")
+
+    def _eval(self, mode: bool = True):
+        raise NotImplementedError("Calling eval() is not supported yet.")
+
+    module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
+    module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
+    return module
 
 
 def export(
@@ -211,7 +206,7 @@ def export(
 
 def save(
     ep: ExportedProgram,
-    f: Union[str, pathlib.Path, io.BytesIO],
+    f: Union[str, os.PathLike, io.BytesIO],
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     opset_version: Optional[Dict[str, int]] = None,
@@ -220,8 +215,8 @@ def save(
     from .serde.schema import SCHEMA_VERSION
     artifact: SerializedArtifact = serialize(ep, opset_version)
 
-    if isinstance(f, (str, pathlib.Path)):
-        f = str(f)
+    if isinstance(f, (str, os.PathLike)):
+        f = os.fspath(f)
 
     with zipfile.ZipFile(f, 'w') as zipf:
         # Save every field the SerializedArtifact to a file
@@ -240,13 +235,13 @@ def save(
 
 
 def load(
-    f: Union[str, pathlib.Path, io.BytesIO],
+    f: Union[str, os.PathLike, io.BytesIO],
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     expected_opset_version: Optional[Dict[str, int]] = None,
 ) -> ExportedProgram:
-    if isinstance(f, (str, pathlib.Path)):
-        f = str(f)
+    if isinstance(f, (str, os.PathLike)):
+        f = os.fspath(f)
 
     with zipfile.ZipFile(f, 'r') as zipf:
         # Check the version

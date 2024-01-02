@@ -1,5 +1,7 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Common.h>
@@ -14,10 +16,7 @@ namespace api {
 
 class DescriptorSet final {
  public:
-  explicit DescriptorSet(
-      const VkDevice,
-      const VkDescriptorSet,
-      const ShaderLayout::Signature&);
+  explicit DescriptorSet(VkDevice, VkDescriptorSet, ShaderLayout::Signature);
 
   DescriptorSet(const DescriptorSet&) = delete;
   DescriptorSet& operator=(const DescriptorSet&) = delete;
@@ -58,9 +57,9 @@ class DescriptorSetPile final {
  public:
   DescriptorSetPile(
       const uint32_t,
-      const VkDescriptorSetLayout,
-      const VkDevice,
-      const VkDescriptorPool);
+      VkDescriptorSetLayout,
+      VkDevice,
+      VkDescriptorPool);
 
   DescriptorSetPile(const DescriptorSetPile&) = delete;
   DescriptorSetPile& operator=(const DescriptorSetPile&) = delete;
@@ -99,7 +98,7 @@ struct DescriptorPoolConfig final {
 
 class DescriptorPool final {
  public:
-  explicit DescriptorPool(const VkDevice, const DescriptorPoolConfig&);
+  explicit DescriptorPool(VkDevice, const DescriptorPoolConfig&);
 
   DescriptorPool(const DescriptorPool&) = delete;
   DescriptorPool& operator=(const DescriptorPool&) = delete;
@@ -119,7 +118,7 @@ class DescriptorPool final {
 
  public:
   DescriptorSet get_descriptor_set(
-      const VkDescriptorSetLayout handle,
+      VkDescriptorSetLayout handle,
       const ShaderLayout::Signature& signature);
 
   void flush();
