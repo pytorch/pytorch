@@ -3,9 +3,11 @@
 #include <c10/cuda/CUDAMacros.h>
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifdef USE_CUDA
@@ -24,17 +26,17 @@ namespace c10::cuda {
 struct DeviceAssertionData {
   /// Stringification of the assertion
   // NOLINTNEXTLINE(*-c-arrays)
-  char assertion_msg[C10_CUDA_DSA_MAX_STR_LEN];
+  char assertion_msg[C10_CUDA_DSA_MAX_STR_LEN]{};
   /// File the assertion was in
   // NOLINTNEXTLINE(*-c-arrays)
-  char filename[C10_CUDA_DSA_MAX_STR_LEN];
+  char filename[C10_CUDA_DSA_MAX_STR_LEN]{};
   /// Name of the function the assertion was in
   // NOLINTNEXTLINE(*-c-arrays)
-  char function_name[C10_CUDA_DSA_MAX_STR_LEN];
+  char function_name[C10_CUDA_DSA_MAX_STR_LEN]{};
   /// Line number the assertion was at
-  int line_number;
+  int line_number{};
   /// Number uniquely identifying the kernel launch that triggered the assertion
-  uint32_t caller;
+  uint32_t caller{};
   /// block_id of the thread that failed the assertion
   std::array<int32_t, 3> block_id;
   /// third_id of the thread that failed the assertion
@@ -46,7 +48,7 @@ struct DeviceAssertionData {
 struct DeviceAssertionsData {
   /// Total number of assertions found; a subset of thse will be recorded
   /// in `assertions`
-  int32_t assertion_count;
+  int32_t assertion_count{};
   /// An array of assertions that will be written to in a race-free manner
   std::array<DeviceAssertionData, C10_CUDA_DSA_ASSERTION_COUNT> assertions;
 };

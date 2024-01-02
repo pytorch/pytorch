@@ -1,14 +1,20 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
-#include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/ApproximateClock.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
 #include <array>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <string>
 #include <unordered_set>
 #include <utility>
 
@@ -176,7 +182,7 @@ struct TraceEntry {
   int device_;
   int64_t addr_; // for OOM, this is the amount of free bytes reported by cuda
   std::shared_ptr<GatheredContext> context_;
-  cudaStream_t stream_;
+  cudaStream_t stream_{};
   int64_t size_;
   trace_time_ time_{};
 };
