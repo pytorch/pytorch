@@ -78,8 +78,8 @@ struct TemplateEnv {
   }
 
  private:
-  [[noreturn]] void notFound(std::string k) const {
-    throw std::logic_error("key not found: " + std::move(k));
+  [[noreturn]] void notFound(const std::string& k) const {
+    throw std::logic_error("key not found: " + k);
   }
 
   std::unordered_map<std::string, std::string> strings_;
