@@ -308,7 +308,6 @@ FIXME_default_non_strict = {
     "torch_np/numpy_tests/lib/test_type_check",
     "torch_np/numpy_tests/linalg/test_linalg",
     "torch_np/test_basic",
-    "torch_np/test_binary_ufuncs",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
