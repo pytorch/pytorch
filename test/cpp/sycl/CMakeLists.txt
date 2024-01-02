@@ -30,16 +30,17 @@ target_link_libraries(test_sycl_build_archive
   -L$<TARGET_FILE_DIR:sycl_simple_kernel_test>
   -l:libsycl_simple_kernel_test.a
   -Wl,--no-whole-archive)
-# ``SYCL_LIBRARIES`` is included in ``INTERFACE_LINK_LIBRARIES`` of
-# sycl_simple_kernel_test. Since not using,
+
+# SYCL runtime library could be a transitive link library of
+# ``test_sycl_build_archive``, if using,
 # ``
 # target_link_libraries(
 #   test_sycl_build_archive
 #   sycl_simple_kernel_test)
 # ``
-# but explicit linkage options here for '--whole-archive' which is required
-# by those objects wrapping SYCL device object modules in the archive library.
-# ``SYCL_LIBRARIES`` is added as link library explicitly.
+# Instead, we use explicit linkage option '--whole-archive', which is required
+# by linkage of device object modules archived in the static library. Then
+# explicit linkage configuration of SYCL runtime library is required.
 target_link_libraries(test_sycl_build_archive ${SYCL_LIBRARIES})
 
 if(INSTALL_TEST)
