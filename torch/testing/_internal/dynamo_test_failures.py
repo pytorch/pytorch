@@ -304,7 +304,6 @@ FIXME_default_non_strict = {
     "torch_np/numpy_tests/lib/test_histograms",
     "torch_np/numpy_tests/lib/test_index_tricks",
     "torch_np/numpy_tests/lib/test_shape_base_",
-    "torch_np/numpy_tests/lib/test_twodim_base",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -1315,6 +1314,14 @@ dynamo_expected_failures = {
     "TestIsreal.test_fail",
     "TestIscomplexobj.test_list",
     "TestIscomplex.test_pass",
+    "TestTrilIndicesFrom.test_exceptions",
+    "TestHistogram2d.test_all_outliers",
+    "TestDiag.test_failure",
+    "TestHistogram2d.test_binparameter_combination",
+    "TestFliplr.test_basic",
+    "TestHistogram2d.test_asym",
+    "TestTriuIndicesFrom.test_exceptions",
+    "TestVander.test_dtypes",
 }
 
 dynamo_skips = {}
