@@ -383,9 +383,6 @@ elseif(CUDA_DEVICE_DEBUG)
   list(APPEND CUDA_NVCC_FLAGS "-g" "-G")  # -G enables device code debugging symbols
 endif()
 
-# Set expt-relaxed-constexpr to suppress Eigen warnings
-list(APPEND CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
-
 # Set expt-extended-lambda to support lambda on device
 list(APPEND CUDA_NVCC_FLAGS "--expt-extended-lambda")
 
