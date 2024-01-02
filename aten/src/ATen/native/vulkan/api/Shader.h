@@ -1,5 +1,7 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Common.h>
@@ -19,7 +21,7 @@ class ShaderLayout final {
  public:
   using Signature = c10::SmallVector<VkDescriptorType, 6u>;
 
-  explicit ShaderLayout(const VkDevice, const Signature&);
+  explicit ShaderLayout(VkDevice, const Signature&);
 
   ShaderLayout(const ShaderLayout&) = delete;
   ShaderLayout& operator=(const ShaderLayout&) = delete;
@@ -81,7 +83,7 @@ bool operator==(const ShaderInfo& _1, const ShaderInfo& _2);
 
 class ShaderModule final {
  public:
-  explicit ShaderModule(const VkDevice device, const ShaderInfo& source);
+  explicit ShaderModule(VkDevice device, const ShaderInfo& source);
 
   ShaderModule(const ShaderModule&) = delete;
   ShaderModule& operator=(const ShaderModule&) = delete;
@@ -108,7 +110,7 @@ class ShaderModule final {
 
 class ShaderLayoutCache final {
  public:
-  explicit ShaderLayoutCache(const VkDevice device);
+  explicit ShaderLayoutCache(VkDevice device);
 
   ShaderLayoutCache(const ShaderLayoutCache&) = delete;
   ShaderLayoutCache& operator=(const ShaderLayoutCache&) = delete;
@@ -148,7 +150,7 @@ class ShaderLayoutCache final {
 
 class ShaderCache final {
  public:
-  explicit ShaderCache(const VkDevice device);
+  explicit ShaderCache(VkDevice device);
 
   ShaderCache(const ShaderCache&) = delete;
   ShaderCache& operator=(const ShaderCache&) = delete;
