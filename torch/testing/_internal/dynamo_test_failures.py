@@ -191,7 +191,6 @@ FIXME_default_non_strict = {
     "test_foreach",
     "test_function_schema",
     "test_functional_autograd_benchmark",
-    "test_functional_optim",
     "test_functionalization",
     "test_functionalization_of_rng_ops",
     "test_futures",
@@ -361,7 +360,7 @@ dynamo_expected_failures = {
     "TestAutogradFallback.test_inplace_on_tensor_that_does_not_require_grad_mode_warn",
     "TestAutogradFallback.test_inplace_autograd_function_registered_to_cpu_mode_nothing",
     "TestAutogradFallback.test_autograd_function_registered_to_cpu_mode_nothing",
->>>>>>> bc83b932f62 ([codemod] markDynamoStrictTest test_autograd_fallback)
+    "TestFunctionalOptimParity.test_functional_optim_parity_sgd",
 }
 
 dynamo_skips = {}
