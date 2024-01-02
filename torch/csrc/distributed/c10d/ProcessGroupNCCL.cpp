@@ -799,6 +799,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
             << "NCCL version: " << getNcclVersion() << ", size: " << size
+            << ", global rank: " << globalRank()
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
@@ -1202,7 +1203,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
     if (debugInfoWriter_ == nullptr) {
       // Dump the trace blob into local disk as a fallback.
       std::unique_ptr<DebugInfoWriter> debugInfoWriterPtr =
-          std::make_unique<DebugInfoWriter>(rank_);
+          std::make_unique<DebugInfoWriter>(globalRank());
       registerDebugInfoWriter(std::move(debugInfoWriterPtr));
     }
     debugInfoWriter_->write(ncclTrace);
@@ -1431,6 +1432,11 @@ const std::string& ProcessGroupNCCL::logPrefix() const {
   return prefix;
 }
 
+const int& ProcessGroupNCCL::globalRank() const {
+  static int globalRank = rank_;
+  return globalRank;
+}
+
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
@@ -1457,10 +1463,12 @@ void ProcessGroupNCCL::watchdogHandler() {
     // Bump up heart beat by one.
     heartbeat_++;
 
-    // poll store to see if some ranks have flagged a timeout when
+    // Assuming that we always init a process group containing all ranks,
+    // we only use the watchdog thread to listen for the global signal to dump
+    // and abort. We poll store to see if some ranks have flagged a timeout when
     // we haven't polled for `heartbeat_timeout` seconds and there haven't
     // any work added or removed for `watchdog_timeout` seconds.
-    if (dumpOnTimeout_) {
+    if (dumpOnTimeout_ && uid_ == 0) {
       auto currentTime = std::chrono::steady_clock::now();
       auto timeSinceLastWorkListUpdate =
           std::chrono::duration_cast<std::chrono::milliseconds>(
