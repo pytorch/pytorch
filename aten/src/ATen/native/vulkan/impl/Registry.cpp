@@ -33,7 +33,7 @@ const api::ShaderInfo& look_up_shader_info(const std::string& op_name) {
   const RegistryKeyMap& registry_key_map = registry_iterator->second;
 
   // Look for "override" and "catchall" keys
-  for (const std::string& key : {"override", "catchall"}) {
+  for (const std::string key : {"override", "catchall"}) {
     const RegistryKeyMap::const_iterator registry_key_iterator =
         registry_key_map.find(key);
     if (registry_key_iterator != registry_key_map.end()) {

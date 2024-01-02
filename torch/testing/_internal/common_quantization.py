@@ -206,7 +206,7 @@ def run_ddp(rank, world_size, prepared):
     prepared.to(rank)
     model_with_ddp = prepared
     optimizer = torch.optim.SGD(model_with_ddp.parameters(), lr=0.0001)
-    train_one_epoch(model_with_ddp, criterion, optimizer, dataset, rank, 1)
+    train_one_epoch(model_with_ddp, criterion, optimizer, dataset, rank, 1)  # noqa: F821
     ddp_cleanup()
 
 
