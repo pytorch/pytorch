@@ -7,8 +7,11 @@
 
 #include <c10/macros/Export.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <ostream>
+#include <string>
 
 namespace c10 {
 
@@ -113,5 +116,6 @@ struct hash<c10::DeviceType> {
 } // namespace std
 
 namespace torch {
+// NOLINTNEXTLINE(misc-unused-using-decls)
 using c10::DeviceType;
-}
+} // namespace torch

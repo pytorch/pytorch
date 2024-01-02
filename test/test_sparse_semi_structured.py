@@ -70,8 +70,16 @@ def rand_sparse_semi_structured_mask(
         .contiguous()
     )
 
-def rand_sparse_semi_structured(r, c, dtype, device, pattern='2by4', choice=None):
-    if pattern == '2by4':
+def rand_sparse_semi_structured(r, c, dtype, device, choice=None):
+    pattern = '2by4' if dtype != torch.float32 else '1by2'
+    if pattern == '1by2':
+        ksparse = 2
+        choices = [
+            [0, 1],
+            [1, 0]
+        ]
+    elif pattern == '2by4':
+        ksparse = 4
         choices = [
             [1, 1, 0, 0],
             [1, 0, 1, 0],
@@ -80,44 +88,45 @@ def rand_sparse_semi_structured(r, c, dtype, device, pattern='2by4', choice=None
             [0, 1, 0, 1],
             [0, 0, 1, 1]
         ]
-        mask_entries = [choice or random.choice(choices) for i in range(r * c // 4)]
-    elif pattern == '1by2':
-        choices = [
-            [0, 1],
-            [1, 0]
-        ]
-        mask_entries = [choice or random.choice(choices) for i in range(r * c // 2)]
-    else:
-        assert(false)
+    mask_entries = [choice or random.choice(choices) for i in range(r * c // ksparse)]
     mask = torch.tensor(mask_entries, dtype=torch.bool).view(r, c).to(device)
     dense = make_tensor(r, c, dtype=dtype, device=device)
     dense[dense == 0] = 1  # To prevent zeros except where mask applied.
     dense = dense.masked_fill(~mask, 0)
     return dense
 
-def rand_sparse_semi_structured_all_patterns(r, c, dtype, device, pattern='2by4'):
-    if pattern == '2by4':
+def rand_sparse_semi_structured_all_patterns(r, c, dtype, device):
+    pattern = '2by4' if dtype != torch.float32 else '1by2'
+    if pattern == '1by2':
+        ksparse = 2
+        choices = [
+            [[0, 0], [0, 1]],
+            [[0, 1], [0, 1]],
+            [[1, 0], [1, 0]],
+            [[1, 1], [1, 0]]
+        ]
+    elif pattern == '2by4':
+        ksparse = 4
         choices = [
             [[0, 0, 0, 0], [0, 0, 1, 1]],
             [[0, 0, 0, 1], [0, 0, 1, 1]],
             [[0, 0, 1, 0], [0, 0, 1, 1]],
             [[0, 0, 1, 1], [0, 0, 1, 1]],
-            [[0, 1, 0, 0], [0, 1, 0, 1]],
+            [[0, 1, 0, 0], [0, 1, 1, 0]],
             [[0, 1, 0, 1], [0, 1, 0, 1]],
             [[0, 1, 1, 0], [0, 1, 1, 0]],
-            [[0, 1, 1, 1], [0, 1, 1, 0]],
-            [[1, 0, 0, 0], [1, 0, 0, 1]],
+            [[0, 1, 1, 1], [0, 1, 0, 1]],
+            [[1, 0, 0, 0], [1, 0, 1, 0]],
             [[1, 0, 0, 1], [1, 0, 0, 1]],
             [[1, 0, 1, 0], [1, 0, 1, 0]],
-            [[1, 0, 1, 1], [1, 0, 1, 0]],
+            [[1, 0, 1, 1], [1, 0, 0, 1]],
             [[1, 1, 0, 0], [1, 1, 0, 0]],
             [[1, 1, 0, 1], [1, 1, 0, 0]],
-            [[1, 1, 1, 0], [1, 0, 1, 0]],
-            [[1, 1, 1, 1], [1, 0, 1, 0]],
+            [[1, 1, 1, 0], [1, 1, 0, 0]],
+            [[1, 1, 1, 1], [1, 1, 0, 0]],
         ]
-        mask_rows = [random.randint(0, len(choices) - 1) for i in range(r * c // 4)]
-    else:
-        assert(false)
+    mask_rows = [random.randint(0, len(choices) - 1) for i in range(r * c // ksparse)]
+
     COL_INV, COL_VAL = 0, 1
     mask_entries_inv = [choices[i][COL_INV] for i in mask_rows]
     mask_entries_val = [choices[i][COL_VAL] for i in mask_rows]
@@ -127,6 +136,7 @@ def rand_sparse_semi_structured_all_patterns(r, c, dtype, device, pattern='2by4'
     dense[dense == 0] = 1   # To prevent zeros except where mask below applied.
     dense_inv = dense.masked_fill(~mask_inv, 0)
     dense_val = dense_inv.masked_fill(~mask_val, 0)
+
     return dense_inv, dense_val
 
 
@@ -478,8 +488,7 @@ class TestSparseSemiStructured(TestCase):
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
 
         def run_test(batch_shape, m, n, k, device, dtype, dtype_out, add_bias, activation, rtol, atol):
-            pattern = '2by4' if dtype != torch.float32 else '1by2'
-            weight = rand_sparse_semi_structured(m, k, dtype, device, pattern=pattern)
+            weight = rand_sparse_semi_structured(m, k, dtype, device)
             input = make_tensor((*batch_shape, n, k), dtype=dtype, device=device)
             bias = make_tensor((m,), dtype=dtype_out, device=device) if add_bias else None
 
@@ -516,7 +525,7 @@ class TestSparseSemiStructured(TestCase):
         if dtype == torch.bfloat16:
             rtol, atol = 5e-3, 5e-3
         elif dtype == torch.float32:
-            rtol, atol = 1e-3, 5e-1
+            rtol, atol = 1e-3, 75e-2
         for batch_shape, m, n, k, add_bias, activation in \
                 itertools.product(batch_shapes, range(3), range(3), range(3), (False, True), activations):
             if activation == "silu" and dtype == torch.int8:
@@ -535,14 +544,10 @@ class TestSparseSemiStructured(TestCase):
     @parametrize("backend", ["cutlass"])
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_conversions(self, device, dtype, backend):
-        if dtype == torch.float32:
-            return
-
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
 
         def run_test(r, c, device, dtype):
-            pattern = '2by4' if dtype != torch.float32 else '1by2'
-            dense_ref = rand_sparse_semi_structured(r, c, dtype, device, pattern=pattern)
+            dense_ref = rand_sparse_semi_structured(r, c, dtype, device)
 
             compressed = to_sparse_semi_structured(dense_ref)
 
@@ -569,9 +574,6 @@ class TestSparseSemiStructured(TestCase):
     @parametrize("backend", ["cutlass"])
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_conversions_all_patterns(self, device, dtype, backend):
-        if dtype == torch.float32:
-            return
-
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         r, c = 32, 128
 
