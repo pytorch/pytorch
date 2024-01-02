@@ -4600,7 +4600,7 @@ def fn():
         self.assertTrue(same(
             torch.nonzero_static(input_tensor, size=static_size, out=out_tensor),
             torch.tensor([0]),
-            ) 
+            )
         )
         self.assertTrue(same(out_tensor, torch.tensor([0])))
 
