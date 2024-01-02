@@ -1383,7 +1383,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 or k.is_python_constant()
             )
 
-            result[ConstDictVariable.get_key(k)] = v
+            result[ConstDictVariable.get_key(self, k)] = v
         assert len(result) == len(items) / 2
         self.push(ConstDictVariable(result, dict, mutable_local=MutableLocal()))
 

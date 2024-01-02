@@ -67,8 +67,8 @@ class ConstDictVariable(VariableTracker):
         else:
             return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
-    def getitem_const(self, arg: VariableTracker):
-        return self.items[ConstDictVariable.get_key(arg)]
+    def getitem_const(self, tx, arg: VariableTracker):
+        return self.items[ConstDictVariable.get_key(tx, arg)]
 
     def call_method(
         self,
@@ -88,7 +88,7 @@ class ConstDictVariable(VariableTracker):
 
         if name == "__getitem__":
             assert len(args) == 1
-            return self.getitem_const(args[0])
+            return self.getitem_const(tx, args[0])
         elif name == "items":
             assert not (args or kwargs)
             return TupleVariable(
@@ -133,7 +133,7 @@ class ConstDictVariable(VariableTracker):
             and self.mutable_local
         ):
             assert not kwargs and len(args) == 2
-            k = ConstDictVariable.get_key(args[0])
+            k = ConstDictVariable.get_key(tx, args[0])
             tx.output.side_effects.mutation(self)
             if istensor(k):
                 tx.store_global_weakref(global_key_name(k), k)
@@ -144,7 +144,7 @@ class ConstDictVariable(VariableTracker):
             and len(args) == 2
             and not kwargs
             and ConstDictVariable.is_valid_key(args[0])
-            and ConstDictVariable.get_key(args[0]) not in self.items
+            and ConstDictVariable.get_key(tx, args[0]) not in self.items
         ):
             # missing item, return the default value
             return args[1]
@@ -153,7 +153,7 @@ class ConstDictVariable(VariableTracker):
             and len(args) == 1
             and not kwargs
             and ConstDictVariable.is_valid_key(args[0])
-            and ConstDictVariable.get_key(args[0]) not in self.items
+            and ConstDictVariable.get_key(tx, args[0]) not in self.items
         ):
             return ConstantVariable(None)
         elif (
@@ -163,7 +163,7 @@ class ConstDictVariable(VariableTracker):
             and self.mutable_local
         ):
             tx.output.side_effects.mutation(self)
-            var = self.items.pop(ConstDictVariable.get_key(args[0]))
+            var = self.items.pop(ConstDictVariable.get_key(tx, args[0]))
             return var
         elif (
             name == "update"
@@ -192,21 +192,21 @@ class ConstDictVariable(VariableTracker):
             for x in args[0].unpack_var_sequence(tx):
                 k, v = x.unpack_var_sequence(tx)
                 assert ConstDictVariable.is_valid_key(k)
-                self.items[ConstDictVariable.get_key(k)] = v
+                self.items[ConstDictVariable.get_key(tx, k)] = v
             self.items.update(kwargs)  # all keys in kwargs are valid (`str`s)
             return ConstantVariable.create(None)
         elif (
             name in ("get", "__getattr__")
             and args
             and ConstDictVariable.is_valid_key(args[0])
-            and ConstDictVariable.get_key(args[0]) in self.items
+            and ConstDictVariable.get_key(tx, args[0]) in self.items
         ):
-            return self.items[ConstDictVariable.get_key(args[0])]
+            return self.items[ConstDictVariable.get_key(tx, args[0])]
         elif (
             name == "__contains__" and args and ConstDictVariable.is_valid_key(args[0])
         ):
             return ConstantVariable.create(
-                ConstDictVariable.get_key(args[0]) in self.items
+                ConstDictVariable.get_key(tx, args[0]) in self.items
             )
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -221,9 +221,11 @@ class ConstDictVariable(VariableTracker):
         return result
 
     @classmethod
-    def get_key(cls, arg: VariableTracker):
+    def get_key(cls, tx, arg: VariableTracker):
         if isinstance(arg, TensorVariable) and arg.specialized_value is not None:
             return arg.specialized_value
+        elif isinstance(arg, variables.NNModuleVariable):
+            return tx.output.nn_modules[arg.module_key]
         else:
             return arg.as_python_constant()
 
@@ -231,8 +233,11 @@ class ConstDictVariable(VariableTracker):
     def is_valid_key(cls, key):
         return (
             key.is_python_constant()
-            or (isinstance(key, TensorVariable) and key.specialized_value is not None)
-            or (isinstance(key, ConstantVariable) and key.python_type() is torch.dtype)
+            or isinstance(key, TensorVariable)
+            and key.specialized_value is not None
+            or isinstance(key, ConstantVariable)
+            and key.python_type() is torch.dtype
+            or isinstance(key, variables.NNModuleVariable)
         )
 
     @classmethod
@@ -274,10 +279,10 @@ class DefaultDictVariable(ConstDictVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__getitem__":
-            k = ConstDictVariable.get_key(args[0])
+            k = ConstDictVariable.get_key(tx, args[0])
 
             if k in self.items:
-                return self.getitem_const(args[0])
+                return self.getitem_const(tx, args[0])
             else:
                 if self.default_factory is None:
                     raise KeyError(f"{k}")
@@ -419,7 +424,7 @@ class SetVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx, arg: VariableTracker):
         raise RuntimeError("Illegal to getitem on a set")
 
     def as_python_constant(self):
@@ -804,7 +809,7 @@ class PythonSysModulesVariable(VariableTracker):
         return real_dict.call_method(tx, name, args, kwargs)
 
     def _contains_helper(self, tx, key: VariableTracker):
-        k = ConstDictVariable.get_key(key)
+        k = ConstDictVariable.get_key(tx, key)
         has_key = k in sys.modules
         install_guard(
             self.make_guard(

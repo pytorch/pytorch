@@ -155,7 +155,7 @@ class SuperVariable(VariableTracker):
             and self.objvar.mutable_local
         ):
             assert not kwargs and len(args) == 2
-            k = variables.ConstDictVariable.get_key(args[0])
+            k = variables.ConstDictVariable.get_key(tx, args[0])
             tx.output.side_effects.mutation(self)
             self.objvar.items[k] = args[1]
             return variables.ConstantVariable.create(None)
