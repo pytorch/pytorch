@@ -670,7 +670,9 @@ class CommonTemplate:
         y = torch.tensor([1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1])
 
         _, code = run_and_get_code(fn, x, y)
-        self.assertEqual(code[0].count("aten.view"), 3)
+        self.assertEqual(
+            code[0].count("::view_dtype" if config.cpp_wrapper else "aten.view"), 3
+        )
 
     def test_add_complex3(self):
         # fix https://github.com/pytorch/pytorch/issues/115071
