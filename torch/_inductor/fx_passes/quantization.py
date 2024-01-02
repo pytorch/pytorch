@@ -1619,6 +1619,7 @@ def _register_qlinear_weight_prepack_pass(
                         output_add_node_for_bias = match.output_node()
                         assert output_add_node_for_bias.target is aten.add.Tensor
                         output_add_node_for_bias.replace_all_uses_with(new_linear_node)
+                        new_linear_node.meta.update(output_add_node_for_bias.meta)
                     else:
                         linear_node.replace_all_uses_with(new_linear_node)
                         new_linear_node.meta.update(linear_node.meta)
