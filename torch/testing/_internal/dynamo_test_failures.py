@@ -309,7 +309,6 @@ FIXME_default_non_strict = {
     "torch_np/numpy_tests/linalg/test_linalg",
     "torch_np/test_basic",
     "torch_np/test_binary_ufuncs",
-    "torch_np/test_dtype",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -849,6 +848,18 @@ dynamo_expected_failures = {
     "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmin_np_method1",
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmax",
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmin",
+    "TestConvertDType.test_convert_np_dtypes_'int64'",
+    "TestConvertDType.test_convert_np_dtypes_'uint8'",
+    "TestConvertDType.test_convert_np_dtypes_bool",
+    "TestConvertDType.test_convert_np_dtypes_'complex128'",
+    "TestConvertDType.test_convert_np_dtypes_'float16'",
+    "TestConvertDType.test_convert_np_dtypes_'int16'",
+    "TestConvertDType.test_convert_np_dtypes_'int32'",
+    "TestConvertDType.test_convert_np_dtypes_'int8'",
+    "TestConvertDType.test_convert_np_dtypes_'float64'",
+    "TestConvertDType.test_convert_np_dtypes_'float32'",
+    "TestConvertDType.test_convert_np_dtypes_'complex64'",
+    "TestConvertDType.test_convert_np_dtypes_'bool_'",
 }
 
 dynamo_skips = {}
