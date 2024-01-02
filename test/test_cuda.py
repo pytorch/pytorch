@@ -2565,7 +2565,7 @@ exit(2)
             if not TEST_CUDAMALLOCASYNC:
                 # These stat checks are specific to the native allocator.
                 if share_mem != "Don't share":
-                    self.assertEqual(reserved_no_sharing - torch.cuda.memory_stats()["reserved_bytes.all.current"],
+                    self.assertEqual(reserved_no_sharing - torch.cuda.memory_stats()["reserved_bytes.all.current"],  # noqa: F821
                                      kSmallBuffer)
                 else:
                     reserved_no_sharing = torch.cuda.memory_stats()["reserved_bytes.all.current"]
