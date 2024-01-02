@@ -1279,13 +1279,13 @@ void TensorPipeAgent::updateGroupMembership(
 }
 std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
-  metrics[kThreadPoolSize] = std::to_string(threadPool_.size());
-  metrics[kNumIdleThreads] = std::to_string(threadPool_.numAvailable());
+  metrics[kThreadPoolSize] = fmt::to_string(threadPool_.size());
+  metrics[kNumIdleThreads] = fmt::to_string(threadPool_.numAvailable());
   {
     std::unique_lock<std::mutex> lock(callCountMutex_);
-    metrics[kClientActiveCalls] = std::to_string(clientActiveCalls_);
-    metrics[kServerActiveCalls] = std::to_string(serverActiveCalls_);
-    metrics[kServerActiveAsyncCalls] = std::to_string(serverActiveAsyncCalls_);
+    metrics[kClientActiveCalls] = fmt::to_string(clientActiveCalls_);
+    metrics[kServerActiveCalls] = fmt::to_string(serverActiveCalls_);
+    metrics[kServerActiveAsyncCalls] = fmt::to_string(serverActiveAsyncCalls_);
   }
   if (isGILProfilingEnabled()) {
     {
@@ -1295,7 +1295,7 @@ std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
       auto averageGilWaitTime =
           timeSeriesMetrics_[kGilAverageWaitTime].computeAverage();
       lock.unlock();
-      metrics[kGilAverageWaitTime] = std::to_string(averageGilWaitTime);
+      metrics[kGilAverageWaitTime] = fmt::to_string(averageGilWaitTime);
     }
   }
 
