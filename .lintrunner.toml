@@ -62,6 +62,8 @@ include_patterns = [
     'aten/src/ATen/native/vulkan/**/*.cpp',
     'aten/src/ATen/native/cuda/MultiTensorApply.cuh',
     'aten/src/ATen/native/**/Foreach*.*',
+    'aten/src/ATen/native/cuda/fused*.*',
+    'aten/src/ATen/native/cuda/Fused*.cu',
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',
