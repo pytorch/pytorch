@@ -4,7 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
-from typing import Dict
+from typing import Dict, Tuple
 
 import torch
 import torch._export
@@ -1330,6 +1330,48 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), inputs)
 
+    def test_scatter_reduce_fallback(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self,
+                inp: torch.Tensor,
+                index: torch.Tensor,
+                src: torch.Tensor,
+            ):
+                return torch.scatter_reduce(inp, 0, index, src, reduce="sum")
+
+        inputs = (
+            torch.tensor([1, 10, 100, 1000], device=self.device, dtype=torch.int64),
+            torch.tensor([0, 1, 0, 1, 2, 1], device=self.device, dtype=torch.int64),
+            torch.tensor([1, 2, 3, 4, 5, 6], device=self.device, dtype=torch.int64),
+        )
+
+        self.check_model(Model(), inputs)
+
+    def test_index_put_fallback(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self,
+                self_tensor: torch.Tensor,
+                indices: Tuple[torch.Tensor],
+                values: torch.Tensor,
+            ):
+                return self_tensor.index_put(indices, values, accumulate=True)
+
+        inputs = (
+            torch.ones(4, device=self.device, dtype=torch.int64),
+            (torch.tensor([1, 0, 1, 0], dtype=torch.bool),),
+            torch.ones(4, device=self.device, dtype=torch.int64),
+        )
+
+        self.check_model(Model(), inputs)
+
     def test_convolution(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1515,7 +1557,9 @@ CPU_TEST_FAILURES = {
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
     # the test segfaults
-    "test_scatter_fallback": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_scatter_fallback": fail_stack_allocation(is_skip=True),
+    "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
+    "test_index_put_fallback": fail_stack_allocation(is_skip=True),
     # Minimal arrayref interface doesn't support bfloat16 yet.
     "test_sdpa": fail_minimal_arrayref_interface(is_skip=True),
     # Minimal arrayref interface doesn't support bfloat16 yet.

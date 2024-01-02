@@ -322,6 +322,13 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scatter_out(
     AtenTensorHandle index,
     AtenTensorHandle src);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_index_put_(
+    AtenTensorHandle self,
+    AtenTensorHandle* indices,
+    AtenTensorHandle values,
+    bool accumulate,
+    const uint32_t num_indices);
+
 #ifdef USE_CUDA
 
 struct CUDAStreamGuardOpaque;

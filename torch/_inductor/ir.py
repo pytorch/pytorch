@@ -4280,11 +4280,28 @@ class IndexPutFallback(ExternKernel):
             else:
                 indices.append(V.graph.wrapper_code.none_str)
 
+        kernel = self.get_kernel_name()
         indices_str = f"{V.graph.wrapper_code.open_bracket}{', '.join(indices)}{V.graph.wrapper_code.closed_bracket}"
         args = [x, indices_str, values, *self.codegen_const_args()]
+
+        if (
+            V.graph.aot_mode
+            and V.graph.cpp_wrapper
+            and config.aot_inductor.abi_compatible
+        ):
+            # Make the fallback call ABI-compatible in the C++ wrapper file.
+            kernel = kernel.replace("at::", "aoti_torch_")
+            indices_str = (
+                f"std::vector<AtenTensorHandle>{{{', '.join(indices)}}}.data()"
+            )
+            num_indices = str(
+                len(indices)
+            )  # num_indices for indexing into indices array
+            args = [x, indices_str, values, *self.codegen_const_args(), num_indices]
+
         wrapper.writeline(
             wrapper.wrap_kernel_call(
-                self.get_kernel_name(),
+                kernel,
                 args,
             )
         )
