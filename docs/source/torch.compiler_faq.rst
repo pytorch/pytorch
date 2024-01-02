@@ -583,8 +583,37 @@ fallback to NumPy for their execution:
 
 - ``ndarray.ctypes`` attribute.
 
-Can I execute NumPy code on CUDA via ``torch.compile``?
--------------------------------------------------------
+Can I compile NumPy code using ``torch.compile``?
+-------------------------------------------------
+
+Of course you do! ``torch.compile`` understands NumPy code natively, and treats it
+as if it were PyTorch code. To do so, simply wrap NumPy code with the ``torch.compile``
+decorator.
+
+.. code-block:: python
+
+   import torch
+   import numpy as np
+
+   @torch.compile
+   def numpy_fn(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
+       return np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
+
+   X = np.random.randn(1024, 64)
+   Y = np.random.randn(1024, 64)
+   Z = numpy_fn(X, Y)
+   assert isinstance(Z, np.ndarray)
+
+Executing this example with the environment variable ``TORCH_LOGS=output_code``, we can see
+that ``torch.compile`` was able to fuse the multiplication and the sum into one C++ kernel.
+It was also able to execute them in parallel using OpenMP (native NumPy is single-threaded).
+This can easily make your NumPy code ``n`` times faster, where ``n`` is the number of cores
+in your processor!
+
+Tracing NumPy code this way also supports graph breaks within the compiled code.
+
+Can I execute NumPy code on CUDA and compute gradients via ``torch.compile``?
+-----------------------------------------------------------------------------
 
 Yes you can! To do so, you may simply execute your code within a ``torch.device("cuda")``
 context. Consider the example
