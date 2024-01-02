@@ -1,6 +1,6 @@
 import logging
 import types
-from typing import Tuple, Optional
+from typing import Tuple
 import weakref
 from dataclasses import dataclass
 
@@ -161,7 +161,7 @@ def is_recompilation(cache_size: CacheSizeRelevantForFrame) -> bool:
     return cache_size.will_compilation_exceed(1)
 
 
-def exceeds_cache_size_limit(cache_size: CacheSizeRelevantForFrame) -> Tuple[bool, Optional[str]]:
+def exceeds_cache_size_limit(cache_size: CacheSizeRelevantForFrame) -> Tuple[bool, str]:
     """
     Checks if we are exceeding the cache size limit.
     """
@@ -169,4 +169,4 @@ def exceeds_cache_size_limit(cache_size: CacheSizeRelevantForFrame) -> Tuple[boo
         return True, "accumulated_cache_size_limit"
     if cache_size.will_compilation_exceed_specific_limit(config.cache_size_limit):
         return True, "cache_size_limit"
-    return False, None
+    return False, ""
