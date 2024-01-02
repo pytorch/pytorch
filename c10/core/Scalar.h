@@ -231,7 +231,7 @@ class C10_API Scalar {
     } else if (tag == Tag::HAS_u) {
       return v.u == num;
     } else if (tag == Tag::HAS_si) {
-      TORCH_CHECK(!isSymbolic(), "NYI SymInt equality");
+      TORCH_INTERNAL_ASSERT(false, "NYI SymInt equality");
     } else if (isBoolean()) {
       // boolean scalar does not equal to a non boolean value
       TORCH_INTERNAL_ASSERT(!isSymbolic());
@@ -256,7 +256,7 @@ class C10_API Scalar {
     } else if (tag == Tag::HAS_u) {
       return v.u == num.real() && num.imag() == T();
     } else if (tag == Tag::HAS_si) {
-      TORCH_CHECK(!isSymbolic(), "NYI SymInt equality");
+      TORCH_INTERNAL_ASSERT(false, "NYI SymInt equality");
     } else if (isBoolean()) {
       // boolean scalar does not equal to a non boolean value
       TORCH_INTERNAL_ASSERT(!isSymbolic());
