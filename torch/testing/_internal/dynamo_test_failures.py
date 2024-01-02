@@ -317,7 +317,6 @@ FIXME_default_non_strict = {
     "torch_np/test_reductions",
     "torch_np/test_scalars_0D_arrays",
     "torch_np/test_ufuncs_basic",
-    "torch_np/test_unary_ufuncs",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
