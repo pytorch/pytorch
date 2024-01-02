@@ -4317,8 +4317,7 @@ def _avg_poolnd(
     else:
         ones_loader = constant_boundary_condition(
             ones_like(x),
-            0.0,
-            padding if count_include_pad else None,
+            1.0 if count_include_pad else 0.0,
             dim=dim,
         )
 
