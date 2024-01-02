@@ -1126,6 +1126,17 @@ class TestPatternMatcher(TestPatternMatcherBase):
         """
         self._qlinear_cpu_test_helper((torch.randn((2, 4, 3, 4)),), do_permute=True)
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_int8_mixed_bf16_input_dim_exceeds_2_and_not_contiguous(self):
+        r"""
+        This testcase will quantize a single Linear Moduel.
+        * Input dim exceeds 2
+        * Input not contiguous
+        """
+        self._qlinear_cpu_test_helper((torch.randn((2, 4, 3, 4)),), int8_mixed_bf16=True, do_permute=True)
+
     def _qlinear_unary_cpu_test_helper(self, inputs, int8_mixed_bf16=False):
         class M(torch.nn.Module):
             def __init__(self, use_bias):

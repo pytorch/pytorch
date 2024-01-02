@@ -1403,7 +1403,11 @@ def _get_linear_dq_mul_node(
             # bmm pattern decomposed from linear when input dim exceeds 2 and not contiguous
             act_expand_node = linear_node.args[input_index]
             assert act_expand_node.target is aten.expand.default
-            mul_node = act_expand_node.args[0]
+            if dtype == torch.float32:
+                mul_node = act_expand_node.args[0]
+            else:
+                activation_to_bf16_node = act_expand_node.args[0]
+                mul_node = activation_to_bf16_node.args[0]          
     else:
         if dtype == torch.float32:
             # pattern: linear -> mul
@@ -1711,7 +1715,11 @@ def _generate_dequant_bmm_node_pattern(
         aten.bmm.default,
         CallFunction(
             aten.expand.default,
-            dequantize_per_tensor_activation_pattern,
+            _may_generate_pattern_with_dtype_convert(
+                dequantize_per_tensor_activation_pattern,
+                KeywordArg("autocast_act_dtype"),
+                dtype != torch.float32,
+            ),
             KeywordArg("act_expand_size"),
         ),
         CallFunction(
@@ -1827,9 +1835,11 @@ def _register_qlinear_weight_prepack():
     # https://github.com/pytorch/pytorch/blob/
     # 80c07df659362a95da7cd4f3ec367abfdace38c4/torch/_decomp/decompositions.py#L3965-L3968
     # in this case, we can convert it back to qlinear
-    for with_bias in [True, False]:
+    for dtype, with_bias in itertools.product(
+        [torch.float32, torch.bfloat16], [True, False]
+    ):
         bmm_pattern = _generate_qlinear_weight_prepack_patterns(
-            dtype=torch.float32,
+            dtype=dtype,
             input_dim_exceeds_two=True,
             input_contiguous=False,
             with_bias=with_bias,
@@ -1839,7 +1849,7 @@ def _register_qlinear_weight_prepack():
             pass_number=1
             if with_bias
             else 2,  # if with_bias, there is an output add, so we should try to match it firstly
-            dtype=torch.float32,
+            dtype=dtype,
             input_dim_exceeds_two=True,
             input_contiguous=False,
         )
