@@ -313,7 +313,6 @@ FIXME_default_non_strict = {
     "torch_np/test_function_base",
     "torch_np/test_ndarray_methods",
     "torch_np/test_nep50_examples",
-    "torch_np/test_random",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -841,6 +840,10 @@ dynamo_expected_failures = {
     "TestGenericReductions.test_bad_axis_func1",
     "TestGenericCumSumProd.test_bad_axis_func0",
     "TestGenericReductions.test_bad_axis_func9",
+    "TestShuffle.test_1d_use_numpy_True",
+    "TestShuffle.test_1d_use_numpy_False",
+    "TestShuffle.test_2d_use_numpy_True",
+    "TestShuffle.test_2d_use_numpy_False",
 }
 
 dynamo_skips = {}
