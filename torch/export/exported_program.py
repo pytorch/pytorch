@@ -1,6 +1,7 @@
 import copy
 import dataclasses
 import functools
+import types
 from typing import (
     Any,
     Callable,
@@ -272,9 +273,7 @@ class ExportedProgram:
             )
         else:
             ordered_tensor_constants = ()
-        self._check_input_constraints(
-            *ordered_params, *ordered_buffers, *ordered_tensor_constants, *args
-        )
+        self._check_input_constraints(*args)
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
         # See: torch/_functorch/aot_autograd.py#L1034
@@ -346,17 +345,23 @@ class ExportedProgram:
         )
         return string
 
-    def module(self, *, flat: bool = True) -> torch.nn.Module:
+    def module(self) -> torch.nn.Module:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
         """
-        from torch._export.unflatten import unflatten
         from ._unlift import _unlift_exported_program_lifted_states
 
-        if flat:
-            return _unlift_exported_program_lifted_states(self)
-        else:
-            return unflatten(self)
+        module = _unlift_exported_program_lifted_states(self)
+
+        def _train(self, mode: bool = True):
+            raise NotImplementedError("Calling train() is not supported yet.")
+
+        def _eval(self, mode: bool = True):
+            raise NotImplementedError("Calling eval() is not supported yet.")
+
+        module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
+        module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
+        return module
 
     @_disable_prexisiting_fake_mode
     def run_decompositions(
@@ -567,9 +572,15 @@ class ExportedProgram:
     def _check_input_constraints(self, *args):
         from torch._export.utils import _check_input_constraints_for_graph
 
+        placeholders = [p for p in self.graph.nodes if p.op == "placeholder"]
+        input_placeholders = [
+            p
+            for p, s in zip(placeholders, self.graph_signature.input_specs)
+            if s.kind == InputKind.USER_INPUT
+        ]
         _check_input_constraints_for_graph(
-            self.graph, self.range_constraints, self.equality_constraints
-        )(*args)
+            input_placeholders, args, self.range_constraints
+        )
 
     def _validate(self):
         self.verifier().check(self)
