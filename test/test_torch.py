@@ -6745,6 +6745,7 @@ class TestTorch(TestCase):
     def test_sobolengine_fast_forward_scrambled(self):
         self.test_sobolengine_fast_forward(scramble=True)
 
+    @skipIfTorchDynamo("np.float64 restored as float32 after graph break.")
     def test_sobolengine_distribution(self, scramble=False):
         d = 50
         engine = torch.quasirandom.SobolEngine(d, scramble=scramble, seed=123456)
@@ -6759,6 +6760,7 @@ class TestTorch(TestCase):
             np.percentile(sample, 75, axis=0), np.repeat(0.75, d), atol=2, rtol=2
         )
 
+    @skipIfTorchDynamo("np.float64 restored as float32 after graph break.")
     def test_sobolengine_distribution_scrambled(self):
         self.test_sobolengine_distribution(scramble=True)
 
@@ -8927,7 +8929,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             # FIXME: All of the following should be marked as expected failures
             # so that it is easier to tell when missing has been added.
             # FIXME: fix all the skipped ones below!
-            test_namespace(torch.randn(1),
+            test_namespace(torch.randn(1),  # noqa: F821
                            'as_strided_',
                            re.compile('^clamp_(min|max)_?$'),
                            'is_distributed',
@@ -8949,8 +8951,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                            '_autocast_to_fp32',
                            )
 
-            test_namespace(torch.nn)
-            test_namespace(torch.nn.functional, 'assert_int_or_pair')
+            test_namespace(torch.nn)  # noqa: F821
+            test_namespace(torch.nn.functional, 'assert_int_or_pair')  # noqa: F821
             # TODO: add torch.* tests when we have proper namespacing on ATen functions
             # test_namespace(torch)
 

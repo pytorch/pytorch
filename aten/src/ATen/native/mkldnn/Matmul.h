@@ -51,8 +51,7 @@ bool mkldnn_fp16_gemm(
 /*
 oneDNN implicit reduced precision arithmetic feature
 https://github.com/mgouicem/oneDNN/tree/mgouicem/rfcs/implicit_downconvert/rfcs/20210301-computation-datatype
-to allow implicitly cast data type from FP32 to BF16 in onednn compute primitives. We call it
-"BF32" mode here to call out its difference from FP32 and BF16 compute.
+to allow implicitly cast data type from FP32 to BF16 in onednn compute primitives
 */
 bool mkldnn_bf32_gemm(
     TransposeType transa, TransposeType transb,
