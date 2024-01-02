@@ -15,6 +15,7 @@ These backends include:
 - ``torch.backends.mps``
 - ``torch.backends.mkl``
 - ``torch.backends.mkldnn``
+- ``torch.backends.nnpack``
 - ``torch.backends.openmp``
 - ``torch.backends.opt_einsum``
 - ``torch.backends.xeon``
@@ -151,6 +152,15 @@ torch.backends.mkldnn
 
 .. autoclass::  torch.backends.mkldnn.verbose
 
+torch.backends.nnpack
+^^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.nnpack
+
+.. autofunction::  torch.backends.nnpack.is_available
+
+.. autofunction::  torch.backends.nnpack.flags
+
+.. autofunction::  torch.backends.nnpack.set_flags
 
 torch.backends.openmp
 ^^^^^^^^^^^^^^^^^^^^^
