@@ -338,7 +338,11 @@ class TransformerEncoder(Module):
         why_not_sparsity_fast_path = ''
         str_first_layer = "self.layers[0]"
         batch_first = first_layer.self_attn.batch_first
-        if not hasattr(self, "use_nested_tensor"):
+        is_fastpath_enabled = torch.backends.mha.get_fastpath_enabled()
+
+        if not is_fastpath_enabled:
+            why_not_sparsity_fast_path = "torch.backends.mha.get_fastpath_enabled() was not True"
+        elif not hasattr(self, "use_nested_tensor"):
             why_not_sparsity_fast_path = "use_nested_tensor attribute not present"
         elif not self.use_nested_tensor:
             why_not_sparsity_fast_path = "self.use_nested_tensor (set in init) was not True"
@@ -635,15 +639,19 @@ class TransformerEncoderLayer(Module):
             check_other=False,
         )
 
+        is_fastpath_enabled = torch.backends.mha.get_fastpath_enabled()
+
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
         why_not_sparsity_fast_path = ''
-        if not src.dim() == 3:
+        if not is_fastpath_enabled:
+            why_not_sparsity_fast_path = "torch.backends.mha.get_fastpath_enabled() was not True"
+        elif not src.dim() == 3:
             why_not_sparsity_fast_path = f"input not batched; expected src.dim() of 3 but got {src.dim()}"
         elif self.training:
             why_not_sparsity_fast_path = "training is enabled"
-        elif not self.self_attn.batch_first :
+        elif not self.self_attn.batch_first:
             why_not_sparsity_fast_path = "self_attn.batch_first was not True"
-        elif not self.self_attn._qkv_same_embed_dim :
+        elif not self.self_attn._qkv_same_embed_dim:
             why_not_sparsity_fast_path = "self_attn._qkv_same_embed_dim was not True"
         elif not self.activation_relu_or_gelu:
             why_not_sparsity_fast_path = "activation_relu_or_gelu was not True"
