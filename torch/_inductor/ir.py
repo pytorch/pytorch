@@ -4483,7 +4483,12 @@ class FallbackKernel(ExternKernelAlloc):
     def is_legacy_abi_kernel(self):
         return "_scaled_dot_product_flash_attention" in str(self.python_kernel_name)
 
-    def get_arg_default_value(self, pos):
+    def get_pos_arg_value(self, pos, kwargs):
+        # positional args may be provided in kwargs
+        pos_arg_name = self.args_default_value[pos]["name"]
+        if pos_arg_name in kwargs:
+            return kwargs[pos_arg_name]
+
         assert hasattr(
             self, "args_default_value"
         ), "self.args_default_value has to be provided"
@@ -4551,10 +4556,11 @@ class FallbackKernel(ExternKernelAlloc):
         if V.graph.cpp_wrapper and hasattr(self, "args_default_value"):
             n_args = len(args)
             n_pos_args = len(self.args_default_value)
-            # Some positional args are not provided, need to use their default value in cpp wrapper
+            # For cpp wrapper, if some positional args are not provided, we need to check
+            # if they're in the kwargs or use their default value
             if n_args < n_pos_args:
                 pos_args = [
-                    self.get_arg_default_value(i) for i in range(n_args, n_pos_args)
+                    self.get_pos_arg_value(i, kwargs) for i in range(n_args, n_pos_args)
                 ]
                 pos_args = [V.graph.wrapper_code.val_to_arg_str(x) for x in pos_args]
                 args.extend(pos_args)
@@ -4682,7 +4688,11 @@ class FallbackKernel(ExternKernelAlloc):
                     self.cpp_kernel_name = get_aten_cpp_kernel_name(kernel)
                     schema = kernel._schema
                     self.args_default_value = [
-                        {"type": x.real_type, "value": x.default_value}
+                        {
+                            "name": x.name,
+                            "type": x.real_type,
+                            "value": x.default_value,
+                        }
                         for x in schema.arguments
                         if not x.kwarg_only
                     ]
