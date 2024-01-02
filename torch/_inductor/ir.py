@@ -4401,7 +4401,6 @@ has_c_shim = {
 
 class FallbackKernel(ExternKernelAlloc):
     args_default_value: List[Dict[str, Any]]
-    args_name: List[str]
 
     def __init__(
         self,
@@ -4437,6 +4436,10 @@ class FallbackKernel(ExternKernelAlloc):
         self.kwargs = {} if kwargs is None else kwargs
         V.graph.warn_fallback(self.python_kernel_name)
 
+    @cache_on_self
+    def get_pos_args_default_value(self):
+        return [item for item in self.args_default_value if not item["kwarg_only"]]
+
     def set_cpp_kernel(self, kernel):
         from .codegen.wrapper import get_cpp_op_schema
 
@@ -4471,17 +4474,15 @@ class FallbackKernel(ExternKernelAlloc):
 
     def get_pos_arg_value(self, pos, kwargs):
         # positional args may be provided in kwargs
-        pos_arg_name = self.args_name[pos]
+        pos_arg_name = self.args_default_value[pos]["name"]
         if pos_arg_name in kwargs:
             return kwargs[pos_arg_name]
 
-        assert hasattr(
-            self, "args_default_value"
-        ), "self.args_default_value has to be provided"
+        pos_args_default_value = self.get_pos_args_default_value()
         assert pos < len(
-            self.args_default_value
-        ), f"expected the index {pos} to be smaller than len(self.args_default_value): {len(self.args_default_value)}"
-        return self.args_default_value[pos]["value"]
+            pos_args_default_value
+        ), f"expected the index {pos} to be smaller than len(pos_args_default_value): {len(pos_args_default_value)}"
+        return pos_args_default_value[pos]["value"]
 
     # Generate abi-compatible kernel names for shim kernels.
     # Each individual shim kernel may have its own versioning rule.
@@ -4541,7 +4542,7 @@ class FallbackKernel(ExternKernelAlloc):
         # https://docs.google.com/document/d/1FzWm-sHYwmRi3x_g036kOxd99KaYquUsA-L5JwOn8ys/edit?usp=sharing
         if V.graph.cpp_wrapper and hasattr(self, "args_default_value"):
             n_args = len(args)
-            n_pos_args = len(self.args_default_value)
+            n_pos_args = len(self.get_pos_args_default_value())
             # For cpp wrapper, if some positional args are not provided, we need to check
             # if they're in the kwargs or use their default value
             if n_args < n_pos_args:
@@ -4685,9 +4686,13 @@ class FallbackKernel(ExternKernelAlloc):
                     schema = kernel._schema
 
                     self.args_default_value = [
-                        {"type": x.real_type, "value": x.default_value}
+                        {
+                            "name": x.name,
+                            "type": x.real_type,
+                            "value": x.default_value,
+                            "kwarg_only": x.kwarg_only,
+                        }
                         for x in schema.arguments
-                        if not x.kwarg_only
                     ]
                     self.ordered_kwargs_for_cpp_kernel = [
                         x.name for x in schema.arguments if x.kwarg_only
@@ -4697,7 +4702,6 @@ class FallbackKernel(ExternKernelAlloc):
                         for x in schema.arguments
                         if x.kwarg_only
                     }
-                    self.args_name = [x.name for x in schema.arguments]
             else:
                 self.python_kernel_name = f"aten.{op_base_name}"
 
