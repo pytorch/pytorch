@@ -296,7 +296,6 @@ FIXME_default_non_strict = {
     "torch_np/numpy_tests/core/test_scalarinherit",
     "torch_np/numpy_tests/core/test_scalarmath",
     "torch_np/numpy_tests/core/test_shape_base",
-    "torch_np/numpy_tests/fft/test_helper",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
