@@ -602,70 +602,84 @@ context. Consider the example
    Y = np.random.randn(1024, 64)
    with torch.device("cuda"):
        Z = numpy_fn(X, Y)
-
+   assert isinstance(Z, np.ndarray)
 
 In this example, ``numpy_fn`` will be executed in CUDA. For this to be
 possible, ``torch.compile`` automatically moves ``X`` and ``Y`` from CPU
 to CUDA, and then it moves the result ``Z`` from CUDA to CPU. If we are
 executing this function several times in the same program run, we may want
 to avoid all these rather expensive memory copies. To do so, we just need
-to tweak our ``numpy_fn`` so that it accepts cuda Tensors and returns tensors:
+to tweak our ``numpy_fn`` so that it accepts cuda Tensors and returns tensors.
+We can do so by using ``torch.compiler.wrap_numpy``:
 
 .. code-block:: python
 
-   @torch.compile
-   def torch_fn(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
-       X, Y = X.numpy(), Y.numpy()
-       Z = numpy_fn(X, Y)
-       return torch.from_numpy(Z)
-
-   X = torch.randn(1024, 64, device="cuda")
-   Y = torch.randn(1024, 64, device="cuda")
-   with torch.device("cuda"):
-       Z = torch_fn(X, Y)
-
-By doing this, we explicitly create the tensors in CUDA memory, and we keep
-them there. In this case ``X.numpy()`` and ``from_numpy()`` are hints to the compiler
-but no real data movement happens. Note that the original program would not run
-on eager mode now. If you want to run it in eager mode, you would need to call
-``.numpy(force=True)`` doing ``Z = Z.cuda()`` before returning
-``Z``. Of course, doing this would execute the program on eager mode NumPy, and
-on CPU. Note also that calling ``.numpy(force=True`` under ``torch.compile`` also
-moves to CPU and deactivates gradient computations.
-
-We provide the decorator ``torch.compiler.wrap_numpy``  that implements the patteron of wrapping
-a NumPy function into a PyTorch one. Using it, we can simply write
-
-.. code-block:: python
-
-   @torch.compile
+   @torch.compile(fullgraph=True)
    @torch.compiler.wrap_numpy
-   def numpy_fn(X: np.ndarray, Y: np.ndarray):
+   def numpy_fn(X, Y):
        return np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
 
    X = torch.randn(1024, 64, device="cuda")
    Y = torch.randn(1024, 64, device="cuda")
-   with torch.device("cuda"):
-       Z = numpy_fn(X, Y)
+   Z = numpy_fn(X, Y)
+   assert isinstance(Z, torch.Tensor)
+   assert Z.device.type == "cuda"
 
-This pattern of wrapping a NumPy function into a PyTorch function and compiling it, allows you
-to treat a NumPy function as if it writen in PyTorch. For example, you can use it to
-compute gradients along NumPy functions!
+Here, we explicitly create the tensors in CUDA memory, and pass them to the
+function, which performs all the computations on the CUDA device.
+``wrap_numpy`` is in charge of marking any ``torch.Tensor`` input as an input
+with ``np.ndarray`` semantics at a ``torch.compile`` level. Marking tensors
+inside the compiler is a very cheap operation, so no data copy or data movement
+happens during runtime.
+
+Using this decorator, we can also differentiate through NumPy code!
 
 .. code-block:: python
 
-   @torch.compile
+   @torch.compile(fullgraph=True)
    @torch.compiler.wrap_numpy
-   def numpy_fn(X: np.ndarray, Y: np.ndarray):
+   def numpy_fn(X, Y):
        return np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
 
    X = torch.randn(1024, 64, device="cuda", requires_grad=True)
    Y = torch.randn(1024, 64, device="cuda")
-   with torch.device("cuda"):
-       Z = numpy_fn(X, Y)
+   Z = numpy_fn(X, Y)
+   assert isinstance(Z, torch.Tensor)
    Z.backward()
    # X.grad now holds the gradient of the computation
    print(X.grad)
+
+We have been using ``fullgraph=True`` as graph break are problematic in this context.
+When a graph break occurs, we need to materialize the NumPy arrays. Since NumPy arrays
+do not have a notion of ``device`` or ``requires_grad``, this information is lost during
+a graph break.
+
+We cannot propagate gradients through a graph break, as the graph break code may execute
+arbitrary code that don't know how to differentiate. On the other hand, in the case of
+the CUDA execution, we can work around this problem as we did in the first example, by
+using the ``torch.device("cuda")`` context manager:
+
+.. code-block:: python
+
+   @torch.compile
+   @torch.compiler.wrap_numpy
+   def numpy_fn(X, Y):
+       prod = X[:, :, None] * Y[:, None, :]
+       print("oops, a graph break!")
+       return np.sum(prod, axis=(-2, -1))
+
+   X = torch.randn(1024, 64, device="cuda")
+   Y = torch.randn(1024, 64, device="cuda")
+
+   with torch.device("cuda"):
+       Z = numpy_fn(X, Y)
+   assert isinstance(Z, torch.Tensor)
+   assert Z.device.type == "cuda"
+
+During the graph break, the intermediary tensors still need to be moved to CPU, but when the
+tracing is resumed after the graph break, the rest of the graph is still traced on CUDA.
+Given this CUDA <> CPU and CPU <> CUDA movement, graph breaks are fairly costly in the NumPy
+context and should be avoided, but at least they allow tracing through complex pieces of code.
 
 
 How do I debug NumPy code under ``torch.compile``?

@@ -124,11 +124,13 @@ def wrap_numpy(fn):
     r"""Decorator that turns a function from ``np.ndarray``s to ``np.ndarray``s into a function
     from ``torch.Tensor``s to ``torch.Tensor``s.
 
-    It is designed to be used with :func:`torch.compile`. It allows to compile a NumPy function
-    as if it were a PyTorch function. If the function can be traced without graph breaks,
-    this allows you to run NumPy code on CUDA.
-    Similarly, you can pass Tensors with ``requires_grad=True`` and then call ``backward()`` on the output
-    to compute gradients through NumPy functions.
+    It is designed to be used with :func:`torch.compile` with ``fullgraph=True``. It allows to
+    compile a NumPy function as if it were a PyTorch function. This allows you to run NumPy code
+    on CUDA or compute its gradients.
+
+    .. note::
+
+        This decorator does not work without :func:`torch.compile`.
 
     Example::
 
@@ -138,7 +140,7 @@ def wrap_numpy(fn):
         >>> @torch.compiler.wrap_numpy
         >>> def fn(a: np.ndarray):
         >>>     return np.sum(a * a)
-        >>> # Execute the NumPy function on CUDA and compute the gradients
+        >>> # Execute the NumPy function using Tensors on CUDA and compute the gradients
         >>> x = torch.arange(6, dtype=torch.float32, device="cuda", requires_grad=True)
         >>> out = fn(x)
         >>> out.backward()
