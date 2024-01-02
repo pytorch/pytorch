@@ -77,8 +77,7 @@ class MaybeOwned final {
       : isBorrowed_(true), borrow_(MaybeOwnedTraits<T>::createBorrow(t)) {}
 
   /// Don't use this; use owned() instead.
-  explicit MaybeOwned(T&& t) noexcept(
-      std::is_nothrow_move_constructible<T>::value)
+  explicit MaybeOwned(T&& t) noexcept(std::is_nothrow_move_constructible_v<T>)
       : isBorrowed_(false), own_(std::move(t)) {}
 
   /// Don't use this; use owned() instead.
@@ -127,6 +126,7 @@ class MaybeOwned final {
   }
 
   MaybeOwned(MaybeOwned&& rhs) noexcept(
+      // NOLINTNEXTLINE(*-noexcept-move-*)
       std::is_nothrow_move_constructible_v<T> &&
       std::is_nothrow_move_assignable_v<borrow_type>)
       : isBorrowed_(rhs.isBorrowed_) {
@@ -141,6 +141,7 @@ class MaybeOwned final {
       std::is_nothrow_move_assignable_v<T> &&
       std::is_nothrow_move_assignable_v<borrow_type> &&
       std::is_nothrow_move_constructible_v<T> &&
+      // NOLINTNEXTLINE(*-noexcept-move-*)
       std::is_nothrow_destructible_v<T> &&
       std::is_nothrow_destructible_v<borrow_type>) {
     if (this == &rhs) {
@@ -171,7 +172,7 @@ class MaybeOwned final {
   }
 
   static MaybeOwned owned(T&& t) noexcept(
-      std::is_nothrow_move_constructible<T>::value) {
+      std::is_nothrow_move_constructible_v<T>) {
     return MaybeOwned(std::move(t));
   }
 
@@ -181,6 +182,7 @@ class MaybeOwned final {
   }
 
   ~MaybeOwned() noexcept(
+      // NOLINTNEXTLINE(*-noexcept-destructor)
       std::is_nothrow_destructible_v<T> &&
       std::is_nothrow_destructible_v<borrow_type>) {
     if (C10_UNLIKELY(!isBorrowed_)) {
