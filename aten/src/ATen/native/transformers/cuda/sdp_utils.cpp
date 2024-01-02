@@ -323,17 +323,17 @@ static bool check_cudnn_mha_layout(sdp_params params, bool debug) {
   const int64_t s_v = params.value.size(2);
   // corresponds to cuDNN's "packed QKV" layout
   const bool query_layout_ok = (params.query.stride(0) == s_q * 3 * h * d) &&
-				 (params.query.stride(1) == d) &&
-				 (params.query.stride(2) == 3 * h * d) &&
-				 (params.query.stride(3) == 1);
+                                 (params.query.stride(1) == d) &&
+                                 (params.query.stride(2) == 3 * h * d) &&
+                                 (params.query.stride(3) == 1);
   const bool key_layout_ok = (params.key.stride(0) == s_k * 3 * h * d) &&
-			       (params.key.stride(1) == d) &&
-			       (params.key.stride(2) == 3 * h * d) &&
-			       (params.key.stride(3) == 1);
+                               (params.key.stride(1) == d) &&
+                               (params.key.stride(2) == 3 * h * d) &&
+                               (params.key.stride(3) == 1);
   const bool value_layout_ok = (params.value.stride(0) == s_v * 3 * h * d) &&
-				 (params.value.stride(1) == d) &&
-				 (params.value.stride(2) == 3 * h * d) &&
-				 (params.value.stride(3) == 1);
+                                 (params.value.stride(1) == d) &&
+                                 (params.value.stride(2) == 3 * h * d) &&
+                                 (params.value.stride(3) == 1);
   if (debug) {
     if (!query_layout_ok) { TORCH_WARN("Query tensor was not in cuDNN-supported packed QKV layout", params.query.strides()); }
     if (!key_layout_ok) { TORCH_WARN("Key tensor was not in cuDNN-supported packed QKV layout"); }
@@ -349,7 +349,7 @@ static bool check_cudnn_mha_compute_capability(sdp_params params, bool debug) {
 
 inline bool use_cudnn_mha(sdp_params const& kernel_params, bool print_debug) {
   static bool supported = (c10::utils::check_env("TORCH_CUDNN_MHA_ENABLED") == true) &&
-	                  check_cudnn_mha_compute_capability(kernel_params, print_debug);
+                          check_cudnn_mha_compute_capability(kernel_params, print_debug);
   if (print_debug) {
     if (!supported) { TORCH_WARN("cuDNN MHA is only supported on sm80 and sm90"); }
     if (!kernel_params.is_causal) { TORCH_WARN("cuDNN MHA only supports is_causal=True"); }
@@ -496,7 +496,7 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
         if (use_cudnn_mha(kernel_params, print_debug)) {
               return SDPBackend::cudnn;
         }
-	break;
+        break;
       case SDPBackend::flash_attention:
         if (sdp::can_use_flash_attention(kernel_params, print_debug)) {
           return SDPBackend::flash_attention;
