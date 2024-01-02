@@ -465,6 +465,7 @@ def dequantize_per_tensor_default_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
+    # input = input.contiguous()
     return (input.to(torch.float32) - zero_point) * scale
 
 

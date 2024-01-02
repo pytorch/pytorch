@@ -3941,6 +3941,7 @@ def matmul(tensor1, tensor2):
             expand_batch_product, n, m1
         )
 
+        # import pdb;pdb.set_trace()
         vector_rhs = dim_tensor2 == 1
         if vector_rhs:
             tensor2_expand_size = expand_batch_portion + [m2]
