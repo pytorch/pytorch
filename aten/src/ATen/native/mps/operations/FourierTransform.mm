@@ -105,7 +105,7 @@ static Tensor runFFTGraph(const Tensor& input, const Tensor& output, bool out_pr
 } // namespace mps
 
 static bool check_mps_compatibility() {
-  static const bool is_macOS_14_0_or_newer = is_macos_14_or_newer();
+  static const bool is_macOS_14_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
   if (!is_macOS_14_0_or_newer) {
     TORCH_WARN_ONCE("MPS: FFT operations are only supported natively starting from macOS 14.0. ",
                       "Falling back on CPU. This may have performance implications.");
