@@ -34,19 +34,20 @@ This will define the following variables:
 set(SYCL_FOUND False)
 include(${CMAKE_ROOT}/Modules/FindPackageHandleStandardArgs.cmake)
 
-find_package(PkgConfig QUIET)
-if(PKG_CONFIG_FOUND)
-  # TODO add dependency package module checks, if any
-endif()
-
 set(SYCL_ROOT $ENV{CMPLR_ROOT})
 if(NOT SYCL_ROOT)
-  execute_process(COMMAND whereis icpx OUTPUT_VARIABLE {SYCL_ROOT)
-endif()
+  execute_process(
+    COMMAND which icpx
+    OUTPUT_VARIABLE SYCL_CMPLR_FULL_PATH
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
 
-if (NOT SYCL_ROOT)
-  message("Please setup Intel SYCL compiler Tool kit enviroment before building!!")
-  return()
+  if(NOT EXISTS "${SYCL_CMPLR_FULL_PATH}")
+    message("Cannot find ENV{CMPLR_ROOT} or icpx, please setup Intel SYCL compiler Tool kit enviroment before building!!")
+    return()
+  endif()
+
+  get_filename_component(SYCL_BIN_DIR "${SYCL_CMPLR_FULL_PATH}" DIRECTORY)
+  set(SYCL_ROOT ${SYCL_BIN_DIR}/..)
 endif()
 
 set(SYCL_COMPILER ${SYCL_ROOT}/bin/icpx)
@@ -62,45 +63,43 @@ endif()
 
 # Function to write a test case to verify SYCL features.
 
-function(SYCL_FEATURE_TEST_WRITE src)
+function(SYCL_CMPLR_TEST_WRITE src)
 
-  set(pp_if "#if")
-  set(pp_endif "#endif")
+  set(cpp_macro_if "#if")
+  set(cpp_macro_endif "#endif")
 
-  set(SYCL_TEST_CONTENT "")
-  string(APPEND SYCL_TEST_CONTENT "#include <iostream>\nusing namespace std;\n")
-  string(APPEND SYCL_TEST_CONTENT "int main(){\n")
+  set(SYCL_CMPLR_TEST_CONTENT "")
+  string(APPEND SYCL_CMPLR_TEST_CONTENT "#include <iostream>\nusing namespace std;\n")
+  string(APPEND SYCL_CMPLR_TEST_CONTENT "int main(){\n")
 
   # Feature tests goes here
 
-  string(APPEND SYCL_TEST_CONTENT "${pp_if} defined(SYCL_LANGUAGE_VERSION)\n")
-  string(APPEND SYCL_TEST_CONTENT "cout << \"SYCL_LANGUAGE_VERSION=\"<<SYCL_LANGUAGE_VERSION<<endl;\n")
-  string(APPEND SYCL_TEST_CONTENT "${pp_endif}\n")
+  string(APPEND SYCL_CMPLR_TEST_CONTENT "${cpp_macro_if} defined(SYCL_LANGUAGE_VERSION)\n")
+  string(APPEND SYCL_CMPLR_TEST_CONTENT "cout << \"SYCL_LANGUAGE_VERSION=\"<<SYCL_LANGUAGE_VERSION<<endl;\n")
+  string(APPEND SYCL_CMPLR_TEST_CONTENT "${cpp_macro_endif}\n")
 
-  string(APPEND SYCL_TEST_CONTENT "return 0;}\n")
+  string(APPEND SYCL_CMPLR_TEST_CONTENT "return 0;}\n")
 
-  file(WRITE ${src} "${SYCL_TEST_CONTENT}")
+  file(WRITE ${src} "${SYCL_CMPLR_TEST_CONTENT}")
 
 endfunction()
 
 # Function to Build the feature check test case.
 
-function(SYCL_FEATURE_TEST_BUILD return TEST_SRC_FILE TEST_EXE)
+function(SYCL_CMPLR_TEST_BUILD error TEST_SRC_FILE TEST_EXE)
 
-  # Convert CXX Flag string to list
   set(SYCL_CXX_FLAGS_LIST "${SYCL_CXX_FLAGS}")
   separate_arguments(SYCL_CXX_FLAGS_LIST)
 
-  # Spawn a process to build the test case.
   execute_process(
     COMMAND "${SYCL_COMPILER}"
     ${SYCL_CXX_FLAGS_LIST}
     ${TEST_SRC_FILE}
     "-o"
     ${TEST_EXE}
-    WORKING_DIRECTORY ${SYCL_TEST_DIR}
+    WORKING_DIRECTORY ${SYCL_CMPLR_TEST_DIR}
     OUTPUT_VARIABLE output ERROR_VARIABLE output
-    OUTPUT_FILE ${SYCL_TEST_DIR}/Compile.log
+    OUTPUT_FILE ${SYCL_CMPLR_TEST_DIR}/Compile.log
     RESULT_VARIABLE result
     TIMEOUT 60
     )
@@ -111,25 +110,20 @@ function(SYCL_FEATURE_TEST_BUILD return TEST_SRC_FILE TEST_EXE)
     message("compile output is: ${output}")
   endif()
 
-  set(${return} ${result} PARENT_SCOPE)
+  set(${error} ${result} PARENT_SCOPE)
 
 endfunction()
 
-# Function to run the test case to generate feature info.
-
-function(SYCL_FEATURE_TEST_RUN return TEST_EXE)
-
-  # Spawn a process to run the test case.
+function(SYCL_CMPLR_TEST_RUN error TEST_EXE)
 
   execute_process(
     COMMAND ${TEST_EXE}
-    WORKING_DIRECTORY ${SYCL_TEST_DIR}
+    WORKING_DIRECTORY ${SYCL_CMPLR_TEST_DIR}
     OUTPUT_VARIABLE output ERROR_VARIABLE output
     RESULT_VARIABLE result
     TIMEOUT 60
     )
 
-  # Verify the test execution output.
   if(test_result)
     set(SYCL_FOUND False)
     set(SYCL_REASON_FAILURE "SYCL: feature test execution failed!!")
@@ -138,13 +132,11 @@ function(SYCL_FEATURE_TEST_RUN return TEST_EXE)
   set(test_result "${result}" PARENT_SCOPE)
   set(test_output "${output}" PARENT_SCOPE)
 
-  set(${return} ${result} PARENT_SCOPE)
+  set(${error} ${result} PARENT_SCOPE)
 
 endfunction()
 
-
-# Function to extract the information from test execution.
-function(SYCL_FEATURE_TEST_EXTRACT test_output)
+function(SYCL_CMPLR_TEST_EXTRACT test_output)
 
   string(REGEX REPLACE "\n" ";" test_output_list "${test_output}")
 
@@ -167,29 +159,29 @@ list(APPEND SYCL_LINK_FLAGS "-fsycl")
 set(SYCL_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SYCL_FLAGS}")
 
 # Create a clean working directory.
-set(SYCL_TEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/TESTSYCL")
-file(REMOVE_RECURSE ${SYCL_TEST_DIR})
-file(MAKE_DIRECTORY ${SYCL_TEST_DIR})
+set(SYCL_CMPLR_TEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/TESTSYCLCMPLR")
+file(REMOVE_RECURSE ${SYCL_CMPLR_TEST_DIR})
+file(MAKE_DIRECTORY ${SYCL_CMPLR_TEST_DIR})
 
 # Create the test source file
-set(TEST_SRC_FILE "${SYCL_TEST_DIR}/sycl_features.cpp")
+set(TEST_SRC_FILE "${SYCL_CMPLR_TEST_DIR}/sycl_features.cpp")
 set(TEST_EXE "${TEST_SRC_FILE}.exe")
-SYCL_FEATURE_TEST_WRITE(${TEST_SRC_FILE})
+SYCL_CMPLR_TEST_WRITE(${TEST_SRC_FILE})
 
 # Build the test and create test executable
-SYCL_FEATURE_TEST_BUILD(return ${TEST_SRC_FILE} ${TEST_EXE})
-if(return)
+SYCL_CMPLR_TEST_BUILD(error ${TEST_SRC_FILE} ${TEST_EXE})
+if(error)
   return()
 endif()
 
 # Execute the test to extract information
-SYCL_FEATURE_TEST_RUN(return ${TEST_EXE})
-if(return)
+SYCL_CMPLR_TEST_RUN(error ${TEST_EXE})
+if(error)
   return()
 endif()
 
 # Extract test output for information
-SYCL_FEATURE_TEST_EXTRACT(${test_output})
+SYCL_CMPLR_TEST_EXTRACT(${test_output})
 
 # As per specification, all the SYCL compatible compilers should
 # define macro  SYCL_LANGUAGE_VERSION
