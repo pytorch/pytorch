@@ -302,7 +302,6 @@ FIXME_default_non_strict = {
     "torch_np/numpy_tests/lib/test_arraysetops",
     "torch_np/numpy_tests/lib/test_function_base",
     "torch_np/numpy_tests/lib/test_histograms",
-    "torch_np/numpy_tests/lib/test_index_tricks",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
