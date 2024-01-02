@@ -952,6 +952,11 @@ class TestSparse(TestSparseBase):
             s.permute(dims=(1, 0))
         with self.assertRaisesRegex(RuntimeError, "duplicate dims"):
             s.permute(dims=(1, 1, 1))
+        # Calling permute on a sparse tensor with an empty tuple used to segfault,
+        # see https://github.com/pytorch/pytorch/issues/116325
+        x = torch.rand((), device=device, dtype=dtype).to_sparse()
+        x.permute(())
+        self.assertEqual(len(x.values()), 1)
 
         def test_shape(sparse_dims, nnz, with_size):
             ndim = len(with_size)
@@ -5065,11 +5070,6 @@ class TestSparseAny(TestCase):
                      torch.Tensor.to_sparse,
                      torch.Tensor.values,
                      ):
-            if layout in sparse_compressed_layouts and func.__name__ == 'values':
-                # FIXME: RuntimeError: indices expected sparse
-                # coordinate tensor layout but got SparseCsr. Likely
-                # works when gh-107126 is fixed.
-                continue
             for x in self.generate_simple_inputs(
                     layout,
                     device=device,

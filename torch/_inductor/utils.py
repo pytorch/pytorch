@@ -440,7 +440,9 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
         sources = [
             origin.meta["original_aten"]._overloadpacket.__name__
             for origin in all_origins
-            if origin.op == "call_function" and "original_aten" in origin.meta
+            if origin.op == "call_function"
+            and "original_aten" in origin.meta
+            and origin.meta["original_aten"] is not None
         ]
         sources = sorted(set(sources))
     elif descriptive_names == "torch":
@@ -471,7 +473,7 @@ def get_kernel_metadata(node_schedule, wrapper):
     from_node_dict = collections.defaultdict(list)
     original_aten_dict = collections.defaultdict(list)
     for node in inductor_nodes:
-        if "original_aten" in node.meta:
+        if "original_aten" in node.meta and node.meta["original_aten"] is not None:
             key = str(node.meta["original_aten"]._overloadpacket)
             original_aten_dict[key].append(node.name)
         if "from_node" in node.meta:
@@ -609,11 +611,16 @@ def has_incompatible_cudagraph_ops(gm):
     return False
 
 
-instance_descriptor = collections.namedtuple(
-    "instance_descriptor",
-    ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
-    defaults=[tuple(), tuple(), tuple(), tuple()],
-)
+try:
+    from triton.compiler.compiler import AttrsDescriptor as instance_descriptor
+except ImportError:
+    # To support older version of triton which does not have AttrsDescriptor
+    # class
+    instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
+        "instance_descriptor",
+        ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
+        defaults=[tuple(), tuple(), tuple(), tuple()],
+    )
 
 
 @functools.lru_cache(None)
@@ -1195,7 +1202,7 @@ class Placeholder(enum.Enum):
 def aot_inductor_launcher(so_path: str, device: str):
     if device == "cuda":
         return f"""
-            #include <torch/csrc/inductor/aoti_model_container_runner_cuda.h>
+            #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 
             torch::inductor::AOTIModelContainerRunnerCuda runner("{so_path}");
 
@@ -1203,13 +1210,13 @@ def aot_inductor_launcher(so_path: str, device: str):
                 return runner.run(input_tensors);
             }}
 
-            std::vector<const char*> get_call_spec() {{
+            std::vector<std::string> get_call_spec() {{
                 return runner.get_call_spec();
             }}
         """
     elif device == "cpu":
         return f"""
-            #include <torch/csrc/inductor/aoti_model_container_runner.h>
+            #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 
             torch::inductor::AOTIModelContainerRunnerCpu runner("{so_path}");
 
@@ -1217,7 +1224,7 @@ def aot_inductor_launcher(so_path: str, device: str):
                 return runner.run(input_tensors);
             }}
 
-            std::vector<const char*> get_call_spec() {{
+            std::vector<std::string> get_call_spec() {{
                 return runner.get_call_spec();
             }}
         """
