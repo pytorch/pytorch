@@ -6,6 +6,7 @@ import io
 import itertools
 import pickle
 import sys
+from typing import List
 import torch
 import torch.distributed as dist
 from torch.distributed import rpc
