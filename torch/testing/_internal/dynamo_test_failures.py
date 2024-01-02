@@ -158,7 +158,6 @@ FIXME_default_non_strict = {
     "profiler/test_profiler",
     "profiler/test_profiler_tree",
     "test_ao_sparsity",
-    "test_autocast",
     "test_autograd",
     "test_autograd_fallback",
     "test_binary_ufuncs",
