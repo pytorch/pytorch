@@ -859,7 +859,9 @@ class GraphModuleSerializer:
         output_arguments = []
         for idx, (meta, return_schema) in enumerate(zip(meta_val, returns)):
             if meta is None:
-                assert isinstance(return_schema.real_type, torch.OptionalType)
+                assert isinstance(return_schema.real_type, (torch.OptionalType, torch.TensorType))
+                # When the return type is annoated as Tensor type, the op can also return an
+                # undefined Tensor which will be implicitly converted to None in Python.
                 output_arguments.append(Argument.create(as_none=()))
             elif isinstance(meta, torch._subclasses.fake_tensor.FakeTensor):
                 assert isinstance(return_schema.real_type, torch.TensorType)
