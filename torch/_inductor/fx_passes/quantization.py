@@ -1360,52 +1360,80 @@ def _generate_qconv_weight_prepack_patterns(dtype=torch.float32):
     )
 
 
+def _get_linear_node(match, input_dim_exceeds_two, input_contiguous):
+    output_reshape_node = None
+    if input_dim_exceeds_two:
+        if input_contiguous:
+            output_reshape_node = match.output_node()
+            assert output_reshape_node.target is aten.reshape.default
+            linear_node = output_reshape_node.args[0]
+        else:
+            linear_nodes = filter_nodes(match.nodes, aten.bmm.default)
+            assert len(linear_nodes) == 1
+            linear_node = linear_nodes[0]
+    else:
+        linear_node = match.output_node()
+
+    assert linear_node.target in (
+        aten.addmm.default,
+        aten.mm.default,
+        aten.bmm.default,
+    )
+    return linear_node, output_reshape_node
+
+
+def _get_linear_dq_mul_node(
+    linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
+):
+    act_reshape_node = None
+    activation_to_bf16_node = None
+    act_expand_node = None
+    if input_dim_exceeds_two:
+        if input_contiguous:
+            act_reshape_node = linear_node.args[input_index]
+            assert act_reshape_node.target is aten.reshape.default
+            if dtype == torch.float32:
+                # pattern: linear -> reshape -> mul
+                mul_node = act_reshape_node.args[0]
+            else:
+                # pattern: linear -> reshape -> to_bf16 -> mul
+                activation_to_bf16_node = act_reshape_node.args[0]
+                mul_node = activation_to_bf16_node.args[0]
+        else:
+            # bmm pattern decomposed from linear when input dim exceeds 2 and not contiguous
+            act_expand_node = linear_node.args[input_index]
+            assert act_expand_node.target is aten.expand.default
+            mul_node = act_expand_node.args[0]
+    else:
+        if dtype == torch.float32:
+            # pattern: linear -> mul
+            mul_node = linear_node.args[input_index]
+        else:
+            # pattern: linear -> to_bf16 -> mul
+            activation_to_bf16_node = linear_node.args[input_index]
+            mul_node = activation_to_bf16_node.args[0]
+    return mul_node, act_reshape_node, activation_to_bf16_node, act_expand_node
+
+
 def _is_valid_dequant_linear_pattern(dtype, input_dim_exceeds_two, input_contiguous):
     def _inner(match):
         # Check dequant pattern has only 1 user.
-        if input_dim_exceeds_two:
-            if input_contiguous:
-                output_reshape_node = match.output_node()
-                assert output_reshape_node.target is aten.reshape.default
-                linear_node = output_reshape_node.args[0]
-            else:
-                linear_nodes = filter_nodes(match.nodes, aten.bmm.default)
-                assert len(linear_nodes) == 1
-                linear_node = linear_nodes[0]
-        else:
-            linear_node = match.output_node()
+        (
+            linear_node,
+            _,
+        ) = _get_linear_node(match, input_dim_exceeds_two, input_contiguous)
 
-        assert linear_node.target in (
-            aten.addmm.default,
-            aten.mm.default,
-            aten.bmm.default,
-        )
         input_index = 1 if linear_node.target is aten.addmm.default else 0
         assert dtype in [torch.float32, torch.bfloat16]
 
-        if input_dim_exceeds_two:
-            if input_contiguous:
-                act_reshape_node = linear_node.args[input_index]
-                assert act_reshape_node.target is aten.reshape.default
-                mul_node = (
-                    act_reshape_node.args[0]  # pattern: linear -> reshape -> mul
-                    if dtype == torch.float32
-                    else act_reshape_node.args[0].args[
-                        0
-                    ]  # pattern: linear -> reshape -> to_bf16 -> mul
-                )
-            else:
-                act_expand_node = linear_node.args[input_index]
-                assert act_expand_node.target is aten.expand.default
-                mul_node = act_expand_node.args[0]
-        else:
-            mul_node = (
-                linear_node.args[input_index]  # pattern: linear -> mul
-                if dtype == torch.float32
-                else linear_node.args[input_index].args[
-                    0
-                ]  # pattern: linear -> to_fb16 -> mul
-            )
+        (
+            mul_node,
+            _,
+            _,
+            _,
+        ) = _get_linear_dq_mul_node(
+            linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
+        )
 
         sub_node = mul_node.args[0]
         to_fp32_node = sub_node.args[0]
@@ -1494,50 +1522,21 @@ def _register_qlinear_weight_prepack_pass(
         onednn.qlinear_pointwise <- onednn.qlinear_prepack <- int8_weight
         """
         assert dtype in [torch.float32, torch.bfloat16]
-        if input_dim_exceeds_two:
-            if input_contiguous:
-                output_reshape_node = match.output_node()
-                assert output_reshape_node.target is aten.reshape.default
-                linear_node = output_reshape_node.args[0]
-            else:
-                linear_nodes = filter_nodes(match.nodes, aten.bmm.default)
-                assert len(linear_nodes) == 1
-                linear_node = linear_nodes[0]
-        else:
-            linear_node = match.output_node()
-
-        assert linear_node.target in (
-            aten.addmm.default,
-            aten.mm.default,
-            aten.bmm.default,
-        )
+        (
+            linear_node,
+            output_reshape_node,
+        ) = _get_linear_node(match, input_dim_exceeds_two, input_contiguous)
         input_index = 1 if linear_node.target is aten.addmm.default else 0
         weight_index = input_index + 1
 
-        if input_dim_exceeds_two:
-            if input_contiguous:
-                act_reshape_node = linear_node.args[input_index]
-                assert act_reshape_node.target is aten.reshape.default
-                if dtype == torch.float32:
-                    # pattern: linear -> reshape -> mul
-                    mul_node = act_reshape_node.args[0]
-                else:
-                    # pattern: linear -> reshape -> to_bf16 -> mul
-                    activation_to_bf16_node = act_reshape_node.args[0]
-                    mul_node = activation_to_bf16_node.args[0]
-            else:
-                # bmm pattern decomposed from linear when input dim exceeds 2 and not contiguous
-                act_expand_node = linear_node.args[input_index]
-                assert act_expand_node.target is aten.expand.default
-                mul_node = act_expand_node.args[0]
-        else:
-            if dtype == torch.float32:
-                # pattern: linear -> mul
-                mul_node = linear_node.args[input_index]
-            else:
-                # pattern: linear -> to_bf16 -> mul
-                activation_to_bf16_node = linear_node.args[input_index]
-                mul_node = activation_to_bf16_node.args[0]
+        (
+            mul_node,
+            act_reshape_node,
+            activation_to_bf16_node,
+            act_expand_node,
+        ) = _get_linear_dq_mul_node(
+            linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
+        )
 
         sub_node = mul_node.args[0]
         to_fp32_node = sub_node.args[0]
