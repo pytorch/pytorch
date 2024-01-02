@@ -190,7 +190,6 @@ FIXME_default_non_strict = {
     "test_foreach",
     "test_function_schema",
     "test_functional_autograd_benchmark",
-    "test_functional_optim",
     "test_functionalization",
     "test_functionalization_of_rng_ops",
     "test_futures",
@@ -489,6 +488,7 @@ dynamo_expected_failures = {
     "TestCustomOp.test_impl_on_existing_op_with_cpu_registration_key_CPU",
     "TestCustomOp.test_impl_on_existing_op_with_cpu_registration_key_CompositeExplicitAutograd",
     "TestCustomOp.test_supported_schemas",
+    "TestFunctionalOptimParity.test_functional_optim_parity_sgd",
 }
 
 dynamo_skips = {}
