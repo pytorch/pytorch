@@ -269,6 +269,7 @@ exclude_patterns = [
     'c10/util/SmallVector.h',
     'c10/util/win32-headers.h',
     'c10/util/*inl.h',
+    'c10/test/**/*.h',
     'aten/src/ATen/core/TensorImpl_test.cpp',
     'third_party/**/*',
     'torch/csrc/api/**',
