@@ -301,7 +301,6 @@ FIXME_default_non_strict = {
     "torch_np/numpy_tests/lib/test_arraypad",
     "torch_np/numpy_tests/lib/test_arraysetops",
     "torch_np/numpy_tests/lib/test_function_base",
-    "torch_np/numpy_tests/lib/test_histograms",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -1342,6 +1341,18 @@ dynamo_expected_failures = {
     "TestDstack.test_non_iterable",
     "TestDstack.test_generator",
     "TestColumnStack.test_generator",
+    "TestHistogramdd.test_equal_edges",
+    "TestHistogram.test_finite_range",
+    "TestHistogramdd.test_finite_range",
+    "TestHistogram.test_one_bin",
+    "TestHistogramdd.test_weights",
+    "TestHistogram.test_precision",
+    "TestHistogramdd.test_bins_errors",
+    "TestHistogram.test_error_binnum_type",
+    "TestHistogramdd.test_simple",
+    "TestHistogram.test_unsigned_monotonicity_check",
+    "TestHistogramdd.test_inf_edges",
+    "TestHistogramdd.test_bins_error_2",
 }
 
 dynamo_skips = {}
