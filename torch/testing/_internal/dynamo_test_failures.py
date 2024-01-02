@@ -312,7 +312,6 @@ FIXME_default_non_strict = {
     "torch_np/test_dtype",
     "torch_np/test_function_base",
     "torch_np/test_ndarray_methods",
-    "torch_np/test_nep50_examples",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
