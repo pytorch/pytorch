@@ -200,7 +200,6 @@ FIXME_default_non_strict = {
     "test_fx_reinplace_pass",
     "test_hub",
     "test_import_stats",
-    "test_indexing",
     "test_itt",
     "test_jit",
     "test_jit_autocast",
@@ -361,6 +360,16 @@ dynamo_expected_failures = {
     "TestAutogradFallback.test_inplace_autograd_function_registered_to_cpu_mode_nothing",
     "TestAutogradFallback.test_autograd_function_registered_to_cpu_mode_nothing",
     "TestFunctionalOptimParity.test_functional_optim_parity_sgd",
+    "TestIndexingCPU.test_invalid_index_cpu",
+    "NumpyTestsCPU.test_boolean_shape_mismatch_cpu",
+    "TestIndexingCPU.test_empty_ndim_index_bool_cpu",
+    "TestIndexingCPU.test_out_of_bound_index_cpu",
+    "NumpyTestsCPU.test_index_no_floats_cpu",
+    "TestIndexingCPU.test_zero_dim_index_cpu",
+    "NumpyTestsCPU.test_empty_fancy_index_cpu",
+    "TestIndexingCPU.test_index_cpu",
+    "TestIndexingCPU.test_index_limits_cpu",
+    "NumpyTestsCPU.test_boolean_indexing_weirdness_cpu",
 }
 
 dynamo_skips = {}
