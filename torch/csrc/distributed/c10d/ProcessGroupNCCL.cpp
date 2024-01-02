@@ -727,6 +727,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
+  logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
@@ -1427,9 +1428,12 @@ struct DumpPipe {
 };
 #endif
 
+std::string ProcessGroupNCCL::createLogPrefix() const {
+  return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
+}
+
 const std::string& ProcessGroupNCCL::logPrefix() const {
-  static std::string prefix = c10::str("[PG ", uid_, " Rank ", rank_, "] ");
-  return prefix;
+  return logPrefix_;
 }
 
 const int& ProcessGroupNCCL::globalRank() const {
