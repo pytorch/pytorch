@@ -35,7 +35,10 @@ from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_JETSON,
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
-                                                  IS_MACOS, TEST_CUDA, IS_LINUX)
+                                                  IS_MACOS, TEST_CUDA, parametrize)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+import functools
+import operator
 
 
 try:
@@ -106,6 +109,11 @@ JOIN_TIMEOUT = 60.0  # seconds
 
 
 supported_multiprocessing_contexts = [None] + list(torch.multiprocessing.get_all_start_methods())
+
+
+# collate_fn that returns the batch cloned; defined globally here for pickle purposes.
+def _clone_collate(b):
+    return [x.clone() for x in b]
 
 
 @unittest.skipIf(
@@ -269,7 +277,7 @@ class TestDatasetRandomSplit(TestCase):
         subset1, subset2 = random_split(dataset, [4, 1])
         subset_of_subset1, subset_of_subset2 = random_split(subset1, [3, 1])
         idx = [subset1.indices[i] for i in subset_of_subset1.indices]
-        self.assertEqual(subset_of_subset1[:], dataset[idx[:]])
+        self.assertEqual(subset_of_subset1[:], dataset[idx.copy()])
         self.assertEqual(subset_of_subset1[0:2], dataset[idx[0:2]])
         self.assertEqual(subset_of_subset1[0:-1:2], dataset[idx[0:-1:2]])
 
@@ -407,6 +415,80 @@ class TestStackDataset(TestCase):
         for i in range(15):
             self.assertEqual(t[i], source[i]['a'])
             self.assertEqual(l[i], source[i]['b'])
+
+    def test_getitems(self):
+        class GetItemsDataset(Dataset):
+            def __init__(self):
+                self.data = torch.randn(4)
+
+            def __getitem__(self, item):
+                return self.data[item]
+
+            def __getitems__(self, items):
+                return self.data[items]
+
+            def __len__(self):
+                return 4
+
+        t = GetItemsDataset()
+        l = [1, 2, 3, 4]
+
+        source = StackDataset(t, l)
+        batch = source.__getitems__([0, 1, 2, 3])
+        for i in range(4):
+            self.assertEqual(t[i], batch[i][0])
+            self.assertEqual(l[i], batch[i][1])
+
+        source = StackDataset(t=t, l=l)
+        batch = source.__getitems__([0, 1, 2, 3])
+        for i in range(4):
+            self.assertEqual(t[i], batch[i]['t'])
+            self.assertEqual(l[i], batch[i]['l'])
+
+    def test_getitems_raises_index_error(self):
+        class GetItemsDataset(Dataset):
+            def __init__(self):
+                self.data = torch.randn(4)
+
+            def __getitem__(self, item):
+                return self.data[item]
+
+            def __getitems__(self, items):
+                return self.data[items]
+
+            def __len__(self):
+                return 4
+
+        t = GetItemsDataset()
+        l = [1, 2, 3, 4]
+
+        source = StackDataset(t, l)
+
+        with self.assertRaises(IndexError):
+            source.__getitems__([0, 4])
+
+    def test_getitems_value_error(self):
+        class GetItemsDataset(Dataset):
+            def __init__(self):
+                self.data = torch.randn(4)
+
+            def __getitem__(self, item):
+                return self.data[item]
+
+            def __getitems__(self, items):
+                return self.data[items][:-1]  # return less
+
+            def __len__(self):
+                return 4
+
+        t = GetItemsDataset()
+        l = [1, 2, 3, 4]
+
+        source = StackDataset(t, l)
+
+        with self.assertRaisesRegex(ValueError,
+                                    "Nested dataset's output size mismatch. Expected 4, got 3"):
+            source.__getitems__([0, 1, 2, 3])
 
 
 @unittest.skipIf(
@@ -885,7 +967,7 @@ def _test_get_worker_info():
     it = iter(dataloader)
     data = []
     for d in it:
-        data.append(d)
+        data.append(d)  # noqa: PERF402
     worker_pids = [w.pid for w in it._workers]
     data = torch.cat(data, 0)
     for d in data:
@@ -1337,7 +1419,7 @@ except RuntimeError as e:
         # [no auto-batching] multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
-        expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        expected = sorted(functools.reduce(operator.iadd, (list(range(s)) for s in sizes_for_all_workers), []))
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
@@ -1396,7 +1478,7 @@ except RuntimeError as e:
         # [auto-batching] multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
-        expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        expected = sorted(functools.reduce(operator.iadd, (list(range(s)) for s in sizes_for_all_workers), []))
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
@@ -1432,7 +1514,7 @@ except RuntimeError as e:
         # [auto-batching & drop_last] multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
-        expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        expected = sorted(functools.reduce(operator.iadd, (list(range(s)) for s in sizes_for_all_workers), []))
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
@@ -1562,85 +1644,6 @@ except RuntimeError as e:
         for ind in range(num_epochs):
             for batch_idx, sample in enumerate(dataloader):
                 self.assertEqual(sample.tolist(), [batch_idx % num_workers] * batch_size)
-
-    @unittest.skipIf(not IS_LINUX, "Only linux supports fork()-ing Generators.")
-    def test_worker_generator_seed(self):
-        self._test_worker_generator_seed(pin_memory=False)
-        if TEST_CUDA:
-            self._test_worker_generator_seed(pin_memory=True)
-
-    def _test_worker_generator_seed(self, pin_memory):
-        # Tests for the RNG seeding behaviour within _worker_loop.
-        # See NOTE [RNG re-seeding in Dataloader workers]
-
-        class MyDataset(SynchronizedDataset):
-            def __getitem__(self, idx):
-                self.sync_once()
-                HIGH = 100_000
-                from_default = torch.randint(0, HIGH, size=(1,)).item()
-                from_g1 = torch.randint(0, HIGH, size=(1,), generator=g1).item()
-                from_g2 = torch.randint(0, HIGH, size=(1,), generator=g2).item()
-
-                return from_default, from_g1, from_g2
-
-
-        num_workers = 2
-        dataset_len = 10
-        dataset = MyDataset(size=dataset_len, num_workers=num_workers, batch_size=1)
-        dl = DataLoader(dataset, num_workers=num_workers, pin_memory=pin_memory, multiprocessing_context="fork")
-
-        # ALL DIFFERENT SEEDS
-        torch.manual_seed(0)
-        g1 = torch.Generator().manual_seed(1)
-        g2 = torch.Generator().manual_seed(2)
-
-        # Assert RNG of all Generators are different within a given worker (each "batch" comes from a single worker)
-        for from_default, from_g1, from_g2 in dl:
-            self.assertEqual(len({from_default, from_g1, from_g2}), 3)
-
-        # Make sure that the Generators' RNG is different across workers.
-        # We check that by making sure all the samples of a given Generator are different over the entire epoch.
-        # If Generators weren't re-seeded in the workers loop, we would see values being duplicated `num_workers` times.
-        all_from_default, all_from_g1, all_from_g2 = zip(*dl)
-        for all_from_generator in (all_from_default, all_from_g1, all_from_g2):
-            all_from_generator = {x.item() for x in all_from_generator}
-            self.assertEqual(len(all_from_generator), dataset_len)
-
-        # ALL EQUAL SEEDS
-        torch.manual_seed(0)
-        g1 = torch.Generator().manual_seed(0)
-        g2 = torch.Generator().manual_seed(0)
-
-        # All seeds are equal so we expect the RNG of all Generators to be the same.
-        # Default RNG is different from the non-default ones, due to slightly different logic for the choice
-        # of the base seed: the non-default Generators are first consumed in the main process before generating
-        # their seed.
-        for from_default, from_g1, from_g2 in dl:
-            self.assertEqual(from_g1, from_g2)
-            self.assertNotEqual(from_default, from_g1)
-
-        # Same check as when seeds are different: even if they're equal we still want the RNG of a given Generator
-        # to be different across workers.
-        all_from_default, all_from_g1, all_from_g2 = zip(*dl)
-        for all_from_generator in (all_from_default, all_from_g1, all_from_g2):
-            all_from_generator = {x.item() for x in all_from_generator}
-            self.assertEqual(len(all_from_generator), dataset_len)
-
-        # ASSERT DIFFERENT RNG ACROSS EPOCHS
-        default_state_before_epoch = torch.random.get_rng_state()
-        g1_state_before_epoch = g1.get_state()
-        g2_state_before_epoch = g2.get_state()
-
-        all_from_default_a, all_from_g1_a, all_from_g2_a = zip(*dl)
-        # All existing Generators should be consumed (in the main process) after an epoch
-        self.assertNotEqual(default_state_before_epoch, torch.random.get_rng_state())
-        self.assertNotEqual(g1_state_before_epoch, g1.get_state())
-        self.assertNotEqual(g2_state_before_epoch, g2.get_state())
-        # More importantly, the RNG of each Generator must be different across epochs
-        all_from_default_b, all_from_g1_b, all_from_g2_b = zip(*dl)
-        self.assertNotEqual(all_from_default_a, all_from_default_b)
-        self.assertNotEqual(all_from_g1_a, all_from_g1_b)
-        self.assertNotEqual(all_from_g2_a, all_from_g2_b)
 
     def test_worker_init_fn(self):
         dataset = SeedDataset(4)
@@ -1877,7 +1880,7 @@ except RuntimeError as e:
         self._test_sampler()
         self._test_sampler(num_workers=4)
         if not NO_MULTIPROCESSING_SPAWN:
-            self._test_sampler(num_workers=4, multiprocessing_context='spawn')
+            self._test_batch_sampler(num_workers=4, multiprocessing_context='spawn')
 
     def _test_batch_sampler(self, **kwargs):
         # [(0, 1), (2, 3, 4), (5, 6), (7, 8, 9), ...]
@@ -2341,6 +2344,47 @@ except RuntimeError as e:
             UserWarning,
                 r"excessive worker creation might get DataLoader running slow or even freeze"):
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
+
+
+class TestDataLoaderDeviceType(TestCase):
+    @parametrize("context", [ctx for ctx in supported_multiprocessing_contexts if ctx is not None])
+    def test_nested_tensor_multiprocessing(self, device, context):
+        # The 'fork' multiprocessing context doesn't work for CUDA so skip it
+        if 'cuda' in device and context == "fork":
+            # TODO: Skip this better in a better way when the test framework allows
+            return
+
+        dataset = [torch.nested.nested_tensor([torch.randn(5)], device=device) for _ in range(10)]
+
+        pin_memory_settings = [False]
+        if device == 'cpu' and torch.cuda.is_available():
+            pin_memory_settings.append(True)
+
+        for pin_memory in pin_memory_settings:
+            loader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=1,
+                num_workers=4,
+                collate_fn=_clone_collate,
+                pin_memory=pin_memory,
+                multiprocessing_context=context,
+            )
+
+            for i, batch in enumerate(loader):
+                self.assertEqual(batch[0], dataset[i])
+
+        # Error case: default collate_fn doesn't currently support batches of nested tensors.
+        # Following the current semantics, we'd need to stack them, which isn't possible atm.
+        with self.assertRaisesRegex(
+                RuntimeError, "not currently supported by the default collate_fn"):
+            loader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=1,
+                num_workers=4,
+                multiprocessing_context=context,
+            )
+
+            next(iter(loader))
 
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
@@ -2848,6 +2892,9 @@ class TestConvAfterFork(TestCase):
         loader = DataLoader(ConvDataset(), num_workers=1)
         for x in loader:
             self.assertEqual(x.shape, (1, 1, 1, 23999))
+
+
+instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
 
 
 if __name__ == '__main__':

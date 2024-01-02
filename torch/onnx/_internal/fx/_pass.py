@@ -3,6 +3,7 @@ from __future__ import annotations
 import abc
 
 import contextlib
+import dataclasses
 import difflib
 
 import io
@@ -17,6 +18,32 @@ from torch._subclasses import fake_tensor
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher
+
+
+@dataclasses.dataclass
+class PackageInfo:
+    package_name: str
+    version: Optional[str]
+    commit_hash: Optional[str]
+
+    def to_onnx_domain_string(self) -> str:
+        return ".".join(
+            filter(None, ("pkg", self.package_name, self.version, self.commit_hash))
+        )
+
+    @classmethod
+    def from_python_class(cls, python_class: type) -> PackageInfo:
+        package_name = python_class.__module__.split(".")[0]
+        package = __import__(package_name)
+        version = getattr(package, "__version__", None)
+        # TODO: Figure out how to retrieve commit hash.
+        commit_hash = None
+        return cls(package_name, version, commit_hash)
+
+
+@dataclasses.dataclass
+class GraphModuleOnnxMeta:
+    package_info: PackageInfo
 
 
 @contextlib.contextmanager
@@ -130,11 +157,12 @@ def maybe_fx_graph_tabular(graph: torch.fx.Graph) -> Optional[str]:
 class Transform(abc.ABC):
     """Base class for FX graph transformations to be used by FX-ONNX exporter.
 
-    This class provides builtin support for transformation recording using the diagnostics system.
+    Similar to `FX Interpreter <https://pytorch.org/docs/stable/fx.html#torch.fx.Interpreter>`_,
+    specializations of this class execute the FX graph Node-by-Node.
+    Methods in the `Transform` class can be overridden to customize the behavior of the model.
+    This pattern can be useful for many things, including writing code transformations as well as analysis passes.
 
-    TODO(bowbao): Add more overrideable methods in call hierarchy
-    Methods in the Transform class can be overridden to customize the behavior of the
-    transform. The following methods can be overridden::
+    The following methods can be overridden::
 
         _run()
             +-- run_node()
@@ -145,13 +173,20 @@ class Transform(abc.ABC):
                 +-- call_module()
                 +-- output()
 
+    One important aspect to note is that if the transformation modifies the model input and/or output signature,
+    (e.g. additional inputs/outputs are added to the model), :class:`InputAdaptStep` and/or :class:`OutputAdaptStep`
+    are needed to reconcile :attr:`ONNXProgram.model_signature` and :attr:`ONNXProgram.model_proto`.
+    That is, the model signature and the model representation must match.
+
+    As an additional feature, this class provides builtin support for transformation recording using the diagnostics.
     The granularity of overriding is up to the user. And it affects the granularity of
     the diagnostics information. For example, if `_run()` is overridden, the
     diagnostics information will only contain graph level transformation. Instead,
     if `call_function()` is overridden, the diagnostics information will additionally
     contain the node level information of `call_function()`.
 
-    Example: TODO(bowbao): Fill example once more overrideable methods are added.
+    TODO(bowbao): Add more overridable methods in call hierarchy
+    TODO(bowbao): Create an example once more overridable methods are added.
     """
 
     diagnostic_context: diagnostics.DiagnosticContext
@@ -219,6 +254,12 @@ class Transform(abc.ABC):
         diagnostic = self.diagnostic_context.inflight_diagnostic(
             rule=diagnostics.rules.fx_pass
         )
+        diagnostic.info(
+            "For detailed logging of graph modifications by this pass, either set "
+            "`DiagnosticOptions.verbosity_level` to `logging.DEBUG` or use the environment variable "
+            "`TORCH_LOGS='onnx_diagnostics'`."
+        )
+
         # Gather graph information before transform.
         graph_diff_log_level = logging.DEBUG
         if diagnostic.logger.isEnabledFor(graph_diff_log_level):
@@ -263,7 +304,7 @@ class Transform(abc.ABC):
         return module
 
 
-class AnalysisResult(abc.ABC):
+class AnalysisResult(abc.ABC):  # noqa: B024
     ...
 
 

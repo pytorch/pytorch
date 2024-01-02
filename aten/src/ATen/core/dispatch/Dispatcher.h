@@ -18,6 +18,10 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/enum_tag.h>
 
+#ifndef NDEBUG
+#include <iostream>
+#endif
+
 namespace c10 {
 
 TORCH_API bool show_dispatch_trace();
@@ -220,6 +224,19 @@ public:
   RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, c10::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
 
   /**
+   * Given an operator, tells the Dispatcher that we have implemented an abstract impl
+   * for this op in the given Python module. Call this a "pystub".
+   */
+  RegistrationHandleRAII registerAbstractImplPyStub(const OperatorName& op_name, const char* pymodule, const char* context);
+
+  /**
+   * Given an operator, throws if we have an abstract impl pystub.
+   */
+  void throwIfHasAbstractImplPyStub(OperatorName op_name);
+
+  c10::optional<std::pair<const char*, const char*>> getAbstractImplPyStub(OperatorName op_name);
+
+  /**
    * Register a new operator by name.
    */
   RegistrationHandleRAII registerName(OperatorName op_name);
@@ -290,6 +307,12 @@ private:
   static int64_t sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey);
   static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey);
   static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, c10::ArrayRef<const c10::IValue> args);
+
+  #ifdef FBCODE_CAFFE2
+  static bool profilingOperatorEvents();
+  static void fireOpStartUSDT(at::RecordFunction::schema_ref_t schema_ref);
+  static void fireOpEndUSDT(at::RecordFunction::schema_ref_t schema_ref);
+  #endif // FBCODE_CAFFE2
 
   OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema);
   OperatorHandle findOrRegisterName_(const OperatorName& op_name);
@@ -423,6 +446,9 @@ public:
     // will be done by the time a typed() handle is acquired.
 #if !defined C10_MOBILE
     operatorDef_->op.assertSignatureIsCorrect<FuncType>();
+    if (fn_has_symint<FuncType>::value) {
+      operatorDef_->op.assertSignatureIsCorrect<typename fn_remove_symint<FuncType>::type>();
+    }
 #endif
     return TypedOperatorHandle<FuncType>(operatorIterator_);
   }
@@ -650,7 +676,23 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandl
     return callWithDispatchKeySlowPath<Return, Args...>(op, *step_callbacks, dispatchKeySet, kernel, std::forward<Args>(args)...);
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
-  return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
+
+#ifdef FBCODE_CAFFE2
+  if(profilingOperatorEvents()) {
+    struct FireOpRAII {
+       FireOpRAII(at::RecordFunction::schema_ref_t schema_ref) : schema_ref_(schema_ref) {
+           fireOpStartUSDT(schema_ref);
+        }
+       ~FireOpRAII() { fireOpEndUSDT(schema_ref_); }
+       at::RecordFunction::schema_ref_t schema_ref_;
+    } event(op.schema());
+    return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
+  } else {
+    return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
+  }
+#else
+    return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
+#endif // FBCODE_CAFFE2
 }
 
 // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
@@ -745,7 +787,7 @@ namespace std {
 
 template <>
 struct hash<c10::OperatorHandle> {
-  size_t operator()(c10::OperatorHandle op) const noexcept {
+  size_t operator()(const c10::OperatorHandle& op) const noexcept {
     return std::hash<void*>{}(static_cast<void*>(op.operatorDef_));
   }
 };

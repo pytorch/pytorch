@@ -37,7 +37,7 @@ class SomeClass:
                 print(f"Abort: {e}")
                 print("Cleaning up...")
                 deleteDirectory(model_dir)
-                exit(1)
+                sys.exit(1)
 
     def _caffe2_model_dir(self, model):
         caffe2_home = os.path.expanduser("~/.caffe2")

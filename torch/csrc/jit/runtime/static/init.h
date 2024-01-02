@@ -1,9 +1,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void initStaticModuleBindings(PyObject* module);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

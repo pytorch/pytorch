@@ -196,7 +196,7 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithMultipleOut
          dummyTensor(DispatchKey::CUDA),
          5,
          {dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CUDA)},
-         c10::optional<int64_t>(c10::in_place, 0),
+         c10::optional<int64_t>(std::in_place, 0),
          dict
        );
      });
@@ -854,7 +854,7 @@ void expectCallsConcatUnboxed(DispatchKey dispatch_key) {
 TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernel_whenRegistered_thenCanBeCalledUnboxed) {
   std::string prefix = "prefix";
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", [&] (const Tensor& tensor1, std::string a, const std::string& b, int64_t c) {
-    return prefix + a + b + c10::guts::to_string(c);
+    return prefix + a + b + std::to_string(c);
   });
   expectCallsConcatUnboxed(DispatchKey::CPU);
 }

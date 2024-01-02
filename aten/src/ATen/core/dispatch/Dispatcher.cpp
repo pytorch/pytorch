@@ -1,10 +1,20 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <chrono>
 #include <list>
 #include <sstream>
 #include <utility>
 
+#ifdef FBCODE_CAFFE2
+#include <c10/util/static_tracepoint.h>
+#endif
+
 namespace c10 {
+
+#ifdef FBCODE_CAFFE2
+TORCH_SDT_DEFINE_SEMAPHORE(operator_start)
+TORCH_SDT_DEFINE_SEMAPHORE(operator_end)
+#endif
 
 bool show_dispatch_trace() {
     static char const* temp = getenv("TORCH_SHOW_DISPATCH_TRACE");
@@ -254,6 +264,71 @@ void Dispatcher::deregisterDef_(
   cleanup(op, op_name);
 }
 
+namespace {
+
+using AbstractImplPyStubsType = std::unordered_map<at::OperatorName, std::pair<const char*, const char*>>;
+AbstractImplPyStubsType& abstractImplPyStubsSingleton() {
+  static AbstractImplPyStubsType _data;
+  return _data;
+}
+
+}
+
+c10::optional<std::pair<const char*, const char*>> Dispatcher::getAbstractImplPyStub(OperatorName op_name) {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  auto found = abstractImplPyStubsSingleton().find(op_name);
+  if (found == abstractImplPyStubsSingleton().end()) {
+    return c10::nullopt;
+  }
+  return found->second;
+}
+
+RegistrationHandleRAII Dispatcher::registerAbstractImplPyStub(
+  const OperatorName& op_name,
+  const char* pymodule,
+  const char* context
+) {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  // If there are duplicates, we just let it through and warn about it.
+  // Throwing an error during static initialization causes a crash that
+  // doesn't give any sign of what happened.
+  auto found = abstractImplPyStubsSingleton().find(op_name);
+  if (found != abstractImplPyStubsSingleton().end()) {
+    TORCH_WARN(
+        "Tried to register an abstract impl pystub for ", op_name, " ",
+        "that specifies the Python module ", pymodule, " "
+        "but there already was a pystub that specifies the Python module ",
+        found->second.first, ". We will override the existing pystub.");
+  }
+  abstractImplPyStubsSingleton()[op_name] = std::make_pair(pymodule, context);
+  return RegistrationHandleRAII([guard = this->guard_, op_name] {
+    std::lock_guard<std::mutex> lock(guard->mutex);
+    if (!guard->alive.load()) {
+      return;
+    }
+    abstractImplPyStubsSingleton().erase(op_name);
+  });
+}
+
+void Dispatcher::throwIfHasAbstractImplPyStub(OperatorName op_name) {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  auto elt = abstractImplPyStubsSingleton().find(op_name);
+  if (elt == abstractImplPyStubsSingleton().end()) {
+    return;
+  }
+  const char* pymodule = elt->second.first;
+  const char* context = elt->second.second;
+  auto* interpreter = at::impl::PythonOpRegistrationTrampoline::getInterpreter();
+  TORCH_CHECK(
+      interpreter != nullptr,
+      op_name,
+      ": while attempting to run this operator with Meta Tensors: "
+      "Either there is no meta kernel for this operator, or it is located "
+      "in the python module ", pymodule, " which is not available "
+      "because Python isn't available.")
+  (*interpreter)->throw_abstract_impl_not_imported_error(toString(op_name), pymodule, context);
+}
+
 RegistrationHandleRAII Dispatcher::registerImpl(
   OperatorName op_name,
   c10::optional<DispatchKey> dispatch_key,
@@ -442,5 +517,22 @@ void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction
   // the forward range with the corresponding Autograd's node
   guard.before(schema_ref, sequenceNumberForRunningRecordFunction(dispatchKey));
 }
+#ifdef FBCODE_CAFFE2
+bool Dispatcher::profilingOperatorEvents() {
+  return TORCH_SDT_IS_ENABLED(operator_start) || TORCH_SDT_IS_ENABLED(operator_end);
+}
+
+void Dispatcher::fireOpStartUSDT(at::RecordFunction::schema_ref_t schema_ref) {
+  if (TORCH_SDT_IS_ENABLED(operator_start)) {
+    TORCH_SDT_WITH_SEMAPHORE(operator_start, schema_ref.get().name().c_str());
+  }
+}
+
+void Dispatcher::fireOpEndUSDT(at::RecordFunction::schema_ref_t schema_ref) {
+  if (TORCH_SDT_IS_ENABLED(operator_end)) {
+    TORCH_SDT_WITH_SEMAPHORE(operator_end, schema_ref.get().name().c_str());
+  }
+}
+#endif
 
 }

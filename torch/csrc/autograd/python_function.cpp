@@ -45,6 +45,7 @@ using namespace torch::autograd;
 using at::Tensor;
 
 PyObject* THPFunctionClass = nullptr;
+PyObject* THPGradientEdgeClass = nullptr;
 
 #define THPFunction_assert(condition, ...) \
   if (!(condition)) {                      \
@@ -55,20 +56,18 @@ PyObject* THPFunctionClass = nullptr;
 // Anonymous namespace for helpful functions used in this file
 namespace {
 
-// Throw a python_error with the PyErr state persisted, so that we
-// don't lose the error state if the GIL is released when we don't
-// have a PyThreadState created beforehand, this is made so that
-// even for pure C++ thread without a pre-created PyThreadState could
-// also capture the correct error message.
-// TODO: This is a temporary approach to allow C++ thread to correctly
-// capture Python Error in autograd, remove this when c10 thread pool
-// allow to do one time initialization.
-// see discussion in https://github.com/pytorch/pytorch/pull/34845
-// Follow up issue: https://github.com/pytorch/pytorch/issues/35006
+// TODO: We shouldn't need to call this function because the engine
+// can already persist the errors for us. This still seems to be
+// needed for the DistEngine however.
+//
+// python test/distributed/rpc/test_tensorpipe_agent.py -k
+// test_backward_autograd_engine_error
+//
+// See Note [ Persisting PyErr state across autograd engine threads ]
 void throw_python_error() {
   python_error err;
   err.persist();
-  throw err;
+  throw std::move(err);
 }
 
 } // namespace
@@ -86,7 +85,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
 
   // Massage a C++ variable_list into a Python arguments tuple
   auto num_inputs = inputs.size();
-  THPObjectPtr pyInputs(PyTuple_New(num_inputs));
+  THPObjectPtr pyInputs(PyTuple_New(static_cast<Py_ssize_t>(num_inputs)));
   if (!pyInputs)
     throw_python_error();
   auto& output_info = py_fn->output_info;
@@ -98,7 +97,13 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
          !py_fn->materialize_non_diff_grads)) {
       input = THPVariable_Wrap(inputs[i]);
     } else {
-      input = THPVariable_Wrap(output_info[i].zeros(_device_guard));
+      auto zeros_without_gil = [](const VariableInfo& variable,
+                                  at::OptionalDeviceGuard& device_guard) {
+        pybind11::gil_scoped_release gil;
+        return variable.zeros(device_guard);
+      };
+      input =
+          THPVariable_Wrap(zeros_without_gil(output_info[i], _device_guard));
     }
     if (!input)
       throw_python_error();
@@ -114,8 +119,8 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   ensure_tuple(r);
 
   auto& is_variable_input = py_fn->is_variable_input;
-  int num_outputs = PyTuple_GET_SIZE(r.get());
-  int num_forward_inputs = is_variable_input.size();
+  auto num_outputs = PyTuple_GET_SIZE(r.get());
+  auto num_forward_inputs = static_cast<Py_ssize_t>(is_variable_input.size());
   // Returning too many results is ok, but only as long as they're all None.
   // Truncate the result tuple in that case.
   if (num_outputs > num_forward_inputs) {
@@ -443,7 +448,7 @@ static void _wrap_outputs(
     // Massage a C++ variable_list into a Python arguments tuple
     // Making sure to introduce the proper None for non-Tensor inputs
     auto num_inputs = self->is_variable_input.size();
-    THPObjectPtr pyInputs(PyTuple_New(num_inputs));
+    THPObjectPtr pyInputs(PyTuple_New(static_cast<Py_ssize_t>(num_inputs)));
     if (!pyInputs)
       throw_python_error();
     int64_t variable_idx = 0;
@@ -501,6 +506,21 @@ static void _wrap_outputs(
     return results;
   };
 
+  auto view_as_self_fn = [](const at::Tensor& x) -> at::Tensor {
+    pybind11::gil_scoped_acquire gil;
+    THPObjectPtr py_x(THPVariable_Wrap(x));
+    THPObjectPtr py_view_as_method(PyObject_GetAttrString(py_x, "view_as"));
+    if (!py_view_as_method)
+      throw python_error();
+    THPObjectPtr args(PyTuple_Pack(1, py_x.get()));
+    if (!args)
+      throw python_error();
+    THPObjectPtr result(PyObject_CallObject(py_view_as_method, args));
+    if (!result)
+      throw python_error();
+    return THPVariable_Unpack(result);
+  };
+
   // Wrap only the tensor outputs.
   auto wrapped_outputs = _wrap_outputs(
       input_vars,
@@ -508,8 +528,9 @@ static void _wrap_outputs(
       dirty_inputs,
       raw_output_vars,
       cdata_if_executable,
-      std::move(jvp_user_function),
-      to_save_if_setup_context);
+      jvp_user_function,
+      to_save_if_setup_context,
+      view_as_self_fn);
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
@@ -522,8 +543,10 @@ static void _wrap_outputs(
       PyTuple_SetItem(outputs, i, obj);
     } else {
       if (is_executable) {
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         self->output_info.emplace_back(*wrapped_outputs[i]);
       }
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       PyTuple_SetItem(outputs, i, THPVariable_Wrap(*wrapped_outputs[i]));
     }
   }
@@ -564,7 +587,7 @@ static void _get_tensors_to_save(
     for (const auto i : c10::irange(num_saved)) {
       PyObject* obj = PyTuple_GET_ITEM(self->to_save, i);
       if (obj == Py_None) {
-        tensors_to_save.push_back(c10::nullopt);
+        tensors_to_save.emplace_back(c10::nullopt);
         continue;
       } else if (THPVariable_Check(obj)) {
         const auto& tensor = THPVariable_Unpack(obj);
@@ -572,7 +595,7 @@ static void _get_tensors_to_save(
           to_save_if_setup_context.insert(tensor.unsafeGetTensorImpl());
         }
         if (is_executable) {
-          tensors_to_save.push_back(tensor);
+          tensors_to_save.emplace_back(tensor);
         }
       } else {
         if (is_executable) {
@@ -943,6 +966,14 @@ PyObject* THPFunction_sequence_nr(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPFunction*)self)->cdata.lock();
+  cdata->set_sequence_nr(THPUtils_unpackUInt64(sequence_nr));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPFunction_maybe_clear_saved_tensors(
     PyObject* self,
     PyObject* noargs) {
@@ -1021,7 +1052,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   HANDLE_TH_ERRORS
 
   // save a local copy of seq_id before it gets incremented
-  int seq_id = at::sequence_number::peek();
+  auto seq_id = at::sequence_number::peek();
   auto info_pair = unpack_input<false>(inputs);
   UnpackedInput& unpacked_input = info_pair.first;
   InputFlags& input_info = info_pair.second;
@@ -1241,8 +1272,8 @@ static PyObject* unpack_saved_variables(
   if (saved_variables.empty())
     return PyTuple_New(0);
 
-  int num_saved = saved_variables.size();
-  THPObjectPtr saved(PyTuple_New(num_saved));
+  auto num_saved = saved_variables.size();
+  THPObjectPtr saved(PyTuple_New(static_cast<Py_ssize_t>(num_saved)));
   if (!saved)
     return nullptr;
   auto saved_for = self->cdata.lock();
@@ -1311,7 +1342,7 @@ PyObject* THPFunction_get_compiled_autograd_symints(
   HANDLE_TH_ERRORS
   auto self = (THPFunction*)_self;
   auto size = self->compiled_autograd_symints.size();
-  PyObject* result = PyTuple_New(size);
+  PyObject* result = PyTuple_New(static_cast<Py_ssize_t>(size));
   if (!result) {
     throw python_error();
   }
@@ -1333,7 +1364,7 @@ PyObject* THPFunction_raw_saved_tensors(THPFunction* self, void* _unused) {
   if (saved_variables.empty())
     return PyTuple_New(0);
   size_t num_saved = saved_variables.size();
-  THPObjectPtr saved(PyTuple_New(num_saved));
+  THPObjectPtr saved(PyTuple_New(static_cast<Py_ssize_t>(num_saved)));
   if (!saved) {
     return nullptr;
   }
@@ -1511,6 +1542,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
 static struct PyMethodDef THPFunction_methods[] = {
     {(char*)"name", THPFunction_name, METH_NOARGS, nullptr},
     {(char*)"_sequence_nr", THPFunction_sequence_nr, METH_NOARGS, nullptr},
+    {(char*)"_set_sequence_nr", THPFunction_set_sequence_nr, METH_O, nullptr},
     {(char*)"maybe_clear_saved_tensors",
      THPFunction_maybe_clear_saved_tensors,
      METH_NOARGS,
@@ -1551,6 +1583,7 @@ PyTypeObject THPFunctionType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
         Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */

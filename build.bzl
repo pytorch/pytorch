@@ -24,7 +24,7 @@ def define_targets(rules):
             "CAFFE2_USE_CUDNN",
             "USE_MKLDNN",
             "CAFFE2_USE_ITT",
-            "TORCH_DISABLE_GPU_ASSERTS",
+            "USE_ROCM_KERNEL_ASSERT",
             "EIGEN_MPL2_ONLY",
         ],
     )
@@ -255,6 +255,7 @@ GENERATED_CPP_CORE = [
 
 _GENERATED_AUTOGRAD_PYTHON_HEADERS = [
     "torch/csrc/autograd/generated/python_functions.h",
+    "torch/csrc/autograd/generated/python_return_types.h",
 ]
 
 _GENERATED_AUTOGRAD_CPP_HEADERS = [

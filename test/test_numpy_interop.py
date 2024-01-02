@@ -6,10 +6,11 @@ import numpy as np
 from itertools import product
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests)
+    (skipIfTorchDynamo, TestCase, run_tests)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, skipMeta)
 from torch.testing._internal.common_dtype import all_types_and_complex_and
+
 
 # For testing handling NumPy objects and sending tensors to / accepting
 #   arrays from NumPy.
@@ -156,6 +157,7 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(y.dtype, np.bool_)
         self.assertEqual(x[0], y[0])
 
+    @skipIfTorchDynamo("conj bit not implemented in TensorVariable yet")
     def test_to_numpy_force_argument(self, device) -> None:
         for force in [False, True]:
             for requires_grad in [False, True]:
@@ -303,6 +305,14 @@ class TestNumPyInterop(TestCase):
         for idx in i:
             self.assertFalse(isinstance(idx, int))
             self.assertEqual(x[idx], x[int(idx)])
+
+    @onlyCPU
+    def test_numpy_index_multi(self, device):
+        for dim_sz in [2, 8, 16, 32]:
+            i = np.zeros((dim_sz, dim_sz, dim_sz), dtype=np.int32)
+            i[:dim_sz // 2, :, :] = 1
+            x = torch.randn(dim_sz, dim_sz, dim_sz)
+            self.assertTrue(x[i == 1].numel() == np.sum(i))
 
     @onlyCPU
     def test_numpy_array_interface(self, device):
@@ -471,6 +481,21 @@ class TestNumPyInterop(TestCase):
                     self.assertFalse(t == a)
                 else:
                     self.assertTrue(t == a)
+
+    @onlyCPU
+    def test_empty_tensors_interop(self, device):
+        x = torch.rand((), dtype=torch.float16)
+        y = torch.tensor(np.random.rand(0), dtype=torch.float16)
+        # Same can be achieved by running
+        # y = torch.empty_strided((0,), (0,), dtype=torch.float16)
+
+        # Regression test for https://github.com/pytorch/pytorch/issues/115068
+        self.assertEqual(torch.true_divide(x, y).shape, y.shape)
+        # Regression test for https://github.com/pytorch/pytorch/issues/115066
+        self.assertEqual(torch.mul(x, y).shape, y.shape)
+        # Regression test for https://github.com/pytorch/pytorch/issues/113037
+        self.assertEqual(torch.div(x, y, rounding_mode='floor').shape, y.shape)
+
 
 instantiate_device_type_tests(TestNumPyInterop, globals())
 

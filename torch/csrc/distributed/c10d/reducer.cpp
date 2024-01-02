@@ -20,7 +20,6 @@
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
-#include <torch/csrc/utils/memory.h>
 
 namespace c10d {
 namespace {
@@ -185,7 +184,7 @@ Reducer::Reducer(
       // Hook to execute after the gradient accumulator has executed.
       hooks_.emplace_back(
           grad_accumulator->add_post_hook(
-              torch::make_unique<torch::autograd::utils::LambdaPostHook>(
+              std::make_unique<torch::autograd::utils::LambdaPostHook>(
                   [=](const torch::autograd::variable_list& outputs,
                       const torch::autograd::variable_list& /* unused */) {
 #ifndef _WIN32
@@ -292,8 +291,11 @@ void Reducer::initialize_local_used_map() {
 
   // This tensor needs to be on the same device as the replica params because
   // backend such as NCCL may not support CPU tensors, and hence it might not
-  // work if we always put it on CPU.
-  options = options.device(params_[0].device());
+  // work if we always put it on CPU. The dist backend for MTIA doesn't support
+  // int32 allreduce for now, so it has to be placed on CPU.
+  options = options.device(
+      (params_[0].is_mtia()) ? c10::Device(c10::DeviceType::CPU)
+                             : params_[0].device());
   local_used_map_dev_ = at::empty({static_cast<long>(variable_count)}, options);
 }
 
@@ -749,7 +751,7 @@ void Reducer::all_reduce_local_used_map() {
     // local_used_map_
     auto local_used_map_tmp = at::native::empty_like(
         local_used_map_,
-        optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
+        c10::optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
         local_used_map_.options().layout_opt(),
         local_used_map_.options().device_opt(),
         true /* pinned_memory */);
@@ -759,6 +761,18 @@ void Reducer::all_reduce_local_used_map() {
     TORCH_INTERNAL_ASSERT(local_used_map_tmp.is_pinned());
     TORCH_INTERNAL_ASSERT(
         local_used_map_tmp.data_ptr() != local_used_map_.data_ptr());
+    local_used_map_tmp.copy_(local_used_map_);
+    local_used_map_dev_.copy_(local_used_map_tmp, true);
+  } else if (local_used_map_dev_.is_mtia()) {
+    // MTIA probably will have special logic in the future, following code might
+    // be changed drastically. Therefore, a new if case is created for MTIA, for
+    // now, the implementation is similar to the CUDA one, except for
+    // the pin memory step.
+    auto local_used_map_tmp = at::native::empty_like(
+        local_used_map_,
+        c10::optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
+        local_used_map_.options().layout_opt(),
+        local_used_map_.options().device_opt());
     local_used_map_tmp.copy_(local_used_map_);
     local_used_map_dev_.copy_(local_used_map_tmp, true);
   } else {
@@ -936,6 +950,22 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
   // these operations are implicitly sequenced, and we don't need to
   // do any extra synchronization here.
   const auto& tensor = bucket.gradients;
+
+  // TODO(@egienvalue): remove special case after view ops are fully
+  // supported on MTIA.
+  // If the bucket.gradients is on MTIA, bucket.bucket_views_in might not
+  // point to the same storage as bucket.gradients due to the special
+  // memory layout. It has to explicitly copy the data back to 1-D gradients.
+  if (tensor.is_mtia()) {
+    for (const auto i : c10::irange(bucket.variables.size())) {
+      const auto offset = bucket.offsets[i];
+      const auto length = bucket.lengths[i];
+      if (!bucket.bucket_views_in[i].is_alias_of(tensor)) {
+        tensor.narrow(0, offset, length)
+            .copy_(bucket.bucket_views_in[i].flatten());
+      }
+    }
+  }
 
   GradBucket grad_bucket(
       next_bucket_,
@@ -1192,7 +1222,12 @@ void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
     auto& v = bucket.variables[i];
     const auto offset = bucket.offsets[i];
     const auto length = bucket.lengths[i];
-    if (v.is_non_overlapping_and_dense()) {
+    // TODO(@egienvalue): remove special case after view ops are fully
+    // supported on MTIA.
+    // In general, on MTIA, due to the special memory layout, it doesn't
+    // support as_strided which creates a view tensor and aten::view will
+    // create a new tensor on MTIA for now.
+    if (v.is_non_overlapping_and_dense() && !v.is_mtia()) {
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
@@ -1243,7 +1278,12 @@ void Reducer::populate_bucket_views_out(
     const auto& v = bucket.variables[i];
     const auto offset = bucket.offsets[i];
     const auto length = bucket.lengths[i];
-    if (v.is_non_overlapping_and_dense()) {
+    // TODO(@egienvalue): remove special case after view ops are fully
+    // supported on MTIA.
+    // In general, on MTIA, due to the special memory layout, it doesn't
+    // support as_strided which creates a view tensor and aten::view will
+    // create a new tensor on MTIA for now.
+    if (v.is_non_overlapping_and_dense() && !v.is_mtia()) {
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
@@ -1768,7 +1808,7 @@ bool Reducer::rebuild_buckets() {
   bucket_size_limits.push_back(bucket_bytes_cap_);
   std::vector<size_t> per_bucket_size_limits;
   auto ddp_set_last_bucket_as_small =
-      (parse_env("DDP_SET_LAST_BUCKET_CAP") == "1");
+      (getCvarString({"DDP_SET_LAST_BUCKET_CAP"}, "N/A") == "1");
 
   if (ddp_set_last_bucket_as_small) {
     // Reverse so that first_bucket_bytes_cap_ (smaller bucket) becomes the last
@@ -2292,6 +2332,28 @@ void Reducer::remove_autograd_hooks() {
 void Reducer::check_finalized() {
   std::lock_guard<std::mutex> lock(mutex_);
   ensure_prior_reduction_finished();
+}
+
+void Reducer::update_process_group(
+    c10::intrusive_ptr<c10d::ProcessGroup> new_process_group) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  process_group_ = std::move(new_process_group);
+}
+
+void Reducer::reset_state() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  // Force rebuild of buckets.
+  has_rebuilt_bucket_ = false;
+  rebuilt_params_.clear();
+  rebuilt_param_indices_.clear();
+
+  // Ensure forward can run despite previous backward not succeeding.
+  expect_autograd_hooks_ = false;
+  require_finalize_ = false;
+
+  // Unset allreduce division factor, as it may change in next backwards pass
+  // when running with DDP join mode.
+  div_factor_ = kUnsetDivFactor;
 }
 
 } // namespace c10d

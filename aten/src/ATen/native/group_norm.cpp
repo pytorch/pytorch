@@ -23,9 +23,7 @@
 #include <tuple>
 #include <vector>
 
-namespace at {
-
-namespace native {
+namespace at::native {
 
 template <typename T>
 void check_group_norm_inputs(
@@ -119,7 +117,9 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   c10::MaybeOwned<Tensor> gamma_maybe_owned =
       at::borrow_from_optional_tensor(gamma_opt);
   const Tensor& gamma = *gamma_maybe_owned;
-
+  TORCH_CHECK(
+      X.scalar_type() == dY.scalar_type(),
+      "Expected scalar types of X and dY are same.");
   bool mixed_type = is_mixed_type(X, mean, rstd);
   if (mixed_type) {
     check_mixed_data_type(X, mean, rstd);
@@ -255,5 +255,4 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
   at::Tensor rstd = std::get<2>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
   return std::make_tuple(out, mean, rstd);
 }
-} // namespace native
-} // namespace at
+} // namespace at::native

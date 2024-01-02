@@ -7,8 +7,7 @@
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSStream.h>
 
-namespace at {
-namespace mps {
+namespace at::mps {
 
 static std::unique_ptr<MPSDevice> mps_device;
 static c10::once_flag mpsdev_init;
@@ -93,10 +92,17 @@ MPSDevice::MPSDevice() : _mtl_device(nil), _mtl_indexing_library(nil) {
   NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0; i < [devices count]; i++) {
     id<MTLDevice> device = devices[i];
-    if (![device isLowPower]) { // exclude Intel GPUs
-      _mtl_device = [device retain];
-      break;
+    if ([device isLowPower]) { // exclude Intel GPUs
+      continue;
     }
+    if (![device supportsFamily:MTLGPUFamilyMac2]) {
+      // Exclude devices that does not support Metal 2.0
+      // Virtualised MPS device on MacOS 12.6 should fail this check
+      TORCH_WARN("Skipping device ", [[device name] UTF8String], " that does not support Metal 2.0");
+      continue;
+    }
+    _mtl_device = [device retain];
+    break;
   }
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(_mtl_device);
 }
@@ -115,6 +121,8 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
       [mpsCD instancesRespondToSelector:@selector(convolution3DWithSourceTensor:weightsTensor:descriptor:name:)] == YES;
   static bool _macos_13_3_plus = [compileOptions respondsToSelector:@selector(maxTotalThreadsPerThreadgroup)] == YES;
 
+  static bool _macos_14_0_plus = [mpsCD instancesRespondToSelector:@selector(conjugateWithTensor:name:)] == YES;
+
   switch (version) {
     case MacOSVersion::MACOS_VER_13_0_PLUS:
       return _macos_13_0_plus;
@@ -124,6 +132,8 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
       return _macos_13_2_plus;
     case MacOSVersion::MACOS_VER_13_3_PLUS:
       return _macos_13_3_plus;
+    case MacOSVersion::MACOS_VER_14_0_PLUS:
+      return _macos_14_0_plus;
     default:
       return false;
   }
@@ -141,9 +151,4 @@ bool is_macos_13_or_newer(MacOSVersion version) {
   return MPSDevice::getInstance()->isMacOS13Plus(version);
 }
 
-bool is_macos_14_or_newer(MacOSVersion version) {
-  return MPSDevice::getInstance()->isMacOS14Plus(version);
-}
-
-} // namespace mps
-} // namespace at
+} // namespace at::mps

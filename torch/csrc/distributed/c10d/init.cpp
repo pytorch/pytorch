@@ -3,6 +3,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/string_view.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #ifndef _WIN32
@@ -20,6 +21,7 @@
 #ifdef USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
@@ -595,6 +597,17 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_check_reducer_finalized",
           [](::c10d::Reducer& reducer) { return reducer.check_finalized(); },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_reset_state",
+          [](::c10d::Reducer& reducer) { return reducer.reset_state(); },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_update_process_group",
+          [](::c10d::Reducer& reducer,
+             c10::intrusive_ptr<::c10d::ProcessGroup> new_process_group) {
+            return reducer.update_process_group(new_process_group);
+          },
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
@@ -691,7 +704,7 @@ Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex ten
 
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
-:func:`reduce`, :func:`all_reduce_multigpu`, etc.
+:func:`reduce`.
 
 This class does not support ``__members__`` property.)");
 
@@ -800,11 +813,32 @@ This class does not support ``__members__`` property.)");
           py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>());
 
+  // TODO(yifu): _{register, resolve}_process_group currently only work for
+  // c10d_functional. Later, we'll unify the name -> group mapping across
+  // Python and C++, and spanning both functional and non-functional
+  // collectives.
+  module.def(
+      "_register_process_group",
+      [](const std::string& group_name,
+         c10::intrusive_ptr<::c10d::ProcessGroup> group) {
+        ::c10d::register_process_group(group_name, group);
+      },
+      py::arg("group_name"),
+      py::arg("group"));
+
+  module.def(
+      "_resolve_process_group",
+      [](const std::string& group_name) {
+        return ::c10d::resolve_process_group(group_name);
+      },
+      py::arg("group_name"));
+
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::BroadcastOptions::rootRank)
       .def_readwrite("rootTensor", &::c10d::BroadcastOptions::rootTensor)
-      .def_readwrite("timeout", &::c10d::BroadcastOptions::timeout);
+      .def_readwrite("timeout", &::c10d::BroadcastOptions::timeout)
+      .def_readwrite("asyncOp", &::c10d::BroadcastOptions::asyncOp);
 
   py::class_<::c10d::AllreduceOptions>(module, "AllreduceOptions")
       .def(py::init<>())
@@ -826,7 +860,8 @@ This class does not support ``__members__`` property.)");
 
   py::class_<::c10d::AllgatherOptions>(module, "AllgatherOptions")
       .def(py::init<>())
-      .def_readwrite("timeout", &::c10d::AllgatherOptions::timeout);
+      .def_readwrite("timeout", &::c10d::AllgatherOptions::timeout)
+      .def_readwrite("asyncOp", &::c10d::AllgatherOptions::asyncOp);
 
   py::class_<::c10d::GatherOptions>(module, "GatherOptions")
       .def(py::init<>())
@@ -836,12 +871,14 @@ This class does not support ``__members__`` property.)");
   py::class_<::c10d::ScatterOptions>(module, "ScatterOptions")
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::ScatterOptions::rootRank)
-      .def_readwrite("timeout", &::c10d::ScatterOptions::timeout);
+      .def_readwrite("timeout", &::c10d::ScatterOptions::timeout)
+      .def_readwrite("asyncOp", &::c10d::ScatterOptions::asyncOp);
 
   py::class_<::c10d::ReduceScatterOptions>(module, "ReduceScatterOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::ReduceScatterOptions::reduceOp)
-      .def_readwrite("timeout", &::c10d::ReduceScatterOptions::timeout);
+      .def_readwrite("timeout", &::c10d::ReduceScatterOptions::timeout)
+      .def_readwrite("asyncOp", &::c10d::ReduceScatterOptions::asyncOp);
 
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
       .def(py::init<>())
@@ -997,6 +1034,29 @@ Example::
     >>> store.add("first_key", 6)
     >>> # Should return 7
     >>> store.get("first_key")
+)")
+          .def(
+              "check",
+              &::c10d::Store::check,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+The call to check whether a given list of ``keys`` have value stored in
+the store. This call immediately returns in normal cases but still suffers
+from some edge deadlock cases, e.g, calling check after TCPStore has been destroyed.
+Calling :meth:`~torch.distributed.store.check` with a list of keys that
+one wants to check whether stored in the store or not.
+
+Arguments:
+    keys (lisr[str]): The keys to query whether stored in the store.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> from datetime import timedelta
+    >>> # Using TCPStore as an example, other store types can also be used
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
+    >>> store.add("first_key", 1)
+    >>> # Should return 7
+    >>> store.check(["first_key"])
 )")
           .def(
               "delete_key",
@@ -1279,7 +1339,7 @@ Arguments:
     world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is None (None indicates a non-fixed number of store users).
     is_master (bool, optional): True when initializing the server store and False for client stores. Default is False.
     timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
-    wait_for_worker (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
+    wait_for_workers (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
     multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
     master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. Useful to avoid port assignment races in some scenarios. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
 Example::
@@ -1333,6 +1393,10 @@ Example::
           py::arg("master_listen_fd") = py::none(),
           py::arg("use_libuv") = false,
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "collect_client_counters",
+          &::c10d::TCPStore::collectClientCounters,
+          "Return a dict of counters for tcp store client")
       .def_property_readonly(
           "host",
           &::c10d::TCPStore::getHost,
@@ -1341,7 +1405,11 @@ Example::
       .def_property_readonly(
           "port",
           &::c10d::TCPStore::getPort,
-          R"(Gets the port number on which the store listens for requests.)");
+          R"(Gets the port number on which the store listens for requests.)")
+      .def_property_readonly(
+          "libuvBackend",
+          &::c10d::TCPStore::isLibUvBackend,
+          R"(Returns True if it's using the libuv backend.)");
 
   intrusive_ptr_class_<::c10d::PrefixStore>(
       module,
@@ -1748,7 +1816,33 @@ Arguments:
           .def(
               "_has_hooks",
               &::c10d::ProcessGroup::hasHooks,
-              py::call_guard<py::gil_scoped_acquire>());
+              py::call_guard<py::gil_scoped_acquire>())
+          .def(
+              "_enable_collectives_timing",
+              &::c10d::ProcessGroup::enableCollectivesTiming,
+              py::call_guard<py::gil_scoped_acquire>(),
+              "Enable timing of collectives by all backends. This might incur in additional overhead.")
+          .def(
+              "_set_group_name",
+              &::c10d::ProcessGroup::setGroupName,
+              py::call_guard<py::gil_scoped_acquire>(),
+              "Sets the process group name. This is an internal C10D method, do not use.")
+          .def_property_readonly(
+              "group_name",
+              &::c10d::ProcessGroup::getGroupName,
+              "(Gets this process group name. It's cluster unique)")
+          .def_property(
+              "bound_device_id",
+              &::c10d::ProcessGroup::getBoundDeviceId,
+              &::c10d::ProcessGroup::setBoundDeviceId)
+          .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
+            return torch::jit::toPyObject(c10::IValue(std::move(self)));
+          })
+          .def_static("unbox", [](py::object obj) {
+              auto typePtr = torch::getCustomClass("__torch__.torch.classes.c10d.ProcessGroup");
+              auto ivalue = torch::jit::toIValue(obj, typePtr);
+              return ivalue.toCustomClass<::c10d::ProcessGroup>();
+          });
 
   py::enum_<::c10d::ProcessGroup::BackendType>(processGroup, "BackendType")
       .value("UNDEFINED", ::c10d::ProcessGroup::BackendType::UNDEFINED)
@@ -1805,6 +1899,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def("rank", &::c10d::Backend::getRank)
           .def("size", &::c10d::Backend::getSize)
           .def("name", &::c10d::Backend::getBackendName)
+          .def_property_readonly(
+              "supports_splitting",
+              &::c10d::Backend::supportsSplitting,
+              "(test whether the backend supports splitting)")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -2075,6 +2173,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("wait_all_ranks") = false,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "eager_connect_single_device",
+              &::c10d::Backend::eagerConnectSingleDevice)
+          .def(
               "_get_backend_name",
               &::c10d::Backend::getBackendName,
               py::call_guard<py::gil_scoped_release>())
@@ -2165,6 +2266,14 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           py::arg("size"),
           py::arg("timeout") = kProcessGroupDefaultTimeout,
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_default_timeout",
+          [](const c10::intrusive_ptr<::c10d::ProcessGroupGloo>& self,
+             std::chrono::milliseconds timeout) {
+            self->getOptions()->timeout = timeout;
+          },
+          py::arg("timeout"),
+          py::call_guard<py::gil_scoped_release>())
       .def_property_readonly("options", &::c10d::ProcessGroupGloo::getOptions);
 
   // ProcessGroupWrapper is a wrapper pg that includes a helper gloo process
@@ -2212,22 +2321,40 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
-              py::arg("timeout") = kProcessGroupDefaultTimeout,
+              py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
               py::call_guard<py::gil_scoped_release>())
           .def(
-              "_abort",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
-                 const c10::optional<std::string>& abortReason) {
-                return self->abort(abortReason);
+              "_shutdown",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
+                return self->shutdown();
               },
-              py::arg("abort_reason") = py::none(),
               py::call_guard<py::gil_scoped_release>())
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
+          .def(
+              "comm_split_count",
+              &::c10d::ProcessGroupNCCL::getCommSplitCounter)
+          .def(
+              "_set_default_timeout",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
+                 std::chrono::milliseconds timeout) {
+                self->getOptions()->timeout = timeout;
+              },
+              py::arg("timeout"),
+              py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)
-          .def_property_readonly(
-              "is_ucc_available", &::c10d::ProcessGroupNCCL::isUCCAvailable);
+          .def_property(
+              "bound_device_id",
+              &::c10d::ProcessGroupNCCL::getBoundDeviceId,
+              &::c10d::ProcessGroupNCCL::setBoundDeviceId)
+          .def(
+              "perform_nocolor_split",
+              &::c10d::ProcessGroupNCCL::performNocolorSplit);
+
+  module.def(
+      "_get_intra_node_comm_usage_counter",
+      &::c10d::intra_node_comm::getIntraNodeCommUsageCounter);
 
 #ifdef NCCL_HAS_COMM_CTA_CGA
   py::class_<ncclConfig_t>(
@@ -2288,15 +2415,18 @@ Example::
       )")
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
 #ifdef NCCL_HAS_COMM_CTA_CGA
+      .def_readwrite("config", &::c10d::ProcessGroupNCCL::Options::config)
+#endif
       .def_readwrite(
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream)
-      .def_readwrite("config", &::c10d::ProcessGroupNCCL::Options::config);
-#else
       .def_readwrite(
-          "is_high_priority_stream",
-          &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream);
-#endif
+          "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
+      .def_readwrite(
+          "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
+      .def_readwrite(
+          "global_ranks_in_group",
+          &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group);
 
 #endif
 
@@ -2367,7 +2497,11 @@ Example::
   py::class_<
       ::c10d::Work,
       c10::intrusive_ptr<::c10d::Work>,
-      ::c10d::PyProcessGroup::PyWork>(module, "Work")
+      ::c10d::PyProcessGroup::PyWork>(module, "Work", R"(
+A `Work` object represents the handle to a pending asynchronous operation in
+PyTorch's distributed package. It is returned by non-blocking collective operations,
+such as `dist.all_reduce(tensor, async_op=True)`.
+)")
       .def(py::init<>())
       .def("is_completed", &::c10d::Work::isCompleted)
       .def(
@@ -2439,7 +2573,7 @@ Example::
                 ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
                 with PyTorch's current device streams to ensure we can have asynchronous CUDA
                 execution and it does not wait for the entire operation to complete on GPU. Note that
-                ``CUDAFuture``  does not support ``NCCL_BLOCKING_WAIT`` flag or NCCL's ``barrier()``.
+                ``CUDAFuture``  does not support ``TORCH_NCCL_BLOCKING_WAIT`` flag or NCCL's ``barrier()``.
                 In addition, if a callback function was added by ``fut.then()``, it will wait until
                 ``WorkNCCL``'s NCCL streams synchronize with ``ProcessGroupNCCL``'s dedicated callback
                 stream and invoke the callback inline after running the callback on the callback stream.
@@ -2468,8 +2602,19 @@ Example::
 
               .. warning ::
                   This API only works for NCCL backend for now and must set
-                  NCCL_ENABLE_TIMING environment variable.
-            )");
+                  TORCH_NCCL_ENABLE_TIMING environment variable.
+            )")
+      .def(
+          "boxed",
+          [](c10::intrusive_ptr<::c10d::Work> self) {
+            return torch::jit::toPyObject(c10::IValue(self));
+          })
+      .def_static("unbox", [](py::object obj) {
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.c10d.Work");
+        auto ivalue = torch::jit::toIValue(obj, typePtr);
+        return ivalue.toCustomClass<::c10d::Work>();
+      });
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())
@@ -2597,7 +2742,24 @@ Example::
 
   module.attr("_DEFAULT_FIRST_BUCKET_BYTES") = ::c10d::kDefaultFirstBucketBytes;
   module.attr("_DEFAULT_PG_TIMEOUT") = py::cast(kProcessGroupDefaultTimeout);
+#ifdef USE_C10D_NCCL
+  module.attr("_DEFAULT_PG_NCCL_TIMEOUT") =
+      py::cast(::c10d::kProcessGroupNCCLDefaultTimeout);
+#endif
   module.attr("_DEFAULT_NO_TIMEOUT") = py::cast(kNoTimeout);
+
+  module.def(
+      "_set_global_rank",
+      [](int64_t rank) { c10::SetGlobalRank(rank); },
+      py::arg("rank"),
+      R"(
+        Arguments:
+          rank(int): The rank of the default process group
+        Informs the C++ runtime what the default process group (a strictly Python
+        notion) is.  This mostly ensures that C++ log messages are prefixed with
+        rank information.  This is not meant to be called manually; it is
+        called by _update_default_pg.
+      )");
 
   module.def(
       "_create_work_from_future",
@@ -2629,6 +2791,21 @@ Example::
             The provided Future object result must be a Tensor or a list of Tensors.
            )");
 
+#ifdef USE_C10D_NCCL
+  module.def(
+      "_hash_tensors",
+      [](const std::vector<at::Tensor>& tensors) {
+        return ::c10d::hashTensors(tensors);
+      },
+      py::arg("tensors"),
+      R"(
+        Arguments:
+          tensors(List[torch.Tensor]): List of tensors we want to hash.
+      )");
+  module.def("_dump_nccl_trace", []() {
+    return py::bytes(::c10d::dump_nccl_trace());
+  });
+#endif
   Py_RETURN_TRUE;
 }
 

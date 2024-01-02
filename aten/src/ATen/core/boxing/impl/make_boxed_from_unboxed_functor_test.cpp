@@ -213,7 +213,7 @@ struct KernelWithMultipleOutputs final : OperatorKernel {
       dummyTensor(DispatchKey::CUDA),
       5,
       c10::List<Tensor>({dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CUDA)}),
-      c10::optional<int64_t>(c10::in_place, 0),
+      c10::optional<int64_t>(std::in_place, 0),
       dict
     );
   }
@@ -787,7 +787,7 @@ struct ConcatKernel final : OperatorKernel {
   explicit ConcatKernel(std::string prefix): prefix_(std::move(prefix)) {}
 
   std::string operator()(const Tensor& tensor1, std::string a, const std::string& b, int64_t c) {
-    return prefix_ + a + b + c10::guts::to_string(c);
+    return prefix_ + a + b + std::to_string(c);
   }
 
   std::string prefix_;

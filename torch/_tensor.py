@@ -76,9 +76,9 @@ def _rebuild_from_type_v2(func, new_type, args, state):
 # to define a ForkingPickler serialization mode for the class.
 #
 # NB: If you add a new method to Tensor, you must update
-# torch/__init__.py.in to add a type annotation for your method;
+# torch/_C/__init__.pyi.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
-class Tensor(torch._C._TensorBase):
+class Tensor(torch._C.TensorBase):
     def __deepcopy__(self, memo):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__deepcopy__, (self,), self, memo)
@@ -100,7 +100,8 @@ class Tensor(torch._C._TensorBase):
             # Update the test in test_serialization if you remove 'meta' from here
             if (
                 self.is_sparse
-                or self.device.type in ["lazy", "xla", "mps", "ort", "meta", "ipu"]
+                or self.device.type
+                in ["lazy", "xla", "mtia", "mps", "ort", "meta", "ipu"]
                 or (
                     not torch._C._has_storage(self)
                     and self.device.type == torch._C._get_privateuse1_backend_name()
@@ -248,7 +249,7 @@ class Tensor(torch._C._TensorBase):
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
-        # Note: Numpy array is chosen to be the rebuild component for XLA, ORT Tensors.
+        # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, ORT Tensors.
         # We considered a few options:
         # 1. CPU tensor can't be used here.
         #    Otherwise in torch.load CPU storage is reconstructed with randomly
@@ -258,7 +259,7 @@ class Tensor(torch._C._TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ["xla", "ort"] or (
+        if self.device.type in ["xla", "mtia", "ort"] or (
             not torch._C._has_storage(self)
             and self.device.type == torch._C._get_privateuse1_backend_name()
         ):
@@ -365,6 +366,17 @@ class Tensor(torch._C._TensorBase):
                 ),
             )
             return (torch._utils._rebuild_sparse_tensor, args_sparse_compressed)
+        elif self.is_nested:
+            args_nested = (
+                # NB: values() currently returns the storage as a buffer in an unsafe way.
+                # Ideally, we'd use a private API for this instead. TODO: Switch to this if
+                # we ever get around to adding it.
+                self.values(),
+                self._nested_tensor_size(),
+                self._nested_tensor_strides(),
+                self._nested_tensor_storage_offsets(),
+            )
+            return (torch._utils._rebuild_nested_tensor, args_nested)
         elif (
             self.data_ptr() == 0
             and type(self) is not torch.Tensor
@@ -382,14 +394,29 @@ class Tensor(torch._C._TensorBase):
             )
             return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
         else:
-            # TODO: Once we decide to break serialization FC, no longer
-            # need to wrap with TypedStorage
-            args = (
-                torch.storage.TypedStorage(
+            v3_dtypes = [
+                torch.float8_e5m2,
+                torch.float8_e4m3fn,
+                torch.bits8,
+                torch.bits16,
+                torch.bits1x8,
+                torch.bits2x4,
+                torch.bits4x2,
+            ]
+            if self.dtype in v3_dtypes:
+                rebuild_func = torch._utils._rebuild_tensor_v3
+                storage = self.untyped_storage()
+            else:
+                # TODO: Once we decide to break serialization FC, no longer
+                # need to wrap with TypedStorage
+                rebuild_func = torch._utils._rebuild_tensor_v2  # type: ignore[assignment]
+                storage = torch.storage.TypedStorage(
                     wrap_storage=self._typed_storage()._untyped_storage,
                     dtype=self.dtype,
                     _internal=True,
-                ),
+                )  # type: ignore[assignment]
+            args = (
+                storage,
                 self.storage_offset(),
                 tuple(self.size()),
                 self.stride(),
@@ -397,10 +424,14 @@ class Tensor(torch._C._TensorBase):
                 backward_hooks,
             )  # previously was self._backward_hooks
 
+            if isinstance(storage, torch.storage.UntypedStorage):
+                args = args + (self.dtype,)  # type: ignore[assignment]
+
             metadata = torch._utils.get_tensor_metadata(self)
             if metadata:
                 args = args + (metadata,)  # type: ignore[assignment]
-            return (torch._utils._rebuild_tensor_v2, args)
+
+            return (rebuild_func, args)
 
     def __setstate__(self, state):
         if has_torch_function_unary(self):
@@ -627,7 +658,7 @@ class Tensor(torch._C._TensorBase):
         )
 
     detach = _C._add_docstr(
-        _C._TensorBase.detach,
+        _C.TensorBase.detach,
         r"""
     Returns a new Tensor, detached from the current graph.
 
@@ -641,19 +672,11 @@ class Tensor(torch._C._TensorBase):
       Returned Tensor shares the same storage with the original one.
       In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
-      IMPORTANT NOTE: Previously, in-place size / stride / storage changes
-      (such as `resize_` / `resize_as_` / `set_` / `transpose_`) to the returned tensor
-      also update the original tensor. Now, these in-place changes will not update the
-      original tensor anymore, and will instead trigger an error.
-      For sparse tensors:
-      In-place indices / values changes (such as `zero_` / `copy_` / `add_`) to the
-      returned tensor will not update the original tensor anymore, and will instead
-      trigger an error.
     """,
     )
 
     detach_ = _C._add_docstr(
-        _C._TensorBase.detach_,
+        _C.TensorBase.detach_,
         r"""
     Detaches the Tensor from the graph that created it, making it a leaf.
     Views cannot be detached in-place.
@@ -677,6 +700,8 @@ class Tensor(torch._C._TensorBase):
 
         This is a no-op if the underlying storage is already in shared memory
         and for CUDA tensors. Tensors in shared memory cannot be resized.
+
+        See :meth:`torch.UntypedStorage.share_memory_` for more details.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.share_memory_, (self,), self)
@@ -912,13 +937,13 @@ class Tensor(torch._C._TensorBase):
         return self.reciprocal() * other
 
     __rtruediv__ = __rdiv__
-    __itruediv__ = _C._TensorBase.__idiv__
+    __itruediv__ = _C.TensorBase.__idiv__
 
     __pow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
-        _C._TensorBase.pow
+        _C.TensorBase.pow
     )
     __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
-        _C._TensorBase.pow_
+        _C.TensorBase.pow_
     )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
@@ -956,9 +981,9 @@ class Tensor(torch._C._TensorBase):
     def __rmatmul__(self, other):
         return torch.matmul(other, self)
 
-    __pos__ = _C._TensorBase.positive
-    __neg__ = _C._TensorBase.neg
-    __abs__ = _C._TensorBase.abs
+    __pos__ = _C.TensorBase.positive
+    __neg__ = _C.TensorBase.neg
+    __abs__ = _C.TensorBase.abs
 
     def __len__(self):
         if has_torch_function_unary(self):
@@ -1317,6 +1342,36 @@ class Tensor(torch._C._TensorBase):
 
         """
         return self.to_sparse()
+
+    def dim_order(self):
+        """
+
+        dim_order() -> tuple
+
+        Returns a tuple of int describing the dim order or physical layout of :attr:`self`.
+
+        Args:
+            None
+
+        Dim order represents how dimensions are laid out in memory,
+        starting from the outermost to the innermost dimension.
+
+        Example::
+            >>> torch.empty((2, 3, 5, 7)).dim_order()
+            (0, 1, 2, 3)
+            >>> torch.empty((2, 3, 5, 7), memory_format=torch.channels_last).dim_order()
+            (0, 2, 3, 1)
+
+        .. warning::
+            The dim_order tensor API is experimental and subject to change.
+
+        """
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.dim_order, (self,), self)
+
+        import torch._prims_common as utils
+
+        return tuple(utils.compute_elementwise_output_logical_to_physical_perm(self))
 
     def _update_names(self, names, inplace):
         if has_torch_function_unary(self):

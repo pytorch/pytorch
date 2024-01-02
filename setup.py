@@ -8,6 +8,9 @@
 #   REL_WITH_DEB_INFO
 #     build with optimizations and -g (debug symbols)
 #
+#   USE_CUSTOM_DEBINFO="path/to/file1.cpp;path/to/file2.cpp"
+#     build with debug info only for specified files
+#
 #   MAX_JOBS
 #     maximum number of compile jobs we should use to compile your code
 #
@@ -106,6 +109,9 @@
 #   USE_FLASH_ATTENTION=0
 #     disables building flash attention for scaled dot product attention
 #
+#   USE_MEM_EFF_ATTENTION=0
+#    disables building memory efficient attention for scaled dot product attention
+#
 #   USE_LEVELDB
 #     enables use of LevelDB for storage
 #
@@ -154,6 +160,9 @@
 #   USE_ZSTD
 #     Enables use of ZSTD, if the libraries are found
 #
+#   USE_ROCM_KERNEL_ASSERT=1
+#     Enable kernel assert in ROCm platform
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
@@ -182,9 +191,6 @@
 #   NCCL_LIB_DIR
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
-#
-#   NVFUSER_SOURCE_DIR
-#     specify nvfuser root directory
 #
 #   NVTOOLSEXT_PATH (Windows only)
 #     specify where nvtoolsext is installed
@@ -626,11 +632,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report("-- Not using ITT")
 
-        if cmake_cache_vars["BUILD_NVFUSER"]:
-            report("-- Building nvfuser")
-        else:
-            report("-- Not Building nvfuser")
-
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
         c_flags = str(os.getenv("CFLAGS", ""))
@@ -722,22 +723,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
             filename = self.get_ext_filename(fullname)
             fileext = os.path.splitext(filename)[1]
             src = os.path.join(os.path.dirname(filename), "functorch" + fileext)
-            dst = os.path.join(os.path.realpath(self.build_lib), filename)
-            if os.path.exists(src):
-                report(f"Copying {ext.name} from {src} to {dst}")
-                dst_dir = os.path.dirname(dst)
-                if not os.path.exists(dst_dir):
-                    os.makedirs(dst_dir)
-                self.copy_file(src, dst)
-
-        # Copy nvfuser extension
-        for i, ext in enumerate(self.extensions):
-            if ext.name != "nvfuser._C":
-                continue
-            fullname = self.get_ext_fullname(ext.name)
-            filename = self.get_ext_filename(fullname)
-            fileext = os.path.splitext(filename)[1]
-            src = os.path.join(os.path.dirname(filename), "nvfuser" + fileext)
             dst = os.path.join(os.path.realpath(self.build_lib), filename)
             if os.path.exists(src):
                 report(f"Copying {ext.name} from {src} to {dst}")
@@ -923,16 +908,10 @@ def configure_extension_build():
             "-Wno-unused-parameter",
             "-Wno-missing-field-initializers",
             "-Wno-unknown-pragmas",
-            # This is required for Python 2 declarations that are deprecated in 3.
-            "-Wno-deprecated-declarations",
             # Python 2.6 requires -fno-strict-aliasing, see
             # http://legacy.python.org/dev/peps/pep-3123/
             # We also depend on it in our code (even Python 3).
             "-fno-strict-aliasing",
-            # Clang has an unfixed bug leading to spurious missing
-            # braces warnings, see
-            # https://bugs.llvm.org/show_bug.cgi?id=21629
-            "-Wno-missing-braces",
         ]
 
     library_dirs.append(lib_path)
@@ -961,7 +940,8 @@ def configure_extension_build():
             extra_compile_args += ["-g"]
             extra_link_args += ["-g"]
 
-    # special CUDA 11.7 package that requires installation of cuda runtime, cudnn and cublas
+    # pypi cuda package that requires installation of cuda runtime, cudnn and cublas
+    # should be included in all wheels uploaded to pypi
     pytorch_extra_install_requirements = os.getenv(
         "PYTORCH_EXTRA_INSTALL_REQUIREMENTS", ""
     )
@@ -1010,8 +990,6 @@ def configure_extension_build():
         excludes.extend(["caffe2", "caffe2.*"])
     if not cmake_cache_vars["BUILD_FUNCTORCH"]:
         excludes.extend(["functorch", "functorch.*"])
-    if not cmake_cache_vars["BUILD_NVFUSER"]:
-        excludes.extend(["nvfuser", "nvfuser.*"])
     packages = find_packages(exclude=excludes)
     C = Extension(
         "torch._C",
@@ -1044,10 +1022,6 @@ def configure_extension_build():
     if cmake_cache_vars["BUILD_FUNCTORCH"]:
         extensions.append(
             Extension(name="functorch._C", sources=[]),
-        )
-    if cmake_cache_vars["BUILD_NVFUSER"]:
-        extensions.append(
-            Extension(name="nvfuser._C", sources=[]),
         )
 
     cmdclass = {
@@ -1095,35 +1069,12 @@ def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
         "filelock",
-        "typing-extensions",
+        "typing-extensions>=4.8.0",
         "sympy",
         "networkx",
         "jinja2",
         "fsspec",
     ]
-
-    extras_require = {"opt-einsum": ["opt-einsum>=3.3"]}
-    if platform.system() == "Linux":
-        cmake_cache_vars = get_cmake_cache_vars()
-        if cmake_cache_vars["USE_ROCM"]:
-            triton_text_file = "triton-rocm.txt"
-            triton_package_name = "pytorch-triton-rocm"
-        else:
-            triton_text_file = "triton.txt"
-            triton_package_name = "pytorch-triton"
-        triton_pin_file = os.path.join(
-            cwd, ".ci", "docker", "ci_commit_pins", triton_text_file
-        )
-        triton_version_file = os.path.join(cwd, ".ci", "docker", "triton_version.txt")
-        if os.path.exists(triton_pin_file) and os.path.exists(triton_version_file):
-            with open(triton_pin_file) as f:
-                triton_pin = f.read().strip()
-            with open(triton_version_file) as f:
-                triton_version = f.read().strip()
-            extras_require["dynamo"] = [
-                triton_package_name + "==" + triton_version + "+" + triton_pin[:10],
-                "jinja2",
-            ]
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1149,6 +1100,11 @@ def main():
     ) = configure_extension_build()
 
     install_requires += extra_install_requires
+
+    extras_require = {
+        "optree": ["optree>=0.9.1"],
+        "opt-einsum": ["opt-einsum>=3.3"],
+    }
 
     # Read in README.md for our long_description
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
@@ -1182,6 +1138,7 @@ def main():
         "include/ATen/cpu/*.h",
         "include/ATen/cpu/vec/vec256/*.h",
         "include/ATen/cpu/vec/vec256/vsx/*.h",
+        "include/ATen/cpu/vec/vec256/zarch/*.h",
         "include/ATen/cpu/vec/vec512/*.h",
         "include/ATen/cpu/vec/*.h",
         "include/ATen/core/*.h",
@@ -1209,6 +1166,7 @@ def main():
         "include/ATen/native/mps/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",
+        "include/ATen/native/utils/*.h",
         "include/ATen/quantized/*.h",
         "include/caffe2/serialize/*.h",
         "include/c10/*.h",
@@ -1259,6 +1217,10 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_runner/*.h",
+        "include/torch/csrc/inductor/aoti_runtime/*.h",
+        "include/torch/csrc/inductor/aoti_torch/*.h",
+        "include/torch/csrc/inductor/aoti_torch/c/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
         "include/torch/csrc/jit/generated/*.h",
@@ -1276,12 +1238,11 @@ def main():
         "include/torch/csrc/jit/tensorexpr/*.h",
         "include/torch/csrc/jit/tensorexpr/operators/*.h",
         "include/torch/csrc/jit/codegen/cuda/*.h",
-        "include/torch/csrc/jit/codegen/cuda/ops/*.h",
-        "include/torch/csrc/jit/codegen/cuda/scheduler/*.h",
         "include/torch/csrc/onnx/*.h",
         "include/torch/csrc/profiler/*.h",
         "include/torch/csrc/profiler/orchestration/*.h",
         "include/torch/csrc/profiler/stubs/*.h",
+        "include/torch/csrc/profiler/unwind/*.h",
         "include/torch/csrc/utils/*.h",
         "include/torch/csrc/tensor/*.h",
         "include/torch/csrc/lazy/backend/*.h",
@@ -1292,6 +1253,7 @@ def main():
         "include/torch/csrc/lazy/ts_backend/*.h",
         "include/pybind11/*.h",
         "include/pybind11/detail/*.h",
+        "include/pybind11/eigen/*.h",
         "include/TH/*.h*",
         "include/TH/generic/*.h*",
         "include/THC/*.cuh",
@@ -1301,8 +1263,8 @@ def main():
         "include/THH/*.h*",
         "include/THH/generic/*.h",
         "include/sleef.h",
-        "_inductor/codegen/*.cpp",
         "_inductor/codegen/*.h",
+        "_inductor/codegen/aoti_runtime/*.cpp",
         "share/cmake/ATen/*.cmake",
         "share/cmake/Caffe2/*.cmake",
         "share/cmake/Caffe2/public/*.cmake",
@@ -1319,18 +1281,6 @@ def main():
         "utils/model_dump/code.js",
         "utils/model_dump/*.mjs",
     ]
-    if get_cmake_cache_vars()["BUILD_NVFUSER"]:
-        torch_package_data.extend(
-            [
-                "share/cmake/nvfuser/*.cmake",
-                "include/nvfuser/*.h",
-                "include/nvfuser/kernel_db/*.h",
-                "include/nvfuser/multidevice/*.h",
-                "include/nvfuser/ops/*.h",
-                "include/nvfuser/python_frontend/*.h",
-                "include/nvfuser/scheduler/*.h",
-            ]
-        )
 
     if get_cmake_cache_vars()["BUILD_CAFFE2"]:
         torch_package_data.extend(

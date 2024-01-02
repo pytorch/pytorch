@@ -7,8 +7,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Resolver;
 using ResolverPtr = std::shared_ptr<Resolver>;
@@ -26,6 +25,8 @@ struct TORCH_API Object {
   Object() = default;
   Object(const Object&) = default;
   Object& operator=(const Object&) = default;
+  Object(Object&&) noexcept = default;
+  Object& operator=(Object&&) noexcept = default;
   Object(ObjectPtr _ivalue) : _ivalue_(std::move(_ivalue)) {}
   Object(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Object(
@@ -196,5 +197,4 @@ namespace script {
 // of the public API; new code should not use this type alias.
 using Object = ::torch::jit::Object;
 } // namespace script
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

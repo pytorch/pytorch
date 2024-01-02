@@ -21,7 +21,8 @@ torch._C._jit_set_profiling_executor(True)
 torch._C._get_graph_executor_optimize(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode_for_profiling_tests, slowTest, skipIfTorchDynamo, TEST_WITH_ASAN
+    enable_profiling_mode_for_profiling_tests, slowTest, skipIfTorchDynamo, TEST_WITH_ASAN, \
+    IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining, \
     clone_inputs, get_traced_sample_variant_pairs, TensorExprTestOptions, NoTracerWarnContextManager
@@ -1288,7 +1289,7 @@ class TestTEFuser(JitTestCase):
                 self.assertLastGraphAllFused()
             except Exception as e:
                 raise RuntimeError(
-                    " ".join(["Failed:", str(self_dtype), op.__name__, device, str(size)])
+                    " ".join(["Failed:", str(self_dtype), op.__name__, device, str(size)])  # noqa: F821
                 ) from e
 
     def test_isnan(self):
@@ -2042,7 +2043,7 @@ class TestTEFuser(JitTestCase):
         sets = []
         for i in range(0, len(indices) + 1):
             for subset in combinations(indices, i):
-                sets.append(subset)
+                sets.append(subset)  # noqa: PERF402
 
         for set in sets:
             size = [2, 3, 4, 5]
@@ -2705,7 +2706,7 @@ def f({', '.join(param_names)}):
             return
         try:
             with warnings.catch_warnings():
-                warnings.simplefilter('ignore', TracerWarning)
+                warnings.simplefilter('ignore', TracerWarning)  # noqa: F821
                 self.te_compile(device, dtype, op)
         except Exception as e:
             pass
@@ -2739,7 +2740,8 @@ def f({', '.join(param_names)}):
             # if the CU is not cleared.
             torch.jit._state._python_cu.drop_all_functions()
 
-only_for = ("cpu", "cuda")
+# CPU fuser not currently used in fbcode
+only_for = ("cuda") if IS_FBCODE else ("cpu", "cuda")
 instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
 
 # Purpose of this class is to allow super() calls. (See TestNNCOpInfoParent)

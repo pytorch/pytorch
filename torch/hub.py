@@ -8,6 +8,7 @@ import shutil
 import sys
 import tempfile
 import torch
+import uuid
 import warnings
 import zipfile
 from pathlib import Path
@@ -200,8 +201,7 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
 def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=True, skip_validation=False):
     # Setup hub_dir to save downloaded files
     hub_dir = get_dir()
-    if not os.path.exists(hub_dir):
-        os.makedirs(hub_dir)
+    os.makedirs(hub_dir, exist_ok=True)
     # Parse github repo information
     repo_owner, repo_name, ref = _parse_repo_info(github)
     # Github allows branch name with slash '/',
@@ -628,9 +628,18 @@ def download_url_to_file(url: str, dst: str, hash_prefix: Optional[str] = None,
     # We deliberately save it in a temp file and move it after
     # download is complete. This prevents a local working checkpoint
     # being overridden by a broken download.
+    # We deliberately do not use NamedTemporaryFile to avoid restrictive
+    # file permissions being applied to the downloaded file.
     dst = os.path.expanduser(dst)
-    dst_dir = os.path.dirname(dst)
-    f = tempfile.NamedTemporaryFile(delete=False, dir=dst_dir)
+    for seq in range(tempfile.TMP_MAX):
+        tmp_dst = dst + '.' + uuid.uuid4().hex + '.partial'
+        try:
+            f = open(tmp_dst, 'w+b')
+        except FileExistsError:
+            continue
+        break
+    else:
+        raise FileExistsError(errno.EEXIST, 'No usable temporary file name found')
 
     try:
         if hash_prefix is not None:
@@ -732,15 +741,7 @@ def load_state_dict_from_url(
         hub_dir = get_dir()
         model_dir = os.path.join(hub_dir, 'checkpoints')
 
-    try:
-        os.makedirs(model_dir)
-    except OSError as e:
-        if e.errno == errno.EEXIST:
-            # Directory already exists, ignore.
-            pass
-        else:
-            # Unexpected OSError, re-raise.
-            raise
+    os.makedirs(model_dir, exist_ok=True)
 
     parts = urlparse(url)
     filename = os.path.basename(parts.path)

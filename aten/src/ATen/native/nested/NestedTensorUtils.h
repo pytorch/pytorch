@@ -169,13 +169,13 @@ inline std::vector<IntArrayRef> NestedTensor_get_strides(
 inline void check_numel_equals_buffer_size(const at::Tensor& self) {
   auto self_impl = get_nested_tensor_impl(self);
   TORCH_CHECK(
-      self.numel() == self_impl->get_buffer_size(),
+      self.numel() == static_cast<int64_t>(self_impl->get_buffer_size()),
       "Number of elements in nested tensor must match number of elements in buffer.");
 }
 
 inline void check_numel_equals_buffer_size(const NestedTensorImpl* self_ptr) {
   TORCH_CHECK(
-      self_ptr->numel() == self_ptr->get_buffer_size(),
+      self_ptr->numel() == static_cast<int64_t>(self_ptr->get_buffer_size()),
       "Number of elements in nested tensor must match number of elements in buffer.");
 }
 //  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

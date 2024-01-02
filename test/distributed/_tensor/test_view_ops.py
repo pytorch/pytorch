@@ -8,6 +8,7 @@ import torch
 import torch.distributed as dist
 from torch import rand, randn, Tensor
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
+from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.ops.view_ops import (
     Broadcast,
     Flatten,
@@ -22,10 +23,9 @@ from torch.distributed._tensor.placement_types import Placement
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    redistribute_profiler,
     with_comms,
 )
-from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 
 class TestViewOps(DTensorTestBase):
@@ -133,7 +133,7 @@ class TestViewOps(DTensorTestBase):
         spec = ops[op]
         rules = spec.dim_map(*args, **kwargs)
         outputs = op(*args, **kwargs)
-        flat_args, _ = tree_flatten(args)
+        flat_args = pytree.arg_tree_leaves(*args)
         in_shape = flat_args[0].shape
 
         no_shard_dims = set()
@@ -166,14 +166,15 @@ class TestViewOps(DTensorTestBase):
             # print(f'   |--- {in_shard}')
             in_dt = distribute_tensor(args[0], device_mesh, in_shard)
 
-            with redistribute_profiler() as profiler:
+            comm_mode = CommDebugMode()
+            with comm_mode:
                 out_dt = op(in_dt, *args[1:], **kwargs)
 
-            self.assertEqual(profiler.num_calls, 0, "Expected no redistribution.")
+            self.assertEqual(
+                comm_mode.get_total_counts(), 0, "Expected no redistribution."
+            )
 
-            full_out = out_dt.redistribute(
-                device_mesh, device_mesh.ndim * [Replicate()]
-            ).to_local()
+            full_out = out_dt.full_tensor()
 
             if dist.get_rank() == 0:
                 self.assertEqual(outputs, full_out)

@@ -20,7 +20,8 @@ _rendezvous_handlers = {}
 
 
 def register_rendezvous_handler(scheme, handler):
-    """Registers a new rendezvous handler.
+    """
+    Register a new rendezvous handler.
 
     Before we can run collective algorithms, participating processes
     need to find each other and exchange information to be able to
@@ -143,10 +144,11 @@ def _torchelastic_use_agent_store() -> bool:
     return os.environ.get("TORCHELASTIC_USE_AGENT_STORE", None) == str(True)
 
 
-def _create_c10d_store(hostname, port, rank, world_size, timeout) -> Store:
+def _create_c10d_store(hostname, port, rank, world_size, timeout, use_libuv=False) -> Store:
     """
-    Smartly creates a c10d Store object on ``rank`` based on whether
-    we need to re-use agent store. The TCPStore server is assumed to be hosted
+    Smartly creates a c10d Store object on ``rank`` based on whether we need to re-use agent store.
+
+    The TCPStore server is assumed to be hosted
     on ``hostname:port``.
 
     If ``torchelastic_use_agent_store()`` is ``True``, then it is assumed that
@@ -170,7 +172,7 @@ def _create_c10d_store(hostname, port, rank, world_size, timeout) -> Store:
     else:
         start_daemon = rank == 0
         return TCPStore(
-            hostname, port, world_size, start_daemon, timeout, multi_tenant=True
+            hostname, port, world_size, start_daemon, timeout, multi_tenant=True, use_libuv=use_libuv
         )
 
 
@@ -191,9 +193,10 @@ def _tcp_rendezvous_handler(
 
     rank = int(query_dict["rank"])
     world_size = int(query_dict["world_size"])
+    use_libuv = query_dict.get("use_libuv", "0") == "1"
     assert result.hostname is not None
 
-    store = _create_c10d_store(result.hostname, result.port, rank, world_size, timeout)
+    store = _create_c10d_store(result.hostname, result.port, rank, world_size, timeout, use_libuv)
 
     yield (store, rank, world_size)
 
@@ -235,10 +238,12 @@ def _env_rendezvous_handler(
     else:
         world_size = int(_get_env_or_raise("WORLD_SIZE"))
 
+
     master_addr = _get_env_or_raise("MASTER_ADDR")
     master_port = int(_get_env_or_raise("MASTER_PORT"))
+    use_libuv = query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "0")) == "1"
 
-    store = _create_c10d_store(master_addr, master_port, rank, world_size, timeout)
+    store = _create_c10d_store(master_addr, master_port, rank, world_size, timeout, use_libuv)
 
     yield (store, rank, world_size)
 

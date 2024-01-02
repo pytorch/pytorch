@@ -611,7 +611,7 @@ def get_nn_functional_top_list():
         else:
             top_nn_functional_[functional_name] += count
 
-    top_nn_functional_ = [(k, v) for k, v in top_nn_functional_.items()]
+    top_nn_functional_ = list(top_nn_functional_.items())
     top_nn_functional_.sort(key=lambda x: x[1], reverse=True)
     return top_nn_functional_
 

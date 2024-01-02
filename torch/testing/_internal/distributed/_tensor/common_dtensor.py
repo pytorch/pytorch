@@ -1,14 +1,12 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
-from contextlib import contextmanager
-from dataclasses import dataclass
 import itertools
+from dataclasses import dataclass
 import sys
 from functools import wraps
 from typing import (
     Any,
     Callable,
-    Generator,
     Iterator,
     Tuple,
     Dict,
@@ -20,6 +18,8 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
+import torch.nn.functional as F
 
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 from torch.testing._internal.common_distributed import (
@@ -34,12 +34,12 @@ from torch.distributed._tensor import (
     Shard,
     Replicate,
     distribute_tensor,
-    redistribute,
 )
-from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.placement_types import Placement, DTensorSpec
+from torch.distributed._tensor.placement_types import Placement
 
 DEVICE_TYPE = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
+PG_BACKEND = "nccl" if DEVICE_TYPE == "cuda" else "gloo"
+
 NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
@@ -50,13 +50,13 @@ if torch.cuda.is_available() and torch.cuda.device_count() > 1:
 T = TypeVar("T")
 
 
-class MLPModule(torch.nn.Module):
+class MLPModule(nn.Module):
     def __init__(self, device):
         super().__init__()
         torch.manual_seed(5)
-        self.net1 = torch.nn.Linear(10, 16, device=device)
-        self.relu = torch.nn.ReLU()
-        self.net2 = torch.nn.Linear(16, 10, device=device)
+        self.net1 = nn.Linear(10, 16, device=device)
+        self.relu = nn.ReLU()
+        self.net2 = nn.Linear(16, 10, device=device)
 
     def forward(self, x):
         return self.net2(self.relu(self.net1(x)))
@@ -64,6 +64,109 @@ class MLPModule(torch.nn.Module):
     def reset_parameters(self):
         self.net1.reset_parameters()
         self.net2.reset_parameters()
+
+
+@dataclass
+class ModelArgs:
+    n_layers: int = 2
+    vocab_size: int = 16
+    max_seq_len: int = 16
+    dim: int = 8
+    n_heads: int = 4
+    dropout_p: float = 0.1
+    use_attn_mask: bool = True
+    weight_tying: bool = True
+
+class Attention(nn.Module):
+    def __init__(self, args: ModelArgs):
+        super().__init__()
+        assert args.dim % args.n_heads == 0
+        self.head_dim = args.dim // args.n_heads
+        self.n_heads = args.n_heads
+        self.dropout_p = args.dropout_p
+        self.resid_dropout = nn.Dropout(args.dropout_p)
+        self.use_attn_mask = args.use_attn_mask
+
+        self.wq = nn.Linear(args.dim, args.dim, bias=False)
+        self.wk = nn.Linear(args.dim, args.dim, bias=False)
+        self.wv = nn.Linear(args.dim, args.dim, bias=False)
+        self.wo = nn.Linear(args.dim, args.dim, bias=False)
+
+    def forward(self, x):
+        bsz, seq_len, _ = x.size()
+        queries, keys, values = self.wq(x), self.wk(x), self.wv(x)
+        queries = queries.view(bsz, seq_len, self.n_heads, self.head_dim)
+        keys = keys.view(bsz, seq_len, self.n_heads, self.head_dim)
+        values = values.view(bsz, seq_len, self.n_heads, self.head_dim)
+
+        queries = queries.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
+        keys = keys.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
+        values = values.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
+
+        mask = None
+        if self.use_attn_mask and seq_len > 1:
+            mask = torch.full((seq_len, seq_len), float("-inf"), device=x.device)
+            mask = torch.triu(mask, diagonal=1)
+        output = F.scaled_dot_product_attention(queries, keys, values, mask, self.dropout_p if self.training else 0)
+        output = output.transpose(1, 2).contiguous().view(bsz, seq_len, -1)
+        return self.resid_dropout(self.wo(output))
+
+class FeedForward(nn.Module):
+    def __init__(self, dim, hidden_dim, dropout_p):
+        super().__init__()
+        self.w1 = nn.Linear(dim, hidden_dim)
+        self.gelu = nn.GELU()
+        self.w2 = nn.Linear(hidden_dim, dim)
+        self.resid_dropout = nn.Dropout(dropout_p)
+
+    def forward(self, x):
+        return self.resid_dropout(self.w2(self.gelu(self.w1(x))))
+
+class TransformerBlock(nn.Module):
+    def __init__(self, args: ModelArgs):
+        super().__init__()
+        self.attention_norm = nn.LayerNorm(args.dim)
+        self.attention = Attention(args)
+        self.ffn_norm = nn.LayerNorm(args.dim)
+        self.feed_forward = FeedForward(args.dim, hidden_dim=4 * args.dim, dropout_p=args.dropout_p)
+
+    def forward(self, x):
+        h = x + self.attention(self.attention_norm(x))
+        out = h + self.feed_forward(self.ffn_norm(h))
+        return out
+
+# A toy transformer model, partly inspired by the nanoGPT model:
+# https://github.com/karpathy/nanoGPT.
+class Transformer(nn.Module):
+    def __init__(self, args: ModelArgs):
+        super().__init__()
+        assert args.vocab_size is not None
+        assert args.max_seq_len is not None
+        self.max_seq_len = args.max_seq_len
+        self.tok_embeddings = nn.Embedding(args.vocab_size, args.dim)
+        self.pos_embeddings = nn.Embedding(args.max_seq_len, args.dim)
+        self.dropout = nn.Dropout(args.dropout_p)
+        self.layers = nn.ModuleList()
+        for _ in range(args.n_layers):
+            self.layers.append(TransformerBlock(args))
+        self.norm = nn.LayerNorm(args.dim)
+        self.output = nn.Linear(args.dim, args.vocab_size, bias=False)
+        if args.weight_tying:
+            self.output.weight = self.tok_embeddings.weight
+
+    def forward(self, tokens):
+        _bsz, seq_len = tokens.size()
+        assert seq_len <= self.max_seq_len
+        h = self.tok_embeddings(tokens)
+        pos = torch.arange(0, seq_len, device=tokens.device)
+        p = self.pos_embeddings(pos)  # positional embeddings of shape (seq_len, dim)
+        h = h + p
+        h = self.dropout(h)
+        for layer in self.layers:
+            h = layer(h)
+        h = self.norm(h)
+        output = self.output(h).float()
+        return output
 
 
 def skip_unless_torch_gpu(method: T) -> T:
@@ -79,59 +182,34 @@ def skip_unless_torch_gpu(method: T) -> T:
     return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
 
 
-@dataclass
-class RedistributeProfile:
-    num_calls: int
-
-
-@contextmanager
-def redistribute_profiler() -> Generator[RedistributeProfile, None, None]:
-
-    orig_redistribute_local_tensor = redistribute.redistribute_local_tensor
-    profile: RedistributeProfile = RedistributeProfile(num_calls=0)
-
-    # pyre-ignore[53]
-    def patched_redistribute_local_tensor(
-        local_tensor: torch.Tensor,
-        current_spec: DTensorSpec,
-        target_spec: DTensorSpec,
-    ) -> DTensor:
-        result = orig_redistribute_local_tensor(local_tensor, current_spec, target_spec)
-        profile.num_calls += 1
-        return result
-
-    try:
-        # pyre-ignore[9]
-        redistribute.redistribute_local_tensor = patched_redistribute_local_tensor
-        yield profile
-    finally:
-        redistribute.redistribute_local_tensor = orig_redistribute_local_tensor
-
-
 class DTensorTestBase(MultiProcessTestCase):
     @property
     def world_size(self) -> int:
         return NUM_DEVICES
 
-    def build_device_mesh(self) -> DeviceMesh:
-        return DeviceMesh(DEVICE_TYPE, list(range(NUM_DEVICES)))
+    @property
+    def backend(self) -> str:
+        return PG_BACKEND
 
-    def init_pg(self, backend: str = "nccl") -> None:
-        if backend == "nccl" and torch.cuda.device_count() < self.world_size:
+    def build_device_mesh(self) -> DeviceMesh:
+        return DeviceMesh(DEVICE_TYPE, list(range(self.world_size)))
+
+    def init_pg(self) -> None:
+        if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        if backend not in ["nccl", "gloo", "mpi"]:
-            raise RuntimeError(f"Backend {backend} not supported!")
+        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl"]:
+            raise RuntimeError(f"Backend {self.backend} not supported!")
 
         dist.init_process_group(
-            backend=backend,
+            backend=self.backend,
             world_size=self.world_size,
             rank=self.rank,  # pyre-ignore[16]
             init_method=f"file://{self.file_name}",  # pyre-ignore[16]
         )
 
         # set device for nccl pg for collectives
-        if backend == "nccl":
+        if "nccl" in self.backend:
             torch.cuda.set_device(self.rank)
 
     def destroy_pg(self) -> None:
@@ -149,19 +227,16 @@ class DTensorTestBase(MultiProcessTestCase):
 
     # pyre-ignore[2]:
     def _test_op(self, mesh: DeviceMesh, op_call, *args, **kwargs) -> None:
-        with redistribute_profiler() as profile:
-            out = op_call(*args, **kwargs)
-            dtc = DTensorConverter(mesh, args, kwargs)
-            for d_args, d_kwargs in dtc:
-                # pyre can't find assertTrue anymore?
-                self.assertEqual(dtc.successful(), True)
-                d_out = op_call(*d_args, **d_kwargs)
-                self.assertEqual(
-                    d_out.redistribute(
-                        mesh, [Replicate()] * mesh.ndim
-                    ).to_local(),
-                    out,
-                )
+        out = op_call(*args, **kwargs)
+        dtc = DTensorConverter(mesh, args, kwargs)
+        for d_args, d_kwargs in dtc:
+            # pyre can't find assertTrue anymore?
+            self.assertEqual(dtc.successful(), True)
+            d_out = op_call(*d_args, **d_kwargs)
+            self.assertEqual(d_out.full_tensor(), out)
+
+    def run_subtests(self, *args, **kwargs):
+        return run_subtests(self, *args, **kwargs)
 
 
 TestFunc = Callable[[object], object]
@@ -180,17 +255,43 @@ def with_comms(func: TestFunc) -> TestFunc:
         else:
             self.device_type = "cpu"
 
-        pg_backend = (
-            "nccl" if self.device_type == "cuda" else "gloo"
-        )
-        if pg_backend == "nccl" and torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
-
-        self.init_pg(backend=pg_backend)
+        self.init_pg()
         func(self, *args, **kwargs)  # type: ignore[misc]
         self.destroy_pg()
 
     return wrapper
+
+
+def run_subtests(
+    cls_inst,
+    subtest_config: Dict[str, List[Any]],
+    test_fn: Callable,
+    *test_args,
+    **test_kwargs: Any,
+):
+    """
+    Runs a test function given by ``test_fn`` as a subtest according to the
+    configurations specified by ``subtest_config``. This amortizes the
+    costly setup overhead (including process spawn and initializing the
+    process group) over the subtests.
+
+    Args:
+        subtest_config (Dict[str, List[Any]]): A mapping from subtest
+            keyword argument name to a list of its possible values.
+        test_fn (Callable): A callable that runs the actual test.
+        test_args: Positional arguments to pass to ``test_fn``.
+        test_kwargs: Keyword arguments to pass to ``test_fn``.
+    """
+    # Convert the config mapping to a list to have a fixed order
+    subtest_config_items: List[Tuple[str, List[Any]]] = list(subtest_config.items())
+    subtest_config_keys: List[str] = [item[0] for item in subtest_config_items]
+    subtest_config_values: List[List[Any]] = [item[1] for item in subtest_config_items]
+    for values in itertools.product(*subtest_config_values):
+        # Map keyword to chosen value
+        subtest_kwargs = dict(zip(subtest_config_keys, values))
+        with cls_inst.subTest(**subtest_kwargs):
+            test_fn(*test_args, **test_kwargs, **subtest_kwargs)
+        dist.barrier()
 
 
 class DTensorOpTestBase(MultiThreadedTestCase):
@@ -333,27 +434,17 @@ class DTensorConverter:
     def to_dist_tensor(
         self, t: torch.Tensor, mesh: DeviceMesh, placements: List[Placement]
     ) -> torch.Tensor:
-        if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
+        if type(t) is torch.Tensor or type(t) is nn.Parameter:
             if self.is_supported_tensor(t):
                 self.hit += 1
-                # We cannot use distribute_tensor for bool tensors as c10d
-                # collectives does not support the dtype, we assume op with
-                # bool tensor args the same tensor so we don't need to broadcast
-                # TODO: add bool tensor dtype support in c10d collective
-                if t.dtype == torch.bool:
-                    r = DTensor(
-                        t,
-                        mesh,
-                        tuple(placements),
-                        size=t.size(),
-                        dtype=torch.bool,
-                        requires_grad=t.requires_grad,
-                        stride=t.stride()
-                    )
+                if t.ndim == 0:
+                    # scalar tensor by default will be replicated
+                    r = distribute_tensor(t, mesh, [Replicate()] * mesh.ndim)
                 else:
+                    # distribute non-scalar tensors
                     r = distribute_tensor(t, mesh, placements)
-                if type(t) is torch.nn.Parameter:
-                    r = torch.nn.Parameter(  # type: ignore[assignment]
+                if type(t) is nn.Parameter:
+                    r = nn.Parameter(  # type: ignore[assignment]
                         r, requires_grad=r.requires_grad
                     )
                 return r

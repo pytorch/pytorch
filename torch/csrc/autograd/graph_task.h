@@ -6,8 +6,7 @@
 #include <torch/csrc/autograd/utils/warnings.h>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 using edge_list = std::vector<Edge>;
 struct ReadyQueue;
@@ -146,6 +145,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
   // Safe to read owner_ and reentrant_depth_ without synchronization
   int owner_;
   // The number of parent graph tasks for this graph task
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int reentrant_depth_;
 
   bool can_checkpoint() const {
@@ -238,5 +238,4 @@ TORCH_API std::vector<Node*> get_current_graph_task_execution_order();
 TORCH_API int get_current_graph_task_id();
 void add_node_to_current_graph_task_exec_info(Node* fn);
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

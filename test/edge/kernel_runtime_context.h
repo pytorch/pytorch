@@ -1,5 +1,7 @@
 #pragma once
 
+#include "event_tracer.h"
+
 namespace torch {
 namespace executor {
 
@@ -15,7 +17,28 @@ namespace executor {
  * operators that need more then constant space, and a TensorResizer for dynamic
  * shape tensors allowing programs to be more flexible with Tensor shape.
  */
-class KernelRuntimeContext {};
+class KernelRuntimeContext {
+  public:
+  /**
+   * Construct a new kernel runtime context along with an optional event tracer.
+   */
+  KernelRuntimeContext(EventTracer* event_tracer = nullptr)
+      : event_tracer_(event_tracer) {}
+
+  /**
+   * INTERNAL ONLY
+   *
+   * Returns a pointer to an instance of EventTracer to do profiling/debugging
+   * logging inside the codegen layer. This is only for internal usage inside
+   * the codegen layer and users should not be accessing this.
+   */
+  EventTracer* internal_event_tracer() {
+    return event_tracer_;
+  }
+
+  private:
+  EventTracer* event_tracer_;
+};
 
 } // namespace executor
 } // namespace torch

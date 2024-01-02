@@ -1,10 +1,12 @@
 # Owner(s): ["module: dynamo"]
-# flake8: noqa
+# flake8: noqa: E731, C405, F811, C418, C417
 import collections
 import functools
 import inspect
 import itertools
+import math
 import operator
+import sys
 import unittest
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, NamedTuple
@@ -18,15 +20,23 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
 from torch._dynamo.testing import expectedFailureDynamic
-from torch._dynamo.utils import same
+from torch._dynamo.utils import ifdynstaticdefault, same
+
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
 )
 
+# Defines all the kernels for tests
+from torch.testing._internal.triton_utils import *  # noqa: F403
+
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
 flag = True
+
+
+class CustomDictSubclass(collections.OrderedDict):
+    pass
 
 
 clip01 = functools.partial(torch.clip, min=0.0, max=1.0)
@@ -41,11 +51,19 @@ def func_with_default(a, b, some_default_arg=True):
         return a - b
 
 
-def make_test(fn):
+def make_test(fn=None, expected_frame_count=1):
+    if fn is None:
+        return lambda fn: make_test(fn, expected_frame_count=expected_frame_count)
+
     nargs = len(inspect.signature(fn).parameters)
 
     def test_fn(self):
-        return torch._dynamo.testing.standard_test(self, fn=fn, nargs=nargs)
+        return torch._dynamo.testing.standard_test(
+            self,
+            fn=fn,
+            nargs=nargs,
+            expected_frame_count=expected_frame_count,
+        )
 
     return test_fn
 
@@ -425,8 +443,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return z
 
     @make_test
+    def test_custom_dict_kwargs(x):
+        z = CustomDictSubclass(sample=torch.ones(10))
+        return z
+
+    @make_test
     def test_float(x):
-        y = float(1.2)
+        y = float(1.2)  # noqa: UP018
         y += float("1.2")
         return torch.add(x, y)
 
@@ -451,6 +474,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_get_autocast_gpu_dtype(x):
         dtype = torch.get_autocast_gpu_dtype()
         return x.type(dtype)
+
+    @make_test
+    def test_promote_types(x):
+        if x.dtype == torch.promote_types(torch.int32, torch.float32):
+            return x + 1
+        else:
+            return x - 1
 
     @make_test
     def test_get_calculate_correct_fan(x):
@@ -655,6 +685,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_dict_ops(a, b):
         tmp = {"a": a + 1, "b": b + 2}
+        assert tmp.get("zzz") is None
         v = tmp.pop("b") + tmp.get("a") + tmp.get("missing", 3) + tmp.pop("missing", 4)
         tmp.update({"d": 3})
         tmp["c"] = v + tmp["d"]
@@ -711,6 +742,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             dd["a"] = x + 1
             dd[param] = 123
             dd["c"] = x * 2
+            dd.update({"b": x * 3})
+            dd.update([["d", x - 2], ("e", x + 2)])
+            dd.update(zip("ab", [x + 3, x + 4]))
             return dd["b"], dd
 
         x = torch.randn(10, 10)
@@ -720,7 +754,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref[0], res[0]))
         self.assertTrue(same(ref[1]["a"], res[1]["a"]))
+        self.assertTrue(same(ref[1]["b"], res[1]["b"]))
         self.assertTrue(same(ref[1]["c"], res[1]["c"]))
+        self.assertTrue(same(ref[1]["d"], res[1]["d"]))
+        self.assertTrue(same(ref[1]["e"], res[1]["e"]))
         self.assertTrue(same(ref[1][param], res[1][param]))
 
     @make_test
@@ -769,6 +806,42 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return d1["a"] + d2["c"] + 1
 
     @make_test
+    def test_dict_fromkeys(x, y):
+        lst = ["a", "b"]
+        d = dict.fromkeys(lst)
+        d1 = dict.fromkeys(d, x + 1)
+        d2 = collections.defaultdict.fromkeys(iter(d1), x - 2)
+        d3 = collections.OrderedDict.fromkeys(tuple(lst), value=y)
+        return d1["a"] * d2["b"] + d2["a"] + d1["b"] + d3["a"] + d3["b"] + 1
+
+    @make_test
+    def test_dict_copy(x):
+        my_list = [("a", x), ("b", x + 1), ("c", x + 2)]
+        d1 = dict(my_list)
+        d1["a"] = x + 10
+        d2 = d1.copy()
+        d2["a"] = x - 5
+        d2["b"] = x + 3
+        d3 = collections.OrderedDict(my_list)
+        d3["c"] = x + 20
+        d4 = d3.copy()
+        d4["c"] = x - 10
+        return d1["a"] * d2["a"] + d2["b"] + d3["c"] * d4["c"] + 1
+
+    @make_test
+    def test_dict_update(x, y, z):
+        d = {"a": x, "b": y}
+        d.update({"a": y - 1})
+        d.update([("b", z + 1), ["c", z]])
+        d.update(zip("ab", [z + 3, y + 2]))
+
+        od = collections.OrderedDict(a=x * 3, b=y + 2)
+        od.update({"a": y + 5})
+        od.update([["b", z + 6], ("c", z - 7)])
+        od.update(zip("ab", [z - 3, x + 2]))
+        return d["a"] * od["a"] + od["c"] + d["b"] + od["b"] * d["c"]
+
+    @make_test
     def test_min_max(a, b):
         c = a + b
         a = a.sum()
@@ -778,12 +851,60 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return max(a, b) - min(a, b) + c
 
     @make_test
+    def test_symbool_to_int(x):
+        # this is roughly the pattern found in einops.unpack()
+        if sum(s == -1 for s in x.size()) == 0:
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_map_sum(a, b, c, d):
         return sum(map(lambda x: x + 1, [a, b, c, d]))
 
     @make_test
+    def test_sum(a, b, c, d):
+        return sum([a, b, c, d])
+
+    @make_test
+    def test_sum_with_start_arg(a, b, c, d):
+        return sum([b, c, d], a)
+
+    @make_test
+    def test_sum_with_start_kwarg(a, b, c, d):
+        return sum([b, c, d], start=a)
+
+    @make_test(expected_frame_count=0)
+    def test_sum_shortcut():
+        return sum([0, 1.0, 2, 3.0])
+
+    @make_test(expected_frame_count=0)
+    def test_sum_shortcut_with_start_arg():
+        return sum([0, 1.0, 2, 3.0], -10)
+
+    @make_test(expected_frame_count=0)
+    def test_sum_shortcut_with_start_kwarg():
+        return sum([0, 1.0, 2, 3.0], start=-10)
+
+    @make_test
     def test_reduce(a, b, c, d):
         return functools.reduce(operator.add, [a, b, c, d])
+
+    @make_test
+    def test_reduce_with_initial(a, b, c, d):
+        return functools.reduce(operator.add, [b, c, d], a)
+
+    @make_test(expected_frame_count=0)
+    def test_reduce_with_single(x):
+        return functools.reduce(lambda a, b: (a, b), [x])
+
+    @make_test(expected_frame_count=0)
+    def test_reduce_with_single_with_initial(x, y):
+        return functools.reduce(lambda a, b: (a, b), [y], x)
+
+    @make_test(expected_frame_count=0)
+    def test_reduce_with_none_initial(x):
+        return functools.reduce(lambda a, b: (a, b), [x], None)
 
     @make_test
     def test_tuple_contains(a, b):
@@ -795,6 +916,19 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if "a" in vals1 and "b" not in vals2:
             return a + b
         return a - b
+
+    @make_test
+    def test_set_contains(a, b):
+        vals = set(["a", "b", "c"])
+        if "a" in vals:
+            x = a + b
+        else:
+            x = a - b
+        if "d" in vals:
+            y = a + b
+        else:
+            y = a - b
+        return x, y
 
     @make_test
     def test_tuple_iadd(a, b):
@@ -970,13 +1104,50 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         y = torch.jit.annotate(Any, x + 1)
         return y + 2
 
-    @expectedFailureDynamic
     @make_test
     def test_is_contiguous_memory_format(tensor):
         if torch.jit.is_scripting():
             return None
         elif tensor.is_contiguous(memory_format=torch.contiguous_format):
             return tensor + 1
+
+    def test_is_contiguous_frame_counts(self):
+        data = [
+            torch.rand(10),
+            torch.rand(2, 3, 32, 32),
+            torch.rand(2, 3, 32, 32).contiguous(memory_format=torch.channels_last),
+            torch.rand(10)[::2],
+            torch.rand(12),
+            torch.rand(2, 3, 24, 24).contiguous(memory_format=torch.channels_last),
+            torch.rand(50)[::2],
+            torch.rand(2, 3, 32, 32)[:, :, 2:-2, 3:-3],
+        ]
+        # dynamo should recompile for all inputs in static shapes mode
+        expected_frame_counts_static = [1, 2, 3, 4, 5, 6, 7, 8]
+        # dynamo should recompile for items 0, 1, 2, 6 in dynamic shapes mode
+        expected_frame_counts_dynamic = [1, 2, 3, 4, 4, 4, 4, 5]
+        expected_frame_counts = ifdynstaticdefault(
+            expected_frame_counts_static, expected_frame_counts_dynamic
+        )
+        dynamic = ifdynstaticdefault(False, True)
+
+        def func(x):
+            if x.is_contiguous():
+                return x + 1
+            elif x.is_contiguous(memory_format=torch.channels_last):
+                return x + 2
+            else:
+                return x + 3
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        cfunc = torch._dynamo.optimize_assert(cnt, dynamic=dynamic)(func)
+
+        assert cnt.frame_count == 0
+        for i, x in enumerate(data):
+            expected = func(x)
+            output = cfunc(x)
+            self.assertTrue(same(output, expected))
+            assert cnt.frame_count == expected_frame_counts[i]
 
     @make_test
     def test_list_slice_assignment(x):
@@ -1040,6 +1211,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     #             return x * param
     #         case {"b": param}:
     #             return x / param
+
+    def test_math_radians(self):
+        def func(x, a):
+            return x + math.radians(a)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        cfunc = torch._dynamo.optimize_assert(cnt)(func)
+
+        assert cnt.frame_count == 0
+        x = torch.rand(10)
+        expected = func(x, 12)
+        output = cfunc(x, 12)
+        self.assertTrue(same(output, expected))
+        assert cnt.frame_count == 1
 
     @make_test
     def test_numpy_meshgrid(x, y):
@@ -1132,6 +1317,279 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_numpy_random():
         x = np.random.randn(2, 2)
         return x - x
+
+    @make_test
+    def test_partials_torch_op_kwarg(x):
+        par_mul = functools.partial(torch.mul, other=torch.ones(10, 10))
+        return par_mul(x)
+
+    @make_test
+    def test_partials_torch_op_arg(x):
+        par_mul = functools.partial(torch.mul, torch.ones(10, 10))
+        return par_mul(x)
+
+    @make_test
+    def test_partials_udf_arg(x):
+        par_mul = functools.partial(udf_mul, torch.ones(10, 10))
+        return par_mul(x)
+
+    @make_test
+    def test_partials_udf_kwarg(x):
+        par_mul = functools.partial(udf_mul, y=torch.ones(10, 10))
+        return par_mul(x)
+
+    @make_test
+    def test_partials_udf_kwarg_module(x, y):
+        par_mod = functools.partial(udf_module, mod=SmallNN())
+        return par_mod(x=x, y=y)
+
+    @make_test
+    def test_partials_udf_kwarg_method(x, y):
+        par_mod = functools.partial(udf_module, mod=SmallNN().forward)
+        return par_mod(x=x, y=y)
+
+    @make_test
+    def test_partials_lambda(x):
+        multiply = lambda x, y: x * y
+        triple = functools.partial(multiply, y=3)
+        return triple(x)
+
+    def test_pow_int(self):
+        def fn(a, b):
+            return torch.pow(a, b)
+
+        x = torch.ones(2, 2)
+        opt_fn = torch.compile(fullgraph=True, backend="eager", dynamic=True)(fn)
+        self.assertEqual(opt_fn(x, 2), fn(x, 2))
+
+    def test_tensor_size_indexed_by_symint(self):
+        def fn(x, y):
+            index = x.shape[-1]
+            return x + y.shape[index]
+
+        x = torch.rand(10, 2)
+        y = torch.rand(10, 8, 6)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+
+    def test_partials_as_input_partials_lambda(self):
+        def fn(f0, f1, x):
+            return f0(x) * f1(x)
+
+        multiply = lambda x, y: x * y
+        lambda0 = functools.partial(multiply, y=3)
+        lambda1 = functools.partial(multiply, y=2)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        torch._dynamo.optimize(cnts, nopython=True)(fn)(
+            lambda0, lambda1, torch.randn(2, 2)
+        )
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_partials_as_input_partials_mod(self):
+        def fn(f0, f1, x):
+            return f0(x) * f1(x)
+
+        lambda0 = functools.partial(SmallNN(), y=torch.randn(2, 2))
+        lambda1 = functools.partial(SmallNN(), y=torch.randn(2, 2))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.randn(2, 2)
+        dynamo_result = torch._dynamo.optimize(cnts, nopython=True)(fn)(
+            lambda0, lambda1, x
+        )
+        self.assertEqual(cnts.frame_count, 1)
+
+        eager_result = fn(lambda0, lambda1, x)
+        self.assertEqual(eager_result, dynamo_result)
+
+    def test_partials_as_input_UDF(self):
+        def fn(f0, f1, x):
+            return f0(x) * f1(x)
+
+        lambda0 = functools.partial(udf_mul, y=torch.randn(2, 2))
+        lambda1 = functools.partial(udf_mul, y=torch.randn(2, 2))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.randn(2, 2)
+        dynamo_result = torch._dynamo.optimize(cnts, nopython=True)(fn)(
+            lambda0, lambda1, x
+        )
+        self.assertEqual(cnts.frame_count, 1)
+
+        eager_result = fn(lambda0, lambda1, x)
+        self.assertEqual(eager_result, dynamo_result)
+
+    def test_partials_recompilation(self):
+        def fn(f0, f1, x):
+            return f0(x) * f1(x)
+
+        lambda0 = functools.partial(udf_mul, y=torch.randn(2, 2))
+        lambda1 = functools.partial(udf_mul, y=torch.randn(2, 2))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.randn(2, 2)
+        fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        dynamo_result = fn(lambda0, lambda1, x)
+        self.assertEqual(cnts.frame_count, 1)
+
+        fn(lambda1, lambda0, x)
+        self.assertEqual(
+            cnts.frame_count, 1
+        )  # No recompile! Tensor and udf_mul guarded
+
+        lambda2 = functools.partial(udf_mul, y=torch.randn(3, 3))
+        x = torch.randn(3, 3)
+        fn(lambda2, lambda2, x)
+        self.assertEqual(cnts.frame_count, 2)  # Recompile! Tensor size changed
+
+        multiply = lambda x, y: x * y
+        lambda3 = functools.partial(multiply, y=torch.randn(3, 3))
+        x = torch.randn(3, 3)
+        fn(lambda3, lambda3, x)
+
+        self.assertEqual(cnts.frame_count, 3)  # Recompile! func id changed
+
+        def fn2(f0, f1, args):
+            return f0(*args) * f1(*args)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        x = torch.randn(2, 2)
+        fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
+        dynamo_result = fn2(lambda0, lambda1, [x])
+        self.assertEqual(cnts.frame_count, 1)  # start over
+
+        lambda4 = functools.partial(multiply, y=3, x=torch.randn(3, 3))
+        fn2(lambda4, lambda4, [])
+
+        self.assertEqual(cnts.frame_count, 2)  # Recompile! Different kwarg keys
+
+        lambda5 = functools.partial(multiply, 1)
+        x = torch.randn(3, 3)
+        fn2(lambda5, lambda5, [x])
+
+        self.assertEqual(cnts.frame_count, 3)  # Recompile! Different arg keys
+
+        lambda6 = lambda x: x + x
+        fn2(lambda6, lambda6, [x])
+        self.assertEqual(
+            cnts.frame_count, 4
+        )  # Recompile! input is no longer a functools partial
+
+    def test_manual_seed(self):
+        @torch.compile
+        def foo():
+            torch.manual_seed(3)
+            return torch.randint(0, 5, (5,))
+
+        self.assertEqual(foo(), foo())
+        self.assertEqual(foo(), foo())
+
+    def test_partial_across_graph_break_uninvoked(self):
+        from functools import partial
+
+        def bar(x, **kwargs):
+            return x + x
+
+        @torch.compile(backend="eager", dynamic=True)
+        def foo(x, i):
+            def inner():
+                print("this is a graph_break")
+                return op(x)
+
+            op = partial(bar, dim=10)
+            x = inner()
+            op = partial(bar, other=10)
+            return inner() + x
+
+        foo(torch.rand(1), 10)
+
+    def test_no_recompile_inner_function(self):
+        def forward(inp):
+            def g(y):
+                return inp + y
+
+            print("graph break")
+            return g(torch.rand([1]))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(forward)
+
+        input = torch.rand([2])
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        # Should not have recompiled
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_no_recompile_inner_lambda(self):
+        def forward(inp):
+            g = lambda y: inp + y
+            print("graph break")
+            return g(torch.rand([1]))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(forward)
+
+        input = torch.rand([2])
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        # Should not have recompiled
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_complex_closure(self):
+        @torch.compile
+        def forward(y):
+            def a():
+                def x(z):
+                    return y + z
+
+                return x
+
+            return a()
+
+        input1 = torch.rand([2])
+        input2 = torch.rand([2])
+        res = forward(input1)(input2)
+        self.assertTrue(same(res, input1 + input2))
+
+    def test_non_inlined_closure(self):
+        @torch.compile()
+        def program(x, y):
+            one = lambda x, y: x + y
+
+            def inner():
+                # Force no inlining
+                torch._dynamo.graph_break()
+                return one(x, y)
+
+            res = inner()
+            one = lambda x, y: x - y
+            res += inner()
+            return res
+
+        input1 = torch.randn(1)
+        input2 = torch.randn(1)
+
+        self.assertTrue(same(program(input1, input2), input1 + input1))
+
+
+def udf_mul(x, y):
+    return x * y
+
+
+class SmallNN(torch.nn.Module):
+    def forward(self, x, y):
+        combined = torch.cat((x, y), dim=1)
+        out = torch.nn.ReLU()(combined)
+        out = torch.nn.ReLU()(out)
+        return out
+
+
+def udf_module(mod, x, y):
+    return mod(x, y)
 
 
 def global_func_with_default_tensor_args(
@@ -1330,6 +1788,264 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         res = fn(x)
         ref = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_listlike_of_tensors_contains_constant(self):
+        for listlike in [set, list]:
+
+            def fn(x):
+                x.add_(1)
+                s = listlike([x])
+                res = 1 in s
+                return res
+
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            x = torch.randn(1)
+            ref = opt_fn(x)
+            res = fn(x)
+            self.assertEqual(ref, res)
+
+    def test_cast_tensor_single_elem(self):
+        with torch._dynamo.config.patch({"capture_scalar_outputs": True}):
+            for t, val in [
+                (float, 1.0),
+                (float, 1),
+                (float, True),
+                (int, 1),
+                (int, False),
+                # (int, 1.0), # fails due to a >= 0 comparison in sym_int
+            ]:  # , bool, complex]: no casting for sym_bool, no sym_complex
+
+                def fn(x):
+                    x = x + 1
+                    return t(x)
+
+                opt_fn = torch.compile(
+                    fn, backend="eager", fullgraph=True, dynamic=False
+                )
+                x = torch.tensor([val])
+                res = fn(x)
+                ref = opt_fn(x)
+                self.assertEqual(ref, res)
+
+                # Cannot handle non single-elem
+                with self.assertRaises(ValueError):
+                    fn(torch.tensor([val] * 2))
+                with self.assertRaises(torch._dynamo.exc.TorchRuntimeError):
+                    opt_fn(torch.tensor([val] * 2))
+
+    def test_set_construction(self):
+        def fn(x):
+            y = x.add_(1)
+            s = set({x})
+            s.add(y)
+            return len(s)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        res = fn(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_is_tensor_tensor(self):
+        def fn(x, y):
+            if x is y:
+                return x * 2
+            else:
+                return x + y
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(2)
+        y = torch.ones(2)
+
+        self.assertEqual(fn(x, y), fn_opt(x, y))
+        self.assertEqual(fn(x, x), fn_opt(x, x))
+
+    def test_is_mutated_tensor_tensor(self):
+        def fn(x):
+            y = x.add_(1)
+            return x is y
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_mutated_tensor_tensor_across_graph_break(self):
+        def fn(x):
+            y = x.add_(1)
+            cond = x is y
+            x.add_(1)
+            # The real tensor values are recovered when graph breaking.
+            # Hence we recover the invariant.
+            torch._dynamo.graph_break()
+            x.add_(1)
+            return x is y, cond
+
+        fn_opt = torch.compile(backend="eager", dynamic=True)(fn)
+
+        z = torch.ones(4)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_mutated_tensor_tensor(self):
+        def fn(x):
+            y = x.add_(1)
+            return y is x
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4, 1)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    def test_is_init_in_compile_mutated_tensor_tensor(self):
+        def fn(x):
+            z = x.clone()
+            y = z.add_(1)
+            return y is z
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4, 1)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    @torch._dynamo.config.patch(capture_func_transforms=True)
+    def test_is_init_in_compile_vmapped_mutated_tensor_tensor(self):
+        def fn(z):
+            x = z.clone()
+            y = torch.vmap(torch.Tensor.acos_)(x)
+            _ = y is z
+            return y is x
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4, 1)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    @torch._dynamo.config.patch(capture_func_transforms=True)
+    def test_is_vmapped_mutated_tensor_tensor(self):
+        def fn(x):
+            y = torch.vmap(torch.Tensor.acos_)(x)
+            return y is x
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        z = torch.ones(4, 1)
+
+        self.assertEqual(fn(z), fn_opt(z))
+
+    @torch._dynamo.config.patch(capture_func_transforms=True)
+    def test_is_init_in_compile_vmapped_mutated_tensor_tensor_multi_arg(self):
+        def fn(y, z):
+            a = y.clone()
+            b = z.clone()
+
+            def g(a, b):
+                return a.acos_(), b.acos_()
+
+            c, d = torch.vmap(g)(a, b)
+            return a is c is b is d
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+
+        y = torch.ones(4, 2)
+        z = torch.ones(4, 10)
+
+        self.assertEqual(fn(y, z), fn_opt(y, z))
+        self.assertEqual(fn(y, y), fn_opt(y, y))
+
+    def test_in_set_would_fail_broadcast(self):
+        param = torch.zeros(5)
+        param2 = torch.zeros(5, 10)
+
+        tensor_list = set()
+        tensor_list.add(param2)
+        assert param not in tensor_list
+
+        def fn(param, param2):
+            param.add_(1)
+            tensor_list = set([param2])
+            return param in tensor_list
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        self.assertEqual(opt_fn(param, param2), fn(param, param2))
+        self.assertEqual(cnts.frame_count, 1)
+        # Test aliased
+        self.assertEqual(opt_fn(param, param), fn(param, param))
+        self.assertEqual(cnts.frame_count, 2)  # Recompiles
+
+    def test_in_set_inplace(self):
+        param = torch.zeros(5)
+        param2 = torch.zeros(5, 10)
+
+        tensor_list = set()
+        tensor_list.add(param2)
+        assert param not in tensor_list
+
+        def fn(param, param2):
+            y = param.add_(1)  # Tensor method
+            z = torch.Tensor.add_(y, 1)  # torch function
+            tensor_list = set([param2])
+            return y in tensor_list and z in tensor_list
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        self.assertEqual(opt_fn(param, param2), fn(param, param2))
+        self.assertEqual(cnts.frame_count, 1)
+        # Test aliased
+        self.assertEqual(opt_fn(param, param), fn(param, param))
+        self.assertEqual(cnts.frame_count, 2)  # Recompiles
+
+    @unittest.skipIf(
+        sys.version_info < (3, 10),
+        "zip strict kwargs not implemented for Python < 3.10",
+    )
+    def test_zip_strict(self):
+        def fn(x, ys, zs):
+            x = x.clone()
+            for y, z in zip(ys, zs, strict=True):
+                x += y * z
+            return x
+
+        opt_fn = torch._dynamo.optimize(backend="eager")(fn)
+        nopython_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+
+        x = torch.ones(3)
+        ys = [1.0, 2.0, 3.0]
+        zs = [2.0, 5.0, 8.0]
+
+        self.assertEqual(opt_fn(x, ys, zs), fn(x, ys, zs))
+
+        # If nopython, should raise UserError
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+            nopython_fn(x, ys[:1], zs)
+
+        # Should cause fallback if allow graph break
+        with self.assertRaisesRegex(ValueError, "zip()"):
+            opt_fn(x, ys[:1], zs)
+
+    def test_compare_constant_and_tensor(self):
+        for op in [
+            operator.lt,
+            operator.le,
+            operator.gt,
+            operator.ge,
+            operator.ne,
+            operator.eq,
+        ]:
+
+            def fn(x):
+                return op(-10, x)
+
+            opt_fn = torch.compile(fullgraph=True)(fn)
+
+            x = torch.randn(10)
+            self.assertEqual(opt_fn(x), fn(x))
 
 
 if __name__ == "__main__":

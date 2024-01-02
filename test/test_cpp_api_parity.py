@@ -1,11 +1,9 @@
 # Owner(s): ["module: cpp"]
 
-import torch
-# NN tests use double as the default dtype
-torch.set_default_dtype(torch.double)
 
 import os
 
+import torch
 import torch.testing._internal.common_utils as common
 import torch.testing._internal.common_nn as common_nn
 from cpp_api_parity.parity_table_parser import parse_parity_tracker_table
@@ -21,6 +19,7 @@ PARITY_TABLE_PATH = os.path.join(os.path.dirname(__file__), 'cpp_api_parity', 'p
 
 parity_table = parse_parity_tracker_table(PARITY_TABLE_PATH)
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppApiParity(common.TestCase):
     module_test_params_map = {}
     functional_test_params_map = {}
@@ -59,4 +58,5 @@ if not common.IS_ARM64:
     functional_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE)
 
 if __name__ == "__main__":
+    common.TestCase._default_dtype_check_enabled = True
     common.run_tests()

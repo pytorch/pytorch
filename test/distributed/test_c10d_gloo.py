@@ -8,6 +8,7 @@ import os
 import random
 import sys
 import tempfile
+from datetime import timedelta
 from functools import reduce
 from itertools import groupby
 
@@ -702,6 +703,20 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_sparse_allreduce_basics_cuda(self):
         self._test_sparse_allreduce_basics(lambda t: t.clone().cuda())
 
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_sparse_allreduce_cuda_dispatched(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
+        tests = simple_sparse_reduce_tests(
+            self.rank, self.world_size, num_inputs=1
+        )
+        for (inputs, outputs) in tests:
+            tensors = inputs[-1].clone().cuda()
+            work = dist.all_reduce(tensors, async_op=True)
+            work.wait()
+            self.assertEqual([tensors], outputs)
+
     @requires_gloo()
     def test_scatter_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -848,6 +863,17 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 result[0],
                 msg=("Mismatch in iteration %d for rank %d" % (iter, root)),
             )
+
+    @requires_gloo()
+    def test_set_gloo_pg_timeout(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+        pg.allreduce(torch.rand(10))
+        self.assertEqual(pg.options._timeout, timedelta(seconds=50))
+        pg._set_default_timeout(timedelta(seconds=23))
+        self.assertEqual(pg.options._timeout, timedelta(seconds=23))
 
     @requires_gloo()
     def test_scatter_stress(self):
@@ -1203,7 +1229,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # Output is not a list of lists.
         dummy_output_lists = [torch.zeros([0], dtype=torch.float32)]
         with self.assertRaisesRegex(
-            RuntimeError, "Invalid function argument.*output_tensor_lists"
+            TypeError, "Invalid function argument.*output_tensor_lists"
         ):
             c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
 

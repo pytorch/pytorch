@@ -1,10 +1,16 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/impl/PyObjectSlot.h>
-
+#include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
+#include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/intrusive_ptr.h>
+#include <cstddef>
+#include <utility>
 
 namespace c10 {
 
@@ -98,7 +104,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   // TODO: remove later
   void set_nbytes(size_t size_bytes) {
-    size_bytes_ = size_bytes;
+    size_bytes_ = static_cast<int64_t>(size_bytes);
     size_bytes_is_heap_allocated_ = false;
   }
 
@@ -187,7 +193,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       at::DataPtr&& data_ptr,
       size_t size_bytes) {
     data_ptr_ = std::move(data_ptr);
-    size_bytes_ = size_bytes;
+    size_bytes_ = static_cast<int64_t>(size_bytes);
     size_bytes_is_heap_allocated_ = false;
     allocator_ = nullptr;
     resizable_ = false;
@@ -201,6 +207,14 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   bool received_cuda() {
     return received_cuda_;
+  }
+
+  impl::PyObjectSlot* pyobj_slot() {
+    return &pyobj_slot_;
+  }
+
+  const impl::PyObjectSlot* pyobj_slot() const {
+    return &pyobj_slot_;
   }
 
  private:

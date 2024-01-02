@@ -10,6 +10,7 @@
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SparseTensorUtils.h>
+#include <ATen/native/TensorConversions.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseCsrTensorMath.h>
@@ -86,6 +87,7 @@
 #include <ATen/ops/neg.h>
 #include <ATen/ops/neg_native.h>
 #include <ATen/ops/normal_native.h>
+#include <ATen/ops/ones.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/rad2deg.h>
 #include <ATen/ops/rad2deg_native.h>
@@ -253,14 +255,12 @@ Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Te
   const auto result_sizes = infer_size(sparse.sizes(), scalar.sizes());
   Tensor compressed_indices, plain_indices;
   std::tie(compressed_indices, plain_indices) = getCompressedPlainIndices(sparse);
-  return at::native::_sparse_compressed_tensor_unsafe(
+  return at::_sparse_compressed_tensor_unsafe(
       compressed_indices.clone(),
       plain_indices.clone(),
       result_values,
       result_sizes,
-      result_values.scalar_type(),
-      sparse.layout(),
-      result_values.device());
+      sparse.options().dtype(result_values.scalar_type()));
 }
 
 template <typename op_t>
@@ -335,14 +335,12 @@ inline Tensor get_result_tensor_for_unary_op(F op, const Tensor& input) {
                                                                  [&]{ return input.col_indices(); },
                                                                  [&]{ return input.row_indices(); });
 
-  auto result = at::native::_sparse_compressed_tensor_unsafe(
+  auto result = at::_sparse_compressed_tensor_unsafe(
       compressed_indices.clone(),
       plain_indices.clone(),
       result_values,
       input.sizes(),
-      result_values.scalar_type(),
-      input.layout(),
-      result_values.device());
+      input.options().dtype(result_values.scalar_type()));
 
   return result;
 }
@@ -368,20 +366,62 @@ Tensor& fill_sparse_csr_(Tensor& self, const Scalar& value) {
   return unary_op_inplace(self, &TensorBase::fill_, value);
 }
 
-Tensor sparse_mask_sparse_csr(
+Tensor sparse_mask_sparse_compressed(
     const Tensor& self,
-    const Tensor& sparse_mask) {
-  TORCH_CHECK(sparse_mask.is_sparse_csr(), "sparse_mask_sparse_csr expects mask to be sparse csr");
-  TORCH_CHECK(self.dim() == 2, "sparse_mask_sparse_csr expects self to be 2D");
-  TORCH_CHECK(sparse_mask.dim() == 2, "sparse_mask_sparse_csr expects mask to be 2D");
+    const Tensor& mask) {
+  TORCH_CHECK(at::sparse_csr::is_sparse_compressed(mask),
+              "sparse_mask_sparse_compressed expects mask to have sparse compressed layout, got ", mask.layout());
+  TORCH_CHECK(
+      mask.sizes().equals(self.sizes()),
+      "sparse_mask(): operands have incompatible sizes; self has size ",
+      self.sizes(),
+      " but mask has size ",
+      mask.sizes());
 
-  // We are computing self.mul(at::ones_like(sparse_mask))
-  // But mul(dense, sparse_csr) is not implemented yet
-  if (self.layout() == sparse_mask.layout()) {
-    // Both inputs are CSR
-    return self.mul(at::ones_like(sparse_mask));
+  if (self.is_same(mask)) {
+    return self;
+  }
+
+  if (!mask.numel() || !mask._nnz()) {
+    return mask.clone().to(self.device(), self.scalar_type());
+  }
+
+  if (self.layout() == kStrided) {
+    Tensor compressed_indices, plain_indices;
+    std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(mask);
+    auto mask_values = mask.values();
+    auto dense_mask = at::_sparse_compressed_tensor_unsafe(
+        compressed_indices,
+        plain_indices,
+        at::ones({1}, self.options().dtype(kBool)).expand_as(mask_values),
+        self.sizes(),
+        self.options().dtype(kBool).layout(mask.layout())).to_dense();
+    return AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
+        mask.layout(), "sparse_mask_sparse_compressed",
+        [&] {
+          return at::native::dense_to_sparse_with_mask(self, dense_mask, mask.layout(), {}, mask.dense_dim());
+        },
+        [&] {
+          auto blocksize = at::sparse_csr::getBlockSize(mask);
+          return at::native::dense_to_sparse_with_mask(self, dense_mask, mask.layout(), blocksize, mask.dense_dim());
+        });
+  } else if (self.layout() == mask.layout()) {
+    // TODO: keeping this for BC but the method used here may lead to
+    // incorrect indices.
+    return self.mul(at::ones_like(mask)).to(self.scalar_type());
   } else {
-    return self.sparse_mask(sparse_mask.to_sparse()).to_sparse_csr();
+    // TODO: keeping this for BC but the method used here cannot
+    // support batch dimensions because sparse COO tensors are batch
+    // dimension ignorant.
+    return AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
+        mask.layout(), "sparse_mask_sparse_compressed",
+        [&] {
+          return self.sparse_mask(mask.to_sparse()).to_sparse(mask.layout());
+        },
+        [&] {
+          auto blocksize = at::sparse_csr::getBlockSize(mask);
+          return self.sparse_mask(mask.to_sparse()).to_sparse(mask.layout(), blocksize);
+        });
   }
 }
 
@@ -785,7 +825,22 @@ Tensor add_sparse_csr(
     const Scalar& alpha) {
   auto commonDtype = at::result_type(self, other);
   alpha_check(commonDtype, alpha);
-  Tensor result = at::empty_like(self, self.options().dtype(commonDtype).memory_format(at::MemoryFormat::Contiguous));
+  Tensor result;
+  if (self.layout() != kStrided && other.layout() == kStrided) {
+    // add(sparse, dense) -> dense
+    result = at::empty_like(
+        other,
+        other.options()
+            .dtype(commonDtype)
+            .memory_format(at::MemoryFormat::Contiguous));
+  } else {
+    // add(dense, sparse) -> dense AND add(sparse, sparse) -> sparse
+    result = at::empty_like(
+        self,
+        self.options()
+            .dtype(commonDtype)
+            .memory_format(at::MemoryFormat::Contiguous));
+  }
   return at::add_out(result, self, other, alpha); // redispatch!
 }
 
@@ -796,13 +851,14 @@ Tensor& add_sparse_csr_(
   return at::add_out(self, self, other, alpha); // redispatch!
 }
 
-static void add_out_dense_sparse_csr_cpu(
+static void add_out_dense_sparse_compressed_cpu(
     const Tensor& out,
     const Tensor& dense,
     const SparseCsrTensor& src,
     const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(dense.layout() == kStrided);
-  TORCH_INTERNAL_ASSERT(src.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT(
+      src.layout() == kSparseCsr || src.layout() == kSparseCsc);
   TORCH_INTERNAL_ASSERT(dense.device() == kCPU);
 
   TORCH_CHECK(
@@ -853,8 +909,15 @@ static void add_out_dense_sparse_csr_cpu(
 
   auto valuesBuffer = src_values.to(commonDtype).reshape({-1, src_values.size(-1)});
   resultBuffer = resultBuffer.view({-1, out.size(-2), out.size(-1)});
-  auto src_crow_indices = src.crow_indices().reshape({-1, src.crow_indices().size(-1)});
-  auto src_col_indices = src.col_indices().reshape({-1, src.col_indices().size(-1)});
+  Tensor src_compressed_indices;
+  Tensor src_plain_indices;
+  std::tie(src_compressed_indices, src_plain_indices) =
+      at::sparse_csr::getCompressedPlainIndices(src);
+  src_compressed_indices =
+      src_compressed_indices.reshape({-1, src_compressed_indices.size(-1)});
+  src_plain_indices =
+      src_plain_indices.reshape({-1, src_plain_indices.size(-1)});
+  auto src_layout = src.layout();
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       kComplexHalf,
@@ -866,35 +929,57 @@ static void add_out_dense_sparse_csr_cpu(
       [&valuesBuffer,
        &resultBuffer,
        &alpha,
-       &src_crow_indices,
-       &src_col_indices]() {
+       &src_compressed_indices,
+       &src_plain_indices,
+       &src_layout]() {
         AT_DISPATCH_INDEX_TYPES(
-            src_crow_indices.scalar_type(),
+            src_compressed_indices.scalar_type(),
             "csr_add_out_crow_indices",
             [&valuesBuffer,
              &resultBuffer,
              &alpha,
-             &src_crow_indices,
-             &src_col_indices]() {
-              auto batch_count = resultBuffer.dim() > 2 ? resultBuffer.size(-3) : 1;
+             &src_compressed_indices,
+             &src_plain_indices,
+             &src_layout]() {
+              auto batch_count =
+                  resultBuffer.dim() > 2 ? resultBuffer.size(-3) : 1;
               auto values_accessor = valuesBuffer.accessor<scalar_t, 2>();
               scalar_t* out_ptr = resultBuffer.data_ptr<scalar_t>();
               scalar_t cast_value = alpha.to<scalar_t>();
 
-              auto crow_indices_accessor =
-                  src_crow_indices.accessor<index_t, 2>();
-              auto col_indices_accessor =
-                  src_col_indices.accessor<index_t, 2>();
+              auto compressed_indices_accessor =
+                  src_compressed_indices.accessor<index_t, 2>();
+              auto plain_indices_accessor =
+                  src_plain_indices.accessor<index_t, 2>();
               auto out_strides = resultBuffer.strides();
+              auto const out_stride_batch = out_strides[0];
+              auto const out_stride_compressed =
+                  AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+                      src_layout,
+                      "add_out_dense_sparse_compressed_cpu",
+                      [&out_strides] { return out_strides[1]; },
+                      [&out_strides] { return out_strides[2]; });
+              auto const out_stride_plain =
+                  AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+                      src_layout,
+                      "add_out_dense_sparse_compressed_cpu",
+                      [&out_strides] { return out_strides[2]; },
+                      [&out_strides] { return out_strides[1]; });
 
               for (const auto batch_idx : c10::irange(batch_count)) {
-                for (const auto irow : c10::irange(src_crow_indices.size(-1) - 1)) {
-                  index_t start_index = crow_indices_accessor[batch_idx][irow];
-                  index_t end_index = crow_indices_accessor[batch_idx][irow + 1];
+                for (const auto i_compressed :
+                     c10::irange(src_compressed_indices.size(-1) - 1)) {
+                  index_t start_index =
+                      compressed_indices_accessor[batch_idx][i_compressed];
+                  index_t end_index =
+                      compressed_indices_accessor[batch_idx][i_compressed + 1];
                   for (const auto i : c10::irange(start_index, end_index)) {
-                    auto icol = col_indices_accessor[batch_idx][i];
-                    auto index = batch_idx * out_strides[0] + irow * out_strides[1] + icol * out_strides[2];
-                    out_ptr[index] += cast_value * values_accessor[batch_idx][i];
+                    auto i_plain = plain_indices_accessor[batch_idx][i];
+                    auto index = batch_idx * out_stride_batch +
+                        i_compressed * out_stride_compressed +
+                        i_plain * out_stride_plain;
+                    out_ptr[index] +=
+                        cast_value * values_accessor[batch_idx][i];
                   }
                 }
               }
@@ -905,13 +990,15 @@ static void add_out_dense_sparse_csr_cpu(
   }
 }
 
-Tensor& add_out_sparse_csr_cpu(
+Tensor& add_out_sparse_compressed_cpu(
     const Tensor& self,
     const SparseCsrTensor& other,
     const Scalar& alpha,
     SparseCsrTensor& out) {
   if (self.layout() == kStrided) {
-    add_out_dense_sparse_csr_cpu(out, self, other, alpha);
+    add_out_dense_sparse_compressed_cpu(out, self, other, alpha);
+  } else if (other.layout() == kStrided) {
+    add_out_dense_sparse_compressed_cpu(out, other, self, alpha);
   } else {
     TORCH_CHECK(
         self.sizes().equals(other.sizes()),

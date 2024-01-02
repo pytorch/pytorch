@@ -10,6 +10,7 @@
 #include <c10/util/Optional.h>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
+#include <exception>
 #include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -22,15 +23,13 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-#ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#endif
 
 using namespace at::mps;
 
-namespace at {
-namespace native {
-namespace mps {
+namespace at::native::mps {
+
+void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)());
 
 struct MPSScalar {
   id<MTLBuffer> getMTLBuffer() const { return __builtin_bit_cast(id<MTLBuffer>, buffer.get()); }
@@ -226,8 +225,7 @@ struct MPSGraphCache
 
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
-    dispatch_sync(serialQueue_, ^() {
-
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
       // verify the cached entry doesn't already exist
       if (cache_.count(hash) != 0) {
         auto& entry = cache_.at(hash);
@@ -325,6 +323,19 @@ inline bool is_dense_in_storage(const at::Tensor& t) {
   return compute_storage_numel_distance(t) == static_cast<size_t>(t.numel());
 }
 
-} // namespace mps
-} // namespace native
-} // namespace at
+static inline void mtl_setBuffer(id<MTLComputeCommandEncoder> encoder, const Tensor& t, unsigned idx) {
+  [encoder setBuffer:getMTLBufferStorage(t)
+              offset:t.storage_offset() * t.element_size()
+             atIndex:idx];
+}
+
+static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
+                                     id<MTLComputePipelineState> cplState,
+                                     uint32_t length) {
+  const uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
+  auto size = MTLSizeMake(length, 1, 1);
+  auto threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, length), 1, 1);
+  [encoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
+}
+
+} // namespace at::native::mps

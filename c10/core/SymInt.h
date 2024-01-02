@@ -2,11 +2,15 @@
 
 #include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#include <cstdint>
+#include <iterator>
 #include <numeric>
+#include <ostream>
 #include <type_traits>
 
 namespace c10 {
@@ -88,6 +92,7 @@ class C10_API SymInt {
     // https://stackoverflow.com/questions/42534749/signed-extension-from-24-bit-to-32-bit-in-c
     uint64_t extended_bits = (unextended_bits ^ sign_bit_mask) - sign_bit_mask;
     return static_cast<SymNodeImpl*>(
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
 
@@ -126,7 +131,8 @@ class C10_API SymInt {
     if (auto r = maybe_as_int()) {
       return *r;
     }
-    TORCH_CHECK(false, "expected int but got ", *this);
+    TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
+        false, "when unpacking SymInt, expected int but got ", *this);
   }
 
   // Test if we have a hint for this int (e.g., guard_int would work).
@@ -145,10 +151,18 @@ class C10_API SymInt {
   // number can be used to diagnose overspecialization.
   int64_t guard_int(const char* file, int64_t line) const;
 
-  // Distinguish actual symbolic values from large negative integers.
+  // Insert a guard that this SymInt must be size-like, returning true if
+  // the integer actually is >= 0.  Unlike manually performing a >= 0 test,
+  // if the SymInt in question is an unbacked SymInt (or, potentially in the
+  // future, if it contains unbacked SymInts), we will also treat the
+  // unbacked SymInt as statically testing >= 2 (which will prevent us from
+  // choking on, e.g., contiguity checks.)
+  bool expect_size(const char* file, int64_t line) const;
+
+  // Distinguish actual symbolic values from constants stored on the heap
   bool is_symbolic() const {
     return is_heap_allocated() &&
-        toSymNodeImplUnowned()->large_negative_int() == 0;
+        !toSymNodeImplUnowned()->constant_int().has_value();
   }
 
   // N.B. It's important to keep this definition in the header
@@ -202,6 +216,11 @@ class C10_API SymInt {
   SymInt min(const SymInt& sci) const;
   SymInt max(const SymInt& sci) const;
 
+  // If both are symbolic, this checks if
+  // they share the same node.
+  // If both are not symbolic this just checks normal equality.
+  bool is_same(const SymInt& other) const;
+
   operator SymFloat() const;
 
   // Don't use this.  Prefer maybe_as_int instead
@@ -215,15 +234,10 @@ class C10_API SymInt {
       return c10::make_optional(data_);
     }
     auto* node = toSymNodeImplUnowned();
-    int64_t c = node->large_negative_int();
-    if (c != 0) {
-      return c10::make_optional(c);
+    if (auto c = node->constant_int()) {
+      return c;
     }
-    c10::optional<int64_t> d = node->maybe_as_int();
-    if (d.has_value()) {
-      return d;
-    }
-    return c10::nullopt;
+    return node->maybe_as_int();
   }
 
   // Return whether the integer is directly coercible to a SymInt
@@ -278,9 +292,9 @@ class C10_API SymInt {
 /// Sum of a list of SymInt; accumulates into the c10::SymInt expression
 template <
     typename C,
-    typename std::enable_if<
-        std::is_same<typename C::value_type, c10::SymInt>::value,
-        int>::type = 0>
+    typename std::enable_if_t<
+        std::is_same_v<typename C::value_type, c10::SymInt>,
+        int> = 0>
 inline c10::SymInt multiply_integers(const C& container) {
   return std::accumulate(
       container.begin(),
@@ -291,9 +305,9 @@ inline c10::SymInt multiply_integers(const C& container) {
 
 template <
     typename Iter,
-    typename = std::enable_if_t<std::is_same<
+    typename = std::enable_if_t<std::is_same_v<
         typename std::iterator_traits<Iter>::value_type,
-        c10::SymInt>::value>>
+        c10::SymInt>>>
 inline c10::SymInt multiply_integers(Iter begin, Iter end) {
   return std::accumulate(
       begin,

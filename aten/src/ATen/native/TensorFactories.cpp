@@ -8,6 +8,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/MapAllocator.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TracerMode.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/NamedTensorUtils.h>
@@ -100,8 +101,7 @@
 #include <string>
 #include <utility>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 void window_function_checks(
     const char* function_name,
@@ -255,7 +255,7 @@ Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::opt
                  c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
   Tensor result = at::detail::empty_cpu(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
   // See Note [Enabling Deterministic Operations]
-  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
     fill_empty_deterministic_(result);
   }
   return result;
@@ -327,7 +327,7 @@ Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<Sca
                          c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
   Tensor result = at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   // See Note [Enabling Deterministic Operations]
-  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
     fill_empty_deterministic_(result);
   }
   return result;
@@ -348,7 +348,7 @@ Tensor& empty_out(IntArrayRef size,
     result.resize_(size);
   }
   // See Note [Enabling Deterministic Operations]
-  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
     fill_empty_deterministic_(result);
   }
   return result;
@@ -706,6 +706,45 @@ Tensor linspace(
   return at::linspace_out(result, start, end, steps);
 }
 
+Tensor linspace(
+    const Tensor& start,
+    const Tensor& end,
+    int64_t steps,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(start.dim() == 0 && end.dim() == 0, "linspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s) and end with ", end.dim()," dimension(s).");
+  return at::linspace(start.item(), end.item(), steps, dtype, layout, device, pin_memory);
+}
+
+Tensor linspace(
+    const Tensor& start,
+    const Scalar& end,
+    int64_t steps,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(start.dim() == 0, "linspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s).");
+  return at::linspace(start.item(), end, steps, dtype, layout, device, pin_memory);
+}
+
+Tensor linspace(
+    const Scalar& start,
+    const Tensor& end,
+    int64_t steps,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(end.dim() == 0, "linspace only supports 0-dimensional start and end tensors, "
+    "but got end with ", end.dim()," dimension(s).");
+  return at::linspace(start, end.item(), steps, dtype, layout, device, pin_memory);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor logspace(
@@ -724,6 +763,48 @@ Tensor logspace(
   auto result_options = linspace_logspace_infer_options(start, end, options, "torch.logspace()");
   Tensor result = at::empty({steps}, result_options);
   return at::logspace_out(result, start, end, steps, base);
+}
+
+Tensor logspace(
+    const Tensor& start,
+    const Tensor& end,
+    int64_t steps,
+    double base,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(start.dim() == 0 && end.dim() == 0, "logspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s) and end with ", end.dim()," dimension(s).");
+  return at::logspace(start.item(), end.item(), steps, base, dtype, layout, device, pin_memory);
+}
+
+Tensor logspace(
+    const Tensor& start,
+    const Scalar& end,
+    int64_t steps,
+    double base,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(start.dim() == 0, "logspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s).");
+  return at::logspace(start.item(), end, steps, base, dtype, layout, device, pin_memory);
+}
+
+Tensor logspace(
+    const Scalar& start,
+    const Tensor& end,
+    int64_t steps,
+    double base,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(end.dim() == 0, "logspace only supports 0-dimensional start and end tensors, "
+    "but got end with ", end.dim()," dimension(s).");
+  return at::logspace(start, end.item(), steps, base, dtype, layout, device, pin_memory);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ones ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1196,14 +1277,51 @@ Tensor triu_indices_cpu(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+static Tensor zeros_sparse_compressed_symint(c10::SymIntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    Layout layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  check_size_nonnegative(size);
+  TORCH_CHECK(size.size() >= 2, "torch.zeros: Only batched sparse compressed (non-block) tensors are supported, but got size ", size);
+  auto size_ = C10_AS_INTARRAYREF_SLOW(size);
+  // torch.zeros cannot be used to create blocked tensors because its
+  // API lacks a method to specify the block size.
+  AT_DISPATCH_SPARSE_COMPRESSED_NONBLOCK_LAYOUTS(layout, "zeros_sparse_compressed", [&]{});
+
+  int64_t nnz = 0;
+  auto compressed_indices_size = DimVector(size_.slice(0, size.size() - 2));
+  auto plain_indices_and_values_size = DimVector(size_.slice(0, size.size() - 2));
+  compressed_indices_size.push_back(size_[at::sparse_csr::compressedDimension(layout, size_)] + 1);
+  plain_indices_and_values_size.push_back(nnz);
+
+  TensorOptions options = TensorOptions().dtype(ScalarType::Long).layout(Layout::Strided).device(device).pinned_memory(pin_memory);
+  auto compressed_indices = at::empty(compressed_indices_size, options);
+  compressed_indices.zero_();
+  auto plain_indices = at::empty(plain_indices_and_values_size, options);
+  auto values = at::empty(plain_indices_and_values_size, options.dtype(dtype));
+
+  return at::_sparse_compressed_tensor_unsafe(compressed_indices,
+                                              plain_indices,
+                                              values,
+                                              size_,
+                                              dtype,
+                                              layout,
+                                              device,
+                                              pin_memory);
+}
+
 Tensor zeros_symint(SymIntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
+  Layout layout_ = layout.value_or(Layout::Strided);
+  if (at::sparse_csr::is_sparse_compressed(layout_)) {
+    return zeros_sparse_compressed_symint(size, dtype, layout_, device, pin_memory);
+  }
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
   auto result = at::empty_symint(size, options);
   return result.zero_();
 }
@@ -1732,5 +1850,4 @@ Tensor rand(
 
 DEFINE_DISPATCH(kaiser_window_stub);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

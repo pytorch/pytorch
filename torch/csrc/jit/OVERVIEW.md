@@ -53,6 +53,7 @@ Sections start with a reference to the source file where the code related to the
   - [Interpreter](#interpreter)
   - [Graph Executor](#graph-executor)
     - [Specialization](#specialization)
+    - [Dynamic Shapes Options](#dynamic-shapes-options)
     - [Pre-derivative Optimization](#pre-derivative-optimization)
     - [Required Passes](#required-passes)
     - [Derivative Preserving Optimization](#derivative-preserving-optimization)
@@ -942,6 +943,22 @@ The executor *specializes* the `Graph` for the particular set of inputs. Special
 
 The ArgumentSpec object is used as a key into a cache that holds pre-optimized Code objects (held in an ExecutionPlan object). On a cache hit, an InterpreterState is created and the Code in the cache is run.
 
+### Dynamic Shapes Options ###
+
+In the "Specialization" section above, it is mentioned that "rank, but not size" is specialized on. This is partially true; size is sometimes specialized on because this specialization can sometimes produce more efficient code. By default, static shapes are specialized initially; if more shapes are observed then eventually the graph executor will generate a dynamic-shape version that doesn't depend on specific input shapes.
+
+To control these settings, you can use `torch._C._jit_set_fusion_strategy()`; it takes as an argument a list of tuples in the format `(type, number)` where `type` is a string in `{"DYNAMIC" ,"STATIC"}` and `number` is an integer.
+
+For example:
+```
+torch._C._jit_set_fusion_strategy([
+    ("STATIC", 2),
+    ("DYNAMIC", 20),
+])
+```
+
+This will make two attempts to generate static-shape graphs, and after that fall back to generating dynamic-shape graphs. If for some reason compilation keeps occuring (even with dynamic-shape graphs - e.g. this could happen if ranks or dtypes vary), after 20 compilation attempts the graph executor will fall back to running the graph without any attempts to compile it.
+
 ### Pre-derivative Optimization ###
 
 On a code cache miss, we generate a new optimized `Graph` on the fly (`compileSpec`). It starts by creating a copy of the initial `Graph` and setting the input types to the specialized `Tensor` types observed in this specialization. TensorType inputs to the `Graph` will get refined with types that know the device, number of dimensions, and requires grad state.
@@ -1176,9 +1193,8 @@ has two benefits: first, it reduces dispatcher overhead by combining multiple op
 single call to the fused kernel; and second, on GPU it can reduce the number of reads and writes to
 global GPU memory, which can be a significant portion of the runtime for pointwise operators.
 
-The current default fuser on NVIDIA GPUs is
-[NVFuser](https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/codegen/cuda/README.md), while other use cases use
-[NNC](https://github.com/pytorch/pytorch/tree/master/torch/csrc/jit/tensorexpr) as a fuser.
+The current default fuser is
+[NNC](https://github.com/pytorch/pytorch/tree/master/torch/csrc/jit/tensorexpr)
 
 Since fusers rely on specialized information that is only available at runtime - such as dtype,
 device, and shape - they are only applied after the first invocation of a torchscript function or
@@ -1198,8 +1214,8 @@ or switching the fuser could also provide a temporary fix in case of bugs.
 | NNC on CPU | `torch._C._jit_override_can_fuse_on_cpu()` |
 | NNC on GPU | `torch._C._jit_override_can_fuse_on_gpu()` |
 | NNC context manager | `with torch.jit.fuser("fuser1"):` |
-| NVFuser enable/disable | `torch._C._jit_set_nvfuser_enabled()` |
-| NVFuser context manager | `with torch.jit.fuser("fuser2")` |
+| NVFuser enable/disable (deprecated) | `torch._C._jit_set_nvfuser_enabled()` |
+| NVFuser context manager (deprecated) | `with torch.jit.fuser("fuser2")` |
 | oneDNN Graph on CPU | `torch._C._jit_set_llga_enabled(True)` |
 | oneDNN Graph context manager | `with torch.jit.fuser("fuser3"):` |
 
@@ -1210,7 +1226,7 @@ or switching the fuser could also provide a temporary fix in case of bugs.
 | NNC enable/disable | `torch::jit::setTensorExprFuserEnabled(bool);` | [here](https://github.com/pytorch/pytorch/blob/1a7e560adecb0192f69f4d05b990800b60dc380b/torch/csrc/jit/passes/tensorexpr_fuser.h#L22) |
 | NNC on CPU | `torch::jit::overrideCanFuseOnCPU(bool);` | [here](https://github.com/pytorch/pytorch/blob/1a7e560adecb0192f69f4d05b990800b60dc380b/torch/csrc/jit/codegen/fuser/interface.h#L28-L29) |
 | NNC on GPU | `torch::jit::overrideCanFuseOnGPU(bool);` | [here](https://github.com/pytorch/pytorch/blob/1a7e560adecb0192f69f4d05b990800b60dc380b/torch/csrc/jit/codegen/fuser/interface.h#L28-L29) |
-| NVFuser enable/disable | `torch::jit::fuser::cuda::setEnabled(bool);` | [here](https://github.com/pytorch/pytorch/blob/1a7e560adecb0192f69f4d05b990800b60dc380b/torch/csrc/jit/codegen/cuda/interface.h#L56) |
+| NVFuser enable/disable (deprecated) | `torch::jit::fuser::cuda::setEnabled(bool);` | [here](https://github.com/pytorch/pytorch/blob/1a7e560adecb0192f69f4d05b990800b60dc380b/torch/csrc/jit/codegen/cuda/interface.h#L56) |
 
 ### Disabling Optimizations ###
 

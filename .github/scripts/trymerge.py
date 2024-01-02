@@ -20,7 +20,18 @@ from collections import defaultdict
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Pattern, Tuple
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterable,
+    List,
+    NamedTuple,
+    Optional,
+    Pattern,
+    Tuple,
+)
 from warnings import warn
 
 import yaml
@@ -30,6 +41,7 @@ from github_utils import (
     gh_fetch_url,
     gh_post_commit_comment,
     gh_post_pr_comment,
+    gh_update_pr_state,
     GitHubComment,
 )
 
@@ -61,6 +73,7 @@ class JobCheckState(NamedTuple):
     classification: Optional[str]
     job_id: Optional[int]
     title: Optional[str]
+    summary: Optional[str]
 
 
 JobNameToStateDict = Dict[str, JobCheckState]
@@ -72,29 +85,6 @@ class WorkflowCheckState:
         self.url: str = url
         self.status: Optional[str] = status
         self.jobs: JobNameToStateDict = {}
-
-
-class FlakyRule:
-    def __init__(self, name: str, captures: List[str]):
-        self.name = re.compile(name)
-        self.captures = [re.compile(r) for r in captures]
-
-    def matches(self, job: Optional[Dict[str, Any]]) -> bool:
-        return (
-            job is not None
-            and self.name.search(job.get("name", "")) is not None
-            and job.get("failure_captures") is not None
-            and all(
-                any(
-                    r.search(capture) is not None
-                    for capture in job.get("failure_captures", [])
-                )
-                for r in self.captures
-            )
-        )
-
-    def __repr__(self) -> str:
-        return f"FlakyRule[name='{self.name}', captures={self.captures}]"
 
 
 GH_PR_REVIEWS_FRAGMENT = """
@@ -141,6 +131,7 @@ fragment PRCheckSuites on CheckSuiteConnection {
           detailsUrl
           databaseId
           title
+          summary
         }
         pageInfo {
           endCursor
@@ -332,6 +323,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cs_cursor: String, $cr_c
                     detailsUrl
                     databaseId
                     title
+                    summary
                   }
                   pageInfo {
                     endCursor
@@ -456,6 +448,7 @@ MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 ROCKSET_MERGES_COLLECTION = "merges"
 ROCKSET_MERGES_WORKSPACE = "commons"
 REMOTE_MAIN_BRANCH = "origin/main"
+DRCI_CHECKRUN_NAME = "Dr.CI"
 INTERNAL_CHANGES_CHECKRUN_NAME = "Meta Internal-Only Changes Check"
 HAS_NO_CONNECTED_DIFF_TITLE = (
     "There is no internal Diff connected, this can be merged now"
@@ -569,6 +562,7 @@ def add_workflow_conclusions(
                             classification=None,
                             job_id=checkrun_node["databaseId"],
                             title=checkrun_node["title"],
+                            summary=checkrun_node["summary"],
                         )
 
                 if bool(checkruns["pageInfo"]["hasNextPage"]):
@@ -599,6 +593,7 @@ def add_workflow_conclusions(
                 classification=None,
                 job_id=None,
                 title=None,
+                summary=None,
             )
     for job_name, job in no_workflow_obj.jobs.items():
         res[job_name] = job
@@ -628,19 +623,14 @@ def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -
     return comment.author_login == "facebook-github-bot"
 
 
-def get_ghstack_prs(
-    repo: GitRepo, pr: "GitHubPR", open_only: bool = True
+def _revlist_to_prs(
+    repo: GitRepo,
+    pr: "GitHubPR",
+    rev_list: Iterable[str],
+    should_skip: Optional[Callable[[int, "GitHubPR"], bool]] = None,
 ) -> List[Tuple["GitHubPR", str]]:
-    """
-    Get the PRs in the stack that are below this PR (inclusive).  Throws error if any of the open PRs are out of sync.
-    @:param open_only: Only return open PRs
-    """
-    assert pr.is_ghstack_pr()
-    entire_stack: List[Tuple[GitHubPR, str]] = []
-    # For ghstack, cherry-pick commits based from origin
-    orig_ref = f"{repo.remote}/{re.sub(r'/head$', '/orig', pr.head_ref())}"
-    rev_list = repo.revlist(f"{pr.default_branch()}..{orig_ref}")
-    for idx, rev in enumerate(reversed(rev_list)):
+    rc: List[Tuple[GitHubPR, str]] = []
+    for idx, rev in enumerate(rev_list):
         msg = repo.commit_message(rev)
         m = RE_PULL_REQUEST_RESOLVED.search(msg)
         if m is None:
@@ -651,17 +641,35 @@ def get_ghstack_prs(
             raise RuntimeError(
                 f"PR {m.group('number')} resolved to wrong owner/repo pair"
             )
-        stacked_pr_num = int(m.group("number"))
-        if stacked_pr_num != pr.pr_num:
-            stacked_pr = GitHubPR(pr.org, pr.project, stacked_pr_num)
-            if open_only and stacked_pr.is_closed():
-                print(
-                    f"Skipping {idx+1} of {len(rev_list)} PR (#{stacked_pr_num}) as its already been merged"
-                )
-                continue
-            entire_stack.append((stacked_pr, rev))
-        else:
-            entire_stack.append((pr, rev))
+        pr_num = int(m.group("number"))
+        candidate = GitHubPR(pr.org, pr.project, pr_num) if pr_num != pr.pr_num else pr
+        if should_skip is not None and should_skip(idx, candidate):
+            continue
+        rc.append((candidate, rev))
+    return rc
+
+
+def get_ghstack_prs(
+    repo: GitRepo, pr: "GitHubPR", open_only: bool = True
+) -> List[Tuple["GitHubPR", str]]:
+    """
+    Get the PRs in the stack that are below this PR (inclusive).  Throws error if any of the open PRs are out of sync.
+    @:param open_only: Only return open PRs
+    """
+    # For ghstack, cherry-pick commits based from origin
+    orig_ref = f"{repo.remote}/{pr.get_ghstack_orig_ref()}"
+    rev_list = repo.revlist(f"{pr.default_branch()}..{orig_ref}")
+
+    def skip_func(idx: int, candidate: "GitHubPR") -> bool:
+        if not open_only or not candidate.is_closed():
+            return False
+        print(
+            f"Skipping {idx+1} of {len(rev_list)} PR (#{candidate.pr_num}) as its already been merged"
+        )
+        return True
+
+    assert pr.is_ghstack_pr()
+    entire_stack = _revlist_to_prs(repo, pr, reversed(rev_list), skip_func)
 
     for stacked_pr, rev in entire_stack:
         if stacked_pr.is_closed():
@@ -709,6 +717,10 @@ class GitHubPR:
 
     def is_ghstack_pr(self) -> bool:
         return RE_GHSTACK_HEAD_REF.match(self.head_ref()) is not None
+
+    def get_ghstack_orig_ref(self) -> str:
+        assert self.is_ghstack_pr()
+        return re.sub(r"/head$", "/orig", self.head_ref())
 
     def is_base_repo_private(self) -> bool:
         return bool(self.info["baseRepository"]["isPrivate"])
@@ -924,6 +936,7 @@ class GitHubPR:
                     classification=None,
                     job_id=None,
                     title=None,
+                    summary=None,
                 )
 
         return self.conclusions
@@ -1261,13 +1274,6 @@ def read_merge_rules(
         return [MergeRule(**x) for x in rc]
 
 
-@lru_cache(maxsize=None)
-def read_flaky_rules() -> List[FlakyRule]:
-    # NOTE: This is currently hardcoded, can be extended to do per repo rules
-    FLAKY_RULES_URL = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/flaky-rules.json"
-    return _get_flaky_rules(FLAKY_RULES_URL)
-
-
 def find_matching_merge_rule(
     pr: GitHubPR,
     repo: Optional[GitRepo] = None,
@@ -1298,27 +1304,20 @@ def find_matching_merge_rule(
     reject_reason = f"No rule found to match PR. Please [report]{issue_link} this issue to DevX team."
 
     rules = read_merge_rules(repo, pr.org, pr.project)
-    flaky_rules = read_flaky_rules()
     if not rules:
         reject_reason = f"Rejecting the merge as no rules are defined for the repository in {MERGE_RULE_PATH}"
         raise RuntimeError(reject_reason)
+
     checks = pr.get_checkrun_conclusions()
-    base_rev = None
-    try:
-        # is allowed to fail if git is not available
-        base_rev = pr.get_merge_base()
-    except Exception as e:
-        print(
-            f"Failed fetching base git revision for {pr.pr_num}. Skipping additional classifications.\n"
-            f"{type(e)}\n{e}"
-        )
     checks = get_classifications(
+        pr.pr_num,
+        pr.project,
         checks,
-        pr.last_commit()["oid"],
-        base_rev,
-        flaky_rules,
         ignore_current_checks=ignore_current_checks,
     )
+
+    # This keeps the list of all approvers that could stamp the change
+    all_rule_approvers = {}
 
     # PRs can fail multiple merge rules, but it only needs to pass one rule to be approved.
     # If it fails all rules, we need to find the rule that it came closest to passing and report
@@ -1363,24 +1362,31 @@ def find_matching_merge_rule(
             continue
 
         # Does the PR have the required approvals for this rule?
-        rule_approvers_set = set()
+        rule_approvers = set()
         for approver in rule.approved_by:
             if "/" in approver:
                 org, name = approver.split("/")
-                rule_approvers_set.update(gh_get_team_members(org, name))
+                rule_approvers.update(gh_get_team_members(org, name))
             else:
-                rule_approvers_set.add(approver)
-        approvers_intersection = approved_by.intersection(rule_approvers_set)
+                rule_approvers.add(approver)
+        approvers_intersection = approved_by.intersection(rule_approvers)
         # If rule requires approvers but they aren't the ones that reviewed PR
-        if len(approvers_intersection) == 0 and len(rule_approvers_set) > 0:
-            if reject_reason_score < 10000:
+        if len(approvers_intersection) == 0 and len(rule_approvers) > 0:
+            # Less than or equal is intentionally used here to gather all potential
+            # approvers
+            if reject_reason_score <= 10000:
                 reject_reason_score = 10000
-                reject_reason = "\n".join(
-                    (
-                        "Approval needed from one of the following:",
-                        f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}",
-                    )
-                )
+
+                all_rule_approvers[rule.name] = rule.approved_by
+                # Prepare the reject reason
+                all_rule_approvers_msg = [
+                    f"- {name} ({', '.join(approved_by[:5])}{', ...' if len(approved_by) > 5 else ''})"
+                    for name, approved_by in all_rule_approvers.items()
+                ]
+
+                reject_reason = "Approvers from one of the following sets are needed:\n"
+                reject_reason += "\n".join(all_rule_approvers_msg)
+
             continue
 
         # Does the PR pass the checks required by this rule?
@@ -1465,11 +1471,6 @@ def checks_to_markdown_bullets(
     return [
         f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]
     ]
-
-
-@retries_decorator(rc=[])
-def _get_flaky_rules(url: str) -> List[FlakyRule]:
-    return [FlakyRule(**rule) for rule in gh_fetch_json_list(url)]
 
 
 @retries_decorator()
@@ -1575,6 +1576,27 @@ where
         return []
 
 
+@retries_decorator()
+def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
+    """
+    Query HUD API to find similar failures to decide if they are flaky
+    """
+    # NB: This doesn't work internally atm because this requires making an
+    # external API call to HUD
+    failures = gh_fetch_url(
+        f"https://hud.pytorch.org/api/drci/drci?prNumber={pr_num}",
+        data=f"repo={project}",
+        headers={
+            "Authorization": os.getenv("DRCI_BOT_KEY", ""),
+            "Accept": "application/vnd.github.v3+json",
+        },
+        method="POST",
+        reader=json.load,
+    )
+
+    return failures.get(str(pr_num), {}) if failures else {}
+
+
 REMOVE_JOB_NAME_SUFFIX_REGEX = re.compile(r", [0-9]+, [0-9]+, .+\)$")
 
 
@@ -1583,89 +1605,88 @@ def remove_job_name_suffix(name: str, replacement: str = ")") -> str:
 
 
 def is_broken_trunk(
-    head_job: Optional[Dict[str, Any]], base_jobs: Optional[Dict[str, Dict[str, Any]]]
+    name: str,
+    drci_classifications: Any,
 ) -> bool:
-    if not head_job or not base_jobs:
+    if not name or not drci_classifications:
         return False
 
+    # Consult the list of broken trunk failures from Dr.CI
     return any(
-        head_job["conclusion"] == base_job["conclusion"]
-        and head_job["failure_captures"] == base_job["failure_captures"]
-        for base_job in base_jobs.values()
+        name == broken_trunk["name"]
+        for broken_trunk in drci_classifications.get("BROKEN_TRUNK", [])
+    )
+
+
+def is_flaky(
+    name: str,
+    drci_classifications: Any,
+) -> bool:
+    if not name or not drci_classifications:
+        return False
+
+    # Consult the list of flaky failures from Dr.CI
+    return any(name == flaky["name"] for flaky in drci_classifications.get("FLAKY", []))
+
+
+def is_invalid_cancel(
+    name: str,
+    conclusion: Optional[str],
+    drci_classifications: Any,
+) -> bool:
+    """
+    After https://github.com/pytorch/test-infra/pull/4579, invalid cancelled
+    signals have been removed from HUD and Dr.CI. The same needs to be done
+    here for consistency
+    """
+    if (
+        not name
+        or not drci_classifications
+        or not conclusion
+        or conclusion.upper() != "CANCELLED"
+    ):
+        return False
+
+    # If a job is cancelled and not listed as a failure by Dr.CI, it's an
+    # invalid signal and can be ignored
+    return all(
+        name != failure["name"] for failure in drci_classifications.get("FAILED", [])
     )
 
 
 def get_classifications(
+    pr_num: int,
+    project: str,
     checks: Dict[str, JobCheckState],
-    head_sha: str,
-    merge_base: Optional[str],
-    flaky_rules: List[FlakyRule],
     ignore_current_checks: Optional[List[str]],
 ) -> Dict[str, JobCheckState]:
-    # Group by job name without shard id and suffix to correctly identify broken
-    # trunk failures, i.e. linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default)
-    head_sha_jobs: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
-    merge_base_jobs: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
+    # Get the failure classification from Dr.CI, which is the source of truth
+    # going forward. It's preferable to try calling Dr.CI API directly first
+    # to get the latest results as well as update Dr.CI PR comment
+    drci_classifications = get_drci_classifications(pr_num=pr_num, project=project)
+    print(f"From Dr.CI API: {json.dumps(drci_classifications)}")
 
-    if merge_base is not None:
-
-        def insert(
-            d: Dict[str, Dict[str, Dict[str, Any]]],
-            key: str,
-            val: Dict[str, Any],
-            overwrite_failed_run_attempt: bool,
-        ) -> None:
-            key_no_suffix = remove_job_name_suffix(key)
-            if key not in d[key_no_suffix]:
-                d[key_no_suffix][key] = val
-                return
-
-            # When overwrite_failed_run_attempt is set to True, always overwrite
-            # the job with the result from the latest attempt. This option is for
-            # jobs from the pull request head_sha where the latest retry is used
-            # when merging
-            #
-            # When overwrite_failed_run_attempt is False, only overwrite the job
-            # with the result from the latest attempt if the latest retry failed.
-            # This option is for jobs from the merger_base where we want to record
-            # failures for broken trunk
-            if d[key_no_suffix][key]["id"] < val["id"] and (
-                overwrite_failed_run_attempt or not is_passing_status(val["conclusion"])
-            ):
-                d[key_no_suffix][key] = val
-
-        rockset_results = get_rockset_results(head_sha, merge_base)
-        for rockset_result in rockset_results:
-            name = f"{rockset_result['workflow_name']} / {rockset_result['name']}"
-            if rockset_result["head_sha"] == head_sha:
-                insert(
-                    head_sha_jobs,
-                    name,
-                    rockset_result,
-                    overwrite_failed_run_attempt=True,
-                )
-            else:
-                insert(
-                    merge_base_jobs,
-                    name,
-                    rockset_result,
-                    overwrite_failed_run_attempt=False,
-                )
+    # NB: if the latest results from Dr.CI is not available, i.e. when calling from
+    # SandCastle, we fallback to any results we can find on Dr.CI check run summary
+    if (
+        not drci_classifications
+        and DRCI_CHECKRUN_NAME in checks
+        and checks[DRCI_CHECKRUN_NAME]
+        and checks[DRCI_CHECKRUN_NAME].summary
+    ):
+        drci_summary = checks[DRCI_CHECKRUN_NAME].summary
+        try:
+            print(f"From Dr.CI checkrun summary: {drci_summary}")
+            drci_classifications = json.loads(str(drci_summary))
+        except json.JSONDecodeError as error:
+            warn("Invalid Dr.CI checkrun summary")
+            drci_classifications = {}
 
     checks_with_classifications = checks.copy()
     for name, check in checks.items():
-        if check.status == "SUCCESS":
+        if check.status == "SUCCESS" or check.status == "NEUTRAL":
             continue
-        if ignore_current_checks is not None and name in ignore_current_checks:
-            checks_with_classifications[name] = JobCheckState(
-                check.name,
-                check.url,
-                check.status,
-                "IGNORE_CURRENT_CHECK",
-                check.job_id,
-                check.title,
-            )
-            continue
+
         if "unstable" in name:
             checks_with_classifications[name] = JobCheckState(
                 check.name,
@@ -1674,13 +1695,13 @@ def get_classifications(
                 "UNSTABLE",
                 check.job_id,
                 check.title,
+                check.summary,
             )
             continue
 
-        name_no_suffix = remove_job_name_suffix(name)
-        head_sha_job = head_sha_jobs.get(name_no_suffix, {}).get(name)
-
-        if is_broken_trunk(head_sha_job, merge_base_jobs.get(name_no_suffix)):
+        # NB: It's important to note that when it comes to ghstack and broken trunk classification,
+        # Dr.CI uses the base of the whole stack
+        if is_broken_trunk(name, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,
@@ -1688,11 +1709,48 @@ def get_classifications(
                 "BROKEN_TRUNK",
                 check.job_id,
                 check.title,
+                check.summary,
             )
-        elif any(rule.matches(head_sha_job) for rule in flaky_rules):
+            continue
+
+        elif is_flaky(name, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
-                check.name, check.url, check.status, "FLAKY", check.job_id, check.title
+                check.name,
+                check.url,
+                check.status,
+                "FLAKY",
+                check.job_id,
+                check.title,
+                check.summary,
             )
+            continue
+
+        elif is_invalid_cancel(name, check.status, drci_classifications):
+            # NB: Create a new category here for invalid cancelled signals because
+            # there are usually many of them when they happen. So, they shouldn't
+            # be counted toward ignorable failures threshold
+            checks_with_classifications[name] = JobCheckState(
+                check.name,
+                check.url,
+                check.status,
+                "INVALID_CANCEL",
+                check.job_id,
+                check.title,
+                check.summary,
+            )
+            continue
+
+        if ignore_current_checks is not None and name in ignore_current_checks:
+            checks_with_classifications[name] = JobCheckState(
+                check.name,
+                check.url,
+                check.status,
+                "IGNORE_CURRENT_CHECK",
+                check.job_id,
+                check.title,
+                check.summary,
+            )
+
     return checks_with_classifications
 
 
@@ -1700,6 +1758,16 @@ def filter_checks_with_lambda(
     checks: JobNameToStateDict, status_filter: Callable[[Optional[str]], bool]
 ) -> List[JobCheckState]:
     return [check for check in checks.values() if status_filter(check.status)]
+
+
+def get_pr_commit_sha(repo: GitRepo, pr: GitHubPR) -> str:
+    commit_sha = pr.get_merge_commit()
+    if commit_sha is not None:
+        return commit_sha
+    commits = repo.commits_resolving_gh_pr(pr.pr_num)
+    if len(commits) == 0:
+        raise PostCommentError("Can't find any commits resolving PR")
+    return commits[0]
 
 
 def validate_revert(
@@ -1723,30 +1791,96 @@ def validate_revert(
             f"Will not revert as @{author_login} is not one of "
             f"[{', '.join(allowed_reverters)}], but instead is {author_association}."
         )
-    skip_internal_checks = can_skip_internal_checks(pr, comment_id)
-
-    # Ignore associated diff it PR does not have internal changes
-    if pr.has_no_connected_diff():
-        skip_internal_checks = True
 
     # Raises exception if matching rule is not found, but ignores all status checks
     find_matching_merge_rule(
-        pr, repo, skip_mandatory_checks=True, skip_internal_checks=skip_internal_checks
+        pr, repo, skip_mandatory_checks=True, skip_internal_checks=True
     )
-    commit_sha = pr.get_merge_commit()
-    if commit_sha is None:
-        commits = repo.commits_resolving_gh_pr(pr.pr_num)
-        if len(commits) == 0:
-            raise PostCommentError("Can't find any commits resolving PR")
-        commit_sha = commits[0]
-    msg = repo.commit_message(commit_sha)
-    rc = RE_DIFF_REV.search(msg)
-    if rc is not None and not skip_internal_checks:
-        raise PostCommentError(
-            f"Can't revert PR that was landed via phabricator as {rc.group(1)}.  "
-            + "Please revert by going to the internal diff and clicking Unland."
-        )
+    commit_sha = get_pr_commit_sha(repo, pr)
     return (author_login, commit_sha)
+
+
+def get_ghstack_dependent_prs(
+    repo: GitRepo, pr: GitHubPR, only_closed: bool = True
+) -> List[Tuple[str, GitHubPR]]:
+    """
+    Get the PRs in the stack that are above this PR (inclusive).
+    Throws error if stack have branched or original branches are gone
+    """
+    assert pr.is_ghstack_pr()
+    orig_ref = f"{repo.remote}/{pr.get_ghstack_orig_ref()}"
+    rev_list = repo.revlist(f"{pr.default_branch()}..{orig_ref}")
+    if len(rev_list) == 0:
+        raise RuntimeError(
+            f"PR {pr.pr_num} does not have any revisions associated with it"
+        )
+    skip_len = len(rev_list) - 1
+    for branch in repo.branches_containing_ref(orig_ref):
+        candidate = repo.revlist(f"{pr.default_branch()}..{branch}")
+        # Pick longest candidate
+        if len(candidate) > len(rev_list):
+            candidate, rev_list = rev_list, candidate
+        # Validate that candidate always ends rev-list
+        if rev_list[-len(candidate) :] != candidate:
+            raise RuntimeError(
+                f"Branch {branch} revlist {', '.join(candidate)} is not a subset of {', '.join(rev_list)}"
+            )
+    # Remove commits original PR depends on
+    if skip_len > 0:
+        rev_list = rev_list[:-skip_len]
+    rc: List[Tuple[str, GitHubPR]] = []
+    for pr_, sha in _revlist_to_prs(repo, pr, rev_list):
+        if not pr_.is_closed():
+            if not only_closed:
+                rc.append(("", pr_))
+            continue
+        commit_sha = get_pr_commit_sha(repo, pr_)
+        rc.append((commit_sha, pr_))
+    return rc
+
+
+def do_revert_prs(
+    repo: GitRepo,
+    shas_and_prs: List[Tuple[str, GitHubPR]],
+    *,
+    author_login: str,
+    extra_msg: str = "",
+    skip_internal_checks: bool = False,
+    dry_run: bool = False,
+) -> None:
+    # Prepare and push revert commits
+    commit_shas: List[str] = []
+    for commit_sha, pr in shas_and_prs:
+        revert_msg = f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
+        revert_msg += extra_msg
+        repo.checkout(pr.default_branch())
+        repo.revert(commit_sha)
+        msg = repo.commit_message("HEAD")
+        msg = re.sub(RE_PULL_REQUEST_RESOLVED, "", msg)
+        msg += revert_msg
+        repo.amend_commit_message(msg)
+    repo.push(shas_and_prs[0][1].default_branch(), dry_run)
+
+    # Comment/reopen PRs
+    for commit_sha, pr in shas_and_prs:
+        revert_message = (
+            f"@{pr.get_pr_creator_login()} your PR has been successfully reverted."
+        )
+        if (
+            pr.has_internal_changes()
+            and not pr.has_no_connected_diff()
+            and not skip_internal_checks
+        ):
+            revert_message += "\n:warning: This PR might contain internal changes"
+            revert_message += "\ncc: @pytorch/pytorch-dev-infra"
+        gh_post_pr_comment(
+            pr.org, pr.project, pr.pr_num, revert_message, dry_run=dry_run
+        )
+
+        if not dry_run:
+            pr.add_numbered_label("reverted")
+            gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
+            gh_update_pr_state(pr.org, pr.project, pr.pr_num)
 
 
 def try_revert(
@@ -1757,33 +1891,37 @@ def try_revert(
     comment_id: Optional[int] = None,
     reason: Optional[str] = None,
 ) -> None:
-    def post_comment(msg: str) -> None:
-        gh_post_pr_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
-
     try:
         author_login, commit_sha = validate_revert(repo, pr, comment_id=comment_id)
     except PostCommentError as e:
-        return post_comment(str(e))
-    revert_msg = f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
-    revert_msg += f" due to {reason}" if reason is not None else ""
-    revert_msg += (
+        gh_post_pr_comment(pr.org, pr.project, pr.pr_num, str(e), dry_run=dry_run)
+        return
+
+    extra_msg = f" due to {reason}" if reason is not None else ""
+    extra_msg += (
         f" ([comment]({pr.get_comment_by_id(comment_id).url}))\n"
         if comment_id is not None
         else "\n"
     )
-    repo.checkout(pr.default_branch())
-    repo.revert(commit_sha)
-    msg = repo.commit_message("HEAD")
-    msg = re.sub(RE_PULL_REQUEST_RESOLVED, "", msg)
-    msg += revert_msg
-    repo.amend_commit_message(msg)
-    repo.push(pr.default_branch(), dry_run)
-    post_comment(
-        f"@{pr.get_pr_creator_login()} your PR has been successfully reverted."
+    shas_and_prs = [(commit_sha, pr)]
+    if pr.is_ghstack_pr():
+        try:
+            shas_and_prs = get_ghstack_dependent_prs(repo, pr)
+            prs_to_revert = " ".join([t[1].get_pr_url() for t in shas_and_prs])
+            print(f"About to stack of PRs: {prs_to_revert}")
+        except Exception as e:
+            print(
+                f"Failed to fetch dependent PRs: {str(e)}, fall over to single revert"
+            )
+
+    do_revert_prs(
+        repo,
+        shas_and_prs,
+        author_login=author_login,
+        extra_msg=extra_msg,
+        dry_run=dry_run,
+        skip_internal_checks=can_skip_internal_checks(pr, comment_id),
     )
-    if not dry_run:
-        pr.add_numbered_label("reverted")
-        gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
 
 
 def prefix_with_github_url(suffix_str: str) -> str:
@@ -1859,6 +1997,8 @@ def categorize_checks(
             # ignored anyway. This is useful to not need to wait for scarce resources
             # like ROCm, which is also frequently in unstable mode
             pending_checks.append((checkname, url, job_id))
+        elif classification == "INVALID_CANCEL":
+            continue
         elif not is_passing_status(check_runs[checkname].status):
             target = (
                 ignorable_failed_checks[classification]
@@ -1904,7 +2044,8 @@ def merge(
     ignore_current: bool = False,
 ) -> None:
     initial_commit_sha = pr.last_commit()["oid"]
-    print(f"Attempting merge of {initial_commit_sha}")
+    pr_link = f"https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num}"
+    print(f"Attempting merge of {initial_commit_sha} ({pr_link})")
 
     if MERGE_IN_PROGRESS_LABEL not in pr.get_labels():
         gh_add_labels(pr.org, pr.project, pr.pr_num, [MERGE_IN_PROGRESS_LABEL])
@@ -1969,7 +2110,6 @@ def merge(
     start_time = time.time()
     last_exception = ""
     elapsed_time = 0.0
-    flaky_rules = read_flaky_rules()
     ignore_current_checks = [
         x[0] for x in ignore_current_checks_info
     ]  # convert to List[str] for convenience
@@ -2002,10 +2142,9 @@ def merge(
 
             checks = pr.get_checkrun_conclusions()
             checks = get_classifications(
+                pr.pr_num,
+                pr.project,
                 checks,
-                pr.last_commit()["oid"],
-                pr.get_merge_base(),
-                flaky_rules,
                 ignore_current_checks=ignore_current_checks,
             )
             pending, failing, _ = categorize_checks(

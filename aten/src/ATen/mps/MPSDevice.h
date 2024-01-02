@@ -24,8 +24,7 @@ typedef void* MTLLibrary_t;
 
 using namespace std;
 
-namespace at {
-namespace mps {
+namespace at::mps {
 
 // Helper enum to check if a MPSGraph op is supported in a given macOS version
 enum class MacOSVersion : uint32_t {
@@ -88,5 +87,4 @@ TORCH_API bool is_macos_13_or_newer(MacOSVersion version = MacOSVersion::MACOS_V
 TORCH_API bool is_macos_14_or_newer(MacOSVersion version = MacOSVersion::MACOS_VER_14_0_PLUS);
 TORCH_API at::Allocator* GetMPSAllocator(bool useSharedAllocator = false);
 
-} // namespace mps
-} // namespace at
+} // namespace at::mps

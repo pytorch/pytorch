@@ -37,7 +37,7 @@
 
 namespace c10 {
 
-// in c++17 std::result_of has been superceded by std::invoke_result.  Since
+// in c++17 std::result_of has been superseded by std::invoke_result.  Since
 // c++20, std::result_of is removed.
 template <typename F, typename... args>
 #if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
@@ -65,10 +65,10 @@ constexpr bool is_pod_v = is_pod<T>::value;
 namespace guts {
 
 template <typename Base, typename Child, typename... Args>
-typename std::enable_if<
-    !std::is_array<Base>::value && !std::is_array<Child>::value &&
-        std::is_base_of<Base, Child>::value,
-    std::unique_ptr<Base>>::type
+std::enable_if_t<
+    !std::is_array_v<Base> && !std::is_array_v<Child> &&
+        std::is_base_of_v<Base, Child>,
+    std::unique_ptr<Base>>
 make_unique_base(Args&&... args) {
   return std::unique_ptr<Base>(new Child(std::forward<Args>(args)...));
 }
@@ -188,17 +188,17 @@ CUDA_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
 #undef CUDA_HOST_DEVICE
 
 template <typename Functor, typename... Args>
-typename std::enable_if<
-    std::is_member_pointer<typename std::decay<Functor>::type>::value,
-    typename c10::invoke_result_t<Functor, Args...>>::type
+std::enable_if_t<
+    std::is_member_pointer_v<std::decay_t<Functor>>,
+    typename c10::invoke_result_t<Functor, Args...>>
 invoke(Functor&& f, Args&&... args) {
   return std::mem_fn(std::forward<Functor>(f))(std::forward<Args>(args)...);
 }
 
 template <typename Functor, typename... Args>
-typename std::enable_if<
-    !std::is_member_pointer<typename std::decay<Functor>::type>::value,
-    typename c10::invoke_result_t<Functor, Args...>>::type
+std::enable_if_t<
+    !std::is_member_pointer_v<std::decay_t<Functor>>,
+    typename c10::invoke_result_t<Functor, Args...>>
 invoke(Functor&& f, Args&&... args) {
   return std::forward<Functor>(f)(std::forward<Args>(args)...);
 }
@@ -232,50 +232,6 @@ struct function_takes_identity_argument<
     void_t<decltype(std::declval<Func>()(_identity()))>> : std::true_type {};
 #endif
 } // namespace detail
-
-// GCC 4.8 doesn't define std::to_string, even though that's in C++11. Let's
-// define it.
-namespace detail {
-class DummyClassForToString final {};
-} // namespace detail
-} // namespace guts
-} // namespace c10
-namespace std {
-// We use SFINAE to detect if std::to_string exists for a type, but that only
-// works if the function name is defined. So let's define a std::to_string for a
-// dummy type. If you're getting an error here saying that this overload doesn't
-// match your std::to_string() call, then you're calling std::to_string() but
-// should be calling c10::guts::to_string().
-inline std::string to_string(c10::guts::detail::DummyClassForToString) {
-  return "";
-}
-
-} // namespace std
-namespace c10 {
-namespace guts {
-namespace detail {
-
-template <class T, class Enable = void>
-struct to_string_ final {
-  static std::string call(T value) {
-    std::ostringstream str;
-    str << value;
-    return str.str();
-  }
-};
-// If a std::to_string exists, use that instead
-template <class T>
-struct to_string_<T, void_t<decltype(std::to_string(std::declval<T>()))>>
-    final {
-  static std::string call(T value) {
-    return std::to_string(value);
-  }
-};
-} // namespace detail
-template <class T>
-inline std::string to_string(T value) {
-  return detail::to_string_<T>::call(value);
-}
 
 } // namespace guts
 } // namespace c10

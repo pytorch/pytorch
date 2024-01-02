@@ -1,4 +1,4 @@
-# Owner(s): ["module: primTorch", "module: decompositions"]
+# Owner(s): ["module: decompositions"]
 
 from collections import defaultdict
 from torch import Tensor
@@ -7,14 +7,17 @@ from torch._decomp import core_aten_decompositions, decomposition_table
 from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.utils import _pytree as pytree
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import tf32_off
+from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     TestCase,
     skipIfCrossRef,
     suppress_warnings,
     TEST_WITH_ASAN,
+    TEST_WITH_SLOW,
     run_tests,
     skipIfTorchDynamo,
 )
@@ -38,13 +41,19 @@ aten = torch.ops.aten
 
 
 # TODO: this isn't going to work with non-aten namespaces
-def overload_to_aten_name(overload):
-    return overload._schema.name.split("::")[1]
+def overload_to_aten_name(op):
+    return op._schema.name.split("::")[1]
 
 
 # All operators that can have decomp tests
-decomposition_names = {overload_to_aten_name(k) for k in decomposition_table}
-core_decomposition_names = {overload_to_aten_name(k) for k in core_aten_decompositions()}
+decomposition_names = {
+    overload_to_aten_name(k) for k in decomposition_table
+    if isinstance(k, torch._ops.OpOverload)
+}
+core_decomposition_names = {
+    overload_to_aten_name(k) for k in core_aten_decompositions()
+    if isinstance(k, torch._ops.OpOverload)
+}
 _decomp_test_ops = [
     op
     for op in op_db
@@ -233,6 +242,21 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         (torch.int16, torch.ops.aten.linspace.default) : (0, 1),
         (torch.int32, torch.ops.aten.linspace.default) : (0, 1),
         (torch.int64, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.int8, torch.ops.aten.linspace.Tensor_Tensor) : (0, 1),
+        (torch.uint8, torch.ops.aten.linspace.Tensor_Tensor) : (0, 1),
+        (torch.int16, torch.ops.aten.linspace.Tensor_Tensor) : (0, 1),
+        (torch.int32, torch.ops.aten.linspace.Tensor_Tensor) : (0, 1),
+        (torch.int64, torch.ops.aten.linspace.Tensor_Tensor) : (0, 1),
+        (torch.int8, torch.ops.aten.linspace.Tensor_Scalar) : (0, 1),
+        (torch.uint8, torch.ops.aten.linspace.Tensor_Scalar) : (0, 1),
+        (torch.int16, torch.ops.aten.linspace.Tensor_Scalar) : (0, 1),
+        (torch.int32, torch.ops.aten.linspace.Tensor_Scalar) : (0, 1),
+        (torch.int64, torch.ops.aten.linspace.Tensor_Scalar) : (0, 1),
+        (torch.int8, torch.ops.aten.linspace.Scalar_Tensor) : (0, 1),
+        (torch.uint8, torch.ops.aten.linspace.Scalar_Tensor) : (0, 1),
+        (torch.int16, torch.ops.aten.linspace.Scalar_Tensor) : (0, 1),
+        (torch.int32, torch.ops.aten.linspace.Scalar_Tensor) : (0, 1),
+        (torch.int64, torch.ops.aten.linspace.Scalar_Tensor) : (0, 1),
     }
     if (decomp.dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]
@@ -405,9 +429,8 @@ def any_unsupported(args, kwargs):
         else:
             return False
 
-    flat_args, _ = tree_flatten(args)
-    flat_kwargs, _ = tree_flatten(kwargs)
-    return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
+    flat_args = pytree.arg_tree_leaves(*args, **kwargs)
+    return any(test_unsupported(x) for x in flat_args)
 
 
 core_backward_failures = {
@@ -422,6 +445,7 @@ core_backward_failures = {
     skip('logaddexp'),  # slow: fails with --timeout=360 secs
     skip('native_dropout_backward'),  # slow: fails with --timeout=360 secs
     xfail('nn.functional.binary_cross_entropy_with_logits'),
+    skip('nn.functional.glu'),  # slow: fails with --timeout=360 secs
     xfail('nn.functional.hardshrink'),
     xfail('nn.functional.softshrink'),
     skip('nn.functional.unfold'),  # slow: fails with --timeout=360 secs
@@ -442,8 +466,23 @@ core_backward_failures = {
     skip('xlogy'),  # slow: fails with --timeout=360 secs
     xfail('zero_'),
 }
+if not TEST_WITH_SLOW:
+    core_backward_failures.update({
+        skip('addr'),  # slow: takes 46 sec on A100
+        skip('baddbmm'),  # slow: takes 800+ sec on A100
+        skip('clamp_min'),  # slow: takes 800 sec on A100
+        skip('clamp_max'),  # slow: takes 800 sec on A100
+        skip('logit'),  # slow: takes 44 sec on A100
+        skip('nn.functional.hardswish'),  # slow: takes 60 sec on A100
+        skip('std_mean'),  # slow: takes 170 sec on A100
+        skip('split', variant_name='list_args'),  # slow: takes 118 sec on A100
+        skip('transpose'),  # slow: takes 50 sec on A100
+        skip('unbind'),  # slow: takes 70 sec on A100
+        skip('unsafe_split'),  # slow: takes 49 sec on A100
+    })
 
 
+@unMarkDynamoStrictTest
 class TestDecomp(TestCase):
     longMessage = True
 
@@ -639,9 +678,9 @@ class TestDecomp(TestCase):
             if self.run_all:
                 # Execute recursively via DFS, to find the root of a possible error first
                 with self:
-                    decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+                    decomp_out = pytree.tree_leaves(decomposition(*args, **kwargs))
             else:
-                decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+                decomp_out = pytree.tree_leaves(decomposition(*args, **kwargs))
 
             # At this stage we should not be decomposing an in-place op
             # We'd like to have decompositions that decompose out-of-place ops into out-of-place ops
@@ -651,7 +690,7 @@ class TestDecomp(TestCase):
             # decomposition does not modify any of the inputs in-place. If it does
             # real_out should be differen than decom_out so we should catch this
             real_out_unflat = func(*args, **kwargs)
-            real_out, _ = tree_flatten(real_out_unflat)
+            real_out = pytree.tree_leaves(real_out_unflat)
 
             assert len(real_out) == len(decomp_out)
 
@@ -837,6 +876,68 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions.elu_backward(grad_out, 1.0, 1, 1, True, out)
         self.assertEqual(ref, res)
 
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_threshold_backward_dtype(self, device):
+        grad = torch.randint(10, (4,), device=device)
+        input_tensor = torch.randint(10, (4,), device=device)
+
+        ref = torch.ops.aten.threshold_backward(grad, input_tensor, 1)
+        res = torch._decomp.decompositions.threshold_backward(grad, input_tensor, 1)
+        self.assertEqual(ref.dtype, res.dtype)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_weight_norm_interface(self, device):
+        g = torch.randn((3, 10, 10), device=device)
+        v = torch.randn((1, 1, 10), device=device)
+
+        ref = torch.ops.aten._weight_norm_interface(g, v, 2)
+        res = torch._decomp.decompositions._weight_norm_interface(g, v, 2)
+        self.assertTrue(torch.allclose(ref[0], res[0]))
+        self.assertTrue(torch.allclose(ref[1], res[1]))
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_sdpa(self, device):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._decomp import get_decompositions
+        from torch.nn import functional as F
+
+        class ScaledDotProductAttention(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, query_layer, key_layer, value_layer):
+                attn_output = F.scaled_dot_product_attention(
+                    query_layer, key_layer, value_layer, None, dropout_p=0.0, is_causal=True
+                )
+                return attn_output
+
+
+        query_layer = torch.randn(1, 128, 100, 64, device=device)
+        key_layer = torch.randn(1, 128, 100, 64, device=device)
+        value_layer = torch.randn(1, 128, 100, 64, device=device)
+
+        attention = ScaledDotProductAttention()
+        fx_g = make_fx(
+            attention,
+            decomposition_table=get_decompositions(
+                [
+                    torch.ops.aten._scaled_dot_product_flash_attention.default,
+                ]
+            ),
+        )(query_layer, key_layer, value_layer)
+
+        compiled_res = fx_g(query_layer, key_layer, value_layer)
+        eager_res = F.scaled_dot_product_attention(
+            query_layer, key_layer, value_layer, None, dropout_p=0.0, is_causal=True
+        )
+        self.assertTrue(torch.allclose(compiled_res, eager_res, atol=1e-6, rtol=1e-5))
+
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
 
@@ -908,7 +1009,8 @@ class HasDecompTest(TestCase):
         # Some decompositions are registered for CompositeImplicitAutograd
         # operators, which never appear in AOTAutograd's graph so are never used.
         useful_decomps = {op for op in decomposition_table.keys()
-                          if self._can_appear_in_trace(op)}
+                          if isinstance(op, torch._ops.OpOverload) and
+                          self._can_appear_in_trace(op)}
         core_decomps = torch._decomp.core_aten_decompositions().keys()
         core_aten_ops = useful_decomps - core_decomps
         self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))

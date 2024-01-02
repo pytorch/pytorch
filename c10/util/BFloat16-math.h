@@ -15,8 +15,7 @@ template <typename T>
 struct is_reduced_floating_point
     : std::integral_constant<
           bool,
-          std::is_same<T, c10::Half>::value ||
-              std::is_same<T, c10::BFloat16>::value> {};
+          std::is_same_v<T, c10::Half> || std::is_same_v<T, c10::BFloat16>> {};
 
 template <typename T>
 constexpr bool is_reduced_floating_point_v =
@@ -39,6 +38,12 @@ template <
     typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
 inline T atan(T a) {
   return std::atan(float(a));
+}
+template <
+    typename T,
+    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+inline T atanh(T a) {
+  return std::atanh(float(a));
 }
 template <
     typename T,

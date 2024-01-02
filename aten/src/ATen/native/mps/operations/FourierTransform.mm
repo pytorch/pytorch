@@ -1,14 +1,20 @@
+//  Copyright © 2023 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/UpSample.h>
+#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <MetalPerformanceShadersGraph/MPSGraphFourierTransformOps.h>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-
+#include <ATen/ops/_fft_c2c.h>
+#include <ATen/ops/_fft_c2r.h>
+#include <ATen/ops/_fft_r2c.h>
 #endif
 
 namespace at::native {
+namespace mps {
 
 enum class FFTType {
     R2C,
@@ -17,113 +23,127 @@ enum class FFTType {
 };
 
 // Prototypes
+Tensor _fft_r2c_mps(const Tensor& input, int64_t signal_ndim, bool normalized, IntArrayRef signal_sizes);
+Tensor& _fft_r2c_mps_out(const Tensor& input, Tensor& out, int64_t signal_ndim, bool normalized, IntArrayRef signal_sizes);
+Tensor _fft_c2r_mps(const Tensor& input, int64_t signal_ndim, bool normalized, IntArrayRef signal_sizes);
+Tensor& _fft_c2r_mps_out(const Tensor& input, Tensor& out, int64_t signal_ndim, bool normalized, IntArrayRef signal_sizes);
+Tensor _fft_c2c_mps(const Tensor& input, int64_t signal_ndim, bool normalized, bool forward, IntArrayRef signal_sizes);
+Tensor& _fft_c2c_mps_out(const Tensor& input, Tensor& out, int64_t signal_ndim, bool normalized, bool forward, IntArrayRef signal_sizes);
+static Tensor runFFTGraph(const Tensor& input, const Tensor& out, bool out_provided, const std::string& key_prefix, mps::FFTType fftType, int64_t signal_ndim, bool normalized, bool forward);
 
 
-Tensor _fft_r2c_mps(const Tensor& self, int64_t signal_ndim, bool normalized, IntArrayRef signal_sizes);
-Tensor& _fft_r2c_mps_out(const Tensor& self, Tensor& out, int64_t signal_ndim, bool normalized, IntArrayRef signal_sizes);
-Tensor _fft_c2r_mps(const Tensor& self, int64_t signal_ndim, bool normalized, IntArrayRef signal_sizes);
-Tensor& _fft_c2r_mps_out(const Tensor& self, Tensor& out, int64_t signal_ndim, bool normalized, IntArrayRef signal_sizes);
-Tensor _fft_c2c_mps(const Tensor& self, int64_t signal_ndim, bool normalized, bool forward, IntArrayRef signal_sizes);
-Tensor& _fft_c2c_mps_out(const Tensor& self, Tensor& out, int64_t signal_ndim, bool normalized, bool forward, IntArrayRef signal_sizes);
-static Tensor runFFTGraph(const Tensor& self, const Tensor& out, bool out_provided, const std::string& key_prefix, FFTType fftType, int64_t signal_ndim, bool normalized, bool forward);
-
-
-using namespace mps;
-
-
-static MPSGraphTensor* createFFTGraph(MPSGraph* graph, MPSGraphTensor* inputTensor, int64_t signal_ndim, bool normalized, FFTType fftType, bool forward) {
+static MPSGraphTensor* createFFTGraph(MPSGraph* graph, MPSGraphTensor* inputTensor, int64_t signal_ndim, bool normalized, mps::FFTType fftType, bool forward) {
     
     MPSGraphFFTDescriptor* descriptor = [MPSGraphFFTDescriptor descriptor];
-    descriptor.inverse = (fftType == FFTType::C2C) ? !forward : (fftType == FFTType::C2R);
+    descriptor.inverse = (fftType == mps::FFTType::C2C) ? !forward : (fftType == mps::FFTType::C2R);
     descriptor.scalingMode = normalized ? MPSGraphFFTScalingModeUnitary : MPSGraphFFTScalingModeNone;
     
     switch (fftType) {
-        case FFTType::R2C:
+        case mps::FFTType::R2C:
             return [graph realToHermiteanFFTWithTensor:inputTensor axes:@[@(signal_ndim)] descriptor:descriptor name:nil];
-        case FFTType::C2R:
+        case mps::FFTType::C2R:
             return [graph HermiteanToRealFFTWithTensor:inputTensor axes:@[@(signal_ndim)] descriptor:descriptor name:nil];
-        case FFTType::C2C:
+        case mps::FFTType::C2C:
             return [graph fastFourierTransformWithTensor:inputTensor axes:@[@(signal_ndim)] descriptor:descriptor name:nil];
     }
 }
 
-static Tensor runFFTGraph(const Tensor& self, const Tensor& out, bool out_provided, const std::string& key_prefix, FFTType fftType, int64_t signal_ndim, bool normalized, bool forward) {
+static Tensor runFFTGraph(const Tensor& input, const Tensor& output, bool out_provided, const std::string& key_prefix, mps::FFTType fftType, int64_t signal_ndim, bool normalized, bool forward) {
     
-    TORCH_CHECK(self.is_mps(), key_prefix + ": Expected MPS tensor");
+    TORCH_CHECK(input.is_mps(), key_prefix + ": Expected MPS tensor");
     if (out_provided) {
-        TORCH_CHECK(out.is_mps(), key_prefix + ": Expected MPS tensor for output");
+        TORCH_CHECK(output.is_mps(), key_prefix + ": Expected MPS tensor for output");
     }
     
-    MPSStream* stream = getCurrentMPSStream();
-
+    Tensor out;
+    if (!output.is_contiguous()) {
+        out = at::empty_like(output, MemoryFormat::Contiguous);
+    }
+      
     struct CachedGraph : public MPSCachedGraph {
         CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-        MPSGraphTensor* inputTensor_ = nil;
-        MPSGraphTensor* outputTensor_ = nil;
+        MPSGraphTensor *inputTensor = nil, *outputTensor = nil;
+        MPSGraphTensor* outputSizeTensor = nil;
     };
+
+    MPSStream* stream = getCurrentMPSStream();
     
     @autoreleasepool {
 
-        string key = key_prefix + getTensorsStringKey({self}) + getMPSTypeString(self);
+        string key = key_prefix + getTensorsStringKey({input}) + getMPSTypeString(input);
         
         auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
 
-            MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), getMPSShape(self));
+            MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input), getMPSShape(input));
             MPSGraphTensor* outputTensor = createFFTGraph(mpsGraph, inputTensor, signal_ndim, normalized, fftType, forward);
-            newCachedGraph->inputTensor_ = inputTensor;
-            newCachedGraph->outputTensor_ = outputTensor;
+            newCachedGraph->inputTensor = inputTensor;
+            newCachedGraph->outputTensor = outputTensor;
         });
         
-        Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-        
-        NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = [[[NSMutableDictionary alloc] init] autorelease];
-        [feeds setObject:inputPlaceholder.getMPSGraphTensorData() forKey:inputPlaceholder.getMPSGraphTensor()];
-        
-        NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = [[[NSMutableDictionary alloc] init] autorelease];
-        
+        MPSNDArrayDescriptor* sizeDesc = [MPSNDArrayDescriptor descriptorWithDataType:MPSDataTypeInt32 shape:@[ @(2) ]];
+        MPSNDArray* sizeNDArray = [[[MPSNDArray alloc] initWithDevice:stream->device() descriptor:sizeDesc] autorelease];
+        [sizeNDArray writeBytes:(int32_t[]){(int32_t)output_height, (int32_t)output_width} strideBytes:nil];
+        MPSGraphTensorData* sizeTensorData = [[[MPSGraphTensorData alloc] initWithMPSNDArray:sizeNDArray] autorelease];
+
+        Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input);
+        Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, out.has_storage() ? out : output, nil, false);
+
+        NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+            inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
+            cachedGraph->outputSizeTensor : sizeTensorData,
+        };
+        NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
+            @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
         runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-        
-        MPSGraphTensorData* outputData = [results objectForKey:cachedGraph->outputTensor_];
-        Tensor output = out_provided ? out : createTensorFromMPSGraphTensorData(outputData);
-        
-        if (out_provided) {
-            out.copy_(output);
+
+        if (out.has_storage()) {
+            output.copy_(out);
         }
-        
-        return output;
     }
 }
 
+} // namespace mps
+
+static bool check_mps_compatibility() {
+  static const bool is_macOS_14_0_or_newer = is_macos_14_or_newer();
+  if (!is_macOS_14_0_or_newer) {
+    TORCH_WARN_ONCE("MPS: FFT operations are only supported natively starting from macOS 14.0. ",
+                      "Falling back on CPU. This may have performance implications.");
+    return false;
+  }
+  return true;
+}
+
 // Real-to-Hermitean FFT
-Tensor _fft_r2c_mps(const Tensor& self, int64_t signal_ndim, bool normalized, IntArrayRef signal_sizes) {
-    return runFFTGraph(self, {}, false, "fft_r2c_mps", FFTType::R2C, signal_ndim, normalized, true);
+Tensor _fft_r2c_mps(const Tensor& input, int64_t signal_ndim, bool normalized, IntArrayRef signal_sizes) {
+    return runFFTGraph(input, {}, false, "fft_r2c_mps", mps::FFTType::R2C, signal_ndim, normalized, true);
 }
 
 // Real-to-Hermitean FFT, writing result to the provided output tensor
-Tensor& _fft_r2c_mps_out(const Tensor& self, Tensor& out, int64_t signal_ndim, bool normalized, IntArrayRef signal_sizes) {
-    runFFTGraph(self, out, true, "fft_r2c_out_mps", FFTType::R2C, signal_ndim, normalized, true);
+Tensor& _fft_r2c_mps_out(const Tensor& input, Tensor& out, int64_t signal_ndim, bool normalized, IntArrayRef signal_sizes) {
+    runFFTGraph(input, out, true, "fft_r2c_out_mps", mps::FFTType::R2C, signal_ndim, normalized, true);
     return out;
 }
 
 // Hermitean-to-Real FFT
-Tensor _fft_c2r_mps(const Tensor& self, int64_t signal_ndim, bool normalized, IntArrayRef signal_sizes) {
-    return runFFTGraph(self, {}, false, "fft_c2r_mps", FFTType::C2R, signal_ndim, normalized, false);
+Tensor _fft_c2r_mps(const Tensor& input, int64_t signal_ndim, bool normalized, IntArrayRef signal_sizes) {
+    return runFFTGraph(input, {}, false, "fft_c2r_mps", mps::FFTType::C2R, signal_ndim, normalized, false);
 }
 
 // Hermitean-to-Real FFT, writing result to the provided output tensor
-Tensor& _fft_c2r_mps_out(const Tensor& self, Tensor& out, int64_t signal_ndim, bool normalized, IntArrayRef signal_sizes) {
-    runFFTGraph(self, out, true, "fft_c2r_out_mps", FFTType::C2R, signal_ndim, normalized, false);
+Tensor& _fft_c2r_mps_out(const Tensor& input, Tensor& out, int64_t signal_ndim, bool normalized, IntArrayRef signal_sizes) {
+    runFFTGraph(input, out, true, "fft_c2r_out_mps", mps::FFTType::C2R, signal_ndim, normalized, false);
     return out;
 }
 
 // complex-to-complex FFT
-Tensor _fft_c2c_mps(const Tensor& self, int64_t signal_ndim, bool normalized, bool forward, IntArrayRef signal_sizes) {
-    return runFFTGraph(self, {}, false, "fft_c2c_mps", FFTType::C2C, signal_ndim, normalized, forward);
+Tensor _fft_c2c_mps(const Tensor& input, int64_t signal_ndim, bool normalized, bool forward, IntArrayRef signal_sizes) {
+    return runFFTGraph(input, {}, false, "fft_c2c_mps", mps::FFTType::C2C, signal_ndim, normalized, forward);
 }
 
 // complex-to-complex FFT, writing result to the provided output tensor
-Tensor& _fft_c2c_mps_out(const Tensor& self, Tensor& out, int64_t signal_ndim, bool normalized, bool forward, IntArrayRef signal_sizes) {
-    runFFTGraph(self, out, true, "fft_c2c_out_mps", FFTType::C2C, signal_ndim, normalized, forward);
+Tensor& _fft_c2c_mps_out(const Tensor& input, Tensor& out, int64_t signal_ndim, bool normalized, bool forward, IntArrayRef signal_sizes) {
+    runFFTGraph(input, out, true, "fft_c2c_out_mps", mps::FFTType::C2C, signal_ndim, normalized, forward);
     return out;
 }
 

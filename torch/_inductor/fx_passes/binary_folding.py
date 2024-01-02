@@ -34,7 +34,7 @@ def mark_mixed_dtype_conv(conv):
 
     if not (
         conv_user.target == prims.convert_element_type.default
-        and conv_user.args[1] in (torch.float16, torch.bfloat16, torch.float32)
+        and conv_user.args[1] == conv_dtype
     ):
         return
 
@@ -138,6 +138,9 @@ def binary_folding_init():
             and not isinstance(other, float)
             and other.op != "get_attr"
         ):
+            return False
+
+        if not len(conv_node.args[1].users) == 1:
             return False
 
         weight_meta_value = conv_node.args[1].meta.get("val")

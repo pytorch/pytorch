@@ -1,7 +1,6 @@
 import functools
 import logging
 from enum import auto, Enum
-from itertools import chain
 from typing import Any, Callable, Dict, List, no_type_check, Optional, Set, Tuple
 
 import torch
@@ -11,34 +10,33 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.autograd.graph import register_multi_grad_hook
-from torch.distributed import get_backend, get_world_size
-from torch.distributed._tensor import DeviceMesh
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _assert_in_training_states,
     _FSDPState,
     _get_module_fsdp_state,
     _is_composable,
+    _log_post_backward_hook,
     _no_dispatch_record_stream,
     clean_tensor_name,
     TrainingState,
 )
-from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
-from torch.distributed.fsdp.api import BackwardPrefetch
-from torch.distributed.fsdp.flat_param import (
+from torch.distributed.fsdp._flat_param import (
     FlatParameter,
     FlatParamHandle,
     HandleShardingStrategy,
     HandleTrainingState,
     RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES,
 )
+from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
+from torch.distributed.fsdp.api import BackwardPrefetch
 from torch.distributed.utils import (
     _apply_to_tensors,
     _cast_forward_inputs,
     _p_assert,
     _to_kwargs,
 )
-from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 log = logging.getLogger(__name__)
 
@@ -164,6 +162,7 @@ def _lazy_init(
     state._is_root = True
     _assert_in_training_states(state, [TrainingState.IDLE])
     _check_flat_params_on_expected_device(state, root_module)
+    state._all_fsdp_states = traversal_utils._get_fsdp_states(root_module)
     _init_streams(state)
     buffers, buffer_dtypes = _get_buffers_and_dtypes_for_computation(state, root_module)
     _cast_buffers_to_dtype_and_device(buffers, buffer_dtypes, state.compute_device)
@@ -196,24 +195,6 @@ def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
             )
 
 
-def _init_device_mesh(
-    root_state: _FSDPState,
-) -> Optional[DeviceMesh]:
-    # We are testing 1D DeviceMesh where dist.get_world_size(pg) == dist.get_world_size() for now.
-    # TODO: Address cases when dist.get_world_size(pg) != dist.get_world_size(). This would capture
-    #       what 1D DeviceMesh currently would not work for:
-    #       1) HSDP Hybrid Sharding, 2) 2D FSDP + TP, 3) dist.new_group() cannot be expressed in 1D DeviceMesh.
-    if root_state.process_group != dist.distributed_c10d._get_default_group():
-        return None
-    if get_backend() == "fake" or not root_state.compute_device:
-        return None
-
-    device_type = root_state.compute_device.type
-    mesh_tensor = torch.arange(get_world_size(root_state.process_group))
-    device_mesh = DeviceMesh(device_type, mesh_tensor, _validate_mesh=False)
-    return device_mesh
-
-
 @no_type_check
 def _share_state_and_init_handle_attrs(
     root_state: _FSDPState,
@@ -231,9 +212,7 @@ def _share_state_and_init_handle_attrs(
     attr_name_to_values: Dict[str, Set[Any]] = {}
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
-    root_state._all_fsdp_states = traversal_utils._get_fsdp_states(root_module)
     root_state._all_handles = root_state._exec_order_data.all_handles  # share reference
-    root_state._device_mesh = _init_device_mesh(root_state)
     # Update _has_optim_in_backward for each handle.
     for handle in root_state._all_handles:
         flat_param = handle.flat_param
@@ -244,7 +223,8 @@ def _share_state_and_init_handle_attrs(
         handle._has_optim_in_backward = flat_param._params is not None and any(
             hasattr(param, "_in_backward_optimizers") for param in flat_param._params
         )
-
+        if handle._has_optim_in_backward:
+            torch._C._log_api_usage_once("fsdp.optimizer_in_backward")
     for fsdp_state in root_state._all_fsdp_states:
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             _p_assert(
@@ -266,10 +246,10 @@ def _share_state_and_init_handle_attrs(
         fsdp_state._unshard_stream = root_state._unshard_stream
         fsdp_state._post_backward_stream = root_state._post_backward_stream
         fsdp_state._pre_unshard_stream = root_state._pre_unshard_stream
+        fsdp_state._all_reduce_stream = root_state._all_reduce_stream
         fsdp_state._default_stream = root_state._default_stream
         fsdp_state._exec_order_data = root_state._exec_order_data
         fsdp_state._free_event_queue = root_state._free_event_queue
-        fsdp_state._device_mesh = root_state._device_mesh
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
@@ -283,24 +263,35 @@ def _share_state_and_init_handle_attrs(
 @no_type_check
 def _init_streams(
     state: _FSDPState,
-) -> _FSDPState:
+) -> None:
     """
     Initializes CUDA streams for overlapping communication, computation, and
     data transfers. The streams should be shared across FSDP instances.
     """
     assert state._is_root
     assert state._device_handle.is_available()
-    # Stream for unshard logic, including allocating the all-gather destination
-    # tensors and the all-gathers themselves.
-    state._unshard_stream = state._device_handle.Stream()
-    # Stream for overlapping gradient reduction with the backward pass gradient
-    # computation.
-    state._post_backward_stream = state._device_handle.Stream()
-    # Stream for pre-unshard logic, namely allocations and writes for CPU
-    # offloading (H2D copy) and mixed precision (low precision cast).
-    state._pre_unshard_stream = state._device_handle.Stream()
+    uses_hybrid_sharding = any(
+        fsdp_state.sharding_strategy in HYBRID_SHARDING_STRATEGIES
+        for fsdp_state in state._all_fsdp_states
+    )
+    # Prioritize all-gathers/reduce-scatters over async all-reduce for HSDP and
+    # preserve the default priority of 0 otherwise
+    high_priority = -1 if state.limit_all_gathers and uses_hybrid_sharding else 0
     # Default stream for computation
     state._default_stream = state._device_handle.current_stream()
+    # Stream for unshard logic, including allocating the all-gather destination
+    # tensors and the all-gathers themselves
+    state._unshard_stream = state._device_handle.Stream(priority=high_priority)
+    # Stream for overlapping gradient reduction with the backward pass gradient
+    # computation
+    state._post_backward_stream = state._device_handle.Stream(priority=high_priority)
+    # Stream for pre-unshard logic, namely allocations and writes for CPU
+    # offloading (H2D copy) and mixed precision (low precision cast)
+    state._pre_unshard_stream = state._device_handle.Stream(priority=high_priority)
+    # Stream to run HSDP's all-reduce as async (if using HSDP)
+    state._all_reduce_stream = (
+        state._device_handle.Stream() if uses_hybrid_sharding else state._default_stream
+    )
 
 
 @no_type_check
@@ -355,10 +346,9 @@ def _reshard(
             free_event.record()
             state._free_event_queue.enqueue(free_event)
     handle.post_reshard()
-    # Since we prefetch entire handles keys at a time, conservatively mark
-    # the entire key as no longer prefetched once we free at least one
-    if free_unsharded_flat_param:
-        handle._prefetched = False
+    # Flat parameter freed or not, we always have to "unshard" the parameter
+    # upon next access to get its shape correct.
+    handle._prefetched = False
 
 
 def _unshard_grads(
@@ -451,7 +441,9 @@ def _pre_forward_unshard(
     if not handle._prefetched:
         _unshard(state, handle, state._unshard_stream, state._pre_unshard_stream)
     handle._needs_pre_forward_unshard = False
-    state._device_handle.current_stream().wait_stream(state._unshard_stream)
+    # Don't wait during trace
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        state._device_handle.current_stream().wait_stream(state._unshard_stream)
     with torch.profiler.record_function(
         "FullyShardedDataParallel._pre_forward_prefetch"
     ):
@@ -602,6 +594,7 @@ def _root_pre_forward(
                     handles.append(fsdp_state._handle)
             for handle in handles:
                 handle._needs_pre_forward_unshard = True
+                handle._prefetched = False
         _wait_for_computation_stream(
             state._device_handle.current_stream(),
             state._unshard_stream,
@@ -647,6 +640,7 @@ def _pre_backward_hook(
     state: _FSDPState,
     module: nn.Module,
     handle: FlatParamHandle,
+    grad,
     *unused: Any,
 ) -> Any:
     """
@@ -658,8 +652,13 @@ def _pre_backward_hook(
     """
     # Only run the pre-backward hook once per group of handles involved in the
     # same module forward computation
-    if handle and handle._ran_pre_backward_hook:
-        return
+    if (
+        handle
+        and hasattr(handle, "_ran_pre_backward_hook")
+        and handle._ran_pre_backward_hook
+    ):
+        log.debug("%s %s", id(state), "Not Running pre backward! Already Ran!")
+        return grad
 
     with torch.profiler.record_function("FullyShardedDataParallel._pre_backward_hook"):
         # Queue the post-backward callback once for the root FSDP instance to
@@ -678,7 +677,7 @@ def _pre_backward_hook(
         # per-handle in the pre-backward hook, so we can return early here if
         # there are no handles.
         if not handle:
-            return
+            return grad
         handle._training_state = HandleTrainingState.BACKWARD_PRE
 
         if handle._needs_pre_backward_unshard:
@@ -691,7 +690,9 @@ def _pre_backward_hook(
                     state._unshard_stream,
                     state._pre_unshard_stream,
                 )
-            state._device_handle.current_stream().wait_stream(state._unshard_stream)
+            # Don't wait during trace
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                state._device_handle.current_stream().wait_stream(state._unshard_stream)
 
         # Set this to `False` to ensure that a mistargeted prefetch does not
         # actually unshard these handles
@@ -702,6 +703,7 @@ def _pre_backward_hook(
             _prefetch_handle(state, handle, _PrefetchMode.BACKWARD)
         handle.prepare_gradient_for_backward()
         handle._ran_pre_backward_hook = True
+        return grad
 
 
 @no_type_check
@@ -709,6 +711,7 @@ def _pre_backward_hook(
 def _post_backward_hook(
     state: _FSDPState,
     handle: FlatParamHandle,
+    flat_param,
     *unused: Any,
 ):
     """
@@ -723,7 +726,7 @@ def _post_backward_hook(
     - Otherwise, the ``_saved_grad_shard`` attribute is the reduced sharded
     gradient (accumulating with any existing gradient).
     """
-    _log_post_backward_hook(state, handle)
+    _log_post_backward_hook(state, handle, log)
     flat_param = handle.flat_param
     flat_param._post_backward_called = True
     with torch.autograd.profiler.record_function(
@@ -752,9 +755,12 @@ def _post_backward_hook(
                 handle._use_unsharded_grad_views()
             return
 
-        # Wait for all ops in the current stream (e.g. gradient
-        # computation) to finish before reduce-scattering the gradient
-        state._post_backward_stream.wait_stream(state._device_handle.current_stream())
+        # Wait for all ops in the current stream (e.g. gradient computation) to
+        # finish before reduce-scattering the gradient
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            state._post_backward_stream.wait_stream(
+                state._device_handle.current_stream()
+            )
 
         with state._device_handle.stream(state._post_backward_stream):
             autograd_computed_grad = flat_param.grad.data
@@ -766,152 +772,16 @@ def _post_backward_hook(
                 and not handle._force_full_precision
             ):
                 flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
-
-            prediv_factor = state._gradient_predivide_factor
-            postdiv_factor = state._gradient_postdivide_factor
             if handle.uses_sharded_strategy:
-                uses_hybrid_sharded_strategy = handle._sharding_strategy in (
-                    HandleShardingStrategy.HYBRID_SHARD,
-                    HandleShardingStrategy._HYBRID_SHARD_ZERO2,
-                )
-                # We clear `.grad` to permit multiple backwards. This avoids a
-                # race where the second backward pass computation precedes
-                # ahead of the first backward pass reduction, which is possible
-                # since the reduction is issued in a separate stream and is
-                # async and would result in reducing the wrong gradient.
-                unsharded_grad = flat_param.grad.data
-                flat_param.grad = None
-                chunks = list(unsharded_grad.chunk(state.world_size))
-                numel_to_pad = (
-                    state.world_size * chunks[0].numel() - unsharded_grad.numel()
-                )
-                padded_unsharded_grad = (
-                    F.pad(unsharded_grad, [0, numel_to_pad])
-                    if numel_to_pad > 0
-                    else unsharded_grad
-                )
-                new_sharded_grad = torch.empty_like(chunks[0])  # padded
-
-                if state._comm_hook is None:  # default path
-                    _div_if_needed(padded_unsharded_grad, prediv_factor)
-                    dist.reduce_scatter_tensor(
-                        new_sharded_grad,
-                        padded_unsharded_grad,
-                        group=state.process_group,
-                    )
-                    if uses_hybrid_sharded_strategy:
-                        dist.all_reduce(new_sharded_grad, group=state._inter_node_pg)
-                    _div_if_needed(new_sharded_grad, postdiv_factor)
-                else:
-                    state._comm_hook(
-                        state._comm_hook_state, padded_unsharded_grad, new_sharded_grad
-                    )
-                    # NOTE: HSDP variants do not support communication hook.
-
-                _cast_grad_to_param_dtype(state, new_sharded_grad, flat_param)
-                # Save the sharded gradient in `_saved_grad_shard` to support
-                # gradient accumulation -- for multiple backwards, the gradient
-                # reductions may happen in arbitrary order
-                accumulate_grad = hasattr(flat_param, "_saved_grad_shard")
-                if accumulate_grad:
-                    _check_grad_to_accumulate(
-                        new_sharded_grad, flat_param._saved_grad_shard
-                    )
-                    flat_param._saved_grad_shard += new_sharded_grad
-                else:
-                    flat_param._saved_grad_shard = new_sharded_grad
-                grad_to_offload = flat_param._saved_grad_shard
+                _reduce_grad(state, handle)
             else:
-                if state._comm_hook is None:  # default path
-                    _div_if_needed(flat_param.grad, prediv_factor)
-                    dist.all_reduce(flat_param.grad, group=state.process_group)
-                    _div_if_needed(flat_param.grad, postdiv_factor)
-                else:
-                    state._comm_hook(state._comm_hook_state, flat_param.grad)
-                # For `NO_SHARD`, we can keep the low precision gradients by
-                # simply omitting the cast altogether
-                if not handle._keep_low_precision_grads:
-                    _cast_grad_to_param_dtype(state, flat_param.grad, flat_param)
-                grad_to_offload = flat_param.grad.data
-
-            if handle._offload_params:
-                # Offload the gradient to CPU to ensure parameters and
-                # gradients are on the same device as required by the optimizer
-                # TODO: Investigate why `NO_SHARD` breaks correctness when
-                # using `non_blocking=True` here.
-                # TODO (rohan-varma): When CPU offload and optimizer overlap,
-                # non_blocking=True won't work since the copy may have not finished
-                # before the optimizer step executes on CPU. If we want to use
-                # non-blocking=True here, we'll have to synchronize before using
-                # result on CPU.
-                non_blocking = (
-                    handle.uses_sharded_strategy and not handle._has_optim_in_backward
-                )
-                flat_param._cpu_grad.copy_(  # type: ignore[attr-defined]
-                    grad_to_offload.detach(), non_blocking=non_blocking
-                )  # synchronized in the post-backward callback
-                # Since the gradient being offloaded may have been produced in
-                # the computation stream and is being consumed here in the
-                # post-backward stream, inform the caching allocator
-                _no_dispatch_record_stream(
-                    grad_to_offload.data,
-                    state._post_backward_stream,
-                )
-
+                _reduce_grad_no_shard(state, handle)
             # Since the unsharded gradient is produced in the computation
             # stream and consumed in the post-backward stream, inform the
             # caching allocator (before it goes out of scope)
             _no_dispatch_record_stream(
                 autograd_computed_grad, state._post_backward_stream
             )
-
-            if handle._use_orig_params:
-                # Since the handle's `FlatParameter` completed its gradient
-                # computation, we should reset the gradient noneness mask
-                handle._reset_is_grad_none()
-                # Delay using sharded gradient views until after the
-                # reduce-scatter instead of immediately after resharding
-                handle._use_sharded_grad_views()
-                if handle._has_optim_in_backward:
-                    handle.prepare_gradient_for_optim()
-                    for orig_param in handle.flat_param._params:
-                        # checking grad for None also filters out params
-                        # that don't belong to this rank
-                        if orig_param.grad is not None and hasattr(
-                            orig_param, "_in_backward_optimizers"
-                        ):
-                            # TODO (rohan-varma): For CPU offload, this unfortunately
-                            # operates on CPU, because the parameters and gradients
-                            # have already been offloaded. We should run this on
-                            # GPU after refactoring.
-                            for optim in orig_param._in_backward_optimizers:
-                                optim.step()
-
-                            optim.zero_grad(set_to_none=True)
-                    handle._reset_flat_param_grad_info_if_needed()
-                    if handle._offload_params:
-                        handle.flat_param._cpu_grad = None
-
-
-@no_type_check
-def _log_post_backward_hook(state: _FSDPState, handle: FlatParamHandle) -> None:
-    # Under TORCH_DISTRIBUTED_DEBUG=INFO, log the module names this hook fires for.
-    # Below logging of module names this post-bwd hook fires for can help debug certain
-    # cases where hooks don't fire, such as under certain activation checkpoint configs.
-    if state._use_orig_params and handle._debug_level == dist.DebugLevel.INFO:
-        param_to_fqn = state._exec_order_data.param_to_fqn
-        handle_params = handle.flat_param._params  # only populated for use_orig_params
-        param_fqns = [
-            param
-            for param_list in [param_to_fqn[p] for p in handle_params]
-            for param in param_list
-        ]
-        log.warning("FSDP firing post-backward hooks for parameters %s", param_fqns)
-
-
-def _div_if_needed(tensor: torch.Tensor, div_factor: float) -> None:
-    if div_factor > 1:
-        tensor.div_(div_factor)
 
 
 def _post_backward_reshard(
@@ -949,6 +819,205 @@ def _should_free_in_backward(
         state._sync_gradients
         or handle._sharding_strategy in RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES
     )
+
+
+@no_type_check
+def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
+    """
+    For sharded strategies, this runs gradient reduction, sharded gradient
+    accumulation if needed, and the post-reduction callback.
+    """
+    flat_param = handle.flat_param
+    uses_hybrid_sharded_strategy = handle._sharding_strategy in (
+        HandleShardingStrategy.HYBRID_SHARD,
+        HandleShardingStrategy._HYBRID_SHARD_ZERO2,
+    )
+    # We clear `.grad` to permit multiple backwards. This avoids a race where
+    # the second backward pass computation precedes ahead of the first backward
+    # pass reduction, which is possible since the reduction is issued in a
+    # separate stream and is async and would result in reducing the wrong
+    # gradient.
+    unsharded_grad = flat_param.grad.data
+    flat_param.grad = None
+    padded_unsharded_grad, new_sharded_grad = _get_reduce_scatter_tensors(
+        state, unsharded_grad
+    )
+    if state._comm_hook is None:  # default path
+        _div_if_needed(padded_unsharded_grad, state._gradient_predivide_factor)
+        pg = (
+            handle._fake_process_group
+            if handle._use_fake_reduce
+            else state.process_group
+        )
+        dist.reduce_scatter_tensor(
+            new_sharded_grad,
+            padded_unsharded_grad,
+            group=pg,
+        )
+        if uses_hybrid_sharded_strategy:
+            # Don't wait during trace
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                state._all_reduce_stream.wait_stream(state._post_backward_stream)
+            with state._device_handle.stream(state._all_reduce_stream):
+                # Since the new sharded gradient is produced in the post-
+                # backward stream and consumed in the all-reduce stream,
+                # inform the caching allocator
+                _no_dispatch_record_stream(new_sharded_grad, state._all_reduce_stream)
+                dist.all_reduce(new_sharded_grad, group=state._inter_node_pg)
+                _div_if_needed(new_sharded_grad, state._gradient_postdivide_factor)
+                grad_to_offload = _accumulate_sharded_grad(
+                    state, handle, new_sharded_grad
+                )
+                _post_reduce_grad_callback(state, handle, grad_to_offload)
+                return
+        _div_if_needed(new_sharded_grad, state._gradient_postdivide_factor)
+    else:
+        state._comm_hook(
+            state._comm_hook_state, padded_unsharded_grad, new_sharded_grad
+        )
+        # NOTE: HSDP variants do not support communication hook.
+    grad_to_offload = _accumulate_sharded_grad(state, handle, new_sharded_grad)
+    _post_reduce_grad_callback(state, handle, grad_to_offload)
+
+
+@no_type_check
+def _get_reduce_scatter_tensors(
+    state: _FSDPState, unsharded_grad: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Returns the input and output tensors to reduce-scatter, respectively.
+    """
+    chunks = list(unsharded_grad.chunk(state.world_size))
+    numel_to_pad = state.world_size * chunks[0].numel() - unsharded_grad.numel()
+    padded_unsharded_grad = (
+        F.pad(unsharded_grad, [0, numel_to_pad]) if numel_to_pad > 0 else unsharded_grad
+    )
+    new_sharded_grad = torch.empty_like(chunks[0])  # padded
+    return padded_unsharded_grad, new_sharded_grad
+
+
+@no_type_check
+def _accumulate_sharded_grad(
+    state: _FSDPState,
+    handle: FlatParamHandle,
+    sharded_grad: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Accumulates the reduce-scattered sharded gradient with any existing sharded
+    gradient if needed, returning the gradient to offload (if CPU offloading is
+    enabled).
+    """
+    flat_param = handle.flat_param
+    _cast_grad_to_param_dtype(state, sharded_grad, flat_param)
+    # Save the sharded gradient in `_saved_grad_shard` to support gradient
+    # accumulation -- for multiple backwards, the gradient reductions may
+    # happen in arbitrary order
+    accumulate_grad = hasattr(flat_param, "_saved_grad_shard")
+    if accumulate_grad:
+        _check_grad_to_accumulate(sharded_grad, flat_param._saved_grad_shard)
+        flat_param._saved_grad_shard += sharded_grad
+    else:
+        flat_param._saved_grad_shard = sharded_grad
+    grad_to_offload = flat_param._saved_grad_shard
+    return grad_to_offload
+
+
+@no_type_check
+def _reduce_grad_no_shard(state: _FSDPState, handle: FlatParamHandle) -> None:
+    """
+    For no-shard, this runs gradient reduction (which directly covers any
+    gradient accumulation implicitly) and the post-reduction callback.
+    """
+    flat_param = handle.flat_param
+    if state._comm_hook is None:  # default path
+        _div_if_needed(flat_param.grad, state._gradient_predivide_factor)
+        dist.all_reduce(flat_param.grad, group=state.process_group)
+        _div_if_needed(flat_param.grad, state._gradient_postdivide_factor)
+    else:
+        state._comm_hook(state._comm_hook_state, flat_param.grad)
+    # For `NO_SHARD`, we can keep the low precision gradients by simply
+    # omitting the cast altogether
+    if not handle._keep_low_precision_grads:
+        _cast_grad_to_param_dtype(state, flat_param.grad, flat_param)
+    grad_to_offload = flat_param.grad.data
+    _post_reduce_grad_callback(state, handle, grad_to_offload)
+
+
+@no_type_check
+def _post_reduce_grad_callback(
+    state: _FSDPState,
+    handle: FlatParamHandle,
+    # Additional arguments needed for the callback logic
+    grad_to_offload: torch.Tensor,
+):
+    """
+    This callback captures any logic to run after the gradient reduction
+    finishes. Currently, this offloads the gradient to CPU if CPU offloading is
+    enabled and uses sharded gradient views if ``use_orig_params=True``.
+    """
+    _offload_grad(state, handle, grad_to_offload)
+    _post_backward_use_sharded_grad_views(handle)
+
+
+@no_type_check
+def _offload_grad(
+    state: _FSDPState,
+    handle: FlatParamHandle,
+    grad_to_offload: torch.Tensor,
+):
+    if not handle._offload_params:
+        return
+    # Offload the gradient to CPU to ensure parameters and gradients are on the
+    # same device as required by the optimizer
+    # TODO: Investigate why `NO_SHARD` breaks correctness when using
+    # `non_blocking=True` here.
+    # TODO (rohan-varma): When CPU offload and optimizer overlap,
+    # non_blocking=True won't work since the copy may have not finished before
+    # the optimizer step executes on CPU. If we want to use non-blocking=True
+    # here, we'll have to synchronize before using result on CPU.
+    non_blocking = handle.uses_sharded_strategy and not handle._has_optim_in_backward
+    handle.flat_param._cpu_grad.copy_(
+        grad_to_offload.detach(), non_blocking=non_blocking
+    )  # synchronized in the post-backward callback
+    # Since the gradient being offloaded may have been produced in the
+    # computation stream and is being consumed here in the post-backward
+    # stream, inform the caching allocator
+    _no_dispatch_record_stream(grad_to_offload.data, state._post_backward_stream)
+
+
+@no_type_check
+def _post_backward_use_sharded_grad_views(handle: FlatParamHandle):
+    if not handle._use_orig_params:
+        return
+    # Since the handle's `FlatParameter` completed its gradient computation, we
+    # should reset the gradient noneness mask
+    handle._reset_is_grad_none()
+    # Delay using sharded gradient views until after the reduce-scatter instead
+    # of immediately after resharding
+    handle._use_sharded_grad_views()
+    if handle._has_optim_in_backward:
+        handle.prepare_gradient_for_optim()
+        for orig_param in handle.flat_param._params:
+            # Check for `None` gradient to filter parameters not in the rank
+            if orig_param.grad is not None and hasattr(
+                orig_param, "_in_backward_optimizers"
+            ):
+                # TODO (rohan-varma): For CPU offload, this unfortunately
+                # operates on CPU because the parameters and gradients have
+                # already been offloaded. We should run this on GPU after
+                # refactoring.
+                for optim in orig_param._in_backward_optimizers:
+                    optim.step()
+
+                optim.zero_grad(set_to_none=True)
+        handle._reset_flat_param_grad_info_if_needed()
+        if handle._offload_params:
+            handle.flat_param._cpu_grad = None
+
+
+def _div_if_needed(tensor: torch.Tensor, div_factor: float) -> None:
+    if div_factor > 1:
+        tensor.div_(div_factor)
 
 
 @no_type_check
@@ -1022,12 +1091,13 @@ def _post_backward_final_callback(
     root_state = state
 
     if root_state._sync_gradients:
+        current_stream = state._device_handle.current_stream()
         # TODO (rohan-varma): this also waits for the overlapped optimizer step to finish
         # since it currently runs in the post-backward stream. That can be
         # pushed to the next forward if run in a different stream
-        state._device_handle.current_stream().wait_stream(
-            root_state._post_backward_stream
-        )
+        current_stream.wait_stream(root_state._post_backward_stream)
+        if root_state._all_reduce_stream is not current_stream:  # uses HSDP
+            current_stream.wait_stream(root_state._all_reduce_stream)
         if root_state.cpu_offload.offload_params:
             # Wait for non-blocking GPU -> CPU sharded gradient copies from the
             # post-backward hooks to finish explicitly since CPU gradients do
@@ -1097,15 +1167,21 @@ def _finalize_params(
     if not handle:
         return
     flat_param = handle.flat_param
-    if hasattr(flat_param, "_post_backward_hook_state"):
-        post_backward_hook_state_len = len(flat_param._post_backward_hook_state)
-        expected_post_backward_hook_state_len = int(flat_param.requires_grad) + 1
-        _p_assert(
-            post_backward_hook_state_len == expected_post_backward_hook_state_len,
-            f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
-        )
-        flat_param._post_backward_hook_state[-1].remove()
-        delattr(flat_param, "_post_backward_hook_state")
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        if hasattr(flat_param, "_post_backward_hook_handle"):
+            pbhs_handle = flat_param._post_backward_hook_handle
+            pbhs_handle.remove()
+            del flat_param._post_backward_hook_handle
+    else:
+        if hasattr(flat_param, "_post_backward_hook_state"):
+            post_backward_hook_state_len = len(flat_param._post_backward_hook_state)
+            expected_post_backward_hook_state_len = int(flat_param.requires_grad) + 1
+            _p_assert(
+                post_backward_hook_state_len == expected_post_backward_hook_state_len,
+                f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
+            )
+            flat_param._post_backward_hook_state[-1].remove()
+            delattr(flat_param, "_post_backward_hook_state")
     if flat_param.requires_grad:
         if not state._sync_gradients:
             # Preserve the gradient accumulation state if not synchronizing
@@ -1358,22 +1434,31 @@ def _register_post_backward_hook(
     if not handle:
         return
     flat_param = handle.flat_param
-    already_registered = hasattr(flat_param, "_post_backward_hook_state")
-    if already_registered or not flat_param.requires_grad:
-        return
-    # Get the `AccumulateGrad` object
-    temp_flat_param = flat_param.expand_as(flat_param)
-    _p_assert(
-        temp_flat_param.grad_fn is not None,
-        "The `grad_fn` is needed to access the `AccumulateGrad` and "
-        "register the post-backward hook",
-    )
-    acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
-    assert acc_grad is not None
-    hook_handle = acc_grad.register_hook(
-        functools.partial(_post_backward_hook, state, handle)
-    )
-    flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
+
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        already_registered = hasattr(flat_param, "_post_backward_hook_handle")
+        if already_registered or not flat_param.requires_grad:
+            return
+        hook = functools.partial(_post_backward_hook, state, handle)
+        hook_handle = flat_param.register_post_accumulate_grad_hook(hook)
+        flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined]
+    else:
+        already_registered = hasattr(flat_param, "_post_backward_hook_state")
+        if already_registered or not flat_param.requires_grad:
+            return
+        # Get the `AccumulateGrad` object
+        temp_flat_param = flat_param.expand_as(flat_param)
+        _p_assert(
+            temp_flat_param.grad_fn is not None,
+            "The `grad_fn` is needed to access the `AccumulateGrad` and "
+            "register the post-backward hook",
+        )
+        acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
+        assert acc_grad is not None
+        hook_handle = acc_grad.register_hook(
+            functools.partial(_post_backward_hook, state, handle)
+        )
+        flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
 
 
 def _register_post_backward_reshard_only_hook(
@@ -1397,21 +1482,28 @@ def _register_post_backward_reshard_only_hook(
     inp_tensors: Optional[List[torch.Tensor]] = None
     if not handle:
         return
-    if handle.flat_param.requires_grad:
+    flat_param = handle.flat_param
+
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        already_registered = hasattr(flat_param, "_post_backward_hook_handle")
+    else:
+        already_registered = hasattr(flat_param, "_post_backward_hook_state")
+
+    if already_registered or flat_param.requires_grad:
         return
     if inp_tensors is None:
-        args_list, _ = tree_flatten(args)
-        kwargs_list, _ = tree_flatten(kwargs)
+        args_flat = pytree.arg_tree_leaves(*args, **kwargs)
         inp_tensors = [
-            obj
-            for obj in chain(args_list, kwargs_list)
-            if torch.is_tensor(obj) and obj.requires_grad
+            obj for obj in args_flat if torch.is_tensor(obj) and obj.requires_grad
         ]
     assert inp_tensors is not None  # mypy
     hook_handle = register_multi_grad_hook(
         inp_tensors, functools.partial(_post_backward_reshard, state, handle)
     )
-    handle.flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined, assignment]
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined, assignment]
+    else:
+        flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined, assignment]
 
 
 @no_type_check
@@ -1430,10 +1522,12 @@ def _register_post_backward_final_callback(
     if state._post_backward_callback_queued:
         return
     _assert_in_training_states(state, [TrainingState.IDLE])
-    state._post_backward_callback_queued = True
-    Variable._execution_engine.queue_callback(
-        functools.partial(_post_backward_final_callback, state, module)
-    )
+    # Trace does not need this callback
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        state._post_backward_callback_queued = True
+        Variable._execution_engine.queue_callback(
+            functools.partial(_post_backward_final_callback, state, module)
+        )
 
 
 def _wait_for_computation_stream(
@@ -1446,6 +1540,9 @@ def _wait_for_computation_stream(
     For example, this should be called in the FSDP root's pre-forward to
     respect optimizer step computation.
     """
+    # Tracing does not need to wait
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        return
     unshard_stream.wait_stream(computation_stream)  # type: ignore[attr-defined]
     # Having the pre-all-gather stream wait for the current stream even if we
     # do not leverage the pre-all-gather stream is tolerable since this only

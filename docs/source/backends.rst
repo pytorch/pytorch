@@ -15,6 +15,7 @@ These backends include:
 - ``torch.backends.mps``
 - ``torch.backends.mkl``
 - ``torch.backends.mkldnn``
+- ``torch.backends.nnpack``
 - ``torch.backends.openmp``
 - ``torch.backends.opt_einsum``
 - ``torch.backends.xeon``
@@ -68,6 +69,8 @@ torch.backends.cuda
 
 .. autoclass:: torch.backends.cuda.SDPBackend
 
+.. autoclass:: torch.backends.cuda.SDPAParams
+
 .. autofunction:: torch.backends.cuda.flash_sdp_enabled
 
 .. autofunction:: torch.backends.cuda.enable_mem_efficient_sdp
@@ -79,6 +82,10 @@ torch.backends.cuda
 .. autofunction:: torch.backends.cuda.math_sdp_enabled
 
 .. autofunction:: torch.backends.cuda.enable_math_sdp
+
+.. autofunction:: torch.backends.cuda.can_use_flash_attention
+
+.. autofunction:: torch.backends.cuda.can_use_efficient_attention
 
 .. autofunction:: torch.backends.cuda.sdp_kernel
 
@@ -117,6 +124,7 @@ torch.backends.cudnn
     available algorithm. Note that this setting only affects convolutions dispatched via the
     cuDNN v8 API.
 
+.. py:module:: torch.backends.cudnn.rnn
 
 torch.backends.mps
 ^^^^^^^^^^^^^^^^^^
@@ -144,6 +152,15 @@ torch.backends.mkldnn
 
 .. autoclass::  torch.backends.mkldnn.verbose
 
+torch.backends.nnpack
+^^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.nnpack
+
+.. autofunction::  torch.backends.nnpack.is_available
+
+.. autofunction::  torch.backends.nnpack.flags
+
+.. autofunction::  torch.backends.nnpack.set_flags
 
 torch.backends.openmp
 ^^^^^^^^^^^^^^^^^^^^^
@@ -187,3 +204,4 @@ torch.backends.opt_einsum
 torch.backends.xeon
 ^^^^^^^^^^^^^^^^^^^
 .. automodule:: torch.backends.xeon
+.. py:module:: torch.backends.xeon.run_cpu

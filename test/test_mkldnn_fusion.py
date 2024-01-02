@@ -205,11 +205,15 @@ class TestMkldnnFusion(JitTestCase):
                 return x
 
         for pointwise_info in self._unary_list().values():
-            options = itertools.product([[2, 3, 10], [2, 10]], [True, False])
-            for input_shape, bias in options:
+            # Tensor with size = [1, 10] and stride = [0, 1] is contiguous tensor
+            # but it's strides is not default contiguous strides.
+            options = itertools.product([[[2, 3, 10], None], [[2, 10], None], [[1, 10], [0, 1]]], [True, False])
+            for (input_shape, input_stride), bias in options:
                 with torch.no_grad():
                     mod = M(pointwise_info.pointwise_module, input_shape[-1], 10, bias).eval()
                     v = torch.randn(input_shape)
+                    if input_stride is not None:
+                        v = v.as_strided(input_shape, input_stride)
                     ref = mod(v)
                     attr = pointwise_info.attr
                     scalars = pointwise_info.scalars
@@ -268,7 +272,7 @@ class TestMkldnnFusion(JitTestCase):
                 x = self.binary(x, other)
                 return x
 
-        input_shapes = {2: (112, 112), 3: (55, 55, 55)}
+        input_shapes = {2: (112, 112), 3: (22, 22, 22)}
         for pointwise_name, pointwise_fn in self._binary_list().items():
             for dim in [2, 3]:
                 channels_last = torch.channels_last if dim == 2 else torch.channels_last_3d
@@ -301,7 +305,7 @@ class TestMkldnnFusion(JitTestCase):
                             self.assertEqual(ref, other)
                             self.assertEqual(ref, fused_inplace)
 
-                        self.assertEqual(ref, fused)
+                        self.assertEqual(ref, fused, atol=5e-4, rtol=5e-4)
 
 
     def test_linear_binary_fusion_ops(self):

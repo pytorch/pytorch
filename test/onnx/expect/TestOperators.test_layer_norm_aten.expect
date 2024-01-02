@@ -1,106 +1,26 @@
-ir_version: 7
+ir_version: 8
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "input"
-    output: "onnx::Sub_3"
-    name: "ReduceMean_0"
-    op_type: "ReduceMean"
-    attribute {
-      name: "axes"
-      ints: -2
-      ints: -1
-      type: INTS
-    }
-  }
-  node {
-    input: "input"
-    input: "onnx::Sub_3"
-    output: "onnx::Pow_4"
-    name: "Sub_1"
-    op_type: "Sub"
-  }
-  node {
-    output: "onnx::Pow_5"
-    name: "Constant_2"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        data_type: 1
-        raw_data: "\000\000\000@"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    input: "onnx::Pow_4"
-    input: "onnx::Pow_5"
-    output: "onnx::ReduceMean_6"
-    name: "Pow_3"
-    op_type: "Pow"
-  }
-  node {
-    input: "onnx::ReduceMean_6"
-    output: "onnx::Add_7"
-    name: "ReduceMean_4"
-    op_type: "ReduceMean"
-    attribute {
-      name: "axes"
-      ints: -2
-      ints: -1
-      type: INTS
-    }
-  }
-  node {
-    output: "onnx::Add_8"
-    name: "Constant_5"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        data_type: 1
-        raw_data: "\254\305\'7"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    input: "onnx::Add_7"
-    input: "onnx::Add_8"
-    output: "onnx::Sqrt_9"
-    name: "Add_6"
-    op_type: "Add"
-  }
-  node {
-    input: "onnx::Sqrt_9"
-    output: "onnx::Div_10"
-    name: "Sqrt_7"
-    op_type: "Sqrt"
-  }
-  node {
-    input: "onnx::Pow_4"
-    input: "onnx::Div_10"
-    output: "onnx::Mul_11"
-    name: "Div_8"
-    op_type: "Div"
-  }
-  node {
-    input: "onnx::Mul_11"
     input: "weight"
-    output: "onnx::Add_12"
-    name: "Mul_9"
-    op_type: "Mul"
-  }
-  node {
-    input: "onnx::Add_12"
     input: "bias"
-    output: "13"
-    name: "Add_10"
-    op_type: "Add"
+    output: "3"
+    name: "LayerNormalization_0"
+    op_type: "LayerNormalization"
+    attribute {
+      name: "axis"
+      i: -2
+      type: INT
+    }
+    attribute {
+      name: "epsilon"
+      f: 1e-05
+      type: FLOAT
+    }
   }
-  name: "torch_jit"
+  name: "main_graph"
   initializer {
     dims: 10
     dims: 10
@@ -170,7 +90,7 @@ graph {
     }
   }
   output {
-    name: "13"
+    name: "3"
     type {
       tensor_type {
         elem_type: 1
@@ -193,5 +113,5 @@ graph {
   }
 }
 opset_import {
-  version: 14
+  version: 17
 }

@@ -7,10 +7,8 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <iostream>
 
-namespace at {
-namespace vec {
+namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
 #ifdef CPU_CAPABILITY_AVX2
@@ -973,7 +971,12 @@ Vectorized<uint8_t> inline operator*(const Vectorized<uint8_t>& a, const Vectori
 
 template <>
 Vectorized<int64_t> inline minimum(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
+#ifndef CPU_CAPABILITY_AVX2
   return emulate(a, b, [](int64_t a_point, int64_t b_point) {return std::min(a_point, b_point);});
+#else
+  __m256i cmp = _mm256_cmpgt_epi64(a, b);
+  return _mm256_blendv_epi8(a, b, cmp);
+#endif
 }
 
 template <>
@@ -998,7 +1001,12 @@ Vectorized<uint8_t> inline minimum(const Vectorized<uint8_t>& a, const Vectorize
 
 template <>
 Vectorized<int64_t> inline maximum(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
+#ifndef CPU_CAPABILITY_AVX2
   return emulate(a, b, [](int64_t a_point, int64_t b_point) {return std::max(a_point, b_point);});
+#else
+  __m256i cmp = _mm256_cmpgt_epi64(a, b);
+  return _mm256_blendv_epi8(b, a, cmp);
+#endif
 }
 
 template <>
@@ -1023,7 +1031,11 @@ Vectorized<uint8_t> inline maximum(const Vectorized<uint8_t>& a, const Vectorize
 
 template <>
 Vectorized<int64_t> inline clamp(const Vectorized<int64_t>& a, const Vectorized<int64_t>& min_val, const Vectorized<int64_t>& max_val) {
+#ifndef CPU_CAPABILITY_AVX2
   return emulate(a, min_val, max_val, [](int64_t a_point, int64_t min_point, int64_t max_point) {return std::min(max_point, std::max(a_point, min_point));});
+#else
+  return minimum(maximum(a, min_val), max_val);
+#endif
 }
 
 template <>
@@ -1048,7 +1060,11 @@ Vectorized<uint8_t> inline clamp(const Vectorized<uint8_t>& a, const Vectorized<
 
 template <>
 Vectorized<int64_t> inline clamp_max(const Vectorized<int64_t>& a, const Vectorized<int64_t>& max_val) {
+#ifndef CPU_CAPABILITY_AVX2
   return emulate(a, max_val, [](int64_t a_point, int64_t max_point) {return std::min(max_point, a_point);});
+#else
+  return minimum(max_val, a);
+#endif
 }
 
 template <>
@@ -1073,7 +1089,11 @@ Vectorized<uint8_t> inline clamp_max(const Vectorized<uint8_t>& a, const Vectori
 
 template <>
 Vectorized<int64_t> inline clamp_min(const Vectorized<int64_t>& a, const Vectorized<int64_t>& min_val) {
+#ifndef CPU_CAPABILITY_AVX2
   return emulate(a, min_val, [](int64_t a_point, int64_t min_point) {return std::max(min_point, a_point);});
+#else
+  return maximum(min_val, a);
+#endif
 }
 
 template <>
@@ -1539,4 +1559,4 @@ Vectorized<uint8_t> inline operator>>(const Vectorized<uint8_t>& a, const Vector
 
 #endif
 
-}}}
+}} // namespace at::vec::CPU_CAPABILITY

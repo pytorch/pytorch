@@ -1,8 +1,6 @@
 #include <torch/csrc/jit/frontend/error_report.h>
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/frontend/tree.h>
-#include <torch/csrc/utils/memory.h>
 
 namespace torch::jit {
 

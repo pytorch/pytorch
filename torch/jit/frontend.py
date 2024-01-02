@@ -1060,7 +1060,7 @@ class ExprBuilder(Builder):
             if isinstance(index_expr.value, ast.Tuple):
                 raise NotSupportedError(
                     base.range(),
-                    "slicing multiple dimensions with " "tuples not supported yet",
+                    "slicing multiple dimensions with tuples not supported yet",
                 )
             return build_expr(ctx, index_expr.value)
 
@@ -1162,7 +1162,7 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Num(ctx, expr):
-        value = str(expr.n)
+        value = str(expr.value)
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(value))
         return Const(r, value)
 
@@ -1187,7 +1187,7 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Str(ctx, expr):
-        value = str(expr.s)
+        value = str(expr.value)
         r = ctx.make_range(
             expr.lineno, expr.col_offset, expr.col_offset + len(value) + 1
         )

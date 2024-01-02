@@ -1,17 +1,18 @@
 #pragma once
 
 #include <chrono>
+#include <memory>
 #include <string>
 #include <unordered_map>
 
 #include <c10/macros/Macros.h>
-#include <c10/util/variant.h>
+#include <variant>
 
 namespace torch {
 namespace monitor {
 
 // data_value_t is the type for Event data values.
-using data_value_t = c10::variant<std::string, double, int64_t, bool>;
+using data_value_t = std::variant<std::string, double, int64_t, bool>;
 
 // Event represents a single event that can be logged out to an external
 // tracker. This does acquire a lock on logging so should be used relatively

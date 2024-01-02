@@ -181,14 +181,26 @@ static at::Tensor lift_functionalize(const at::Tensor & self) {
 }
 
 static at::Tensor lift_fresh_functionalize(const at::Tensor & self) {
-  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
+  // See Note [Exporting and compiling a graph with lift_fresh_copy]
+  if (at::functionalization::impl::isFunctionalTensor(self)) {
+    return self.view_as(self);
+  }
+
   at::AutoDispatchSkipFunctionalize guard;
   auto out = at::lift_fresh(self);
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
 static at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
-  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
+  // Note [Exporting and compiling a graph with lift_fresh_copy]
+  // If out is already a functional tensor, don't wrap it twice.
+  // In theory this could be useful if we want to nest functionalization with itself,
+  // but that isn't really a use case today.
+  // Needed for https://github.com/pytorch/pytorch/issues/105327
+  if (at::functionalization::impl::isFunctionalTensor(self)) {
+    return self.clone();
+  }
+
   at::AutoDispatchSkipFunctionalize guard;
   auto out = at::lift_fresh_copy(self);
   return at::functionalization::impl::to_functional_tensor(out);
@@ -287,6 +299,28 @@ static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymInt
   return out;
 }
 
+static at::Tensor& set__functionalize(at::Tensor& self, const at::Tensor& src) {
+  // error case
+  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(self) || !at::functionalization::impl::isFunctionalTensor(src),
+    "set__functionalize: Tried to mutate a non-functional tensor with a functional tensor, which is not allowed");
+
+  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(src),
+    "set__functionalize: We do not currently support x.set_(y) where y is not a FunctionalTensor. Please file an issue");
+
+  // nop case
+  if (!at::functionalization::impl::isFunctionalTensor(self) && !at::functionalization::impl::isFunctionalTensor(src)) {
+    at::AutoDispatchSkipFunctionalize guard;
+    return self.set_(src);
+  }
+
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(src));
+  auto self_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
+  auto src_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(src);
+  self_impl->set__impl(src_impl);
+  return self;
+}
+
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
 }
@@ -298,4 +332,7 @@ TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
   m.impl("lift_fresh_copy", TORCH_FN(lift_fresh_functionalize_copy));
   m.impl("_to_copy", TORCH_FN(_to_copy_functionalize));
   m.impl("_unsafe_view", TORCH_FN(_unsafe_view_functionalize));
+  // The overloads of set_() that take in a storage should never
+  // appear with torch.compile, because dynamo graph breaks
+  m.impl("set_.source_Tensor", TORCH_FN(set__functionalize));
 }

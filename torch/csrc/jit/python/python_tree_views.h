@@ -2,10 +2,8 @@
 
 #include <torch/csrc/python_headers.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void initTreeViewBindings(PyObject* module);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

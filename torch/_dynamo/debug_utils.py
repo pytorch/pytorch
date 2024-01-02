@@ -1,3 +1,5 @@
+# mypy: disable-error-code="method-assign"
+
 import copy
 import functools
 import getpass
@@ -9,7 +11,7 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Callable, Optional, Sequence, TypeVar
+from typing import Callable, Optional, TypeVar
 
 import torch
 import torch._prims_common as utils
@@ -32,7 +34,7 @@ inductor_config = import_module("torch._inductor.config")
 use_buck = inductor_config.is_fbcode()
 
 if use_buck:
-    import libfb.py.build_info  # type: ignore[import]
+    import libfb.py.build_info
 
 
 extra_deps = []
@@ -223,8 +225,8 @@ def _cuda_system_info_comment():
 
     model_str = "# CUDA Info: \n"
     try:
-        cuda_version_out = subprocess.run(["nvcc", "--version"], stdout=subprocess.PIPE)
-        cuda_version_lines = cuda_version_out.stdout.decode().split("\n")
+        cuda_version_out = subprocess.check_output(["nvcc", "--version"])
+        cuda_version_lines = cuda_version_out.decode().split("\n")
         comment = "".join([f"# {s} \n" for s in cuda_version_lines if s not in [""]])
         model_str += f"{comment}\n"
     except FileNotFoundError:
@@ -252,9 +254,11 @@ def generate_config_string(*, stable_output=False):
 import torch._dynamo.config
 import torch._inductor.config
 import torch._functorch.config
+import torch.fx.experimental._config
 {torch._dynamo.config.codegen_config()}
 {torch._inductor.config.codegen_config()}
 {torch._functorch.config.codegen_config()}
+{torch.fx.experimental._config.codegen_config()}
 """
 
 
@@ -376,7 +380,7 @@ def same_two_models(
             fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
         except Exception:
             if require_fp64:
-                raise RuntimeError("Could not generate fp64 outputs")
+                raise RuntimeError("Could not generate fp64 outputs")  # noqa: TRY200
             log.warning("Could not generate fp64 outputs")
 
     try:
@@ -402,7 +406,7 @@ def same_two_models(
     return passing
 
 
-def cast_convert_element_type_to_fp64(model):
+def cast_dtype_args_to_fp64(model):
     for node in model.graph.nodes:
         if (
             node.op == "call_function"
@@ -411,6 +415,13 @@ def cast_convert_element_type_to_fp64(model):
             assert len(node.args) == 2
             if is_float_dtype(node.args[1]) and node.args[1] != torch.float64:
                 node.args = (node.args[0], torch.float64)
+        if node.op == "call_function":
+            dtype = node.kwargs.get("dtype")
+            if dtype is not None and is_float_dtype(dtype):
+                new_kwargs = dict(node.kwargs)
+                new_kwargs["dtype"] = torch.float64
+                node.kwargs = new_kwargs
+
     model.graph.lint()
     model.recompile()
     return model
@@ -422,8 +433,8 @@ def cast_to(dtype, model, inputs):
     model = model.to(dtype)
     if dtype == torch.float64:
         # If casting to fp64 for accuracy comparison, we need to
-        # take care of convert_element_type explicitly
-        model = cast_convert_element_type_to_fp64(model)
+        # replace dtype arguments embedded in the graph with fp64
+        model = cast_dtype_args_to_fp64(model)
 
     inputs = tree_map(
         lambda x: x.to(dtype)
@@ -460,7 +471,7 @@ def backend_accuracy_fails(
             ignore_non_fp=ignore_non_fp,
         )
     except Exception as e:
-        # This means that the the minified graph is bad/exposes a different problem.
+        # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
         log.exception(
             "While minifying the program in accuracy minification mode, "
@@ -480,8 +491,10 @@ def backend_accuracy_fails(
 
 
 def _stride_or_default(
-    stride: Optional[Sequence[int]], *, shape: Sequence[int]
-) -> Sequence[int]:
+    stride: Optional["torch._prims_common.StrideType"],
+    *,
+    shape: "torch._prims_common.ShapeType",
+) -> "torch._prims_common.StrideType":
     return stride if stride is not None else utils.make_contiguous_strides_for(shape)
 
 

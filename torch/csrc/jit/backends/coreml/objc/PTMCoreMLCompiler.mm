@@ -11,7 +11,7 @@ static NSString *gCompiledModelExtension = @"mlmodelc";
 static NSString *gVersionExtension = @"version";
 
 + (void)setCacheDirectory:(const std::string&)dir {
-  gCacheDirectory = [NSString stringWithCString:dir.c_str()];
+  gCacheDirectory = [NSString stringWithCString:dir.c_str() encoding:NSUTF8StringEncoding];
 }
 
 + (nonnull NSString *)cacheDirectory {
@@ -55,11 +55,10 @@ static NSString *gVersionExtension = @"version";
   return [PTMCoreMLCompiler _compileModel:modelName atPath:modelPath];
 }
 
-+ (nullable MLModel*)loadModel:(const std::string)modelID backend:(const std::string)backend allowLowPrecision:(BOOL)allowLowPrecision {
++ (nullable MLModel*)loadModel:(const std::string)modelID backend:(const std::string)backend allowLowPrecision:(BOOL)allowLowPrecision error:(NSError**)error {
   NSString *modelName = [NSString stringWithCString:modelID.c_str() encoding:NSUTF8StringEncoding];
   NSURL *modelURL = [PTMCoreMLCompiler _cacheURLForModel:modelName extension:gCompiledModelExtension];
 
-  NSError *error;
   MLModel *model;
   if (@available(iOS 12.0, macOS 10.14, *)) {
     MLModelConfiguration* config = [[MLModelConfiguration alloc] init];
@@ -71,12 +70,12 @@ static NSString *gVersionExtension = @"version";
     }
     config.computeUnits = computeUnits;
     config.allowLowPrecisionAccumulationOnGPU = allowLowPrecision;
-    model = [MLModel modelWithContentsOfURL:modelURL configuration:config error:&error];
+    model = [MLModel modelWithContentsOfURL:modelURL configuration:config error:error];
   } else {
-    model = [MLModel modelWithContentsOfURL:modelURL error:&error];
+    model = [MLModel modelWithContentsOfURL:modelURL error:error];
   }
 
-  if (error) {
+  if (error && *error) {
     [PTMCoreMLCompiler _cleanupCachedModel:modelName];
     return nil;
   }
@@ -116,7 +115,7 @@ static NSString *gVersionExtension = @"version";
 #if TARGET_OS_IPHONE
   NSURL *versionURL = [PTMCoreMLCompiler _cacheURLForModel:modelName extension:gVersionExtension];
   NSString *currentOSVer = [UIDevice currentDevice].systemVersion;
-  [currentOSVer writeToFile:versionURL.path atomically:YES];
+  [currentOSVer writeToFile:versionURL.path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
 #endif
 
   return YES;

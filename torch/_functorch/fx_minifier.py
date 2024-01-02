@@ -10,7 +10,7 @@ from .compile_utils import get_placeholders, get_outputs
 from torch.utils._content_store import ContentStoreWriter
 from torch.hub import tqdm
 from torch.multiprocessing.reductions import StorageWeakRef
-import os.path
+import os
 
 is_tuple = object()
 
@@ -116,6 +116,16 @@ def _convert_node_to_placeholder(graph, node, inps):
 
     return False
 
+def create_minified_hlo_graph(minified_fx_graph, inputs):
+    """
+    Takes minified FX graph as primary input, and ports it to HLO via StableHLO
+    Provides minified HLO graph as output, and archive them to local directory
+    """
+    hlo_dir = f"{os.getcwd()}/hlo_files"
+    os.makedirs(hlo_dir, exists_ok=True)
+
+    from torch_xla.stablehlo import save_torch_model_as_stablehlo
+    save_torch_model_as_stablehlo(minified_fx_graph, inputs, hlo_dir)
 
 def dump_state(fx_g, inps):
     print(f"""
@@ -260,6 +270,9 @@ def minifier(
             if node.op == 'output':
                 output = node
                 break
+
+        if isinstance(output.args[0], fx.Node):
+            return None
 
         output_args = sorted(output.args[0], key=lambda x: x.idx if isinstance(x, fx.Node) else int(1e9))
         if len(output_args) == 1:
@@ -420,6 +433,11 @@ def minifier(
 
     print(f"Made {num_queries} queries", file=sys.stderr)
     failing_fx = fx.GraphModule(fail_f, failing_state.graph)
+
+    # If XLA debugging environment is enabled, create minified HLO graph as well
+    if "XLA_HLO_DEBUG" in os.environ:
+        create_minified_hlo_graph(failing_fx, failing_state.inps)
+
     dump_state(failing_fx, failing_state.inps)
     print("Wrote minimal repro out to repro.py", file=sys.stderr)
     return failing_fx, failing_state.inps

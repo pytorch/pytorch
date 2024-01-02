@@ -1,10 +1,20 @@
 #pragma once
 #include <c10/core/DispatchKey.h>
+#include <c10/macros/Export.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Metaprogramming.h>
+#include <c10/util/TypeList.h>
 #include <c10/util/llvmMathExtras.h>
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <initializer_list>
+#include <iterator>
 #include <ostream>
+#include <string>
+#include <type_traits>
 
 namespace c10 {
 
@@ -81,8 +91,8 @@ C10_ALWAYS_INLINE static const std::
 // 5 categories.
 //
 // (1) "Building block" keys
-//    (a) backends: jEverything in the BackendComponent enum (e.g. CPUBit,
-//    CUDABIt) (b) functionalities: (per-backend) functionality-bit DispatchKeys
+//    (a) backends: Everything in the BackendComponent enum (e.g. CPUBit,
+//    CUDABit) (b) functionalities: (per-backend) functionality-bit DispatchKeys
 //    (e.g. AutogradFunctionality, Sparse, Dense)
 // (2) "Runtime" keys
 //    (a) "non-customizable backends" (e.g. FPGA)
@@ -112,7 +122,7 @@ C10_ALWAYS_INLINE static const std::
 // Sparse, Quantized, AutogradFunctionality, ...). These keys together allow
 // every dispatcher operator to be customized in up to 12*4 different ways. Each
 // of those requires a slot in the operator table of every dispatcher operator.
-// Not every piece of functionality necessarily needs to be customizeable
+// Not every piece of functionality necessarily needs to be customizable
 // per-backend, and not every backend necessarily needs to be able to customize
 // every type of functionality.
 //
@@ -128,10 +138,10 @@ C10_ALWAYS_INLINE static const std::
 
 // (2a) and (2b) are represented identically in the DispatchKeySet logic:
 // - backend-agnostic functionalities (e.g. FuncTorchBatched) are NOT
-// customizeable per backend.
+// customizable per backend.
 //   In order to do so, we'd need to promote it to a per-backend functionality
 //   "building block" key.
-// - non-customizeable backends (e.g. FPGA) can NOT customize existing
+// - non-customizable backends (e.g. FPGA) can NOT customize existing
 // functionality like Sparse, Autograd, etc.
 //   In order to do so, we'd need to promote it to a backend "building block"
 //   key.
@@ -190,6 +200,7 @@ class DispatchKeySet final {
   }
 
   constexpr explicit DispatchKeySet(DispatchKey k) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (k == DispatchKey::Undefined) {
       // Case 1: handle Undefined specifically
       repr_ = 0;
@@ -795,7 +806,7 @@ C10_API bool isBackendDispatchKey(DispatchKey t);
 C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
 
 // Resolve alias dispatch key to DispatchKeySet if applicable,
-// and chek if k is a part of that set
+// and check if k is a part of that set
 C10_API bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k);
 
 // Returns a DispatchKeySet of all backend keys mapped to Autograd dispatch key
@@ -915,12 +926,12 @@ template <class FuncType>
 using remove_DispatchKeySet_arg_from_func = guts::make_function_traits_t<
     typename guts::infer_function_traits_t<FuncType>::return_type,
     typename std::conditional_t<
-        std::is_same<
+        std::is_same_v<
             DispatchKeySet,
             typename guts::typelist::head_with_default_t<
                 void,
                 typename guts::infer_function_traits_t<
-                    FuncType>::parameter_types>>::value,
+                    FuncType>::parameter_types>>,
         guts::typelist::drop_if_nonempty_t<
             typename guts::infer_function_traits_t<FuncType>::parameter_types,
             1>,

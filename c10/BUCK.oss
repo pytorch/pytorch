@@ -11,6 +11,7 @@ cxx_library(
         ],
     ),
       deps = [
+        "//third_party:cpuinfo",
         "//third_party:fmt",
         "//third_party:glog",
     ],

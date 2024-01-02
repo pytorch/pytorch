@@ -371,6 +371,89 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
       AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND3(     \
           SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, __VA_ARGS__))
 
+#define AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND4(    \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, SCALARTYPE4, ...) \
+  AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES(__VA_ARGS__)   \
+  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)                 \
+  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)                 \
+  AT_DISPATCH_CASE(SCALARTYPE3, __VA_ARGS__)                 \
+  AT_DISPATCH_CASE(SCALARTYPE4, __VA_ARGS__)
+
+#define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND4(                     \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, SCALARTYPE4, TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                                    \
+      TYPE,                                                              \
+      NAME,                                                              \
+      AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND4(                  \
+          SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, SCALARTYPE4, __VA_ARGS__))
+
+#define AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND5(                 \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, SCALARTYPE4, SCALARTYPE5, ...) \
+  AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES(__VA_ARGS__)                \
+  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)                              \
+  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)                              \
+  AT_DISPATCH_CASE(SCALARTYPE3, __VA_ARGS__)                              \
+  AT_DISPATCH_CASE(SCALARTYPE4, __VA_ARGS__)                              \
+  AT_DISPATCH_CASE(SCALARTYPE5, __VA_ARGS__)
+
+#define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND5(    \
+    SCALARTYPE1,                                        \
+    SCALARTYPE2,                                        \
+    SCALARTYPE3,                                        \
+    SCALARTYPE4,                                        \
+    SCALARTYPE5,                                        \
+    TYPE,                                               \
+    NAME,                                               \
+    ...)                                                \
+  AT_DISPATCH_SWITCH(                                   \
+      TYPE,                                             \
+      NAME,                                             \
+      AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND5( \
+          SCALARTYPE1,                                  \
+          SCALARTYPE2,                                  \
+          SCALARTYPE3,                                  \
+          SCALARTYPE4,                                  \
+          SCALARTYPE5,                                  \
+          __VA_ARGS__))
+
+#define AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND6(  \
+    SCALARTYPE1,                                           \
+    SCALARTYPE2,                                           \
+    SCALARTYPE3,                                           \
+    SCALARTYPE4,                                           \
+    SCALARTYPE5,                                           \
+    SCALARTYPE6,                                           \
+    ...)                                                   \
+  AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES(__VA_ARGS__) \
+  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)               \
+  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)               \
+  AT_DISPATCH_CASE(SCALARTYPE3, __VA_ARGS__)               \
+  AT_DISPATCH_CASE(SCALARTYPE4, __VA_ARGS__)               \
+  AT_DISPATCH_CASE(SCALARTYPE5, __VA_ARGS__)               \
+  AT_DISPATCH_CASE(SCALARTYPE6, __VA_ARGS__)
+
+#define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND6(    \
+    SCALARTYPE1,                                        \
+    SCALARTYPE2,                                        \
+    SCALARTYPE3,                                        \
+    SCALARTYPE4,                                        \
+    SCALARTYPE5,                                        \
+    SCALARTYPE6,                                        \
+    TYPE,                                               \
+    NAME,                                               \
+    ...)                                                \
+  AT_DISPATCH_SWITCH(                                   \
+      TYPE,                                             \
+      NAME,                                             \
+      AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND6( \
+          SCALARTYPE1,                                  \
+          SCALARTYPE2,                                  \
+          SCALARTYPE3,                                  \
+          SCALARTYPE4,                                  \
+          SCALARTYPE5,                                  \
+          SCALARTYPE6,                                  \
+          __VA_ARGS__))
+
 #define AT_DISPATCH_CASE_INTEGRAL_TYPES(...)          \
   AT_DISPATCH_CASE(at::ScalarType::Byte, __VA_ARGS__) \
   AT_DISPATCH_CASE(at::ScalarType::Char, __VA_ARGS__) \
@@ -405,6 +488,14 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 
 #define AT_DISPATCH_QINT_TYPES(TYPE, NAME, ...) \
   AT_DISPATCH_SWITCH(TYPE, NAME, AT_DISPATCH_CASE_QINT_TYPES(__VA_ARGS__))
+
+#define AT_DISPATCH_CASE_QINT_TYPES_AND(SCALARTYPE, ...) \
+  AT_DISPATCH_CASE_QINT_TYPES(__VA_ARGS__)               \
+  AT_DISPATCH_CASE(SCALARTYPE, __VA_ARGS__)
+
+#define AT_DISPATCH_QINT_TYPES_AND(SCALARTYPE, TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                           \
+      TYPE, NAME, AT_DISPATCH_CASE_QINT_TYPES_AND(SCALARTYPE, __VA_ARGS__))
 
 #define AT_DISPATCH_CASE_QINT_BYTE_TYPES(...)               \
   AT_DISPATCH_CASE_QINT(at::kQInt8, at::qint8, __VA_ARGS__) \
@@ -597,6 +688,104 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
           SCALARTYPE5,                             \
           SCALARTYPE6,                             \
           __VA_ARGS__))
+
+#define AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND7(  \
+    SCALARTYPE1,                                      \
+    SCALARTYPE2,                                      \
+    SCALARTYPE3,                                      \
+    SCALARTYPE4,                                      \
+    SCALARTYPE5,                                      \
+    SCALARTYPE6,                                      \
+    SCALARTYPE7,                                      \
+    ...)                                              \
+  AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX(__VA_ARGS__) \
+  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)          \
+  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)          \
+  AT_DISPATCH_CASE(SCALARTYPE3, __VA_ARGS__)          \
+  AT_DISPATCH_CASE(SCALARTYPE4, __VA_ARGS__)          \
+  AT_DISPATCH_CASE(SCALARTYPE5, __VA_ARGS__)          \
+  AT_DISPATCH_CASE(SCALARTYPE6, __VA_ARGS__)          \
+  AT_DISPATCH_CASE(SCALARTYPE7, __VA_ARGS__)
+
+#define AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND7(    \
+    SCALARTYPE1,                                   \
+    SCALARTYPE2,                                   \
+    SCALARTYPE3,                                   \
+    SCALARTYPE4,                                   \
+    SCALARTYPE5,                                   \
+    SCALARTYPE6,                                   \
+    SCALARTYPE7,                                   \
+    TYPE,                                          \
+    NAME,                                          \
+    ...)                                           \
+  AT_DISPATCH_SWITCH(                              \
+      TYPE,                                        \
+      NAME,                                        \
+      AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND7( \
+          SCALARTYPE1,                             \
+          SCALARTYPE2,                             \
+          SCALARTYPE3,                             \
+          SCALARTYPE4,                             \
+          SCALARTYPE5,                             \
+          SCALARTYPE6,                             \
+          SCALARTYPE7,                             \
+          __VA_ARGS__))
+
+#define AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND8(  \
+    SCALARTYPE1,                                      \
+    SCALARTYPE2,                                      \
+    SCALARTYPE3,                                      \
+    SCALARTYPE4,                                      \
+    SCALARTYPE5,                                      \
+    SCALARTYPE6,                                      \
+    SCALARTYPE7,                                      \
+    SCALARTYPE8,                                      \
+    ...)                                              \
+  AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX(__VA_ARGS__) \
+  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)          \
+  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)          \
+  AT_DISPATCH_CASE(SCALARTYPE3, __VA_ARGS__)          \
+  AT_DISPATCH_CASE(SCALARTYPE4, __VA_ARGS__)          \
+  AT_DISPATCH_CASE(SCALARTYPE5, __VA_ARGS__)          \
+  AT_DISPATCH_CASE(SCALARTYPE6, __VA_ARGS__)          \
+  AT_DISPATCH_CASE(SCALARTYPE7, __VA_ARGS__)          \
+  AT_DISPATCH_CASE(SCALARTYPE8, __VA_ARGS__)
+
+#define AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND8(    \
+    SCALARTYPE1,                                   \
+    SCALARTYPE2,                                   \
+    SCALARTYPE3,                                   \
+    SCALARTYPE4,                                   \
+    SCALARTYPE5,                                   \
+    SCALARTYPE6,                                   \
+    SCALARTYPE7,                                   \
+    SCALARTYPE8,                                   \
+    TYPE,                                          \
+    NAME,                                          \
+    ...)                                           \
+  AT_DISPATCH_SWITCH(                              \
+      TYPE,                                        \
+      NAME,                                        \
+      AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND8( \
+          SCALARTYPE1,                             \
+          SCALARTYPE2,                             \
+          SCALARTYPE3,                             \
+          SCALARTYPE4,                             \
+          SCALARTYPE5,                             \
+          SCALARTYPE6,                             \
+          SCALARTYPE7,                             \
+          SCALARTYPE8,                             \
+          __VA_ARGS__))
+
+#define AT_DISPATCH_CASE_BIT_TYPES(...)                  \
+  AT_DISPATCH_CASE(at::ScalarType::Bits1x8, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::Bits2x4, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::Bits4x2, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::Bits8, __VA_ARGS__)   \
+  AT_DISPATCH_CASE(at::ScalarType::Bits16, __VA_ARGS__)
+
+#define AT_DISPATCH_BIT_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(TYPE, NAME, AT_DISPATCH_CASE_BIT_TYPES(__VA_ARGS__))
 
 #define AT_DISPATCH_INDEX_TYPES(TYPE, NAME, ...)     \
   AT_DISPATCH_SWITCH(                                \

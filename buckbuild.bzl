@@ -110,6 +110,11 @@ def get_static_dispatch_backend():
         return []
     return static_dispatch_backend.split(";")
 
+def get_glsl_image_format():
+    if read_config("pt", "vulkan_full_precision", "0") == "0":
+        return "rgba16f"
+    return "rgba32f"
+
 def get_glsl_paths():
     paths = [
         "//xplat/caffe2:aten_vulkan_glsl_src_path",
@@ -122,7 +127,7 @@ def get_glsl_paths():
 
     if len(paths) % 2 != 0:
         fail(
-            "gen_vulkan_spv.additional_glsl_paths must contain an even number of elements"
+            "gen_vulkan_spv.additional_glsl_paths must contain an even number of elements",
         )
 
     return " ".join(
@@ -136,7 +141,7 @@ def get_glsl_paths():
                 len(paths),
                 2,
             )
-        ]
+        ],
     )
 
 # @lint-ignore BUCKRESTRICTEDSYNTAX
@@ -163,8 +168,8 @@ THIRD_PARTY_LIBS = {
     "flatc": ["//third-party/flatbuffers/fbsource_namespace:flatc", "//third_party:flatc"],
     "fmt": ["//third-party/fmt:fmt", "//third_party:fmt"],
     "glog": ["//third-party/glog:glog", "//third_party:glog"],
-    "gmock": ["//xplat/third-party/gmock:gtest", "//third_party:gmock"],
-    "gtest": ["//xplat/third-party/gmock:gmock", "//third_party:gtest"],
+    "gmock": ["//third-party/googletest:gmock_main", "//third_party:gmock"],
+    "gtest": ["//third-party/googletest:gtest_main", "//third_party:gtest"],
     "kineto": ["//xplat/kineto/libkineto:libkineto", "//third_party:libkineto"],
     "libkineto_headers": ["//xplat/kineto/libkineto:libkineto_headers", "//third_party:libkineto_headers"],
     "omp": ["//xplat/third-party/linker_lib:omp", "//third_party:no-op"],
@@ -175,8 +180,8 @@ THIRD_PARTY_LIBS = {
     "pyyaml": ["//third-party/pyyaml:pyyaml", "//third_party:pyyaml"],
     "rt": ["//xplat/third-party/linker_lib:rt", "//third_party:rt"],
     "ruy": ["//third-party/ruy:ruy_xplat_lib", "//third_party:ruy_lib"],
-    "typing-extensions": ["//third-party/typing-extensions:typing-extensions", "//third_party:typing-extensions"],
     "sleef_arm": ["//third-party/sleef:sleef_arm", "//third_party:sleef_arm"],
+    "typing-extensions": ["//third-party/typing-extensions:typing-extensions", "//third_party:typing-extensions"],
 }
 
 def third_party(name):
@@ -186,9 +191,7 @@ def third_party(name):
 
 def get_pt_compiler_flags():
     return select({
-        "DEFAULT": _PT_COMPILER_FLAGS + [
-            "-std=gnu++17",  #to accommodate for eigen
-        ],
+        "DEFAULT": _PT_COMPILER_FLAGS,
         "ovr_config//compiler:cl": windows_convert_gcc_clang_flags(_PT_COMPILER_FLAGS),
     })
 
@@ -901,7 +904,6 @@ def define_buck_targets(
                 # Don't need on mobile.
                 "torch/csrc/Exceptions.h",
                 "torch/csrc/python_headers.h",
-                "torch/csrc/utils/auto_gil.h",
                 "torch/csrc/jit/serialization/mobile_bytecode_generated.h",
             ],
         ),
@@ -1051,9 +1053,6 @@ def define_buck_targets(
             "--replace",
             "@AT_MKL_SEQUENTIAL@",
             "ATEN_MKL_SEQUENTIAL_FBXPLAT",
-            "--replace",
-            "@AT_FFTW_ENABLED@",
-            "0",
             "--replace",
             "@AT_POCKETFFT_ENABLED@",
             "1",
@@ -1467,7 +1466,6 @@ def define_buck_targets(
             "torch/csrc/jit/mobile/train/random.cpp",
             "torch/csrc/jit/mobile/train/sequential.cpp",
             ":gen_aten_libtorch[autograd/generated/Functions.cpp]",
-            "torch/csrc/quantized/quantized_backward.cpp",
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + ["-DUSE_MOBILE_CLASSTYPE"],
@@ -1948,7 +1946,7 @@ def define_buck_targets(
             ] + select({
                 "DEFAULT": [],
                 "ovr_config//runtime:fbcode-arm64": [
-                  third_party("sleef_arm"),
+                    third_party("sleef_arm"),
                 ],
             }),
             compiler_flags = get_aten_compiler_flags(),
@@ -2092,6 +2090,7 @@ def define_buck_targets(
             "aten/src/ATen/core/dispatch/Dispatcher.cpp",
             "aten/src/ATen/core/dispatch/ObservedOperators.cpp",
             "aten/src/ATen/core/dispatch/OperatorEntry.cpp",
+            "aten/src/ATen/core/PythonOpRegistrationTrampoline.cpp",
             "aten/src/ATen/core/interned_strings.cpp",
             "aten/src/ATen/core/library.cpp",
             "aten/src/ATen/core/op_registration/infer_schema.cpp",

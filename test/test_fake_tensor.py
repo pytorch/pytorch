@@ -15,12 +15,14 @@ from torch._subclasses.fake_tensor import (
     DynamicOutputShapeException,
     UnsupportedOperatorException,
 )
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic, free_symbols, StatelessSymbolicContext
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, OpDTypes
-from torch.testing._internal.common_cuda import SM80OrLater, PLATFORM_SUPPORTS_FUSED_SDPA
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch._dynamo.testing import rand_strided
+from torch._C._functorch import is_batchedtensor, _add_batch_dim, get_unwrapped
 from torch.testing import FileCheck
 import unittest
 import torch._prims as prims
@@ -34,7 +36,7 @@ from unittest.mock import patch
 from torch import distributed as dist
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten
+import torch.utils._pytree as pytree
 
 class FakeTensorTest(TestCase):
     def checkType(self, t, device_str, size):
@@ -97,7 +99,7 @@ class FakeTensorTest(TestCase):
 
     @unittest.skipIf(not dist.is_available(), "requires distributed")
     def test_fsdp_flat_param(self):
-        from torch.distributed.fsdp.flat_param import FlatParameter
+        from torch.distributed.fsdp._flat_param import FlatParameter
         with FakeTensorMode() as m:
             data = torch.randn(2, 2)
             param = FlatParameter(data, requires_grad=True)
@@ -200,6 +202,23 @@ class FakeTensorTest(TestCase):
                 FileCheck().check("CPU").check("AutocastCPU").run(torch._C._dispatch_key_set(y))
                 FileCheck().check_not("ADInplaceOrView").check_not("Autograd").run(torch._C._dispatch_key_set(y))
 
+    def test_batch_tensor(self):
+        x = torch.rand((3, 4, 5))
+        b = _add_batch_dim(x, 0, 0)
+        mode = FakeTensorMode()
+        fake_b = mode.from_tensor(b)
+        prims.utils.compare_tensor_meta(b, fake_b, check_strides=True)
+
+        b1 = _add_batch_dim(x, 1, 1)
+        b2 = _add_batch_dim(b1, 0, 2)
+        fake_b2 = mode.from_tensor(b2)
+        prims.utils.compare_tensor_meta(b2, fake_b2, check_strides=True)
+        self.assertTrue(is_batchedtensor(fake_b2))
+        fake_b1 = get_unwrapped(fake_b2)
+        self.assertTrue(is_batchedtensor(fake_b1))
+        fake_tensor = get_unwrapped(fake_b1)
+        self.assertIsInstance(fake_tensor, FakeTensor)
+
     def test_constructor(self):
         with FakeTensorMode():
             x = torch.rand([4, 4], device="cpu")
@@ -224,9 +243,9 @@ class FakeTensorTest(TestCase):
         with torch._subclasses.FakeTensorMode():
             out_fake = fn()
 
-        for a, b in zip(tree_flatten(out), tree_flatten(out_fake)):
-            if not isinstance(a, FakeTensor):
-                self.assertTrue(not isinstance(b, FakeTensor))
+        for a, b in zip(pytree.tree_leaves(out), pytree.tree_leaves(out_fake)):
+            if not isinstance(a, torch.Tensor):
+                self.assertTrue(not isinstance(b, torch.Tensor))
                 continue
 
             prims.utils.compare_tensor_meta(a, b, check_strides=True)
@@ -264,6 +283,25 @@ class FakeTensorTest(TestCase):
         prims.utils.compare_tensor_meta(fake_x.grad, x.grad)
 
         self.assertTrue(isinstance(fake_x.grad, FakeTensor))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_index_put_error(self):
+        mode = FakeTensorMode()
+        for context in [contextlib.nullcontext, lambda: mode]:
+            with context():
+                y = torch.randn(2, 2, 3)
+                x = torch.randn(2, 2, 3).to('cuda')
+                with self.assertRaises(RuntimeError):
+                    x[[1, 1]] = y
+
+                with self.assertRaises(RuntimeError):
+                    torch.ops.aten.index_put(x, torch.tensor([1, 1], device="cuda"), y)
+
+                # no error
+                torch.ops.aten.index_put(x, torch.tensor([1, 1], device="cuda"), torch.tensor(5.))
+                torch.ops.aten.index_put_(x, torch.tensor([1, 1], device="cuda"), torch.tensor(5.))
+
+
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_like_constructor(self):
@@ -509,6 +547,55 @@ class FakeTensorTest(TestCase):
             x = torch.rand([10, 10])
 
             self.assertRaises(DynamicOutputShapeException, lambda: torch.nonzero(x))
+
+    def test_tolist(self):
+        shape_env = ShapeEnv()
+        with FakeTensorMode(allow_fallback_kernels=False, shape_env=shape_env):
+            x = torch.rand([10])
+            x.tolist()
+
+    def test_same_shape_env_preserved(self):
+        shape_env = ShapeEnv()
+        mode1 = FakeTensorMode(shape_env=shape_env)
+        t1 = mode1.from_tensor(
+            torch.randn(10),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[DimDynamic.DYNAMIC],
+                constraint_sizes=[None]
+            )
+        )
+        mode2 = FakeTensorMode(shape_env=shape_env)
+        t2 = mode2.from_tensor(t1)
+        # t2.size(0) is still dynamic, even though we didn't pass DYNAMIC here
+        self.assertIsNot(t2, t1)
+        self.assertIs(t1.fake_mode, mode1)
+        self.assertIs(t2.fake_mode, mode2)
+        self.assertIs(t2.size(0).node.shape_env, t1.size(0).node.shape_env)
+        self.assertEqual(str(t2.size(0)), str(t1.size(0)))
+
+    def test_jagged_fake_to_fake_preserved(self):
+        from torch.nested._internal.nested_tensor import jagged_from_list
+
+        S0, S1, S2 = 3, 4, 5
+        D = 4
+        a = torch.randn(S0, D, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(S1, D, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(S2, D, requires_grad=True, dtype=torch.float64)
+        offsets = None
+        jt, _ = jagged_from_list([a, b, c], offsets)
+        shape_env = ShapeEnv()
+        mode1 = FakeTensorMode(shape_env=shape_env)
+        t1 = mode1.from_tensor(jt)
+        mode2 = FakeTensorMode(shape_env=shape_env)
+        t2 = mode2.from_tensor(t1)
+        # It's not obvious that the invocation above makes it dynamic but it
+        # does!
+        self.assertTrue(free_symbols(t1.size()))
+        self.assertIsNot(t2, t1)
+        self.assertIs(t1.offsets().fake_mode, mode1)
+        self.assertIs(t2.offsets().fake_mode, mode2)
+        self.assertIs(t2.size(1).node.shape_env, t1.size(1).node.shape_env)
+        self.assertEqual(str(t2.size(1)), str(t1.size(1)))
 
     def checkMetaProps(self, t1, t2):
         prims.utils.compare_tensor_meta(t1, t2, check_strides=True)
@@ -782,16 +869,11 @@ def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
 class FakeTensorOpInfoTest(TestCase):
     @ops(custom_op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
-        data_dependent_outputs = {
-            'NumpyNMSCustomOp',
-            'NumpyNonzeroCustomOp',
-        }
-
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             args = (sample_input.input,) + sample_input.args
             kwargs = sample_input.kwargs
-            optests.fake_check(op, args, kwargs, op.name in data_dependent_outputs)
+            optests.fake_check(op, args, kwargs)
 
 
 class FakeTensorConverterTest(TestCase):
@@ -1011,31 +1093,38 @@ class FakeTensorOperatorInvariants(TestCase):
             self.assertEqual(ref.size(), meta_out.size())
 
     @skipIfRocm
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     def test_flash_attention(self):
         class Repro(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
             def forward(self, arg1, arg2, arg3):
-                torch.ops.aten._scaled_dot_product_flash_attention(arg1, arg2, arg3)
+                torch.ops.aten._scaled_dot_product_flash_attention(arg1, arg2, arg3, scale=0.17677669529663687)
 
         args_new = [
-            ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
-            ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
-            ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+            [
+                ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+                ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+                ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+            ],
+            [
+                ((4, 2, 16, 32), (1024, 512, 32, 1), torch.float16, "cuda"),
+                ((4, 2, 16, 32), (1024, 512, 32, 1), torch.float16, "cuda"),
+                ((4, 2, 16, 32), (1024, 512, 32, 1), torch.float16, "cuda"),
+            ]
         ]
-
-        args = [rand_strided(bsz, num_heads, seq_len, head_dim) for
-                (bsz, num_heads, seq_len, head_dim) in args_new]
-        try:
-            with torch._subclasses.CrossRefFakeMode():
-                Repro()(*args)
-        except RuntimeError as e:
-            # We expect the cross ref to succed for the first output to fail
-            # for the rng state, see Note [Seed and Offset]
-            self.assertTrue("output[0]" not in str(e))
-            self.assertTrue("found mismatched tensor metadata for output[6]: Devices cpu and cuda:0 are not equal!" in str(e))
+        for args_list in args_new:
+            args = [rand_strided(bsz, num_heads, seq_len, head_dim) for
+                    (bsz, num_heads, seq_len, head_dim) in args_list]
+            try:
+                with torch._subclasses.CrossRefFakeMode():
+                    Repro()(*args)
+            except RuntimeError as e:
+                # We expect the cross ref to succed for the first output to fail
+                # for the rng state, see Note [Seed and Offset]
+                self.assertTrue("output[0]" not in str(e))
+                self.assertTrue("found mismatched tensor metadata for output[6]: Devices cpu and cuda:0 are not equal!" in str(e))
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")

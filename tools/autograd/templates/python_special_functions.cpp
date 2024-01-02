@@ -5,7 +5,7 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/python_special_functions.h"
-#include "torch/csrc/autograd/python_return_types.h"
+#include "torch/csrc/autograd/generated/python_return_types.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/utils/python_arg_parsing.h"
@@ -40,7 +40,7 @@ using at::DimnameList;
 using torch::utils::check_out_type_matches;
 using namespace torch::autograd::utils;
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 // generated forward declarations start here
 
@@ -76,4 +76,4 @@ void initSpecialFunctions(PyObject* module) {
 
 ${py_methods}
 
-}} // namespace torch::autograd
+} // namespace torch::autograd

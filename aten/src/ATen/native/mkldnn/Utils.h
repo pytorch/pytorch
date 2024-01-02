@@ -4,7 +4,10 @@
 #include <ATen/core/List.h>
 #include <ATen/core/Tensor.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/strides.h>
+#if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
+#endif
 #include <vector>
 
 #if AT_MKLDNN_ENABLED()
@@ -54,6 +57,19 @@ static inline std::vector<int64_t> padding_r(
   return pad_r;
 }
 
+// Make sure input has default contiguous strides if it's contiguous tensors for better performance.
+// For example, for tensor of size = [1, 1280], stride = [0, 1], we'll convert it to size = [1, 1280], stride = [1280, 1]
+// before calling oneDNN for better performance.
+static inline Tensor may_convert_to_default_contiguous_strides(const Tensor& input) {
+  auto input_size = input.sizes().vec();
+  auto input_stride = input.strides().vec();
+  auto input_default_contiguous_strides = c10::contiguous_strides(input_size);
+  if (input.is_contiguous() && input_stride != c10::IntArrayRef(input_default_contiguous_strides)) {
+     return input.as_strided(input_size, input_default_contiguous_strides);
+  }
+  return input;
+}
+
 #if AT_MKLDNN_ENABLED()
 
 using AttrFunction = std::function<ideep::attr_t(
@@ -69,19 +85,55 @@ const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map();
 #endif // AT_MKLDNN_ENABLED()
 };
 
-inline bool mkldnn_bf16_device_check() {
-  return cpuinfo_initialize() && ((cpuinfo_has_x86_avx512bw()
-     && cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512dq()) || (cpuinfo_has_arm_bf16()));
-}
-
 #if defined(__aarch64__)
 inline bool mkldnn_bf16_device_check_arm() {
-  return (cpuinfo_initialize() && cpuinfo_has_arm_bf16());
+  return cpuinfo_initialize() && cpuinfo_has_arm_bf16();
 }
 #else
 constexpr bool mkldnn_bf16_device_check_arm() {
   return false;
 }
 #endif
+
+#if AT_MKLDNN_ENABLED()
+inline bool mkldnn_bf16_device_check() {
+#if defined(__x86_64__)
+  // Use ideep to check bf16 on X64 as cpuinfo has no avx_ne_convert check.
+  return ideep::has_bf16_type_support();
+#else
+  return mkldnn_bf16_device_check_arm();
+#endif
+}
+
+inline bool mkldnn_fp16_device_check() {
+#if defined(__x86_64__)
+  return ideep::has_fp16_type_support();
+#else
+  return false;
+#endif
+}
+
+#else
+inline bool mkldnn_bf16_device_check() {
+  return false;
+}
+inline bool mkldnn_fp16_device_check() {
+  return false;
+}
+#endif
+
+inline void mkldnn_check_low_precision(ScalarType input_t, std::string name) {
+  if (input_t == ScalarType::BFloat16) {
+    TORCH_CHECK(
+        mkldnn_bf16_device_check(),
+        name,
+        ": bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq");
+  } else if (input_t == ScalarType::Half) {
+    TORCH_CHECK(
+        mkldnn_fp16_device_check(),
+        name,
+        ": fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
+  }
+}
 
 }

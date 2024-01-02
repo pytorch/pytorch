@@ -17,14 +17,9 @@
 #include <torch/csrc/autograd/jit_decomp_interface.h>
 #include <torch/csrc/utils/variadic.h>
 
-#include <array>
 #include <cstddef>
 #include <functional>
-#include <initializer_list>
 #include <memory>
-#include <stdexcept>
-#include <string>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -117,8 +112,8 @@ inline void rebase_history(Variable& var, std::shared_ptr<Node> grad_fn) {
 }
 
 inline void rebase_history(
-    std::vector<Variable>&& vars,
-    std::shared_ptr<Node> grad_fn) {
+    const std::vector<Variable>& vars,
+    const std::shared_ptr<Node>& grad_fn) {
   if (grad_fn) {
     for (auto& var : vars) {
       if (var.defined()) {
@@ -137,6 +132,7 @@ inline void increment_version(const at::Tensor& t) {
 
 struct Flatten : IterArgs<Flatten> {
   Flatten(variable_list& out) : out(out) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   variable_list& out;
   void operator()(const at::Tensor& x) {
     out.emplace_back(x);
@@ -263,7 +259,8 @@ inline std::vector<at::Tensor> as_view(
   if (base.is_inference())
     return tensors;
 
-  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
+  const auto diff_view_meta =
+      torch::autograd::impl::get_view_autograd_meta(base);
 
   // Special case when view info can be shared for forward and backward
   // differentiable views
@@ -309,7 +306,6 @@ inline std::vector<at::Tensor> as_view(
   c10::optional<ViewInfo> new_fw_info = c10::nullopt;
 
   if (is_bw_differentiable) {
-    auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
     if (diff_view_meta && diff_view_meta->has_bw_view()) {
       const auto& base_bw_info = diff_view_meta->get_backward_view();
       // TODO: fix fb internal use-case so that it doesn't trigger this internal
@@ -333,7 +329,6 @@ inline std::vector<at::Tensor> as_view(
   }
   if (is_fw_differentiable) {
     // Check if base is a forward differentiable view
-    auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
     if (diff_view_meta && diff_view_meta->has_fw_view()) {
       const auto& base_fw_info = diff_view_meta->get_forward_view();
       TORCH_INTERNAL_ASSERT(
@@ -351,7 +346,6 @@ inline std::vector<at::Tensor> as_view(
 
   if ((is_fw_differentiable || is_bw_differentiable) && base.is_view()) {
     // is_view() => diff_view_meta
-    auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
     creation_meta = propagate_creation_meta(
         diff_view_meta->get_creation_meta(), creation_meta);
   }

@@ -43,13 +43,13 @@ api::GPUMemoryLayout get_gpu_memory_layout(
  * TensorImpl.h was used as a reference.
  */
 c10::SmallVector<int64_t, 6u> calc_contiguous_strides(const IntArrayRef sizes) {
-  int64_t ndim = sizes.size();
+  int64_t ndim = static_cast<int64_t>(sizes.size());
   c10::SmallVector<int64_t, 6u> strides(ndim);
 
   int64_t running_product = 1;
   if (ndim >= 1) {
     strides[ndim - 1] = running_product;
-    for (int i = sizes.size() - 2; i >= 0; --i) {
+    for (int i = static_cast<int>(sizes.size()) - 2; i >= 0; --i) {
       running_product *= sizes[i + 1];
       strides[i] = running_product;
     }
@@ -168,13 +168,30 @@ c10::SmallVector<int64_t, 6u> calc_gpu_sizes(
   // packed dimension.
   else {
     TORCH_CHECK(
-        ndim >= 1 && ndim <= 4,
-        "Texture storage only valid for 1 <= ndim <= 4!");
+        ndim >= 0 && ndim <= 4,
+        "Texture storage only valid for 0 <= ndim <= 4, received: ",
+        ndim);
 
     c10::SmallVector<int64_t, 6u> gpu_sizes(ndim == 4 ? 4 : 3);
 
     // Channel dim will be be aligned to the next multiple of 4
     switch (ndim) {
+      case 0:
+        switch (memory_layout) {
+          case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
+            // 0-dimension tensors only has 1 element. Hence it is always {4, 1,
+            // 1} when stored as image textures. Channels need to be multiple of
+            // 4 due to packing.
+            gpu_sizes[0] = 4;
+            gpu_sizes[1] = 1;
+            gpu_sizes[2] = 1;
+            break;
+          default:
+            TORCH_CHECK(
+                false,
+                "Invalid memory format used to create vTensor with zero-dim!");
+        }
+        break;
       case 1:
         switch (memory_layout) {
           case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
@@ -255,6 +272,7 @@ c10::SmallVector<int64_t, 6u> calc_gpu_sizes(
             gpu_sizes[1] = sizes[1];
             gpu_sizes[2] = sizes[3];
             gpu_sizes[3] = api::utils::align_up(sizes[3], INT64_C(4));
+            break;
           case api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED:
             gpu_sizes[0] = sizes[0];
             gpu_sizes[1] = sizes[1];
@@ -303,12 +321,17 @@ api::utils::uvec3 create_image_extents(
       case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
         TORCH_CHECK(width % 4 == 0, "Channels must be divisible by 4!")
         width /= 4;
+        break;
       case api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED:
         TORCH_CHECK(height % 4 == 0, "Channels must be divisible by 4!")
         height /= 4;
+        break;
       case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
         TORCH_CHECK(channels % 4 == 0, "Channels must be divisible by 4!")
         channels /= 4;
+        break;
+      default:
+        TORCH_CHECK(false, "Invalid memory format used!");
     }
 
     return {width, height, batch * channels};
@@ -433,8 +456,6 @@ vTensor::vTensor(
 api::VulkanImage& vTensor::image(
     api::PipelineBarrier& pipeline_barrier,
     const api::PipelineStageFlags stage) const& {
-  TORCH_CHECK(view_->image_, "vTensor has empty image texture!");
-
   view_->transition(pipeline_barrier, stage, api::MemoryAccessType::READ);
   return view_->image_;
 }
@@ -443,8 +464,6 @@ api::VulkanImage& vTensor::image(
     api::PipelineBarrier& pipeline_barrier,
     const api::PipelineStageFlags stage,
     const api::MemoryAccessFlags access) & {
-  TORCH_CHECK(view_->image_, "vTensor has empty image texture!");
-
   view_->transition(pipeline_barrier, stage, access);
   return view_->image_;
 }
@@ -452,8 +471,6 @@ api::VulkanImage& vTensor::image(
 api::VulkanBuffer& vTensor::buffer(
     api::PipelineBarrier& pipeline_barrier,
     const api::PipelineStageFlags stage) const& {
-  TORCH_CHECK(view_->buffer_, "vTensor has empty buffer!");
-
   view_->transition(pipeline_barrier, stage, api::MemoryAccessType::READ);
   return view_->buffer_;
 }
@@ -462,8 +479,6 @@ api::VulkanBuffer& vTensor::buffer(
     api::PipelineBarrier& pipeline_barrier,
     const api::PipelineStageFlags stage,
     const api::MemoryAccessFlags access) & {
-  TORCH_CHECK(view_->buffer_, "vTensor has empty buffer!");
-
   view_->transition(pipeline_barrier, stage, access);
   return view_->buffer_;
 }

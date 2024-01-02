@@ -10,8 +10,7 @@
 #include <sleef.h>
 #endif
 
-namespace at {
-namespace vec {
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -143,6 +142,9 @@ public:
   Vectorized<double> atan() const {
     return Vectorized<double>(Sleef_atand4_u10(values));
   }
+  Vectorized<double> atanh() const {
+    return Vectorized<double>(Sleef_atanhd4_u10(values));
+  }
   Vectorized<double> atan2(const Vectorized<double> &b) const {
     return Vectorized<double>(Sleef_atan2d4_u10(values, b));
   }
@@ -167,6 +169,9 @@ public:
   Vectorized<double> expm1() const {
     return Vectorized<double>(Sleef_expm1d4_u10(values));
   }
+  Vectorized<double> exp_u20() const {
+    return exp();
+  }
   Vectorized<double> fmod(const Vectorized<double>& q) const {
     return Vectorized<double>(Sleef_fmodd4(values, q));
   }
@@ -178,6 +183,9 @@ public:
   }
   Vectorized<double> i0e() const {
     return map(calc_i0e);
+  }
+  Vectorized<double> digamma() const {
+    return map(calc_digamma);
   }
   Vectorized<double> igamma(const Vectorized<double> &x) const {
     __at_align__ double tmp[size()];
@@ -424,4 +432,4 @@ Vectorized<double> inline fmsub(const Vectorized<double>& a, const Vectorized<do
 
 #endif
 
-}}}
+}} // namespace at::vec::CPU_CAPABILITY

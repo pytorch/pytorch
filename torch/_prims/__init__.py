@@ -148,6 +148,7 @@ __all__ = [
     "squeeze",
     "transpose",
     "view_of",
+    "view_element_type",
     #
     # Functionalized view mutations
     #
@@ -172,7 +173,6 @@ __all__ = [
     "item",
     "maximum_value",
     "minimum_value",
-    "to_dtype",
     "copy_strided",
     #
     # Inplace prims
@@ -271,7 +271,7 @@ def _make_prim(
 
     """
 
-    prim.define(schema)
+    prim.define(schema, tags=torch.Tag.pt2_compliant_tag)
 
     def _prim_impl(*args, **kwargs):
         # always run the meta function because aten implementation will
@@ -290,6 +290,8 @@ def _make_prim(
     def _backend_select_impl(*args, **kwargs):
         if kwargs.get("device") and kwargs["device"].type == "meta":
             return meta(*args, **kwargs)
+        if any(isinstance(x, torch.device) and x.type == "meta" for x in args):
+            return meta(*args, **kwargs)
         else:
             return _prim_impl(*args, **kwargs)
 
@@ -305,7 +307,12 @@ def _make_prim(
 
     from torch._subclasses.fake_tensor import contains_tensor_types
 
-    if not any(contains_tensor_types(a.type) for a in _prim._schema.arguments):
+    if not any(contains_tensor_types(a.type) for a in _prim._schema.arguments) or str(
+        _prim
+    ) in [
+        # See https://github.com/pytorch/pytorch/issues/103532
+        "prims.device_put.default"
+    ]:
         prim_backend_select_impl.impl(name, _backend_select_impl)
 
     for p in (_prim_packet, _prim):
@@ -328,7 +335,7 @@ class ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND(Enum):
 
 
 # TODO: implement dtype validation here, too, or on the corresponding refs
-def _elementwise_meta(
+def _prim_elementwise_meta(
     *args,
     type_promotion: ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND,
     args_with_fixed_dtypes: Optional[Tuple[TensorLikeType, ...]] = None,
@@ -427,7 +434,7 @@ def _complex_only_elementwise_meta(*args, **kwargs):
     torch._check(
         utils.is_complex_dtype(args[0].dtype), lambda: "Only complex dtype is supported"
     )
-    return _elementwise_meta(*args, **kwargs)
+    return _prim_elementwise_meta(*args, **kwargs)
 
 
 def _make_elementwise_unary_prim(
@@ -439,7 +446,7 @@ def _make_elementwise_unary_prim(
 
     return _make_prim(
         schema=f"{name}(Tensor self) -> Tensor",
-        meta=partial(_elementwise_meta, type_promotion=type_promotion),
+        meta=partial(_prim_elementwise_meta, type_promotion=type_promotion),
         return_type=RETURN_TYPE.NEW,
         **kwargs,
     )
@@ -454,7 +461,7 @@ def _make_elementwise_binary_prim(
 
     return _make_prim(
         schema=f"{name}(Tensor self, Tensor other) -> Tensor",
-        meta=partial(_elementwise_meta, type_promotion=type_promotion),
+        meta=partial(_prim_elementwise_meta, type_promotion=type_promotion),
         return_type=RETURN_TYPE.NEW,
         **kwargs,
     )
@@ -637,7 +644,6 @@ def _clone_meta(
             dtype=input.dtype,
             layout=input.layout,
             device=input.device,
-            requires_grad=input.requires_grad,
             memory_format=memory_format,
         )
 
@@ -649,7 +655,6 @@ def _clone_meta(
         dtype=input.dtype,
         layout=input.layout,
         device=input.device,
-        requires_grad=input.requires_grad,
     )
 
 
@@ -719,7 +724,7 @@ exp2 = _make_elementwise_unary_prim(
 
 
 def _fill_meta(a: TensorLikeType, value: NumberType) -> TensorLikeType:
-    return _elementwise_meta(
+    return _prim_elementwise_meta(
         a, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
     )
 
@@ -1226,7 +1231,7 @@ def _broadcast_in_dim_meta(
 
         return x
 
-    reduce(lambda acc, x: _greater_than_reduce(acc, x), broadcast_dimensions, -1)
+    reduce(_greater_than_reduce, broadcast_dimensions, -1)
 
     # shape must be broadcastable to
     for idx, new_idx in enumerate(broadcast_dimensions):
@@ -1780,6 +1785,27 @@ view_of = _make_prim(
     doc=_view_of_doc,
 )
 
+
+def _view_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
+    return a.view(dtype)
+
+
+def _view_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
+    return a.view(dtype)
+
+
+_view_element_type_doc = """
+    Creates a view of the tensor with a different dtype.
+    """
+
+view_element_type = _make_prim(
+    schema="view_of_dtype(Tensor(a) a, ScalarType dtype) -> Tensor",
+    meta=_view_element_type_meta,
+    impl_aten=_view_element_type_aten,
+    return_type=RETURN_TYPE.VIEW,
+    doc=_view_element_type_doc,
+)
+
 #
 # Functionalized view mutations
 #
@@ -1870,11 +1896,12 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
             if idx == dim:
                 concat_length = concat_length + length
-            elif length != common_length:
-                raise RuntimeError(
-                    f"Sizes of tensors must match except in dimension {dim}. "
+            else:
+                torch._check(
+                    length == common_length,
+                    lambda: f"Sizes of tensors must match except in dimension {dim}. "
                     f"Expected {common_length} but got {length} for tensor number "
-                    f"{tensor_idx} in the list"
+                    f"{tensor_idx} in the list",
                 )
 
     new_shape = list(tensors[0].shape).copy()
@@ -1961,7 +1988,7 @@ rev = _make_prim(
 def _where_meta(
     pred: TensorLikeType, a: TensorLikeType, b: TensorLikeType
 ) -> TensorLikeType:
-    return _elementwise_meta(
+    return _prim_elementwise_meta(
         a,
         b,
         type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
@@ -2738,8 +2765,6 @@ svd = _make_prim(
 #
 
 
-# TODO: add generator support
-# NOTE: there is currently no way of acquiring the "default" torch generator
 def _normal_meta(
     shape: ShapeType,
     *,
@@ -2748,6 +2773,7 @@ def _normal_meta(
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
+    generator: Optional[torch.Generator] = None,
 ) -> TensorLikeType:
     torch._check(
         std >= 0.0,
@@ -2771,11 +2797,12 @@ def _normal_aten(
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
+    generator: Optional[torch.Generator] = None,
 ) -> Tensor:
     a = torch.empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
     with torch.no_grad():
         # NOTE: normal_ is incorrectly annotated to expect mean to be a float
-        a.normal_(mean, std)  # type: ignore[arg-type]
+        a.normal_(mean, std, generator=generator)  # type: ignore[arg-type]
     return a
 
 
@@ -2788,7 +2815,7 @@ _normal_doc = """
 
 normal = _make_prim(
     schema=(
-        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad) -> Tensor"
+        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad, Generator? generator=None) -> Tensor"  # noqa: B950
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_normal_meta,
@@ -2804,6 +2831,7 @@ def _uniform_meta(
     high: float,
     dtype: torch.dtype,
     device: torch.device,
+    generator: Optional[torch.Generator] = None,
 ) -> TensorLikeType:
     strides = utils.make_contiguous_strides_for(shape)
     return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
@@ -2816,9 +2844,10 @@ def _uniform_aten(
     high: float,
     dtype: torch.dtype,
     device: torch.device,
+    generator: Optional[torch.Generator] = None,
 ) -> Tensor:
     a = torch.empty(shape, dtype=dtype, device=device)
-    a.uniform_(low, high)
+    a.uniform_(low, high, generator=generator)
     return a
 
 
@@ -2829,7 +2858,7 @@ _uniform_doc = """
 # TODO: we should more seriously review randomness modeling and prims
 _uniform_helper = _make_prim(
     schema=(
-        "uniform(SymInt[] shape, *, Scalar low, Scalar high, ScalarType dtype, Device device) -> Tensor"
+        "uniform(SymInt[] shape, *, Scalar low, Scalar high, ScalarType dtype, Device device, Generator? generator=None) -> Tensor"
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_uniform_meta,

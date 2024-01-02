@@ -107,6 +107,7 @@ static void accumulate(
   //  5) The other Tensor is not a Tensor subclass (except sparse), since
   //     it's hard to predict the semantics of arbitrary subclass behavior.
 
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (at::GradMode::is_enabled()) {
     buffer[pos] = old_var + var;
   } else if (
@@ -159,6 +160,7 @@ void InputBuffer::add(
 
   TORCH_INTERNAL_ASSERT(device_of(var));
   c10::optional<c10::Stream> opt_accumulate_stream = c10::nullopt;
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   if (device_of(var)->is_cuda()) {
     const auto on_producer =
         opt_producer_stream && device_of(var) == opt_producer_stream->device();
@@ -189,6 +191,7 @@ void InputBuffer::add(
         opt_sync_stream = opt_producer_stream;
       } else {
         // (5)
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         opt_accumulate_stream = guard.getDefaultStream(*device_of(var));
       }
       if (opt_sync_stream && (opt_accumulate_stream != opt_sync_stream)) {
