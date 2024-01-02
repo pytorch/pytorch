@@ -720,9 +720,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Generates a prefix that is unique to this process group and rank, for
   // disambiguating logs
-  std::string createLogPrefix() const;
-
-  // Returns the unique prefix created in createLogPrefix
   const std::string& logPrefix() const;
 
   // Returns the global rank of the device. This function assumes that users
@@ -752,6 +749,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Helper to wait up to the specified timeout and then abandon the dump.
   // Logs on timeout, and asserts the future's status is as expected.
   void waitForDumpOrTimeout(std::future<bool>& fut, size_t timeout_sec = 30);
+
+  // Helper to have a potential additional sleep so that dumps from all ranks
+  // are likely to finish before exit.
+  void extraWaitForDumpUntil(
+      const std::chrono::time_point<std::chrono::steady_clock>& wakeUpTime);
 
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
@@ -978,8 +980,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unique_ptr<DebugInfoWriter> debugInfoWriter_ = nullptr;
 
   size_t uid_;
-
-  std::string logPrefix_;
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
 };

@@ -727,7 +727,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
-  logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
@@ -1062,16 +1061,17 @@ std::future<bool> ProcessGroupNCCL::launchAsyncDebugDump() {
   return resultFuture;
 }
 
+void ProcessGroupNCCL::extraWaitForDumpUntil(
+    const std::chrono::time_point<std::chrono::steady_clock>& wakeUpTime) {
+  std::this_thread::sleep_until(wakeUpTime);
+}
+
 void ProcessGroupNCCL::waitForDumpOrTimeout(
     std::future<bool>& fut,
     size_t timeout_sec) {
   TORCH_CHECK(fut.valid(), "Expected a valid future");
 
   auto futStatus = fut.wait_for(std::chrono::seconds(timeout_sec));
-  // This extra sleep is needed to ensure all ranks get enough time to dump
-  // debug info when timeout.
-  std::this_thread::sleep_for(
-      std::chrono::milliseconds(waitTimeoutDumpSleepInMilSec_));
   if (futStatus != std::future_status::ready) {
     TORCH_CHECK(
         futStatus != std::future_status::deferred,
@@ -1119,8 +1119,17 @@ void ProcessGroupNCCL::abortCommsFromMap(
     // their responsibility to destroy the process group and recreate
     // it to recover from errors.
 
+    c10::StreamId streamId = -1;
+    if (ncclStreams_.find(devName) != ncclStreams_.end()) {
+      auto streams = ncclStreams_.at(devName);
+      if (streams.size() > 0) {
+        streamId = streams[0].id();
+      }
+    }
+
     LOG(INFO) << logPrefix() << "] Destroyed " << ncclComms.size()
-              << "communicators on CUDA device " << devName;
+              << "communicators on CUDA device: " << devName
+              << " with stream: " << streamId;
   }
 }
 
@@ -1253,6 +1262,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     }
   }
 
+  auto wakeUpTime = std::chrono::steady_clock::now() +
+      std::chrono::milliseconds(waitTimeoutDumpSleepInMilSec_);
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)
   std::future<bool> asyncDebugDump = launchAsyncDebugDump();
@@ -1300,6 +1311,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // check the return value here.  We mainly use a future so we can exit early
   // if done.
   waitForDumpOrTimeout(asyncDebugDump);
+  extraWaitForDumpUntil(wakeUpTime);
 
   if (!terminateHeartbeatMonitorThread_.load()) {
     const auto logMsg = c10::str(
@@ -1436,12 +1448,9 @@ struct DumpPipe {
 };
 #endif
 
-std::string ProcessGroupNCCL::createLogPrefix() const {
-  return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
-}
-
 const std::string& ProcessGroupNCCL::logPrefix() const {
-  return logPrefix_;
+  static std::string prefix = c10::str("[PG ", uid_, " Rank ", rank_, "] ");
+  return prefix;
 }
 
 const int& ProcessGroupNCCL::globalRank() const {
@@ -1494,8 +1503,11 @@ void ProcessGroupNCCL::watchdogHandler() {
           timeSinceLastPollStore >= heartbeatTimeoutInSec_ * 1000) {
         lastTimePollStore = currentTime;
         if (store_->check({std::string(TIMEOUT_DUMP)}) && !optAsyncDebugDump) {
+          auto wakeUpTime = std::chrono::steady_clock::now() +
+              std::chrono::milliseconds(waitTimeoutDumpSleepInMilSec_);
           optAsyncDebugDump = launchAsyncDebugDump();
           waitForDumpOrTimeout(*optAsyncDebugDump);
+          extraWaitForDumpUntil(wakeUpTime);
           const auto exitMsg = c10::str(
               logPrefix(),
               "Another rank reported a timeout and signaled a global abort.");
@@ -1532,6 +1544,8 @@ void ProcessGroupNCCL::watchdogHandler() {
               store_->set(std::string(TIMEOUT_DUMP), vec);
             }
 
+            auto wakeUpTime = std::chrono::steady_clock::now() +
+                std::chrono::milliseconds(waitTimeoutDumpSleepInMilSec_);
             if (dumpOnTimeout_ && !optAsyncDebugDump) {
               // Store debug info to storage. (By default to local disk)
               optAsyncDebugDump = launchAsyncDebugDump();
@@ -1545,6 +1559,7 @@ void ProcessGroupNCCL::watchdogHandler() {
             if (dumpOnTimeout_) {
               // Store debug info to storage. (By default to local disk)
               waitForDumpOrTimeout(*optAsyncDebugDump);
+              extraWaitForDumpUntil(wakeUpTime);
             }
 
           } catch (const std::exception& e) {
