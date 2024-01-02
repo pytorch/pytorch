@@ -10,7 +10,7 @@ def collate_sentences_lm(samples):
     src_tokens = torch.stack([s["source"] for s in samples], 0)
     tgt_tokens = torch.stack([s["target"] for s in samples], 0)
     ntokens = len(samples) * len(samples[0]["target"])
-    src_lengths = torch.LongTensor([len(samples[0]["source"])] * len(samples))
+    torch.LongTensor([len(samples[0]["source"])] * len(samples))
 
     batch = {
         "id": id,

@@ -239,7 +239,7 @@ class AutocastCPUTestLists:
         # Utility arguments, created as one-element tuples
         pointwise0_bf16 = (torch.randn(n, dtype=torch.bfloat16, device=dev),)
         pointwise1_bf16 = (torch.randn(n, dtype=torch.bfloat16, device=dev),)
-        pointwise2_bf16 = (torch.randn(n, dtype=torch.bfloat16, device=dev),)
+        (torch.randn(n, dtype=torch.bfloat16, device=dev),)
         mat0_bf16 = (torch.randn((n, n), dtype=torch.bfloat16, device=dev),)
         mat1_bf16 = (torch.randn((n, n), dtype=torch.bfloat16, device=dev),)
         mat2_bf16 = (torch.randn((n, n), dtype=torch.bfloat16, device=dev),)
@@ -253,14 +253,14 @@ class AutocastCPUTestLists:
                       for dimset in dummy_dimsets]
 
         dimsets = ((n, n, n), (n, n, n, n), (n, n, n, n, n))
-        conv_args_bf16 = [(torch.randn(dimset, dtype=torch.bfloat16, device=dev),
-                           torch.randn(dimset, dtype=torch.bfloat16, device=dev))
-                          for dimset in dimsets]
+        [(torch.randn(dimset, dtype=torch.bfloat16, device=dev),
+          torch.randn(dimset, dtype=torch.bfloat16, device=dev))
+         for dimset in dimsets]
         conv_args_fp32 = [(torch.randn(dimset, dtype=torch.float32, device=dev),
                            torch.randn(dimset, dtype=torch.float32, device=dev))
                           for dimset in dimsets]
 
-        bias_fp32 = (torch.randn((n,), dtype=torch.float32, device=dev),)
+        (torch.randn((n,), dtype=torch.float32, device=dev),)
         element0_fp32 = (torch.randn(1, dtype=torch.float32, device=dev),)
         pointwise0_fp32 = (torch.randn(n, dtype=torch.float32, device=dev),)
         pointwise1_fp32 = (torch.randn(n, dtype=torch.float32, device=dev),)
@@ -269,8 +269,8 @@ class AutocastCPUTestLists:
         mat2_fp32 = (torch.randn((n, n), dtype=torch.float32, device=dev),)
         mat3_fp32 = (torch.randn((n, n), dtype=torch.float32, device=dev),)
 
-        dummy_fp32 = [(torch.randn(dimset, dtype=torch.float32, device=dev),)
-                      for dimset in dummy_dimsets]
+        [(torch.randn(dimset, dtype=torch.float32, device=dev),)
+         for dimset in dummy_dimsets]
         # The lists below organize ops that autocast needs to test.
         # self.list_name corresponds to test_autocast_list_name in test/test_cpu.py.
         # Each op is associated with a tuple of valid arguments.

@@ -1957,7 +1957,7 @@ def is_iterable_of_tensors(iterable, include_empty=False):
             if not isinstance(t, torch.Tensor):
                 return False
 
-    except TypeError as te:
+    except TypeError:
         return False
 
     return True
@@ -4153,9 +4153,9 @@ def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
     """
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
-    singular = kwargs.get("singular", False)
+    kwargs.get("singular", False)
 
-    k = min(rows, columns)
+    min(rows, columns)
     nonzero_elements = max(min(rows, columns), int(rows * columns * density))
 
     row_indices = [i % rows for i in range(nonzero_elements)]

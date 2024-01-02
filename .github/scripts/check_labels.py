@@ -44,7 +44,7 @@ def main() -> None:
             add_label_err_comment(pr)
         else:
             delete_all_label_err_comments(pr)
-    except Exception as e:
+    except Exception:
         pass
 
     sys.exit(0)

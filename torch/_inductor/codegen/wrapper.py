@@ -1284,7 +1284,7 @@ class WrapperCodeGen(CodeGen):
     @staticmethod
     def statically_known_int_or_none(x):
         try:
-            val = V.graph._shape_env._maybe_evaluate_static(x)
+            V.graph._shape_env._maybe_evaluate_static(x)
             return int(x)
         except Exception:
             return None
@@ -1875,7 +1875,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                             cached_output_name = (
                                 f"cached_output_{next(self.cached_output_id)}"
                             )
-                            output_value_type = f"std::decay_t<decltype(std::get<{idx}>(output_arrayref_tensors).data()[0])>"
                             self.wrapper_call.writeline(
                                 f"thread_local RAIIAtenTensorHandle {cached_output_name};"
                             )

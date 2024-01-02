@@ -1273,7 +1273,7 @@ def get_guard_fail_reason(
         with report_compile_source_on_error():
             try:
                 fail_reason = eval(part, global_scope, scope)
-            except Exception as e:
+            except Exception:
                 if is_recompiles_verbose_enabled():
                     continue
                 else:
@@ -1296,7 +1296,7 @@ def get_guard_fail_reason(
             guard_fn.guard_fail_fn(
                 GuardFail(reason_str or "unknown reason", orig_code_map[code])
             )
-    except Exception as e:
+    except Exception:
         log.exception(
             "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
         )

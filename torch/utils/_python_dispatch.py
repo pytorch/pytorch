@@ -5,7 +5,7 @@ import warnings
 from dataclasses import dataclass
 import torch
 import torchgen
-from torch._C import _len_torch_dispatch_stack, _get_dispatch_stack_at,\
+from torch._C import _len_torch_dispatch_stack, _get_dispatch_stack_at, \
     _pop_torch_dispatch_stack, _push_on_torch_dispatch_stack, DispatchKey
 
 
@@ -234,7 +234,7 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
     assert isinstance(func, torch._ops.OpOverload)
     assert isinstance(args, tuple)
     assert isinstance(outs, (list, tuple))
-    flat_outs = torch.utils._pytree.tree_leaves(outs)
+    torch.utils._pytree.tree_leaves(outs)
 
     def alias_non_inplace_storage(arg, ret):
         # This is hopefully a reasonable assert:

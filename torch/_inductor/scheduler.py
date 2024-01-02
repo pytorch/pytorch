@@ -2226,7 +2226,7 @@ class Scheduler:
                     node.get_name(),
                     node.get_estimated_runtime(),
                 )
-            except Exception as e:
+            except Exception:
                 log.debug(
                     "Generating code for node %s with estimated runtime 0.0",
                     node.get_name(),

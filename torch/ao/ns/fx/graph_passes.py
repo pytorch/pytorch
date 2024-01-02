@@ -97,7 +97,7 @@ def add_loggers_to_model(
 
     new_graph = Graph()
     env: Dict[str, Any] = {}
-    modules = dict(gm.named_modules())
+    dict(gm.named_modules())
 
     def load_arg(a):
         return map_arg(a, lambda node: env[node.name])
@@ -449,10 +449,10 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
     TODO(before land): real docblock
     """
     if isinstance(input_node_c, Node):
-        graph_c = input_node_c.graph
+        pass
     else:
         assert isinstance(input_node_c, list)
-        graph_c = input_node_c[0].graph
+        input_node_c[0].graph
 
     # create a sequential list of the subgraphs' nodes from start to end,
     # because we need to add the nodes to graph C in non-reverse order
@@ -660,7 +660,7 @@ def create_a_shadows_b(
     # the shadows with the nodes copied from graph_a
     graph_c = Graph()
     env_c: Dict[str, Any] = {}
-    modules = dict(gm_b.named_modules())
+    dict(gm_b.named_modules())
 
     def load_arg(a):
         return map_arg(a, lambda node: env_c[node.name])

@@ -534,7 +534,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
                 dst_worker1_name, modes=[ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE]
             ):
                 # Test querying some simple attributes from worker2.
-                attrs = rpc.rpc_sync(
+                rpc.rpc_sync(
                     dst_worker2_name, remote_module_attributes, (remote_module,)
                 )
 
@@ -556,7 +556,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
             )
 
             args = (torch.ones(1), 2, "3")
-            ret1 = rpc.rpc_sync(
+            rpc.rpc_sync(
                 dst_worker1_name, remote_forward, (remote_module, args)
             )
             ret2 = rpc.rpc_sync(

@@ -106,7 +106,7 @@ def test_only_eval_fn(model, calib_data):
     input Tensors and run the model on the dataset
     """
     for inp in calib_data:
-        output = model(*inp)
+        model(*inp)
 
 _default_loss_fn = torch.nn.CrossEntropyLoss()
 def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
@@ -175,7 +175,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_bat
     model.train()
     cnt = 0
     for image, target in data_loader:
-        start_time = time.time()
+        time.time()
         print('.', end='')
         cnt += 1
         image, target = image.to(device), target.to(device)
@@ -1080,7 +1080,7 @@ class QuantizationLiteTestCase(QuantizationTestCase):
         # Creates quantized model for testing mobile script modules
         qengine = "qnnpack"
         with override_quantized_engine(qengine):
-            qconfig = torch.ao.quantization.get_default_qconfig(qengine)
+            torch.ao.quantization.get_default_qconfig(qengine)
             model = model_class(**kwargs)
             model = quantize(model, test_only_eval_fn, [self.calib_data])
 

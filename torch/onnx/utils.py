@@ -1146,7 +1146,7 @@ def _model_to_graph(
             input_names=input_names,
             module=module,
         )
-    except Exception as e:
+    except Exception:
         torch.onnx.log("Torch IR graph at exception: ", graph)
         raise
 

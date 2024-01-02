@@ -216,7 +216,6 @@ def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:
 
     # =============== latency computation ===============
     intraHw = NCCL_HW.NVLINK
-    hw = intraHw if nNodes == 1 else NCCL_HW.NET
 
     if coll == NCCL_COLL.ALL_REDUCE:
         if nNodes > 1:

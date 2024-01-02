@@ -211,7 +211,6 @@ def _extract_shape_env_and_assert_equal(args, kwargs):
 def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
     def decorator(fn: Callable) -> Callable:
         assert callable(fn)
-        name = fn.__name__
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):

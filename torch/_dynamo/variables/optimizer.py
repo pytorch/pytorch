@@ -70,7 +70,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 # to the input tensors (e.g. dtype, layout). Changing these would trigger a
                 # recompilation and hence never result in the wrong specialization of `ret_val`.
                 return ConstantVariable.create(ret_val)
-            except (ArgMappingException, GuardInstallException) as _:
+            except (ArgMappingException, GuardInstallException):
                 # trace normally if we can't map args or install guards correctly
                 pass
 

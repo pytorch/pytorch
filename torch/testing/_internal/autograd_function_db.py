@@ -208,7 +208,7 @@ class NumpySort(torch.autograd.Function):
         x = to_numpy(x)
         ind = np.argsort(x, axis=dim)
         ind_inv = np.argsort(ind, axis=dim)
-        result = np.take_along_axis(x, ind, axis=dim)
+        np.take_along_axis(x, ind, axis=dim)
         return (
             torch.tensor(x, device=device),
             torch.tensor(ind, device=device),
@@ -247,7 +247,6 @@ class SortGenVmap(torch.autograd.Function):
 
     @staticmethod
     def forward(x, dim):
-        device = x.device
         ind = torch.argsort(x, dim=dim)
         ind_inv = torch.argsort(ind, axis=dim)
         result = torch.take_along_dim(x, ind, dim=dim)

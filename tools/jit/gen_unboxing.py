@@ -263,10 +263,7 @@ def main(args: List[str]) -> None:
     native_yaml_path = os.path.join(options.source_path, "native/native_functions.yaml")
     tags_yaml_path = os.path.join(options.source_path, "native/tags.yaml")
     parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path)
-    native_functions, backend_indices = (
-        parsed_yaml.native_functions,
-        parsed_yaml.backend_indices,
-    )
+    native_functions = parsed_yaml.native_functions
 
     cpu_fm = make_file_manager(options=options)
     gen_unboxing(native_functions=native_functions, cpu_fm=cpu_fm, selector=selector)

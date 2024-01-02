@@ -334,11 +334,11 @@ def deps_install(deps: List[str], existing_env: bool, env_opts: List[str]) -> No
     if not existing_env:
         # first remove previous pytorch-deps env
         cmd = ["conda", "env", "remove", "--yes"] + env_opts
-        p = subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True)
     # install new deps
     inst_opt = "install" if existing_env else "create"
     cmd = ["conda", inst_opt, "--yes", "--no-deps"] + env_opts + deps
-    p = subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True)
 
 
 @timed("Installing pytorch nightly binaries")
@@ -346,7 +346,7 @@ def pytorch_install(url: str) -> "tempfile.TemporaryDirectory[str]":
     """Install pytorch into a temporary directory"""
     pytdir = tempfile.TemporaryDirectory()
     cmd = ["conda", "create", "--yes", "--no-deps", "--prefix", pytdir.name, url]
-    p = subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True)
     return pytdir
 
 
@@ -410,7 +410,7 @@ def checkout_nightly_version(branch: str, spdir: str) -> None:
     """Get's the nightly version and then checks it out."""
     nightly_version = _nightly_version(spdir)
     cmd = ["git", "checkout", "-b", branch, nightly_version]
-    p = subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True)
 
 
 @timed("Pulling nightly PyTorch")
@@ -418,7 +418,7 @@ def pull_nightly_version(spdir: str) -> None:
     """Fetches the nightly version and then merges it ."""
     nightly_version = _nightly_version(spdir)
     cmd = ["git", "merge", nightly_version]
-    p = subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True)
 
 
 def _get_listing_linux(source_dir: str) -> List[str]:

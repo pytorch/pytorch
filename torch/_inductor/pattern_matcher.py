@@ -777,7 +777,7 @@ class ReplacementPatternEntry(PatternEntry):
         args: List[Any],
     ):
         output_nodes = match.output_nodes()
-        first_node = output_nodes[0]
+        output_nodes[0]
 
         class Replacer(torch.fx.Interpreter):
             call_method = None

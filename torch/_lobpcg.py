@@ -986,7 +986,6 @@ class LOBPCG:
 
         """
         B = self.B
-        mm = torch.matmul
         SBS = _utils.qform(B, S)
         d_row = SBS.diagonal(0, -2, -1) ** -0.5
         d_col = d_row.reshape(d_row.shape[0], 1)
@@ -1107,7 +1106,6 @@ class LOBPCG:
         BU = mm_B(self.B, U)
         VBU = mm(_utils.transpose(V), BU)
         i = j = 0
-        stats = ""
         for i in range(i_max):
             U = U - mm(V, VBU)
             drop = False

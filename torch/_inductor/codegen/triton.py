@@ -118,7 +118,7 @@ class TritonPrinter(PythonPrinter):
         return propagate_nan_arg
 
     def _print_Min(self, expr):
-        nargs = len(expr.args)
+        len(expr.args)
         if len(expr.args) == 1:
             return self._print(expr.args[0])
 
@@ -128,7 +128,7 @@ class TritonPrinter(PythonPrinter):
         return f"tl.math.min({a}, {b}{TritonPrinter._propagate_nan_arg()})"
 
     def _print_Max(self, expr):
-        nargs = len(expr.args)
+        len(expr.args)
         if len(expr.args) == 1:
             return self._print(expr.args[0])
 
@@ -1542,7 +1542,7 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
-        indirect_indexing = self.is_indirect_indexing(index)
+        self.is_indirect_indexing(index)
         original_index = index
         index, mask_vars, mask, expand_str = self.indexing(index, dense_indexing=True)
 
@@ -1888,7 +1888,7 @@ class TritonKernel(Kernel):
         masks = sorted(masks)
         if self._load_mask:
             masks.append(self._load_mask)
-        reduction_range_prefix = self.range_trees[-1].prefix
+        self.range_trees[-1].prefix
 
         value = self.cse.generate(
             self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})"
@@ -2581,7 +2581,6 @@ class TritonScheduling(BaseScheduling):
 
     def generate_node_schedule(self, nodes, numel, rnumel):
         node_schedule: List[Any] = []
-        current_loop_writes: Set[str] = set()
 
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended

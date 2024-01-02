@@ -817,7 +817,7 @@ class StmtBuilder(Builder):
         if is_torch_jit_ignore_context_manager(stmt):
             if not _IS_ASTUNPARSE_INSTALLED:
                 raise RuntimeError(
-                    "torch.jit._IgnoreContextManager requires installing Python library `astunparse`,\
+                    "torch.jit._IgnoreContextManager requires installing Python library `astunparse`, \
                                    please install it in your Python environment"
                 )
             assign_ast = build_ignore_context_manager(ctx, stmt)

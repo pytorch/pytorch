@@ -434,7 +434,7 @@ class _NnapiSerializer:
         operand_id = len(self.operands)
         self.operands.append(toper)
         tsize = tensor_size(toper.op_type, toper.shape)
-        psize = ((tsize - 1) | 0x3) + 1
+        ((tsize - 1) | 0x3) + 1
         self.values.append((operand_id, OperandValueSourceType.NUMBERED_BUFFER))
         buf_num = len(self.used_weights)
         offset = 0

@@ -124,9 +124,9 @@ def run_functionalized_fw_and_collect_metadata(
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
         for i, (arg, f_arg) in enumerate(zip(flat_args, flat_f_args)):
             if not isinstance(arg, Tensor):
-                new_arg = arg
+                pass
             else:
-                new_arg = from_fun(f_arg)
+                from_fun(f_arg)
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
             )
@@ -559,7 +559,7 @@ from a multi-output view call"
         traced_tangents = pytree.tree_map(
             view_avoid_dupes_with_primals, traced_tangents
         )
-        user_outs = pytree.tree_map(from_fun, f_output_tangents)
+        pytree.tree_map(from_fun, f_output_tangents)
 
         f_mutated_inputs = [
             inp

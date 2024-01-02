@@ -960,7 +960,7 @@ class DistributedTest:
         def test_new_subgroups_by_enumeration_input_rank_exceeds_world_size(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
-            device_id = rank_to_GPU[rank][0]
+            rank_to_GPU[rank][0]
             world_size = get_world_size(group_id)
 
             with self.assertRaisesRegex(
@@ -1372,7 +1372,6 @@ class DistributedTest:
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
             device_id = rank_to_GPU[rank][0]
             torch.cuda.set_device(device_id)
-            p2p_op_list = []
 
             send_tensor = _build_tensor(world_size, device_id=device_id)
             recv_tensor = _build_tensor(world_size, value=-1, device_id=device_id)
@@ -1524,7 +1523,7 @@ class DistributedTest:
             self._barrier()
             rank = dist.get_rank()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
-            device_id = rank_to_GPU[rank][0]
+            rank_to_GPU[rank][0]
             group_gloo = dist.new_group(ranks=[0, 1], backend="gloo")
             group_nccl = dist.new_group(ranks=[0, 1], backend="nccl")
             if rank == 0:
@@ -2588,7 +2587,7 @@ class DistributedTest:
 
             # TODO: move this test to use torch.profiler once kineto issues are
             # fixed internally.
-            with autograd_profiler_ctx as prof:
+            with autograd_profiler_ctx:
                 works = [op_call() for op_call in op_calls]
                 if is_async:
                     for work in works:
@@ -4406,7 +4405,7 @@ class DistributedTest:
                     self.net2 = nn.Linear(10, 0)
 
             model = ToyModel().to(self.rank)
-            ddp_model = nn.parallel.DistributedDataParallel(
+            nn.parallel.DistributedDataParallel(
                 model, device_ids=[self.rank]
             )
 
@@ -4754,7 +4753,7 @@ class DistributedTest:
             torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
                 model, params_to_ignore
             )
-            ddp_model = torch.nn.parallel.DistributedDataParallel(
+            torch.nn.parallel.DistributedDataParallel(
                 model, device_ids=[self.rank]
             )
             dp_params = torch.nn.parallel.DistributedDataParallel._get_data_parallel_params(
@@ -6091,7 +6090,6 @@ class DistributedTest:
             gpus = [rank]
 
             # cpu training setup
-            model = BN_NET
 
             num_processes = dist.get_world_size()
             local_bs = rank + 2
@@ -7538,7 +7536,7 @@ class DistributedTest:
                     "ignore_buffer", torch.zeros(5 + self.rank, device=self.rank)
                 )
                 proxy_params = list(model.fc2.parameters())
-                proxy_buffers = list(model.fc2.buffers())
+                list(model.fc2.buffers())
                 model_fc2_name = next(
                     module_name
                     for module_name, module in model.named_modules()
@@ -7695,7 +7693,7 @@ class DistributedTest:
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_device(self):
-            m = nn.Linear(10, 10).to(self.rank)
+            nn.Linear(10, 10).to(self.rank)
             expected_len = 2
 
             class TensorWrapper:
@@ -7917,7 +7915,7 @@ class DistributedTest:
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_invalid_static_graph(self):
-            world_size = dist.get_world_size()
+            dist.get_world_size()
             torch.cuda.set_device(self.rank)
             model = torch.nn.parallel.DistributedDataParallel(
                 ControlFlowToyModel().cuda(self.rank),
@@ -8137,11 +8135,11 @@ class DistributedTest:
                     self._generate_sparse_tensors_for_bucket_assignment_test()
                 )
                 if use_logger:
-                    result = dist._compute_bucket_assignment_by_size(
+                    dist._compute_bucket_assignment_by_size(
                         tensors_sparse, [400], logger=net.logger
                     )
                 else:
-                    result = dist._compute_bucket_assignment_by_size(
+                    dist._compute_bucket_assignment_by_size(
                         tensors_sparse, [400]
                     )
             if use_logger:
@@ -8501,7 +8499,7 @@ class DistributedTest:
                         return F.relu(self.lin1(x))
 
             torch.manual_seed(31415)
-            world_size = dist.get_world_size()
+            dist.get_world_size()
             torch.cuda.set_device(self.rank)
             model = ToyModel(self.rank).cuda(self.rank)
             ddp_model = torch.nn.parallel.DistributedDataParallel(
@@ -9771,7 +9769,7 @@ class DistributedTest:
                         loss = a.sum() + b.sum()
                         loss.backward()
 
-                    ws = dist.get_world_size()
+                    dist.get_world_size()
                     for p in local_model.parameters():
                         p.grad.data = p.grad / dist.get_world_size()
 

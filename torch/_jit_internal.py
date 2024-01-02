@@ -862,7 +862,7 @@ def get_overload_no_implementation_error_message(kind, obj):
 def _check_overload_body(func):
     try:
         parsed_def = parse_def(func)
-    except OSError as e:
+    except OSError:
         # Parsing the function definition can raise an OSError if source is unavailable.
         # Since this is just an initial check, just raise a warning if this is the case.
         warnings.warn(

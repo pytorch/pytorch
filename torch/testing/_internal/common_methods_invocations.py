@@ -826,7 +826,6 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
     yield SampleInput(1, args=(3, 1))
 
 def sample_inputs_randn(op, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
 
     shapes = (
         (M,),
@@ -2945,7 +2944,6 @@ def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
         ((XS, XS, XS), 2, (XS, XS, 1), (XS, XS, 1)),
         ((XS, XS, XS), 2, (XS, XS, XS), (XS, XS, XS)),)
 
-    sample_inputs = []
     for size, dim, size_prepend, size_append in test_cases:
         prepend_size = 0 if (size_prepend is None) else size_prepend[dim]
         append_size = 0 if (size_append is None) else size_append[dim]
@@ -4631,7 +4629,6 @@ def error_inputs_gelu(op, device, **kwargs):
 
 
 def sample_inputs_max_min_reduction_with_dim(op_info, device, dtype, requires_grad, **kwargs):
-    inputs = []
     args_for_reduction_with_dim = (
         ((S, S, S), (1,),),
         ((S, S, S), (1, True, ),),
@@ -4962,7 +4959,6 @@ def sample_inputs_dist(op_info, device, dtype, requires_grad, **kwargs):
 # https://github.com/pytorch/pytorch/issues/53352
 def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, **kwargs):
     # target.index_select(dim, idx)
-    select = "index_select" in op_info.name
     # target.index_add(dim, idx, source, *, alpha=1)
     add = "index_add" in op_info.name
     # target.index_copy(dim, idx, source)
@@ -6860,7 +6856,7 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
     def _tensor(shape, dtype=dtype, low=None, high=None):
         return make_tensor(shape, dtype=dtype, device=device, low=low, high=high, requires_grad=requires_grad)
 
-    zero = torch.tensor(0, dtype=torch.long, device=device)
+    torch.tensor(0, dtype=torch.long, device=device)
     test_cases = (
         # inp_shape, dim, lengths, unsafe
         ((S,), 0, [0, 1, 2, 2], False),
@@ -6903,8 +6899,6 @@ def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((S, S, S), noncontiguous=True))
 
 def sample_inputs_unravel_index(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device,
-                       low=None, high=None, requires_grad=requires_grad)
     yield SampleInput(
         torch.tensor(
             [[3, 8, 13], [0, 5, 10]],
@@ -7233,7 +7227,6 @@ def error_inputs_view_reshape(op, device, **kwargs):
 
 
 def sample_inputs_atleast1d2d3d(op_info, device, dtype, requires_grad, **kwargs):
-    input_list = []
     shapes = ((S, S, S, S), (S, S, S), (S, S), (S, ), (),)
     make_tensor_partial = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     for shape in shapes:
@@ -7445,7 +7438,6 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
     yield SampleInput(a, args=(c, b))
 
     # type promoting
-    other_dtype = torch.double if dtype is not torch.double else torch.long
     c = make_cond((10, 3), noncontiguous=True)
     a = make_arg((10, 1), dtype=torch.long)
     b = make_arg((10, 1))
@@ -8419,7 +8411,7 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
         ))
 
     # Add non standard shapes
-    diff_v_head_dim = SampleInput(
+    SampleInput(
         make((batch, num_heads, seq_q, head_dim)),
         make((batch, num_heads, seq_kv, head_dim)),
         make((batch, num_heads, seq_kv, head_dim + 8)),
@@ -8476,7 +8468,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
         ))
 
     # Add non standard shapes
-    diff_v_head_dim = SampleInput(
+    SampleInput(
         make((batch, seq_q, num_heads, head_dim)),
         make((batch, seq_kv, num_heads, head_dim)),
         make((batch, seq_kv, num_heads, head_dim + 8)),
@@ -8627,7 +8619,6 @@ def sample_inputs_allclose(op_info, device, dtype, requires_grad, **kwargs):
     sample_shapes = [(), (S), (S, S, S)]
     atols = [1e-2, 1e-16]
     rtols = [1e-1, 0.5]
-    eps = 1e-8
     for s, rtol, atol in product(sample_shapes, rtols, atols):
         # close sample
         t = make_tensor(s, device=device, dtype=dtype, requires_grad=requires_grad)

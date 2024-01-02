@@ -206,7 +206,6 @@ class MetaConverter:
         assert not torch._C._dispatch_tls_local_exclude_set().has(
             torch._C.DispatchKey.Python
         )
-        arg_cnt = self.arg_cnt
         self.arg_cnt += 1
 
         # When we make as_strided calls, we end up generating a guard

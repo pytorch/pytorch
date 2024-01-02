@@ -82,7 +82,7 @@ class SchemaCheckMode(TorchDispatchMode):
             if isinstance(e, torch.Tensor) and not type(e) == torch.Tensor:
                 try:
                     return e.elem
-                except AttributeError as t:
+                except AttributeError:
                     return e
             return e
 
@@ -95,7 +95,7 @@ class SchemaCheckMode(TorchDispatchMode):
                             deepcopy(current.stride()),
                             current._typed_storage()._cdata,
                         )
-                    except AttributeError as t:
+                    except AttributeError:
                         return None
                 # Sparse CSR tensors do not have strides or storage
                 elif e.layout != torch.sparse_csr:

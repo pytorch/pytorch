@@ -28,7 +28,7 @@ SUPPORTED_OPS = {"add_op"}
 
 
 def parse_op_args(op):
-    op_list = op.split(",")
+    op.split(",")
 
 
 def print_results(result):

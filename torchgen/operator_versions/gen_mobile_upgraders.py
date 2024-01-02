@@ -334,7 +334,6 @@ def write_cpp(cpp_path: str, upgrader_dict: List[Dict[str, Any]]) -> None:
             operator_list_str = ""
             for table_name, contents in bytecode.items():
                 element = ByteCode[table_name]
-                body_string = ""
                 if element is ByteCode.instructions:
                     instruction_list_str = construct_instruction(contents)
                 elif element is ByteCode.constants:
@@ -366,7 +365,7 @@ def write_cpp(cpp_path: str, upgrader_dict: List[Dict[str, Any]]) -> None:
     body_parts.append(upgrader_file_content)
     print("writing file to : ", cpp_path + "/" + UPGRADER_MOBILE_FILE_NAME)
     with open(os.path.join(cpp_path, UPGRADER_MOBILE_FILE_NAME), "wb") as out_file:
-        final_output = "".join(body_parts)
+        "".join(body_parts)
         out_file.write(upgrader_file_content.encode("utf-8"))
 
 

@@ -148,7 +148,7 @@ class APoTObserver(ObserverBase):
         ys = [apot_to_float(float_to_apot(x, quantization_levels, level_indices, alpha),
                             quantization_levels, level_indices).item() for x in xs]
 
-        f = plt.figure(figsize=(15, 10))
+        plt.figure(figsize=(15, 10))
 
         plt.plot(xs, ys)
         plt.title("APoT Quantization Plot")

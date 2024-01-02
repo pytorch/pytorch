@@ -144,8 +144,8 @@ def compare(before, after, format_flamegraph=format_flamegraph):
     before_segs = {_seg_key(seg) for seg in before}
     after_segs = {_seg_key(seg) for seg in after}
 
-    print(f'only_before = {[a for a,_ in (before_segs - after_segs)]}')
-    print(f'only_after = {[a for a,_ in (after_segs - before_segs)]}')
+    print(f'only_before = {[a for a, _ in (before_segs - after_segs)]}')
+    print(f'only_after = {[a for a, _ in (after_segs - before_segs)]}')
 
     for seg in before:
         if _seg_key(seg) not in after_segs:
@@ -211,7 +211,6 @@ def segsum(data):
     Args:
         data: snapshot dictionary created from _snapshot()
     """
-    segments = []
     out = io.StringIO()
     out.write(f"Summary of segments >= {Bytes(PAGE_SIZE)} in size\n")
     total_reserved = 0
@@ -270,7 +269,7 @@ def segsum(data):
     out.write(f'segments: {len(data["segments"])}\n')
     out.write(f'total_reserved: {Bytes(total_reserved)}\n')
     out.write(f'total_allocated: {Bytes(total_allocated)}\n')
-    internal_external = f' ({Bytes(free_internal)} internal + {Bytes(free_external)} external)' if free_internal else ''
+    f' ({Bytes(free_internal)} internal + {Bytes(free_external)} external)' if free_internal else ''
     out.write(f'total_free: {_report_free(free_external, free_internal)}\n')
     out.write(legend)
     assert free_internal + free_external + total_allocated == total_reserved

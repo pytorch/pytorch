@@ -205,7 +205,7 @@ def maybe_to_fresh_input(idx, t, meta):
         return t
     if idx in meta.mutated_inp_runtime_indices:
         # We only need to bother cloning mutated inputs that participate in autograd.
-        mutated_inp_idx = meta.mutated_inp_runtime_indices.index(idx)
+        meta.mutated_inp_runtime_indices.index(idx)
         if meta.input_info[idx].requires_grad and meta.input_info[idx].mutates_data:
             # Make sure the primal we pass to autograd.grad()
             # sees the tensor before the mutation

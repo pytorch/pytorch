@@ -1315,8 +1315,6 @@ def emit_single_dispatch(
         else:
             schema_comment = f"// aten::{f.func}"
 
-        deprecated = "[deprecated] " if ps.deprecated else ""
-
         # dispatch lambda signature
         name = cpp.name(f.func)
         lambda_formals = ", ".join(
