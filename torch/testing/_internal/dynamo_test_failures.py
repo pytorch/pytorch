@@ -314,7 +314,6 @@ FIXME_default_non_strict = {
     "torch_np/test_ndarray_methods",
     "torch_np/test_nep50_examples",
     "torch_np/test_random",
-    "torch_np/test_reductions",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -828,6 +827,20 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc10_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc1_out_dtype_float64",
     "TestIsScalar.test_is_not_scalar_value6",
+    "TestGenericReductions.test_bad_axis_func0",
+    "TestGenericReductions.test_bad_axis_func11",
+    "TestGenericReductions.test_bad_axis_func7",
+    "TestGenericReductions.test_bad_axis_func6",
+    "TestGenericReductions.test_bad_axis_func2",
+    "TestGenericCumSumProd.test_bad_axis_func1",
+    "TestGenericReductions.test_bad_axis_func3",
+    "TestGenericReductions.test_bad_axis_func4",
+    "TestGenericReductions.test_bad_axis_func10",
+    "TestGenericReductions.test_bad_axis_func5",
+    "TestGenericReductions.test_bad_axis_func8",
+    "TestGenericReductions.test_bad_axis_func1",
+    "TestGenericCumSumProd.test_bad_axis_func0",
+    "TestGenericReductions.test_bad_axis_func9",
 }
 
 dynamo_skips = {}
