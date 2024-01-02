@@ -4262,14 +4262,14 @@ def _avg_poolnd(
     batch = x.get_size()[:-dim]
     dhw = x.get_size()[-dim:]
 
-    h_out, ceil_mode = zip(
+    h_out, ceil_modes = zip(
         *[
             pooling_size(dhw[i], i, kernel_size, stride, padding, ceil_mode)
             for i in range(dim)
         ]
     )
 
-    if any(padding) or any(ceil_mode):
+    if any(padding) or any(ceil_modes):
         x_loader = constant_boundary_condition(x, 0.0, dim=dim)
         had_padding = True
     else:
