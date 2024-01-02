@@ -980,7 +980,7 @@ Violating any of these will likely cause silent numerical errors or undefined be
 * Within a process, only one capture may be underway at a time.
 * No non-captured CUDA work may run in this process (on any thread) while capture is underway.
 * CPU work is not captured. If the captured ops include CPU work, that work will be elided during replay.
-* Every replay reads from and writes to the same (virtual) memory addresses.
+* Every replay reads from and writes to the same (virtual) memory addresses in different streams or different threads.
 * Dynamic control flow (based on CPU or GPU data) is prohibited.
 * Dynamic shapes are prohibited. The graph assumes every tensor in the captured op sequence
   has the same size and layout in every replay.
