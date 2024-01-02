@@ -120,13 +120,15 @@ class PyCodegen:
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
             graph_outputs_key = self.add_graph_output(value)
+
+            self.load_import_from(utils.__name__, "to_subclass")
+            self.load_graph_output(graph_outputs[graph_outputs_key].index)
             output.append(
                 self.create_load_global(
-                    value.global_mangled_class_name(), True, add=True
+                    value.global_mangled_class_name(), False, add=True
                 )
             )
-            self.load_graph_output(graph_outputs[graph_outputs_key].index)
-            output.extend(create_call_function(1, True))
+            output.extend(create_call_function(2, True))
         elif isinstance(
             value,
             (
