@@ -1271,7 +1271,7 @@ if(USE_ROCM)
     message("TORCH_HIP_VERSION=${TORCH_HIP_VERSION} is added as a compiler defines")
 
     if(CMAKE_BUILD_TYPE MATCHES Debug)
-       list(APPEND HIP_CXX_FLAGS -g)
+       list(APPEND HIP_CXX_FLAGS -g2)
        list(APPEND HIP_CXX_FLAGS -O0)
        list(APPEND HIP_HIPCC_FLAGS -fdebug-info-for-profiling)
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
@@ -1338,7 +1338,7 @@ if(USE_XPU)
     list(APPEND SYCL_HOST_FLAGS -Wno-attributes)
 
     if(CMAKE_BUILD_TYPE MATCHES Debug)
-       list(APPEND SYCL_HOST_FLAGS -g2)
+       list(APPEND SYCL_HOST_FLAGS -g)
        list(APPEND SYCL_HOST_FLAGS -O0)
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
 
