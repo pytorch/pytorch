@@ -673,6 +673,7 @@ def _compile(
         finally:
             if tracer:
                 tracer.output.local_scope = {}
+
             from .utils import curr_frame
 
             frame_key = str(curr_frame)
