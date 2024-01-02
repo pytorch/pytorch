@@ -64,6 +64,17 @@ class FunctionalTensor(torch.Tensor):
         torch.ops.prim.device.default,  # type: ignore[has-type]
     ]
 
+    # These are ops that claim to be functional, but actually are maybe-mutating/maybe-aliasing
+    # TODO (tmanlaibaatar) make it a tag
+    maybe_aliasing_or_mutating_ops = [
+        torch.ops.aten.dropout.default,  # type: ignore[has-type]
+        torch.ops.aten.batch_norm.default,  # type: ignore[has-type]
+        torch.ops.aten.native_batch_norm.default,  # type: ignore[has-type]
+        torch.ops.aten._batch_norm_impl_index.default,  # type: ignore[has-type]
+        torch.ops.aten.cudnn_batch_norm.default,  # type: ignore[has-type]
+        torch.ops.aten.miopen_batch_norm.default,  # type: ignore[has-type]
+    ]
+
     def __new__(cls, elem):
         assert torch._is_functional_tensor(elem)
 
@@ -207,7 +218,6 @@ class FunctionalTensorMode(TorchDispatchMode):
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.FUNCTIONAL
         # This will be turned off later for pre-dispatch functionalization
-        self.decompose_composite_implicit_ops = True
         self._dispatch_key = torch._C.DispatchKey.PreDispatch if pre_dispatch else None  # type: ignore[attr-defined]
 
     # No-op if FunctionalTensorMode is already in use
@@ -249,15 +259,40 @@ class FunctionalTensorMode(TorchDispatchMode):
             )
             return NotImplemented
 
+        def _can_decompose(func):
+            # TODO (tmanlaibaatar)
+            # Eventually, we don't want to decompose any aten op at all
+            # but there is a safety and coverage gap that we need to close
+            # before that.
+            #
+            # (1) the "safety" is what we are risking with this PR
+            #     (we are blindly taking every op that advertises as
+            #      functional and sending it to the functional fallback.
+            #      We risk silent correctness if we have an op that lies about its schema,
+            #      that we didn't manually hardcode above) Therefore we always decompose them
+            # (2) the "not every composite inplace op has a functional variant" is a coverage gap,
+            #      but not really a safety risk, since we'll loudly error when we try to generate
+            #      functionalization kernels for these new (composite) inplace/view ops. But until we
+            #      establish such gap more concretely, we still decompose them
+            if self._dispatch_key is not None:
+                # it is unsafe to not decompose ops that claim to be functional but actually aren't
+                if func in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+                    return True
+                # only decompose view or inplace mutating ops
+                alias_info = len(
+                    [i for i in func._schema.arguments if i.alias_info is not None]
+                )
+                return alias_info != 0 or func._schema.is_mutable
+            return True
+
         if (
             func not in FunctionalTensor.metadata_fns
-            and self.decompose_composite_implicit_ops
+            and _can_decompose(func)
             # Not all funcs from __torch_dispatch__ are actual dispatcher ops,
             # e.g. prim.device
             and torch._C._dispatch_has_kernel(func.name())
         ):
             with self:
-                # Decomposes CompositeImplicitAutograd ops
                 r = func.decompose(*args, **kwargs)
                 if r is not NotImplemented:
                     return r
