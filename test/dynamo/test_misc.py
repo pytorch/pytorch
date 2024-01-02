@@ -4598,7 +4598,7 @@ def fn():
         static_size = 1
         out_tensor = torch.empty((10, 10, 10, 10), dtype=torch.long)
         self.assertTrue(same(
-            torch.nonzero_static(input_tensor, size=static_size, out=out_tensor), 
+            torch.nonzero_static(input_tensor, size=static_size, out=out_tensor),
             torch.tensor([0]),
             ) 
         )
@@ -4609,7 +4609,7 @@ def fn():
         static_size = 1
         out_tensor = torch.empty((0), dtype=torch.long)
         self.assertTrue(same(
-            torch.nonzero_static(input_tensor, size=static_size, out=out_tensor), 
+            torch.nonzero_static(input_tensor, size=static_size, out=out_tensor),
             torch.tensor([0]),
             )
         )
@@ -4636,7 +4636,7 @@ def fn():
         input_tensor = torch.tensor([0, 8])
         static_size = 1
         self.assertTrue(same(
-            torch.nonzero_static(input_tensor, size=static_size), 
+            torch.nonzero_static(input_tensor, size=static_size),
             torch.tensor([1])
             )
         )
