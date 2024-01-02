@@ -72,8 +72,8 @@ namespace c10 {
   _(c10::Float8_e4m3fn, Float8_e4m3fn) /* 24 */          \
   _(c10::Float8_e5m2fnuz, Float8_e5m2fnuz) /* 25 */      \
   _(c10::Float8_e4m3fnuz, Float8_e4m3fnuz) /* 26 */      \
-  _(uint16_t, UInt16) /* 27 */ \
-  _(uint32_t, UInt32) /* 28 */ \
+  _(uint16_t, UInt16) /* 27 */                           \
+  _(uint32_t, UInt32) /* 28 */                           \
   _(uint64_t, UInt64) /* 29 */
 
 // If you want to support ComplexHalf for real, add ComplexHalf
@@ -409,8 +409,9 @@ static inline size_t elementSize(ScalarType t) {
 static inline bool isIntegralType(ScalarType t, bool includeBool) {
   bool isIntegral =
       (t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||
-       t == ScalarType::Long || t == ScalarType::Short || t == ScalarType::UInt16 ||
-       t == ScalarType::UInt32 || t == ScalarType::UInt64);
+       t == ScalarType::Long || t == ScalarType::Short ||
+       t == ScalarType::UInt16 || t == ScalarType::UInt32 ||
+       t == ScalarType::UInt64);
 
   return isIntegral || (includeBool && t == ScalarType::Bool);
 }
@@ -455,7 +456,8 @@ static inline bool isBitsType(ScalarType t) {
 }
 
 static inline bool isBarebonesUnsignedType(ScalarType t) {
-  return t == ScalarType::UInt16 || t == ScalarType::UInt32 || t == ScalarType::UInt64;
+  return t == ScalarType::UInt16 || t == ScalarType::UInt32 ||
+      t == ScalarType::UInt64;
 }
 
 static inline ScalarType toQIntType(ScalarType t) {
