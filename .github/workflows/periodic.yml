@@ -12,6 +12,8 @@ on:
   push:
     tags:
       - ciflow/periodic/*
+    branches:
+      - release/*
   workflow_dispatch:
 
 concurrency:

@@ -130,12 +130,7 @@
 #include <utility>
 #include <vector>
 
-namespace at {
-namespace native {
-
-} // namespace native
-
-namespace meta {
+namespace at::meta {
 
 static ScalarType infer_dtype_from_optional(
     const Tensor& self,
@@ -402,9 +397,9 @@ TORCH_META_FUNC(amin)
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(aminmax_stub);
 DEFINE_DISPATCH(aminmax_allreduce_stub);
@@ -429,10 +424,6 @@ TORCH_IMPL_FUNC(aminmax_out)
     aminmax_allreduce_stub(self.device().type(), self.contiguous(), mutable_min, mutable_max);
   }
 }
-
-} // namespace native
-
-namespace native {
 
 DEFINE_DISPATCH(sum_stub);
 DEFINE_DISPATCH(nansum_stub);
@@ -2332,5 +2323,4 @@ Tensor sum_sparse_compressed(
   return at::_sparse_csr_sum(self, *dim, keepdim, dtype);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
