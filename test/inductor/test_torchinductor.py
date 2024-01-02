@@ -8540,9 +8540,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
 
             @torch.compile
             def wrapper(x):
-                x = x.numpy()
-                y = my_np(x)
-                return torch.as_tensor(y)
+                return torch.compiler.wrap_numpy(my_np)(x)
 
             @torch.compile
             def wrapper2(x):
