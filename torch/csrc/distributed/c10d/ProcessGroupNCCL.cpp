@@ -727,7 +727,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
-  logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
@@ -1111,8 +1110,17 @@ void ProcessGroupNCCL::abortCommsFromMap(
     // their responsibility to destroy the process group and recreate
     // it to recover from errors.
 
+    c10::StreamId streamId = -1;
+    if (ncclStreams_.find(devName) != ncclStreams_.end()) {
+      auto streams = ncclStreams_.at(devName);
+      if (streams.size() > 0) {
+        streamId = streams[0].id();
+      }
+    }
+
     LOG(INFO) << logPrefix() << "] Destroyed " << ncclComms.size()
-              << "communicators on CUDA device " << devName;
+              << "communicators on CUDA device: " << devName
+              << " with stream: " << streamId;
   }
 }
 
@@ -1428,12 +1436,9 @@ struct DumpPipe {
 };
 #endif
 
-std::string ProcessGroupNCCL::createLogPrefix() const {
-  return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
-}
-
 const std::string& ProcessGroupNCCL::logPrefix() const {
-  return logPrefix_;
+  static std::string prefix = c10::str("[PG ", uid_, " Rank ", rank_, "] ");
+  return prefix;
 }
 
 const int& ProcessGroupNCCL::globalRank() const {
