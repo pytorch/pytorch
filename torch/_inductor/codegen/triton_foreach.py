@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple
 
 from sympy import Integer
 
-from .. import metrics
+from .. import config, metrics
 from ..scheduler import SchedulerNode
 from ..utils import ceildiv, Placeholder
 from ..virtualized import V
