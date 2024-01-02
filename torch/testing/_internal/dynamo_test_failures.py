@@ -315,7 +315,6 @@ FIXME_default_non_strict = {
     "torch_np/test_nep50_examples",
     "torch_np/test_random",
     "torch_np/test_reductions",
-    "torch_np/test_scalars_0D_arrays",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -828,6 +827,7 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc2",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc10_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc1_out_dtype_float64",
+    "TestIsScalar.test_is_not_scalar_value6",
 }
 
 dynamo_skips = {}
