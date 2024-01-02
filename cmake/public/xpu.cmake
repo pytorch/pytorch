@@ -46,7 +46,7 @@ set(SYCL_COMPILER_VERSION)
 file(READ ${SYCL_VERSION} version_contents)
 string(REGEX MATCHALL "__SYCL_COMPILER_VERSION +[0-9]+" VERSION_LINE "${version_contents}")
 list(LENGTH VERSION_LINE ver_line_num)
-if (${ver_line_num} EQUAL 1)
+if(${ver_line_num} EQUAL 1)
   string(REGEX MATCHALL "[0-9]+" SYCL_COMPILER_VERSION "${VERSION_LINE}")
 endif()
 
