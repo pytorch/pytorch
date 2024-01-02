@@ -230,7 +230,7 @@ static struct PyMethodDef _MPSModule_methods[] = {
      MPSModule_isMacOSorNewer,
      METH_VARARGS,
      nullptr},
-     {"_mps_is_on_macos_14_or_newer",
+    {"_mps_is_on_macos_14_or_newer",
      MPSModule_isMacOS14orNewer,
      METH_O,
      nullptr},
