@@ -228,6 +228,10 @@ def sgd(params: List[Tensor],
         else:
             foreach = False
             fused = False
+    if foreach is None:
+        foreach = False
+    if fused is None:
+        fused = False
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with foreach optimizers')
