@@ -41,9 +41,7 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 #include <fbgemm/FbgemmI64.h>
 #endif  // USE_FBGEMM
 
-namespace at {
-namespace native {
-namespace cpublas {
+namespace at::native::cpublas {
 namespace internal {
 
 void normalize_last_dims(
@@ -782,4 +780,4 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
       n, x, incx, y, incy);
 }
 
-}}}  // namespace at::native::cpublas
+}  // namespace at::native::cpublas

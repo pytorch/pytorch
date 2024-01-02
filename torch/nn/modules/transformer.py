@@ -17,13 +17,17 @@ __all__ = ['Transformer', 'TransformerEncoder', 'TransformerDecoder', 'Transform
 
 def _generate_square_subsequent_mask(
         sz: int,
-        device: torch.device = torch.device(torch._C._get_default_device()),  # torch.device('cpu'),
-        dtype: torch.dtype = torch.get_default_dtype(),
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
     r"""Generate a square causal mask for the sequence.
 
     The masked positions are filled with float('-inf'). Unmasked positions are filled with float(0.0).
     """
+    if device is None:
+        device = torch.device('cpu')
+    if dtype is None:
+        dtype = torch.float32
     return torch.triu(
         torch.full((sz, sz), float('-inf'), dtype=dtype, device=device),
         diagonal=1,
@@ -214,8 +218,8 @@ class Transformer(Module):
     @staticmethod
     def generate_square_subsequent_mask(
             sz: int,
-            device: torch.device = torch.device(torch._C._get_default_device()),  # torch.device('cpu'),
-            dtype: torch.dtype = torch.get_default_dtype(),
+            device: Optional[torch.device] = None,
+            dtype: Optional[torch.dtype] = None,
     ) -> Tensor:
         r"""Generate a square causal mask for the sequence.
 

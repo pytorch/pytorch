@@ -445,13 +445,6 @@ int64_t _fused_sdp_choice_meta(
     bool is_causal,
     c10::optional<double> scale) {
   auto query_key_set = query_.key_set();
-#if defined(USE_ROCM)
-  bool has_rocm = query_key_set.has(c10::DispatchKey::HIP);
-  if (has_rocm) {
-    auto choice_int = _fused_sdp_choice_stub(at::kHIP, query_, key, value, attn_mask_, dropout_p, is_causal, scale);
-    return choice_int;
-  }
-#else
   bool has_cuda = query_key_set.has(c10::DispatchKey::CUDA);
   if (has_cuda) {
     auto choice_int = _fused_sdp_choice_stub(
@@ -465,7 +458,6 @@ int64_t _fused_sdp_choice_meta(
         scale);
     return choice_int;
   }
-#endif
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 namespace {
@@ -633,8 +625,7 @@ Tensor scaled_dot_product_attention(
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (query_.device().type() == DeviceType::CUDA
-      || query_.device().type() == DeviceType::CPU
-      || query_.device().type() == DeviceType::HIP){
+      || query_.device().type() == DeviceType::CPU){
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
       query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   }

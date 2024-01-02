@@ -9,6 +9,7 @@ load("@fbsource//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode", "is_fbcod
 load("@fbsource//tools/build_defs:platform_defs.bzl", "ANDROID", "APPLE", "CXX", "IOS", "MACOSX", "WINDOWS")
 load("@fbsource//tools/build_defs/apple:build_mode_defs.bzl", "is_production_build")
 load("@fbsource//tools/build_defs/apple:config_utils_defs.bzl", "STATIC_LIBRARY_IOS_CONFIG", "STATIC_LIBRARY_MAC_CONFIG", "fbobjc_configs")
+load("@fbsource//xplat/caffe2:buckbuild.bzl", "read_bool")
 load("@fbsource//xplat/pfh/Msgr/Mobile/ProductInfra:DEFS.bzl", "Msgr_Mobile_ProductInfra")
 
 def get_c2_expose_op_to_c10():
@@ -326,6 +327,9 @@ def get_c2_aten_cpu_fbobjc_macosx_deps():
         "ovr_config//os:macos-x86_64": ["fbsource//xplat/deeplearning/fbgemm:fbgemm"],
     }) if is_arvr_mode() else []
 
+def build_cpukernel_avx2():
+    return read_bool("caffe2", "build_cpukernel_avx2", not is_arvr_mode())
+
 def get_c2_aten_cpu_fbobjc_macosx_platform_deps():
     return compose_platform_setting_list([
         {
@@ -334,7 +338,7 @@ def get_c2_aten_cpu_fbobjc_macosx_platform_deps():
                 "fbsource//xplat/deeplearning/fbgemm:fbgemmAppleMac",
             ] + ([
                 "fbsource//xplat/caffe2:cpukernel_avx2AppleMac",
-            ] if not is_arvr_mode() else []),
+            ] if build_cpukernel_avx2() else []),
             "os": "macosx",
         },
         {
