@@ -738,8 +738,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 10 /*10 Mins*/);
-  waitTimeoutDumpSleepInMilSec_ =
-      getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_SLEEP_MILSEC, 1200);
+  waitTimeoutDumpInMilSec_ =
+      getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 2000);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -804,8 +804,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", global rank: " << globalRank()
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
-            << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_SLEEP_MILSEC: "
-            << waitTimeoutDumpSleepInMilSec_
+            << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: "
+            << waitTimeoutDumpInMilSec_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
             << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
             << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
@@ -1263,7 +1263,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   }
 
   auto wakeUpTime = std::chrono::steady_clock::now() +
-      std::chrono::milliseconds(waitTimeoutDumpSleepInMilSec_);
+      std::chrono::milliseconds(waitTimeoutDumpInMilSec_);
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)
   std::future<bool> asyncDebugDump = launchAsyncDebugDump();
@@ -1504,7 +1504,7 @@ void ProcessGroupNCCL::watchdogHandler() {
         lastTimePollStore = currentTime;
         if (store_->check({std::string(TIMEOUT_DUMP)}) && !optAsyncDebugDump) {
           auto wakeUpTime = std::chrono::steady_clock::now() +
-              std::chrono::milliseconds(waitTimeoutDumpSleepInMilSec_);
+              std::chrono::milliseconds(waitTimeoutDumpInMilSec_);
           optAsyncDebugDump = launchAsyncDebugDump();
           waitForDumpOrTimeout(*optAsyncDebugDump);
           extraWaitForDumpUntil(wakeUpTime);
@@ -1545,7 +1545,7 @@ void ProcessGroupNCCL::watchdogHandler() {
             }
 
             auto wakeUpTime = std::chrono::steady_clock::now() +
-                std::chrono::milliseconds(waitTimeoutDumpSleepInMilSec_);
+                std::chrono::milliseconds(waitTimeoutDumpInMilSec_);
             if (dumpOnTimeout_ && !optAsyncDebugDump) {
               // Store debug info to storage. (By default to local disk)
               optAsyncDebugDump = launchAsyncDebugDump();
