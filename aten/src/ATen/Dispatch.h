@@ -454,6 +454,13 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
           SCALARTYPE6,                                  \
           __VA_ARGS__))
 
+/*
+TODO:
+  AT_DISPATCH_CASE(at::ScalarType::UInt16, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::UInt32, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::UInt64, __VA_ARGS__) \
+*/
+
 #define AT_DISPATCH_CASE_INTEGRAL_TYPES(...)          \
   AT_DISPATCH_CASE(at::ScalarType::Byte, __VA_ARGS__) \
   AT_DISPATCH_CASE(at::ScalarType::Char, __VA_ARGS__) \
