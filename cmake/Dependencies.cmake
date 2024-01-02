@@ -1271,7 +1271,7 @@ if(USE_ROCM)
     message("TORCH_HIP_VERSION=${TORCH_HIP_VERSION} is added as a compiler defines")
 
     if(CMAKE_BUILD_TYPE MATCHES Debug)
-       list(APPEND HIP_CXX_FLAGS -g2)
+       list(APPEND HIP_CXX_FLAGS -g)
        list(APPEND HIP_CXX_FLAGS -O0)
        list(APPEND HIP_HIPCC_FLAGS -fdebug-info-for-profiling)
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
@@ -1358,6 +1358,8 @@ if(USE_XPU)
     set(SYCL_KERNEL_OPTIONS ${SYCL_KERNEL_OPTIONS} -fhonor-infinities)
     set(SYCL_KERNEL_OPTIONS ${SYCL_KERNEL_OPTIONS} -fno-associative-math)
     set(SYCL_KERNEL_OPTIONS ${SYCL_KERNEL_OPTIONS} -fno-approx-func)
+    # TODO: Align with PyTorch and switch to ABI=0 eventually, after
+    # resolving incompatible implementation in SYCL runtime.
     set(SYCL_KERNEL_OPTIONS ${SYCL_KERNEL_OPTIONS} -D_GLIBCXX_USE_CXX11_ABI=1)
     set(SYCL_FLAGS ${SYCL_FLAGS} ${SYCL_KERNEL_OPTIONS})
 

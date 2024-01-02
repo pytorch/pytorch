@@ -1,19 +1,3 @@
-#
-# Modifications, Copyright (C) 2022 Intel Corporation
-#
-# This software and the related documents are Intel copyrighted materials, and
-# your use of them is governed by the express license under which they were
-# provided to you ("License"). Unless the License provides otherwise, you may not
-# use, modify, copy, publish, distribute, disclose or transmit this software or
-# the related documents without Intel's prior written permission.
-#
-# This software and the related documents are provided as is, with no express
-# or implied warranties, other than those that are expressly stated in the
-# License.
-#
-# Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
-# file Copyright.txt or https://cmake.org/licensing for details.
-
 #[=======================================================================[.rst:
 SYCLConfig
 -------
@@ -101,7 +85,7 @@ endfunction()
 
 # Function to Build the feature check test case.
 
-function(SYCL_FEATURE_TEST_BUILD TEST_SRC_FILE TEST_EXE)
+function(SYCL_FEATURE_TEST_BUILD return TEST_SRC_FILE TEST_EXE)
 
   # Convert CXX Flag string to list
   set(SYCL_CXX_FLAGS_LIST "${SYCL_CXX_FLAGS}")
@@ -123,17 +107,17 @@ function(SYCL_FEATURE_TEST_BUILD TEST_SRC_FILE TEST_EXE)
 
   # Verify if test case build properly.
   if(result)
-    message("SYCL feature test compile failed!")
+    message("SYCL: feature test compile failed!!")
     message("compile output is: ${output}")
   endif()
 
-  # TODO: what to do if it doesn't build
+  set(${return} ${result} PARENT_SCOPE)
 
 endfunction()
 
 # Function to run the test case to generate feature info.
 
-function(SYCL_FEATURE_TEST_RUN TEST_EXE)
+function(SYCL_FEATURE_TEST_RUN return TEST_EXE)
 
   # Spawn a process to run the test case.
 
@@ -150,10 +134,11 @@ function(SYCL_FEATURE_TEST_RUN TEST_EXE)
     set(SYCL_FOUND False)
     set(SYCL_REASON_FAILURE "SYCL: feature test execution failed!!")
   endif()
-  # TODO: what iff the result is false.. error or ignore?
 
-  set( test_result "${result}" PARENT_SCOPE)
-  set( test_output "${output}" PARENT_SCOPE)
+  set(test_result "${result}" PARENT_SCOPE)
+  set(test_output "${output}" PARENT_SCOPE)
+
+  set(${return} ${result} PARENT_SCOPE)
 
 endfunction()
 
@@ -192,10 +177,16 @@ set(TEST_EXE "${TEST_SRC_FILE}.exe")
 SYCL_FEATURE_TEST_WRITE(${TEST_SRC_FILE})
 
 # Build the test and create test executable
-SYCL_FEATURE_TEST_BUILD(${TEST_SRC_FILE} ${TEST_EXE})
+SYCL_FEATURE_TEST_BUILD(return ${TEST_SRC_FILE} ${TEST_EXE})
+if(return)
+  return()
+endif()
 
 # Execute the test to extract information
-SYCL_FEATURE_TEST_RUN(${TEST_EXE})
+SYCL_FEATURE_TEST_RUN(return ${TEST_EXE})
+if(return)
+  return()
+endif()
 
 # Extract test output for information
 SYCL_FEATURE_TEST_EXTRACT(${test_output})
