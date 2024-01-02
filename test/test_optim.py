@@ -467,7 +467,7 @@ class TestOptimRenewed(TestCase):
 
             def fwd_bwd(optim, mod, i):
                 optim.zero_grad()
-                loss = mod(input).sum()
+                loss = mod(i).sum()
                 loss.backward()
                 return loss
 
