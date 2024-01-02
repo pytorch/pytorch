@@ -306,10 +306,18 @@ mobile::Module FlatbufferLoader::parseModule(
     mobile_ivalue_size_ = ivalues->size();
   }
 
+  flatbuffers::Verifier verifier(
+      reinterpret_cast<const uint8_t*>(module),
+      end - reinterpret_cast<const char*>(module),
+      64,
+      1000000,
+      false);
+
   for (uint32_t i = 0; i < mobile_ivalue_size_; i++) {
     const auto* ival = ivalues->Get(i);
-    TORCH_CHECK(
-        reinterpret_cast<const char*>(ival) < end, "Corrupted ivalue item")
+
+    TORCH_CHECK(ival->Verify(verifier), "Malformed flatbuffer ivalue");
+
     parseAndPopulate(i, ival);
   }
   IValue& module_ivalue = getIValue(module->state_obj());
@@ -455,6 +463,8 @@ IValue parseBasic(
     case mobile::serialization::IValueUnion::String:
       return ivalue.val_as_String()->data()->str();
     case mobile::serialization::IValueUnion::Device: {
+      TORCH_CHECK(
+          ivalue.val_as_Device()->str() != nullptr, "Device string is nullptr");
       return c10::Device(ivalue.val_as_Device()->str()->str());
     }
     default:
@@ -537,6 +547,7 @@ IValue parseList(
 template <typename T, typename U>
 std::vector<T> parseListNative(const U* list) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(list != nullptr);
+  TORCH_CHECK(list->items() != nullptr, "List items cannot be nullptr");
   return {list->items()->begin(), list->items()->end()};
 }
 
@@ -570,6 +581,7 @@ IValue parseTuple(
     FlatbufferLoader& loader,
     const mobile::serialization::IValue& ivalue) {
   const auto& tuple = ivalue.val_as_Tuple();
+  TORCH_CHECK(tuple->items() != nullptr, "Tuple items cannot be nullptr");
   std::vector<IValue> res;
   for (int i : *tuple->items()) {
     res.emplace_back(loader.getIValue(i));
@@ -678,8 +690,12 @@ IValue parseObject(
 
 IValue FlatbufferLoader::parseIValue(
     const mobile::serialization::IValue* ivalue) {
-  return ivalue_parsers_[static_cast<uint32_t>(ivalue->val_type())](
-      *this, *ivalue);
+  uint32_t parser_index = static_cast<uint32_t>(ivalue->val_type());
+  TORCH_CHECK(
+      parser_index < ivalue_parsers_.size(),
+      "Invalid ivalue type: ",
+      parser_index);
+  return ivalue_parsers_[parser_index](*this, *ivalue);
 }
 
 void deleteNothing2(void*);
