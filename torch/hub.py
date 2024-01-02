@@ -201,8 +201,7 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
 def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=True, skip_validation=False):
     # Setup hub_dir to save downloaded files
     hub_dir = get_dir()
-    if not os.path.exists(hub_dir):
-        os.makedirs(hub_dir)
+    os.makedirs(hub_dir, exist_ok=True)
     # Parse github repo information
     repo_owner, repo_name, ref = _parse_repo_info(github)
     # Github allows branch name with slash '/',
@@ -742,15 +741,7 @@ def load_state_dict_from_url(
         hub_dir = get_dir()
         model_dir = os.path.join(hub_dir, 'checkpoints')
 
-    try:
-        os.makedirs(model_dir)
-    except OSError as e:
-        if e.errno == errno.EEXIST:
-            # Directory already exists, ignore.
-            pass
-        else:
-            # Unexpected OSError, re-raise.
-            raise
+    os.makedirs(model_dir, exist_ok=True)
 
     parts = urlparse(url)
     filename = os.path.basename(parts.path)

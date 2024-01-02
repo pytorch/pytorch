@@ -229,7 +229,7 @@ class TestTransformers(NNTestCase):
                     test_train_uint8 = encoder(test, src_key_padding_mask=pad_mask.to(torch.uint8))
                 except AssertionError as e:
                     continue
-                self.assertFalse(e, "Failed to catch unsupported uint8 type exception")
+                self.assertFalse(e, "Failed to catch unsupported uint8 type exception")  # noqa: F821
 
                 test_train_bool = encoder(test, src_key_padding_mask=pad_mask)
                 encoder.eval()
@@ -240,7 +240,7 @@ class TestTransformers(NNTestCase):
                     test_eval_uint8 = encoder(test, src_key_padding_mask=pad_mask.to(torch.int64))
                 except AssertionError as e:
                     continue
-                self.assertFalse(e, "Failed to catch unsupported Long type exception")
+                self.assertFalse(e, "Failed to catch unsupported Long type exception")  # noqa: F821
 
                 test_eval_bool = encoder(test, src_key_padding_mask=pad_mask)
                 l1_bool = nn.L1Loss()(test_train_bool[:, 0:2, :], test_eval_bool[:, 0:2, :]).item()
@@ -917,7 +917,7 @@ class TestTransformers(NNTestCase):
                 )
 
                 if torch_encoder is not None:
-                    self.decoder = torch_to_fairseq(torch_encoder, self.decoder)
+                    self.decoder = torch_to_fairseq(torch_encoder, self.decoder)  # noqa: F821
                 self.decoder = self.decoder.eval().cuda().half()
 
             def forward(
