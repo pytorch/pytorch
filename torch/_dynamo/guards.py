@@ -57,6 +57,7 @@ from .eval_frame import set_guard_error_hook
 from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
+    common_constant_types,
     dict_const_keys,
     dict_const_keys_repr,
     dict_param_key_ids,
@@ -378,25 +379,19 @@ class GuardBuilder(GuardBuilderBase):
             )
         else:
             np_types = ()
-        ok_types = (
-            int,
-            float,
-            bool,
-            type(None),
-            str,
-            type,
-            list,
-            tuple,
-            set,
-            slice,
-            frozenset,
-            range,
-            torch.Size,
-            torch.device,
-            torch.dtype,
-            torch.memory_format,
-            torch.layout,
-            *np_types,
+        ok_types = tuple(
+            common_constant_types
+            | {
+                type,
+                list,
+                tuple,
+                set,
+                frozenset,
+                slice,
+                range,
+                torch.Size,
+                *np_types,
+            }
         )
         if istype(val, dict):
             assert all(
@@ -974,8 +969,15 @@ class CheckFunctionManager:
             output_graph.global_scope,
             self,
         )
+
+        # Break retain cycle. See test_release_scope_memory
+        def cleanup_builder(weak_b):
+            b = weak_b()
+            if b:
+                b.scope = None
+
         # Break retain cycle. See test_release_input_memory
-        w_builder = weakref.ref(builder)
+        w_builder = weakref.ref(builder, cleanup_builder)
 
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
