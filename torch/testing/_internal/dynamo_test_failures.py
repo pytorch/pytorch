@@ -305,7 +305,6 @@ FIXME_default_non_strict = {
     "torch_np/numpy_tests/lib/test_index_tricks",
     "torch_np/numpy_tests/lib/test_shape_base_",
     "torch_np/numpy_tests/lib/test_twodim_base",
-    "torch_np/numpy_tests/lib/test_type_check",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -1310,6 +1309,12 @@ dynamo_expected_failures = {
     "TestCholesky.test_basic_property_shape0_dtype1",
     "TestNormInt64.test_matrix_2x2",
     "TestCholesky.test_basic_property_shape2_dtype3",
+    "TestIsrealobj.test_basic",
+    "TestIsreal.test_pass",
+    "TestIscomplexobj.test_basic",
+    "TestIsreal.test_fail",
+    "TestIscomplexobj.test_list",
+    "TestIscomplex.test_pass",
 }
 
 dynamo_skips = {}
