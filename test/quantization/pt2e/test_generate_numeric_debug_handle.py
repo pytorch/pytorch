@@ -5,26 +5,37 @@ import unittest
 import torch
 from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import generate_numeric_debug_handle
+from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
+from torch.ao.quantization.quantizer.xnnpack_quantizer import (
+    get_symmetric_quantization_config,
+    XNNPACKQuantizer,
+)
 from torch.fx import Node
+from torch.fx.passes.utils.matcher_with_name_node_map_utils import (
+    SubgraphMatcherWithNameNodeMap,
+)
 from torch.testing._internal.common_quantization import TestHelperModules
 from torch.testing._internal.common_utils import IS_WINDOWS, TestCase
-from torch.fx.passes.utils.matcher_with_name_node_map_utils import SubgraphMatcherWithNameNodeMap
-from torch.ao.quantization.quantizer.xnnpack_quantizer import XNNPACKQuantizer, get_symmetric_quantization_config
-from torch.ao.quantization.quantize_pt2e import prepare_pt2e, convert_pt2e
 
 
 def _extract_conv2d_pattern_debug_handle_map(model):
     """Returns a debug_handle_map from input/weight/bias/output to numeric_debug_handle
     for conv2d pattern, extracted from the model
     """
+
     def conv_pattern(input, weight, bias):
         output = torch.nn.functional.conv2d(input, weight, bias)
-        return output, {"input": input, "weight": weight, "bias": bias, "output": output}
+        return output, {
+            "input": input,
+            "weight": weight,
+            "bias": bias,
+            "output": output,
+        }
 
     conv_pattern_example_inputs = (
         torch.randn(1, 1, 3, 3),  # input
         torch.randn(1, 1, 1, 1),  # weight
-        torch.randn(1),           # bias
+        torch.randn(1),  # bias
     )
     conv_gm = capture_pre_autograd_graph(conv_pattern, conv_pattern_example_inputs)
     conv_pm = SubgraphMatcherWithNameNodeMap(conv_gm)
@@ -47,6 +58,7 @@ def _extract_conv2d_pattern_debug_handle_map(model):
         debug_handle_map["bias"] = conv_node.meta["numeric_debug_handle"][bias_node]
     debug_handle_map["output"] = conv_node.meta["numeric_debug_handle"]["output"]
     return debug_handle_map
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
 class TestGenerateNumericDebugHandle(TestCase):
@@ -75,7 +87,9 @@ class TestGenerateNumericDebugHandle(TestCase):
 
         debug_handle_map_ref = _extract_conv2d_pattern_debug_handle_map(m)
 
-        quantizer = XNNPACKQuantizer().set_global(get_symmetric_quantization_config(is_per_channel=False))
+        quantizer = XNNPACKQuantizer().set_global(
+            get_symmetric_quantization_config(is_per_channel=False)
+        )
         m = prepare_pt2e(m, quantizer)
         debug_handle_map = _extract_conv2d_pattern_debug_handle_map(m)
         self.assertEqual(debug_handle_map, debug_handle_map_ref)

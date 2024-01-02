@@ -207,7 +207,10 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 tuple(dq_inputs),
                 {}
             )
-            remap_fn = lambda x: dequantized_node if x is node else x
+
+            def remap_fn(x):
+                return dequantized_node if x is node else x
+
             # remap numeric_debug_handle
             for user_node in node.users:
                 if "numeric_debug_handle" in user_node.meta:
@@ -312,7 +315,10 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 tuple(dq_inputs),
                 {}
             )
-            remap_fn = lambda x: dequantized_node if x is node else x
+
+            def remap_fn(x):
+                return dequantized_node if x is node else x
+
             # remap numeric_debug_handle
             for user_node in node.users:
                 if "numeric_debug_handle" in user_node.meta:

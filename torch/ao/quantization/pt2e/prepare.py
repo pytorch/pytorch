@@ -369,8 +369,11 @@ def _maybe_insert_input_observers_for_node(
         remap[arg] = new_arg
 
     if "numeric_debug_handle" in node.meta:
+
+        def remap_fn(x):
+            return remap.get(x, x)
+
         numeric_debug_handle = node.meta["numeric_debug_handle"]
-        remap_fn = lambda x: remap[x] if x in remap else x
         node.meta["numeric_debug_handle"] = {remap_fn(k): v for k, v in numeric_debug_handle.items()}
 
     # Clone has a memory_format kwarg and zeros_like has a pin_memory kwarg
