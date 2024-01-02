@@ -294,7 +294,6 @@ FIXME_default_non_strict = {
     "torch_np/numpy_tests/core/test_scalar_ctors",
     "torch_np/numpy_tests/core/test_scalar_methods",
     "torch_np/numpy_tests/core/test_scalarinherit",
-    "torch_np/numpy_tests/core/test_scalarmath",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -1460,6 +1459,19 @@ dynamo_expected_failures = {
     "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_no",
     "TestVstack.test_generator",
     "TestHstack.test_generator",
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_L_operation1",
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_Q_operation1",
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_L_operation0",
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_H_operation1",
+    "TestPower.test_modular_power",
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_H_operation0",
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_I_operation1",
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_Q_operation0",
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_P_operation0",
+    "TestBaseMath.test_lower_align",
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_P_operation1",
+    "TestNegative.test_exceptions",
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_I_operation0",
 }
 
 dynamo_skips = {}
