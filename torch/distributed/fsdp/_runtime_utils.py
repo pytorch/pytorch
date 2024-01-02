@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
+from torch.distributed.distributed_c10d import get_process_group_ranks
 from torch.distributed.fsdp._common_utils import (
     _assert_in_training_states,
     _FSDPState,
@@ -52,6 +53,7 @@ class _PrefetchMode(Enum):
     BACKWARD = auto()
     FORWARD = auto()
 
+
 def fsdp_state_has_default_pg(state: _FSDPState) -> bool:
     """Indicates whether FlatParamHandle has the default process group.
 
@@ -62,25 +64,25 @@ def fsdp_state_has_default_pg(state: _FSDPState) -> bool:
         bool: True if the ProcessGroup of the _FSDPState object is the default process group. False
             otherwise.
     """
-    from torch.distributed.distributed_c10d import get_process_group_ranks
     if state.process_group is None:
         # If no process group is attached to the _FSDPState, assume it uses default process group.
         return True
-    return len(get_process_group_ranks(
-        state.process_group)) == dist.get_world_size()
+    return len(get_process_group_ranks(state.process_group)) == dist.get_world_size()
 
 
-def fsdp_state_pg_ranks(state: _FSDPState) -> Tuple[int]:
+def fsdp_state_pg_ranks(state: _FSDPState) -> Tuple[int, ...]:
     """Gets the ranks included in the ProcessGroup of an _FSDPState.
 
     Args:
         state (_FSDPState): FSDP State object
 
     Returns:
-        Tuple[int]: Ranks for the FSDP State's process group.
+        Tuple[int, ...]: Ranks for the FSDP State's process group.
     """
-    from torch.distributed.distributed_c10d import get_process_group_ranks
-    return tuple(get_process_group_ranks(state.process_group))
+    if state.process_group is None:
+        return tuple(range(dist.get_world_size()))
+    else:
+        return tuple(get_process_group_ranks(state.process_group))
 
 
 def _get_fsdp_root_states_with_modules(
@@ -230,14 +232,11 @@ def _share_state_and_init_handle_attrs(
     root_state: _FSDPState,
     root_module: nn.Module,
 ) -> None:
-    """Shares data structure state from the ``root_state`` to all FSDP states in
-    ``root_module`` 's module tree, and initializes handle attributes. These are
-    done together to require a single loop over the states."""
-    from torch.distributed.fsdp._runtime_utils import (
-        HOMOGENEOUS_ATTR_NAMES, _init_device_mesh,
-        _validate_and_get_hybrid_shard_state)
-    from torch.distributed.utils import _p_assert
-
+    """
+    Shares data structure state from the ``root_state`` to all FSDP states in
+    ``root_module`` 's module tree, and initializes handle attributes. These
+    are done together to require a single loop over the states.
+    """
     handle = root_state._handle
     if handle:
         handle.init_flat_param_attributes()
@@ -246,17 +245,18 @@ def _share_state_and_init_handle_attrs(
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
     root_state._all_handles = root_state._exec_order_data.all_handles  # share reference
-    root_state._device_mesh = _init_device_mesh(root_state)
     # Update _has_optim_in_backward for each handle.
     for handle in root_state._all_handles:
         flat_param = handle.flat_param
-        if hasattr(flat_param, '_in_backward_optimizers'):
+        if hasattr(flat_param, "_in_backward_optimizers"):
             raise RuntimeError(
-                'FSDP optimizer in backward only supported with use_orig_params=True!'
+                "FSDP optimizer in backward only supported with use_orig_params=True!"
             )
         handle._has_optim_in_backward = flat_param._params is not None and any(
-            hasattr(param, '_in_backward_optimizers')
-            for param in flat_param._params)
+            hasattr(param, "_in_backward_optimizers") for param in flat_param._params
+        )
+        if handle._has_optim_in_backward:
+            torch._C._log_api_usage_once("fsdp.optimizer_in_backward")
     # Keep track of any new unshard streams we may have to add for specific process groups.
     fsdp_pg_unshard_streams = {}
     unshard_priority = root_state._unshard_stream.priority
@@ -264,7 +264,7 @@ def _share_state_and_init_handle_attrs(
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             _p_assert(
                 hasattr(fsdp_state, attr_name),
-                f'FSDP state missing attribute {attr_name}',
+                f"FSDP state missing attribute {attr_name}",
             )
             attr_name_to_values[attr_name].add(getattr(fsdp_state, attr_name))
         if fsdp_state is root_state:
@@ -275,7 +275,7 @@ def _share_state_and_init_handle_attrs(
         _p_assert(
             fsdp_state._is_root is None or not fsdp_state._is_root,
             "Non-root FSDP instance's `_is_root` should not have been "
-            'set yet or should have been set to `False`',
+            "set yet or should have been set to `False`",
         )
         fsdp_state._is_root = False
 
@@ -288,14 +288,13 @@ def _share_state_and_init_handle_attrs(
             state_pg_ranks = fsdp_state_pg_ranks(fsdp_state)
             if state_pg_ranks in fsdp_pg_unshard_streams:
                 # We have created the unshard stream for this process group already. Use it.
-                fsdp_state._unshard_stream = fsdp_pg_unshard_streams[
-                    state_pg_ranks]
+                fsdp_state._unshard_stream = fsdp_pg_unshard_streams[state_pg_ranks]
             else:
                 # We don't have an unshard stream for this process group yet. Make it.
                 fsdp_state._unshard_stream = fsdp_state._device_handle.Stream(
-                    priority=unshard_priority)
-                fsdp_pg_unshard_streams[
-                    state_pg_ranks] = fsdp_state._unshard_stream
+                    priority=unshard_priority
+                )
+                fsdp_pg_unshard_streams[state_pg_ranks] = fsdp_state._unshard_stream
 
         # All other stream assignments stay common across all of FSDP.
         fsdp_state._post_backward_stream = root_state._post_backward_stream
@@ -311,7 +310,7 @@ def _share_state_and_init_handle_attrs(
     for attr_name, attr_values in attr_name_to_values.items():
         if len(attr_values) != 1:
             raise ValueError(
-                f'Expects one homogeneous value for {attr_name} but got {attr_values}'
+                f"Expects one homogeneous value for {attr_name} but got {attr_values}"
             )
 
 
