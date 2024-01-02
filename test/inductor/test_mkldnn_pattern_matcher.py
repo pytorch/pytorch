@@ -1135,7 +1135,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
         * Input dim exceeds 2
         * Input not contiguous
         """
-        self._qlinear_cpu_test_helper((torch.randn((2, 4, 3, 4)),), int8_mixed_bf16=True, do_permute=True)
+        self._qlinear_cpu_test_helper(
+            (torch.randn((2, 4, 3, 4)),), int8_mixed_bf16=True, do_permute=True
+        )
 
     def _qlinear_unary_cpu_test_helper(self, inputs, int8_mixed_bf16=False):
         class M(torch.nn.Module):

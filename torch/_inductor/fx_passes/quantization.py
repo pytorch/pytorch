@@ -1407,7 +1407,7 @@ def _get_linear_dq_mul_node(
                 mul_node = act_expand_node.args[0]
             else:
                 activation_to_bf16_node = act_expand_node.args[0]
-                mul_node = activation_to_bf16_node.args[0]          
+                mul_node = activation_to_bf16_node.args[0]
     else:
         if dtype == torch.float32:
             # pattern: linear -> mul
