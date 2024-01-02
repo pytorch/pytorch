@@ -58,6 +58,22 @@ def _may_generate_pattern_with_reshape(pattern, reshape_size=Arg(), with_reshape
         return pattern
 
 
+def _generate_linear_t_pattern(
+    _dequant_per_channel_pattern,
+    dtype,
+):
+    t_pattern = CallFunction(
+        aten.permute.default,
+        _may_generate_pattern_with_dtype_convert(
+            _dequant_per_channel_pattern,
+            KeywordArg("autocast_wgt_dtype"),
+            dtype != torch.float32,
+        ),
+        KeywordArg("permute_axes"),
+    )
+    return t_pattern
+
+
 """
 dequantize activation:
     x = x.to(fp32)
@@ -1409,7 +1425,7 @@ def _is_valid_dequant_linear_pattern(dtype, input_dim_exceeds_two, input_contigu
         # Extra check for bmm pattern
         if input_dim_exceeds_two and not input_contiguous:
             # Check for act
-            # Act expand size is exactly same as act size
+            # Act expand size should be exactly same as act size
             act_expand_size = match.kwargs["act_expand_size"]
             act_node = match.kwargs["x"]
             if not (
@@ -1420,17 +1436,17 @@ def _is_valid_dequant_linear_pattern(dtype, input_dim_exceeds_two, input_contigu
                 return False
 
             # Check for wgt
-            # wgt permute dims is [1, 0]
+            # wgt permute dims should be [1, 0]
             wgt_permute_dims = match.kwargs["permute_axes"]
             if wgt_permute_dims != [1, 0]:
                 return False
 
             # Check below wgt size items:
-            # wgt before expand is with dim 2
-            # Expand size is with dim 3
-            # Expand size[0] is same as act size[0]
-            # Expand size[1] is same as wgt size[0]
-            # Expand size[2] is same as wgt size[1]
+            # wgt before expand should with dim 2
+            # Expand size should with dim 3
+            # Expand size[0] should same as act size[0]
+            # Expand size[1] should same as wgt size[0]
+            # Expand size[2] should same as wgt size[1]
             qweight_node = match.kwargs["q_weight"]
             wgt_expand_size = match.kwargs["wgt_expand_size"]
             if not (
@@ -1611,10 +1627,11 @@ def _register_qlinear_weight_prepack_pass(
                 new_linear_node.meta.update(linear_node.meta)
 
             # Erase the original linear node
-            if input_dim_exceeds_two and input_contiguous:
-                graph.erase_node(output_reshape_node)
-            if input_dim_exceeds_two and not input_contiguous and bias:
-                graph.erase_node(output_add_node_for_bias)
+            if input_dim_exceeds_two:
+                if input_contiguous:
+                    graph.erase_node(output_reshape_node)
+                elif not input_contiguous and bias:
+                    graph.erase_node(output_add_node_for_bias)
             graph.erase_node(linear_node)
             if input_dim_exceeds_two:
                 if input_contiguous:
@@ -1643,15 +1660,7 @@ def _register_qlinear_weight_prepack_pass(
 def _generate_dequant_linear_node_pattern(
     _dequant_per_channel_pattern, dtype=torch.float32, input_dim_exceeds_two=False
 ):
-    t_pattern = CallFunction(
-        aten.permute.default,
-        _may_generate_pattern_with_dtype_convert(
-            _dequant_per_channel_pattern,
-            KeywordArg("autocast_wgt_dtype"),
-            dtype != torch.float32,
-        ),
-        KeywordArg("permute_axes"),
-    )
+    t_pattern = _generate_linear_t_pattern(_dequant_per_channel_pattern, dtype)
     dequant_linear_bias_pattern = _may_generate_pattern_with_reshape(
         CallFunction(
             aten.addmm.default,
@@ -1696,15 +1705,7 @@ def _generate_dequant_bmm_node_pattern(
     with_bias=False,
 ):
     # When activation of linear dim exceed 2 and not contiguous
-    t_pattern = CallFunction(
-        aten.permute.default,
-        _may_generate_pattern_with_dtype_convert(
-            _dequant_per_channel_pattern,
-            KeywordArg("autocast_wgt_dtype"),
-            dtype != torch.float32,
-        ),
-        KeywordArg("permute_axes"),
-    )
+    t_pattern = _generate_linear_t_pattern(_dequant_per_channel_pattern, dtype)
 
     dequant_bmm_pattern = CallFunction(
         aten.bmm.default,

@@ -1121,6 +1121,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def test_qlinear_input_dim_exceeds_2_and_not_contiguous(self):
         r"""
         This testcase will quantize a single Linear Moduel.
+        * Input dim exceeds 2
+        * Input not contiguous
         """
         self._qlinear_cpu_test_helper((torch.randn((2, 4, 3, 4)),), do_permute=True)
 
