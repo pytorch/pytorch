@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/mobile/method.h>
 #include <torch/csrc/jit/mobile/quantization.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace mobile {
@@ -137,7 +139,7 @@ class TORCH_API Module {
   }
 
   void set_delete_memory(std::shared_ptr<char> delete_mem) {
-    mem_to_delete_ = delete_mem;
+    mem_to_delete_ = std::move(delete_mem);
   }
 
   void set_min_operator_version(int64_t version) {

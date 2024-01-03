@@ -12,7 +12,7 @@ struct RAIIContextManager {
 
   void enter() {
     auto emplace = [&](Args... args) {
-      return guard_.emplace(std::forward<Args>(args)...);
+      guard_.emplace(std::forward<Args>(args)...);
     };
     std::apply(std::move(emplace), args_);
   }

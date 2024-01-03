@@ -3,14 +3,13 @@ import dataclasses
 import functools
 import inspect
 import itertools
-import operator
 import sys
 import types
 from typing import Dict, List
 
 import torch._C
 import torch._numpy as tnp
-from .. import config, polyfill, variables
+from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -22,7 +21,6 @@ from ..utils import (
     proxy_args_kwargs,
 )
 from .base import MutableLocal, VariableTracker
-from .dicts import DefaultDictVariable
 from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
@@ -158,13 +156,9 @@ class SuperVariable(VariableTracker):
         ):
             assert not kwargs and len(args) == 2
             k = variables.ConstDictVariable.get_key(args[0])
-
-            newval = dict(self.objvar.items)
-            newval[k] = args[1]
-            return tx.replace_all(
-                self.objvar,
-                self.objvar.modifed(newval),
-            )
+            tx.output.side_effects.mutation(self)
+            self.objvar.items[k] = args[1]
+            return variables.ConstantVariable.create(None)
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
 
@@ -276,25 +270,26 @@ class InspectSignatureVariable(VariableTracker):
             unimplemented(f"inspect.signature with {kwargs}")
         return InspectSignatureVariable(callable)
 
-    def __init__(self, inspected, **kwargs):
+    def __init__(self, inspected: VariableTracker, **kwargs):
         super().__init__(**kwargs)
         self.inspected = inspected
 
+    def var_getattr(self, tx, name: str) -> "VariableTracker":
+        if name == "parameters":
+            return variables.ConstDictVariable(
+                {
+                    name: InspectParameterVariable()
+                    for name in self.inspected.inspect_parameter_names()
+                },
+                user_cls=dict,
+            )
+        return super().var_getattr(tx, name)
 
-def produce_trampoline_autograd_fwd(fn_cls):
-    def trampoline_autograd_fwd(*args, **kwargs):
-        return fn_cls.forward(*args, **kwargs)
 
-    trampoline_autograd_fwd._origin = produce_trampoline_autograd_fwd
-    return trampoline_autograd_fwd
+class InspectParameterVariable(VariableTracker):
+    """This is not implemented, if used will graph break."""
 
-
-def produce_trampoline_autograd_bwd(fn_cls):
-    def trampoline_autograd_bwd(*args, **kwargs):
-        return fn_cls.backward(*args, **kwargs)
-
-    trampoline_autograd_bwd._origin = produce_trampoline_autograd_bwd
-    return trampoline_autograd_bwd
+    pass
 
 
 def produce_trampoline_autograd_apply(fn_cls):
@@ -327,9 +322,6 @@ class AutogradFunctionVariable(VariableTracker):
 
         VariableTracker.apply(visit, (args, kwargs))
 
-        ctx = AutogradFunctionContextVariable.create(tx)
-        args = [ctx, *args]
-
         if (
             requires_grad
             and torch.is_grad_enabled()
@@ -353,80 +345,28 @@ class AutogradFunctionVariable(VariableTracker):
             if jvp_fn is not torch.autograd.Function.jvp:
                 unimplemented("NYI - User defind jvp")
 
-            from .higher_order_ops import (
-                safe_or_raise_always_restore,
-                TorchHigherOrderOperatorVariable,
-            )
+            from .higher_order_ops import AutogradFunctionApplyVariable
 
-            trampoline_autograd_apply = produce_trampoline_autograd_apply(self.fn_cls)
-            trampoline_autograd_fwd = produce_trampoline_autograd_fwd(self.fn_cls)
-            trampoline_autograd_bwd = produce_trampoline_autograd_bwd(self.fn_cls)
+            source = self.source
+            if source is None:
+                source = AttrSource(
+                    tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
+                )
 
-            # NOTE [On Tracing autograd.Function w/ grad]
-            # The complex system described here revolves around the soundness evaluation of an autograd.Function in
-            # PyTorch. The system follows a well-defined strategy for tracing, which involves three key steps: tracing
-            # forward, tracing backward, and if both are sound the potential recording of an "apply" operation into the
-            # graph.We trace forward, and evaluate soundness. Soundness, in this context, refers to the absence of side
-            # effects, the avoidance of lifting new arguments into the trace, the production of a single tensor output,
-            # and a limited input scope confined to contexts, tensors, and constants. If the forward trace is sound,
-            # we install any guards accumulated from tracing. If not, we graph break. We trace backward, and evaluate
-            # for soundness, same as forward, except with more strictness. We enable a strict mode on the tx, and
-            # reject certain ops when running under this strict mode. If the backward trace is sound, we discard the
-            # trace by restoring. Otherwise, we raise.
-
-            # if both the forward and backward traces are sound, we write the autograd function’s apply into the graph.
-
-            # For tracing forward and backward, we use UserFunctionVariable. Although it does not directly contribute
-            # to soundness evaluation, it plus a  GlobalSource makes sure we can produce valid guards,
-            # and that we can inline properly here. Inlining is required in order to be able to ensure that the
-            # soundness evaluation works as described above.
-            graph_checkpoint, checkpoint = tx.output.graph, tx.copy_graphstate()
-
-            module_source = AttrSource(
-                tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
-            )
-            fwd_bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
-                tx.output,
-                parent=tx.output.current_tracer,
-                source_target="autograd.Function",
-            )
-            higher_order_autograd_fn = TorchHigherOrderOperatorVariable.make(
-                trampoline_autograd_fwd,
-                source=AttrSource(module_source, "forward"),
-                fwd_bwd_tracer=fwd_bwd_tracer,
-            )
-            speculated_fwd_result = higher_order_autograd_fn.call_function(
-                tx, args, kwargs
-            )
-
-            if isinstance(speculated_fwd_result, variables.TupleVariable):
-                bwd_args = [ctx, *speculated_fwd_result.items]
-            else:
-                bwd_args = [ctx, speculated_fwd_result]
-            safe_or_raise_always_restore(
-                tx,
-                graph_checkpoint,
-                checkpoint,
-                TorchHigherOrderOperatorVariable.make(
-                    trampoline_autograd_bwd,
-                    source=AttrSource(module_source, "backward"),
-                    fwd_bwd_tracer=fwd_bwd_tracer,
-                ),
-                bwd_args,
-            )
-            # If fwd and backward are sound, we want apply in the graph.
-            # And we don't want backwards for the obvious reasons.
-            args = args[1:]
-            return TorchHigherOrderOperatorVariable.make(
-                trampoline_autograd_apply,
-                fwd_bwd_tracer=None,
+            return AutogradFunctionApplyVariable(
+                self.fn_cls.forward,
+                self.fn_cls.backward,
+                source,
+                source=AttrSource(source, member="apply"),
             ).call_function(tx, args, kwargs)
 
+        source = None
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), "forward")
-        else:
-            source = None
+
         fn = self.fn_cls.forward
+        ctx = AutogradFunctionContextVariable.create(tx)
+        args = [ctx, *args]
         if isinstance(fn, types.FunctionType):
             return variables.UserFunctionVariable(fn, source=source).call_function(
                 tx, args, kwargs
@@ -452,11 +392,11 @@ class AutogradFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ):
-        from ..allowed_functions import is_user_defined_allowed
+        from ..trace_rules import is_callable_allowed
         from .builder import wrap_fx_proxy
 
         if name == "apply":
-            if is_user_defined_allowed(self.fn_cls):
+            if is_callable_allowed(self.fn_cls):
                 trampoline_autograd_apply = produce_trampoline_autograd_apply(
                     self.fn_cls
                 )
@@ -642,23 +582,6 @@ class GetAttrVariable(VariableTracker):
     ) -> "VariableTracker":
         return self.obj.call_method(tx, self.name, args, kwargs)
 
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        if (
-            name == "__len__"
-            and isinstance(self.obj, InspectSignatureVariable)
-            and self.name == "parameters"
-        ):
-            return variables.ConstantVariable.create(
-                self.obj.inspected.num_parameters(),
-            )
-        return super().call_method(tx, name, args, kwargs)
-
 
 class MethodWrapperVariable(VariableTracker):
     def __init__(self, method_wrapper, **kwargs):
@@ -710,13 +633,26 @@ class PythonModuleVariable(VariableTracker):
     def __init__(self, value: types.ModuleType, **kwargs):
         super().__init__(**kwargs)
         self.value = value
+        self.is_torch = self.value is torch or self.value.__name__.startswith("torch.")
 
     def python_type(self):
         return types.ModuleType
 
+    def as_python_constant(self):
+        return self.value
+
+    def __repr__(self):
+        return f"PythonModuleVariable({self.value})"
+
+    def call_hasattr(self, tx, name):
+        if self.is_torch:
+            result = hasattr(self.value, name)
+            return variables.ConstantVariable.create(result)
+        return super().call_hasattr(tx, name)
+
 
 class SkipFilesVariable(VariableTracker):
-    def __init__(self, value, reason, **kwargs):
+    def __init__(self, value, reason=None, **kwargs):
         super().__init__(**kwargs)
         self.value = value
         self.reason = reason
@@ -726,6 +662,14 @@ class SkipFilesVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
+
+    @classmethod
+    def create_with_source(cls, value, source):
+        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+        return cls(
+            value,
+            source=source,
+        )
 
     @staticmethod
     @functools.lru_cache(None)
@@ -737,26 +681,8 @@ class SkipFilesVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from .builtin import BuiltinVariable
-
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
-        # Allowlist a few popular classes(e.g, collections.OrderedDict) calls in skip files.
-        elif self.value is collections.OrderedDict:
-            return BuiltinVariable.call_custom_dict(
-                tx, collections.OrderedDict, *args, **kwargs
-            )
-        elif (
-            self.value is collections.defaultdict
-            and len(args) <= 1
-            and DefaultDictVariable.is_supported_arg(args[0])
-        ):
-            return DefaultDictVariable(
-                {},
-                collections.defaultdict,
-                args[0],
-                mutable_local=MutableLocal(),
-            )
         # Fold through the functions(e.g, collections.namedtuple)
         # that inputs & outputs are all python constants
         elif (
@@ -771,138 +697,32 @@ class SkipFilesVariable(VariableTracker):
                 value, mutable_local=MutableLocal()
             )
         elif (
-            self.value is itertools.product
-            and not kwargs
-            and all(arg.has_unpack_var_sequence(tx) for arg in args)
-        ):
-            seqs = [arg.unpack_var_sequence(tx) for arg in args]
-            items = []
-            for item in itertools.product(*seqs):
-                items.append(variables.TupleVariable(list(item)))
-            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
-        elif (
-            self.value is itertools.chain
-            and not kwargs
-            and all(arg.has_unpack_var_sequence(tx) for arg in args)
-        ):
-            seqs = [arg.unpack_var_sequence(tx) for arg in args]
-            items = []
-            for item in itertools.chain(*seqs):
-                items.append(item)
-            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
-        elif self.value is itertools.accumulate:
-            from .builtin import BuiltinVariable
-
-            if any(key not in ["initial", "func"] for key in kwargs.keys()):
-                unimplemented(
-                    "Unsupported kwargs for itertools.accumulate: "
-                    f"{','.join(set(kwargs.keys()) - {'initial', 'func'})}"
-                )
-
-            acc = kwargs.get("initial")
-
-            if len(args) in [1, 2] and args[0].has_unpack_var_sequence(tx):
-                seq = args[0].unpack_var_sequence(tx)
-
-                if "func" in kwargs and len(args) == 1:
-                    func = kwargs["func"].call_function
-                elif len(args) == 2:
-                    func = args[1].call_function
-                elif len(args) == 1:
-                    # Default to operator.add
-                    func = BuiltinVariable(operator.add).call_function
-                else:
-                    unimplemented(
-                        "itertools.accumulate can only accept one of: `func` kwarg, pos 2 arg"
-                    )
-            else:
-                unimplemented("Unsupported arguments for itertools.accumulate")
-
-            items = []
-            if acc is not None:
-                items.append(acc)
-            for item in seq:
-                if acc is None:
-                    acc = item
-                else:
-                    try:
-                        acc = func(tx, [acc, item], {})
-                    except Exception:
-                        raise unimplemented(  # noqa: TRY200
-                            f"Unexpected failure in invoking function during accumulate. Failed running func {func}({item}{acc})"
-                        )
-                items.append(acc)
-
-            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
-        elif (
-            self.value is itertools.combinations
-            and not kwargs
-            and len(args) == 2
-            and args[0].has_unpack_var_sequence(tx)
-            and args[1].is_python_constant()
-        ):
-            iterable = args[0].unpack_var_sequence(tx)
-            r = args[1].as_python_constant()
-
-            items = []
-            for item in itertools.combinations(iterable, r):
-                items.append(variables.TupleVariable(list(item)))
-            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
-        elif (
             self.value is functools.wraps
             and not kwargs
             and len(args) == 1
-            and args[0].source
+            and (
+                args[0].source is not None or args[0].can_reconstruct(tx.output.root_tx)
+            )
         ):
 
             def wraps(fn):
                 if isinstance(fn, variables.NestedUserFunctionVariable):
-                    return fn.clone(wraps_source=args[0].source)
+                    if args[0].source:
+                        reconstructible = args[0].source
+                    else:
+                        reconstructible = args[0]
+                    return fn.clone(wrapped_reconstructible=reconstructible)
                 unimplemented(f"functools.wraps({fn})")
 
             return variables.LambdaVariable(wraps)
-        elif self.value is collections.deque and not kwargs:
-            if len(args) == 0:
-                items = []
-            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
-                items = args[0].unpack_var_sequence(tx)
-            else:
-                unimplemented("deque() with more than 1 arg not supported")
-            return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
-        elif self.value is functools.partial:
-            if not args:
-                unimplemented("functools.partial malformed")
-            # The first arg, a callable (the ctor below will assert on types)
-            fn = args[0]
-            rest_args = args[1:]
-            # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
-            # args and keywords
-            return variables.functions.FunctoolsPartialVariable(
-                fn, args=rest_args, keywords=kwargs
-            )
-        elif self.value is itertools.repeat:
-            if len(args) < 2:
-                return variables.RepeatIteratorVariable(
-                    *args, mutable_local=MutableLocal()
-                )
-
-            from .builder import SourcelessBuilder
-
-            return tx.inline_user_function_return(
-                SourcelessBuilder()(tx, polyfill.repeat), args, kwargs
-            )
-        elif self.value is itertools.count:
-            return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())
-        elif self.value is itertools.cycle:
-            return variables.CycleIteratorVariable(*args, mutable_local=MutableLocal())
         else:
             try:
                 path = inspect.getfile(self.value)
             except TypeError:
                 path = f"Builtin {self.value.__name__}"
-            unimplemented(
-                f"'call_function {self.value.__qualname__} in skip_files {path}, {self.reason}'"
-            )
+            msg = f"'skip function {self.value.__qualname__} in file {path}'"
+            msg += f"', {self.reason}'" if self.reason else ""
+            unimplemented(msg)
 
 
 class TypingVariable(VariableTracker):
@@ -1044,3 +864,51 @@ class NullVariable(VariableTracker):
 
 class DeletedVariable(VariableTracker):
     """Marker used to implement delattr()"""
+
+
+class StringFormatVariable(VariableTracker):
+    """
+    Represents a call to str.format(), we delay calling format until after the graph.
+    """
+
+    _nonvar_fields = {"format_string", *VariableTracker._nonvar_fields}
+
+    @classmethod
+    def create(cls, format_string, sym_args, sym_kwargs):
+        if all(
+            x.is_python_constant()
+            for x in itertools.chain(sym_args, sym_kwargs.values())
+        ):
+            return variables.ConstantVariable.create(
+                format_string.format(
+                    *[v.as_python_constant() for v in sym_args],
+                    **{k: v.as_python_constant() for k, v in sym_kwargs.items()},
+                )
+            )
+        return cls(format_string, list(sym_args), dict(sym_kwargs))
+
+    def __init__(self, format_string, sym_args, sym_kwargs, **kwargs):
+        super().__init__(**kwargs)
+        assert isinstance(format_string, str)
+        self.format_string = format_string
+        self.sym_args = sym_args
+        self.sym_kwargs = sym_kwargs
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.format_string!r}, {self.sym_args!r}, {self.sym_kwargs!r})"
+
+    def reconstruct(self, codegen):
+        if sys.version_info >= (3, 11):
+            codegen.append_output(create_instruction("PUSH_NULL"))
+        codegen.append_output(codegen.create_load_const(self.format_string))
+        codegen.append_output(codegen.create_load_attr("format"))
+        codegen.extend_output(
+            variables.TupleVariable(self.sym_args).reconstruct(codegen)
+        )
+        codegen.extend_output(
+            variables.ConstDictVariable(self.sym_kwargs, user_cls=dict).reconstruct(
+                codegen
+            )
+        )
+        codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=1))
+        return []
