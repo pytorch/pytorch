@@ -1839,6 +1839,15 @@ class ExpandView(BaseView):
             if new_size[i] == -1:
                 assert old_size[i] is not None
                 new_size[i] = old_size[i]
+            elif old_size[i] is None or old_size[i] == 1:
+                pass
+            else:
+                # Expect broadcast compatibility
+                new_size[i] = V.graph.sizevars.expect_equals(
+                    new_size[i],
+                    old_size[i],
+                    msg=f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}",
+                )
         return new_size
 
     @classmethod
