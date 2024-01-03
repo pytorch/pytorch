@@ -1875,6 +1875,17 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+    def test_numpy_subdtype(self):
+        def fn(x, n):
+            return np.issubdtype(type(n), np.integer) + x
+
+        args = [torch.randn(10), 4096]
+        correct = fn(*args)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        self.assertEqual(opt_fn(*args), correct)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_numpy_take_along_axis(self):
         def fn(x, i, a):
             return np.take_along_axis(x, i, a)
