@@ -113,14 +113,16 @@ class AutogradCompilerInstance:
 
         with disable_proxy_modes_tracing():
             # create fake Tensors
-            grad_ins = []
+            grad_ins: List[Optional[torch.Tensor]] = []
             for output_metadata in output_metadatas:
                 if output_metadata is None:
                     grad_ins.append(None)
                     continue
 
                 layout, device, dtype, size = output_metadata
-                grad_ins.append(torch.empty(size=size, dtype=dtype, layout=layout, device=device))
+                grad_ins.append(
+                    torch.empty(size=size, dtype=dtype, layout=layout, device=device)
+                )
             self.bind_tensors_to_proxies(grad_ins, proxies)
         return tuple(grad_ins)
 

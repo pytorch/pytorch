@@ -42,7 +42,7 @@ def hook3(gI, gO):
 
 
 class TestCompiledAutograd(TestCase):
-    def check_output_and_recompiles(self, fn, count=1):
+    def check_output_and_recompiles(self, fn, count=1, compiler_fn=compiler_fn):
         with torch.autograd.set_multithreading_enabled(False):
             torch._dynamo.reset()
             counters["compiled_autograd"].clear()
@@ -518,7 +518,7 @@ class TestCompiledAutograd(TestCase):
             class MyFn(torch.autograd.Function):
                 @staticmethod
                 def forward(ctx, x, y, z):
-                    return x*2, y*3, z*4
+                    return x * 2, y * 3, z * 4
 
                 @staticmethod
                 def backward(ctx, gO_1, gO_2, gO_3):
@@ -539,6 +539,21 @@ class TestCompiledAutograd(TestCase):
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_custom_fn_output_metadata(self):
+        def my_compiler_fn(gm):
+            for node in gm.graph.nodes:
+                if isinstance(node.target, torch._ops.OpOverload):
+                    assert (
+                        node.target._name != "aten::_to_copy"
+                    ), "there should be no implicit copies (e.g. dtype casting)"
+
+            def inner_compiler(gm_, example_inputs_):
+                counters["compiled_autograd"]["compiles"] += 1
+                return inductor.compile(gm_, example_inputs_)
+
+            return torch.compile(
+                gm, backend=inner_compiler, fullgraph=True, dynamic=True
+            )
+
         def fn():
             class MyFn(torch.autograd.Function):
                 @staticmethod
@@ -549,8 +564,10 @@ class TestCompiledAutograd(TestCase):
                 def backward(ctx, gO):
                     return gO
 
-            x = torch.arange(1, 10, requires_grad=True, dtype=torch.float16, device="cuda")
-            x_view = x.view(3,3)
+            x = torch.arange(
+                1, 10, requires_grad=True, dtype=torch.float16, device="cuda"
+            )
+            x_view = x.view(3, 3)
             out = MyFn.apply(x_view)
             loss = out.sum()
             loss.backward()
@@ -558,7 +575,7 @@ class TestCompiledAutograd(TestCase):
             yield x.device
             yield x.grad
 
-        self.check_output_and_recompiles(fn, 1)
+        self.check_output_and_recompiles(fn, 1, my_compiler_fn)
 
     def test_custom_fns_with_same_graph(self):
         def fn():

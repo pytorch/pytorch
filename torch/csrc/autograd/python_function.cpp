@@ -233,9 +233,7 @@ auto PyNode::compiled_apply(
         to_py_size(input_info.size));
 
     PyTuple_SetItem(
-        fwdInputMetadatas.get(),
-        static_cast<Py_ssize_t>(i),
-        fwdInputMetadata);
+        fwdInputMetadatas.get(), static_cast<Py_ssize_t>(i), fwdInputMetadata);
   }
   PyObject* saved_tensors(unpack_saved_variables(
       py_fn, [](const Variable& var) { return THPVariable_Wrap(var); }));
