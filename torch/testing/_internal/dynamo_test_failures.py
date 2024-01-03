@@ -310,7 +310,6 @@ FIXME_default_non_strict = {
     "torch_np/test_binary_ufuncs",
     "torch_np/test_dtype",
     "torch_np/test_function_base",
-    "torch_np/test_ndarray_methods",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -889,6 +888,14 @@ dynamo_expected_failures = {
     "TestFromBuffer.test_basic_little_dtype0",
     "TestMatmul.test_exceptions",
     "TestFlag.test_writeable_from_readonly",
+    "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmax_np_method0",
+    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmin",
+    "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmax_np_method0",
+    "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmin_np_method1",
+    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmax",
+    "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmin_np_method1",
+    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmax",
+    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmin",
 }
 
 dynamo_skips = {
