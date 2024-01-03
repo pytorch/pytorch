@@ -1240,6 +1240,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             restore_side_effects=False,
             tracer=tracer,
             enable_grad=enable_grad,
+            set_subgraph_inputs="manual",
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:
