@@ -16,6 +16,7 @@ import platform
 import textwrap
 import ctypes
 import inspect
+import threading
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -39,7 +40,7 @@ import builtins
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage',
-    'set_default_tensor_type', 'set_default_device',
+    'set_default_tensor_type', 'set_default_device', 'get_default_device',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
@@ -56,6 +57,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
+    'sym_sqrt',
     'export', 'autocast', 'cond',
 ]
 
@@ -342,6 +344,10 @@ class SymFloat:
     def __sym_int__(self):
         raise AssertionError("type stub not overridden")
 
+    def is_integer(self):
+        """Return True if the float is an integer."""
+        raise AssertionError("type stub not overridden")
+
     def __repr__(self):
         return self.node.str()
 
@@ -414,8 +420,15 @@ def sym_not(a):
     Args:
         a (SymBool or bool): Object to negate
     """
+    import sympy
+    from .overrides import has_torch_function_unary, handle_torch_function
+
+    if has_torch_function_unary(a):
+        return handle_torch_function(sym_not, (a,), a)
     if hasattr(a, '__sym_not__'):
         return a.__sym_not__()
+    if isinstance(a, sympy.Basic):
+        return ~a  # type: ignore[operator]
     return not a
 
 def sym_float(a):
@@ -424,6 +437,10 @@ def sym_float(a):
     Args:
         a (SymInt, SymFloat, or object): Object to cast
     """
+    from .overrides import has_torch_function_unary, handle_torch_function
+
+    if has_torch_function_unary(a):
+        return handle_torch_function(sym_float, (a,), a)
     if isinstance(a, SymFloat):
         return a
     elif hasattr(a, '__sym_float__'):
@@ -437,6 +454,10 @@ def sym_int(a):
     Args:
         a (SymInt, SymFloat, or object): Object to cast
     """
+    from .overrides import has_torch_function_unary, handle_torch_function
+
+    if has_torch_function_unary(a):
+        return handle_torch_function(sym_int, (a,), a)
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
@@ -445,6 +466,10 @@ def sym_int(a):
 
 def sym_max(a, b):
     """ SymInt-aware utility for max()."""
+    from .overrides import has_torch_function, handle_torch_function
+
+    if has_torch_function((a, b)):
+        return handle_torch_function(sym_max, (a, b), a, b)
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_max__(b)
     elif isinstance(b, (SymInt, SymFloat)):
@@ -456,13 +481,31 @@ def sym_max(a, b):
 
 def sym_min(a, b):
     """ SymInt-aware utility for max()."""
+    from .overrides import has_torch_function, handle_torch_function
+
+    if has_torch_function((a, b)):
+        return handle_torch_function(sym_min, (a, b), a, b)
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_min__(b)
     elif isinstance(b, (SymInt, SymFloat)):
         return b.__sym_min__(a)
     return builtins.min(a, b)  # type: ignore[operator]
 
+# Drop in replacement for math.sqrt
+def sym_sqrt(a):
+    from .overrides import has_torch_function_unary, handle_torch_function
+
+    if has_torch_function_unary(a):
+        return handle_torch_function(sym_sqrt, (a,), a)
+    if hasattr(a, "__sym_sqrt__"):
+        return a.__sym_sqrt__()
+    return math.sqrt(a)
+
 def sym_ite(b, t, f):
+    from .overrides import has_torch_function, handle_torch_function
+
+    if has_torch_function((b, t, f)):
+        return handle_torch_function(sym_ite, (b, t, f), b, t, f)
     assert isinstance(b, (SymBool, builtins.bool)) and type(t) == type(f)
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
@@ -572,7 +615,23 @@ def is_storage(obj):
     return type(obj) in _storage_classes
 
 
-_GLOBAL_DEVICE_CONTEXT = None
+_GLOBAL_DEVICE_CONTEXT = threading.local()
+
+
+def get_default_device() -> "torch.device":
+    r"""Gets the default ``torch.Tensor`` to be allocated on ``device``"""
+    global _GLOBAL_DEVICE_CONTEXT
+    if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
+        device = _GLOBAL_DEVICE_CONTEXT.device_context.device
+        if device.index is not None:
+            return device
+        else:
+            # TODO: Call like get_device_index() method corresponding to
+            # each device type
+            return torch.tensor([]).device
+    else:
+        return torch.device("cpu")
+
 
 def set_default_device(device):
     """Sets the default ``torch.Tensor`` to be allocated on ``device``.  This
@@ -595,35 +654,54 @@ def set_default_device(device):
         is causing problems for you, please comment on
         https://github.com/pytorch/pytorch/issues/92701
 
+    .. note::
+
+        This doesn't affect functions that create tensors that share the same memory as the input, like:
+        :func:`torch.from_numpy` and :func:`torch.frombuffer`
+
     Args:
         device (device or string): the device to set as default
 
     Example::
 
         >>> # xdoctest: +SKIP("requires cuda, changes global state")
-        >>> torch.tensor([1.2, 3]).device
+        >>> torch.get_default_device()
         device(type='cpu')
         >>> torch.set_default_device('cuda')  # current device is 0
-        >>> torch.tensor([1.2, 3]).device
+        >>> torch.get_default_device()
         device(type='cuda', index=0)
+        >>> torch.set_default_device('cuda')
+        >>> torch.cuda.set_device('cuda:1')  # current device is 1
+        >>> torch.get_default_device()
+        device(type='cuda', index=1)
         >>> torch.set_default_device('cuda:1')
-        >>> torch.tensor([1.2, 3]).device
+        >>> torch.get_default_device()
         device(type='cuda', index=1)
 
     """
     global _GLOBAL_DEVICE_CONTEXT
-    if _GLOBAL_DEVICE_CONTEXT is not None:
-        _GLOBAL_DEVICE_CONTEXT.__exit__(None, None, None)
+    if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
+        device_context = _GLOBAL_DEVICE_CONTEXT.device_context
+        if device_context is not None:
+            device_context.__exit__(None, None, None)
+
     if device is None:
-        _GLOBAL_DEVICE_CONTEXT = None
-        return
-    from torch.utils._device import DeviceContext
-    _GLOBAL_DEVICE_CONTEXT = DeviceContext(device)
-    _GLOBAL_DEVICE_CONTEXT.__enter__()
+        device_context = None
+    else:
+        from torch.utils._device import DeviceContext
+        device_context = DeviceContext(device)
+        device_context.__enter__()
+    _GLOBAL_DEVICE_CONTEXT.device_context = device_context
 
 
 def set_default_tensor_type(t):
-    r"""Sets the default ``torch.Tensor`` type to floating point tensor type
+    r"""
+    .. warning::
+
+        This function is deprecated as of PyTorch 2.1, please use :func:`torch.set_default_dtype()` and
+        :func:`torch.set_default_device()` as alternatives.
+
+    Sets the default ``torch.Tensor`` type to floating point tensor type
     ``t``. This type will also be used as default floating point type for
     type inference in :func:`torch.tensor`.
 
@@ -716,6 +794,7 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
         * :class:`torch.nn.ConvTranspose1d` when called on CUDA tensor
         * :class:`torch.nn.ConvTranspose2d` when called on CUDA tensor
         * :class:`torch.nn.ConvTranspose3d` when called on CUDA tensor
+        * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
@@ -758,7 +837,6 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
         * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
-        * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.NLLLoss` when called on a CUDA tensor
         * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
@@ -1389,7 +1467,7 @@ if TYPE_CHECKING:
     from torch._C._VariableFunctions import *  # type: ignore[assignment, misc] # noqa: F403
     # Fixup segment_reduce visibility
     _segment_reduce = segment_reduce
-    del segment_reduce
+    del segment_reduce  # noqa: F821
 
 # Ops not to be exposed in `torch` namespace,
 # mostly helper ops.

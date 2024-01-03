@@ -253,11 +253,6 @@ def _share_state_and_init_handle_attrs(
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
-        # TODO: remove this if check after we integrate device_mesh in Composable APIs.
-        # Currently, it is needed since root_state of composable APIs doesn't have DeviceMesh passed in yet.
-        if hasattr(root_state, "_device_mesh"):
-            fsdp_state._device_mesh = root_state._device_mesh
-            fsdp_state._fsdp_extension = root_state._fsdp_extension
     for attr_name, attr_values in attr_name_to_values.items():
         if len(attr_values) != 1:
             raise ValueError(
@@ -446,7 +441,9 @@ def _pre_forward_unshard(
     if not handle._prefetched:
         _unshard(state, handle, state._unshard_stream, state._pre_unshard_stream)
     handle._needs_pre_forward_unshard = False
-    state._device_handle.current_stream().wait_stream(state._unshard_stream)
+    # Don't wait during trace
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        state._device_handle.current_stream().wait_stream(state._unshard_stream)
     with torch.profiler.record_function(
         "FullyShardedDataParallel._pre_forward_prefetch"
     ):
@@ -643,6 +640,7 @@ def _pre_backward_hook(
     state: _FSDPState,
     module: nn.Module,
     handle: FlatParamHandle,
+    grad,
     *unused: Any,
 ) -> Any:
     """
@@ -654,8 +652,13 @@ def _pre_backward_hook(
     """
     # Only run the pre-backward hook once per group of handles involved in the
     # same module forward computation
-    if handle and handle._ran_pre_backward_hook:
-        return
+    if (
+        handle
+        and hasattr(handle, "_ran_pre_backward_hook")
+        and handle._ran_pre_backward_hook
+    ):
+        log.debug("%s %s", id(state), "Not Running pre backward! Already Ran!")
+        return grad
 
     with torch.profiler.record_function("FullyShardedDataParallel._pre_backward_hook"):
         # Queue the post-backward callback once for the root FSDP instance to
@@ -674,7 +677,7 @@ def _pre_backward_hook(
         # per-handle in the pre-backward hook, so we can return early here if
         # there are no handles.
         if not handle:
-            return
+            return grad
         handle._training_state = HandleTrainingState.BACKWARD_PRE
 
         if handle._needs_pre_backward_unshard:
@@ -687,7 +690,9 @@ def _pre_backward_hook(
                     state._unshard_stream,
                     state._pre_unshard_stream,
                 )
-            state._device_handle.current_stream().wait_stream(state._unshard_stream)
+            # Don't wait during trace
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                state._device_handle.current_stream().wait_stream(state._unshard_stream)
 
         # Set this to `False` to ensure that a mistargeted prefetch does not
         # actually unshard these handles
@@ -698,6 +703,7 @@ def _pre_backward_hook(
             _prefetch_handle(state, handle, _PrefetchMode.BACKWARD)
         handle.prepare_gradient_for_backward()
         handle._ran_pre_backward_hook = True
+        return grad
 
 
 @no_type_check
@@ -705,6 +711,7 @@ def _pre_backward_hook(
 def _post_backward_hook(
     state: _FSDPState,
     handle: FlatParamHandle,
+    flat_param,
     *unused: Any,
 ):
     """
@@ -750,7 +757,10 @@ def _post_backward_hook(
 
         # Wait for all ops in the current stream (e.g. gradient computation) to
         # finish before reduce-scattering the gradient
-        state._post_backward_stream.wait_stream(state._device_handle.current_stream())
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            state._post_backward_stream.wait_stream(
+                state._device_handle.current_stream()
+            )
 
         with state._device_handle.stream(state._post_backward_stream):
             autograd_computed_grad = flat_param.grad.data
@@ -845,7 +855,9 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
             group=pg,
         )
         if uses_hybrid_sharded_strategy:
-            state._all_reduce_stream.wait_stream(state._post_backward_stream)
+            # Don't wait during trace
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                state._all_reduce_stream.wait_stream(state._post_backward_stream)
             with state._device_handle.stream(state._all_reduce_stream):
                 # Since the new sharded gradient is produced in the post-
                 # backward stream and consumed in the all-reduce stream,
@@ -1155,15 +1167,21 @@ def _finalize_params(
     if not handle:
         return
     flat_param = handle.flat_param
-    if hasattr(flat_param, "_post_backward_hook_state"):
-        post_backward_hook_state_len = len(flat_param._post_backward_hook_state)
-        expected_post_backward_hook_state_len = int(flat_param.requires_grad) + 1
-        _p_assert(
-            post_backward_hook_state_len == expected_post_backward_hook_state_len,
-            f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
-        )
-        flat_param._post_backward_hook_state[-1].remove()
-        delattr(flat_param, "_post_backward_hook_state")
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        if hasattr(flat_param, "_post_backward_hook_handle"):
+            pbhs_handle = flat_param._post_backward_hook_handle
+            pbhs_handle.remove()
+            del flat_param._post_backward_hook_handle
+    else:
+        if hasattr(flat_param, "_post_backward_hook_state"):
+            post_backward_hook_state_len = len(flat_param._post_backward_hook_state)
+            expected_post_backward_hook_state_len = int(flat_param.requires_grad) + 1
+            _p_assert(
+                post_backward_hook_state_len == expected_post_backward_hook_state_len,
+                f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
+            )
+            flat_param._post_backward_hook_state[-1].remove()
+            delattr(flat_param, "_post_backward_hook_state")
     if flat_param.requires_grad:
         if not state._sync_gradients:
             # Preserve the gradient accumulation state if not synchronizing
@@ -1416,22 +1434,31 @@ def _register_post_backward_hook(
     if not handle:
         return
     flat_param = handle.flat_param
-    already_registered = hasattr(flat_param, "_post_backward_hook_state")
-    if already_registered or not flat_param.requires_grad:
-        return
-    # Get the `AccumulateGrad` object
-    temp_flat_param = flat_param.expand_as(flat_param)
-    _p_assert(
-        temp_flat_param.grad_fn is not None,
-        "The `grad_fn` is needed to access the `AccumulateGrad` and "
-        "register the post-backward hook",
-    )
-    acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
-    assert acc_grad is not None
-    hook_handle = acc_grad.register_hook(
-        functools.partial(_post_backward_hook, state, handle)
-    )
-    flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
+
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        already_registered = hasattr(flat_param, "_post_backward_hook_handle")
+        if already_registered or not flat_param.requires_grad:
+            return
+        hook = functools.partial(_post_backward_hook, state, handle)
+        hook_handle = flat_param.register_post_accumulate_grad_hook(hook)
+        flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined]
+    else:
+        already_registered = hasattr(flat_param, "_post_backward_hook_state")
+        if already_registered or not flat_param.requires_grad:
+            return
+        # Get the `AccumulateGrad` object
+        temp_flat_param = flat_param.expand_as(flat_param)
+        _p_assert(
+            temp_flat_param.grad_fn is not None,
+            "The `grad_fn` is needed to access the `AccumulateGrad` and "
+            "register the post-backward hook",
+        )
+        acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
+        assert acc_grad is not None
+        hook_handle = acc_grad.register_hook(
+            functools.partial(_post_backward_hook, state, handle)
+        )
+        flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
 
 
 def _register_post_backward_reshard_only_hook(
@@ -1456,7 +1483,12 @@ def _register_post_backward_reshard_only_hook(
     if not handle:
         return
     flat_param = handle.flat_param
-    already_registered = hasattr(flat_param, "_post_backward_hook_state")
+
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        already_registered = hasattr(flat_param, "_post_backward_hook_handle")
+    else:
+        already_registered = hasattr(flat_param, "_post_backward_hook_state")
+
     if already_registered or flat_param.requires_grad:
         return
     if inp_tensors is None:
@@ -1468,7 +1500,10 @@ def _register_post_backward_reshard_only_hook(
     hook_handle = register_multi_grad_hook(
         inp_tensors, functools.partial(_post_backward_reshard, state, handle)
     )
-    flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined, assignment]
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined, assignment]
+    else:
+        flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined, assignment]
 
 
 @no_type_check
@@ -1487,10 +1522,12 @@ def _register_post_backward_final_callback(
     if state._post_backward_callback_queued:
         return
     _assert_in_training_states(state, [TrainingState.IDLE])
-    state._post_backward_callback_queued = True
-    Variable._execution_engine.queue_callback(
-        functools.partial(_post_backward_final_callback, state, module)
-    )
+    # Trace does not need this callback
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        state._post_backward_callback_queued = True
+        Variable._execution_engine.queue_callback(
+            functools.partial(_post_backward_final_callback, state, module)
+        )
 
 
 def _wait_for_computation_stream(
@@ -1503,6 +1540,9 @@ def _wait_for_computation_stream(
     For example, this should be called in the FSDP root's pre-forward to
     respect optimizer step computation.
     """
+    # Tracing does not need to wait
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        return
     unshard_stream.wait_stream(computation_stream)  # type: ignore[attr-defined]
     # Having the pre-all-gather stream wait for the current stream even if we
     # do not leverage the pre-all-gather stream is tolerable since this only
