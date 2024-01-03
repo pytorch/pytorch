@@ -2501,8 +2501,6 @@ coverage_ignore_classes = [
     "DuplicateDQPass",
     # torch.ao.quantization.pt2e.port_metadata_pass
     "PortNodeMetaForQDQ",
-    # torch.ao.quantization.qconfig
-    "QConfigDynamic",
     # torch.ao.quantization.quant_type
     "QuantType",
     # torch.ao.quantization.quantizer.composable_quantizer

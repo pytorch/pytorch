@@ -41,7 +41,6 @@ __all__ = [
     "PlaceholderObserver",
     "QConfig",
     "QConfigAny",
-    "QConfigDynamic",
     "QConfigMapping",
     "QuantStub",
     "QuantType",
