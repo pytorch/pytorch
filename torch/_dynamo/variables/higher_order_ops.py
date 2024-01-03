@@ -143,16 +143,33 @@ def _detect_input_mutations_and_aliasing(tx, graph_module, proxy_args):
             if val._version != old_v
         ]
 
-        aliased_inputs = []
-        input_storages = {
-            StorageWeakRef(example_value._typed_storage()): proxy
+        from torch._C._functorch import is_batchedtensor
+
+        # Note: we cannot access the storage of BatchedTensorImpl (created by vmap) so filtered them out here.
+        # This is safe because dispatcher will unwrap the batched tensor and run torch.cond again using the
+        # the original possibly aliased tensor, cond will have a chance to detect aliasing at that point.
+        non_batched_example_value_proxy = [
+            (example_value, proxy)
             for example_value, proxy in zip(example_values, proxy_args)
-        }
-        assert isinstance(res, (tuple, list))
-        output_storages = [StorageWeakRef(t._typed_storage()) for t in res]
-        aliased_inputs = [
-            input_storages[ref] for ref in output_storages if ref in input_storages
+            if not is_batchedtensor(example_value)
         ]
+        non_batched_res = [t for t in res if not is_batchedtensor(t)]
+
+        def _detect_aliasing(example_value_proxy, res):
+            input_storages = {
+                StorageWeakRef(example_value._typed_storage()): proxy
+                for example_value, proxy in example_value_proxy
+            }
+            assert isinstance(res, (tuple, list))
+            output_storages = [StorageWeakRef(t._typed_storage()) for t in res]
+            aliased_inputs = [
+                input_storages[ref] for ref in output_storages if ref in input_storages
+            ]
+            return aliased_inputs
+
+        aliased_inputs = _detect_aliasing(
+            non_batched_example_value_proxy, non_batched_res
+        )
     return mutated_inputs, aliased_inputs
 
 

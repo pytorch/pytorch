@@ -1259,6 +1259,13 @@ def forward(self, L_x_ : torch.Tensor):
             },
         )
 
+    def _check_raise_uncaptured_hoo_error(self, fn, args):
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
+            fn(*args)
+
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
+            torch.compile(fn, backend="eager")(*args)
+
     def test_cond_raise_error_when_mutating_buffer(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1277,31 +1284,10 @@ def forward(self, L_x_ : torch.Tensor):
                 return (a + 3, a + 4)
 
         inp = torch.randn(3, 4)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
-        ):
-            torch.compile(M())(inp)
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
-        ):
-            M()(inp)
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
-        ):
-            with torch.inference_mode():
-                torch.compile(M())(inp)
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
-        ):
-            with torch.inference_mode():
-                M()(inp)
+        m = M()
+        self._check_raise_uncaptured_hoo_error(m, (inp,))
+        with torch.inference_mode():
+            self._check_raise_uncaptured_hoo_error(m, (inp,))
 
     def test_cond_raise_error_when_mutating_input(self):
         class M(torch.nn.Module):
@@ -1320,31 +1306,10 @@ def forward(self, L_x_ : torch.Tensor):
                 return (a + 3, a + 4)
 
         inp = torch.randn(3, 4)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
-        ):
-            torch.compile(M())(inp)
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
-        ):
-            M()(inp)
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
-        ):
-            with torch.inference_mode():
-                torch.compile(M())(inp)
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
-        ):
-            with torch.inference_mode():
-                M()(inp)
+        m = M()
+        self._check_raise_uncaptured_hoo_error(m, (inp,))
+        with torch.inference_mode():
+            self._check_raise_uncaptured_hoo_error(m, (inp,))
 
     def test_cond_raise_error_when_mutating_closure(self):
         t = torch.randn(1)
@@ -1361,31 +1326,9 @@ def forward(self, L_x_ : torch.Tensor):
             return (a + 3, a + 4)
 
         inp = torch.randn(3, 4)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
-        ):
-            torch.compile(fn)(inp)
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
-        ):
-            fn(inp)
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
-        ):
-            with torch.inference_mode():
-                torch.compile(fn)(inp)
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
-        ):
-            with torch.inference_mode():
-                fn(inp)
+        self._check_raise_uncaptured_hoo_error(fn, (inp,))
+        with torch.inference_mode():
+            self._check_raise_uncaptured_hoo_error(fn, (inp,))
 
     def test_cond_raise_error_when_output_alias_input(self):
         def alias_input(pred, x, y):
@@ -1397,15 +1340,10 @@ def forward(self, L_x_ : torch.Tensor):
 
             return torch.cond(pred, true_fn, false_fn, ((x, y),))
 
-        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
-            torch.compile(alias_input, backend="eager")(
-                torch.tensor(True), torch.ones(3, 3), torch.ones(3, 3)
-            )
-        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
-            with torch.inference_mode():
-                torch.compile(alias_input, backend="eager")(
-                    torch.tensor(True), torch.ones(3, 3), torch.ones(3, 3)
-                )
+        inp = (torch.tensor(True), torch.ones(3, 3), torch.ones(3, 3))
+        self._check_raise_uncaptured_hoo_error(alias_input, inp)
+        with torch.inference_mode():
+            self._check_raise_uncaptured_hoo_error(alias_input, inp)
 
     def test_cond_raise_error_when_output_alias_buffer(self):
         class AliaseBufferM(torch.nn.Module):
