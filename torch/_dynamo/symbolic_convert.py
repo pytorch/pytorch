@@ -25,7 +25,6 @@ import torch._logging
 from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import config, exc, logging as torchdynamo_logging, skipfiles, variables
-from .allowed_functions import is_builtin_constant, is_forbidden
 from .bytecode_analysis import (
     get_indexof,
     JUMP_OPNAMES,
@@ -58,6 +57,7 @@ from .source import (
     LocalSource,
     Source,
 )
+from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     counters,
     get_fake_value,
@@ -2251,18 +2251,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         result = skipfiles.check_verbose(func, is_inlined_call=True)
         if result.skipped:
-            from torch._dynamo.variables.misc import (
-                produce_trampoline_autograd_apply,
-                produce_trampoline_autograd_bwd,
-                produce_trampoline_autograd_fwd,
-            )
+            from torch._dynamo.variables.misc import produce_trampoline_autograd_apply
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
             if hasattr(func.fn, "_origin") and func.fn._origin in [
-                produce_trampoline_autograd_fwd,
                 produce_trampoline_autograd_apply,
-                produce_trampoline_autograd_bwd,
             ]:
                 # Known sound
                 return skipfiles.SkipResult(False, "allowlist in dynamo known function")
