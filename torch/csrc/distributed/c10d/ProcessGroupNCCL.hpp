@@ -70,8 +70,8 @@ static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
 static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
     "TORCH_NCCL_TRACE_BUFFER_SIZE"};
 
-static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_SLEEP_MILSEC = {
-    "TORCH_NCCL_WAIT_TIMEOUT_DUMP_SLEEP_MILSEC"};
+static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC = {
+    "TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
@@ -553,9 +553,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void enableCollectivesTiming() override;
 
-  // Provide an API for users to define their own ways to store NCCL debug info.
-  void registerDebugInfoWriter(std::unique_ptr<DebugInfoWriter> writer);
-
   // Helper function for iteratively aborting communicators in the provided map
   void abortCommsFromMap(
       std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
@@ -753,6 +750,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Logs on timeout, and asserts the future's status is as expected.
   void waitForDumpOrTimeout(std::future<bool>& fut, size_t timeout_sec = 30);
 
+  // Helper to have a potential additional sleep so that dumps from all ranks
+  // are likely to finish before exit.
+  void extraWaitForDumpUntil(
+      const std::chrono::time_point<std::chrono::steady_clock>& wakeUpTime);
+
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
   // We are working on enabling more useful debug information for watchdog
@@ -828,7 +830,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   int heartbeatTimeoutInSec_;
 
   // Extra time of sleep when waiting for timeout dump to finish.
-  int waitTimeoutDumpSleepInMilSec_;
+  int waitTimeoutDumpInMilSec_;
 
   // Size of ring buffer where we store NCCL Traces for debugging.
   int ncclTraceBufferSize_;
@@ -973,9 +975,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   uint64_t seq_{0};
 
   std::exception_ptr watchDogException_ = nullptr;
-
-  // The callback function to store NCCL debug info.
-  std::unique_ptr<DebugInfoWriter> debugInfoWriter_ = nullptr;
 
   size_t uid_;
 
