@@ -79,7 +79,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertTrue(torch.allclose(graph_res_2, eager_res_2))
         self.assertTrue(torch.allclose(graph_res_1, eager_res_1))
 
-    def test_mark_strict_with_kwargs(self):
+    def test_mark_strict_with_container_type(self):
         @_mark_strict_DO_NOT_USE
         class B(torch.nn.Module):
             def __init__(self):
