@@ -280,12 +280,14 @@ class PrepareModuleInput(ParallelStyle):
         prepared_inputs = []
         if not isinstance(inputs, tuple):
             inputs = (inputs,)
-        assert len(inputs) == len(self.input_layouts), \
-            "module inputs and input_layouts should have same length!"
+        if len(inputs) != len(self.input_layouts):
+            raise ValueError("module inputs and input_layouts should have same length!")
+
         for inp, input_layout, desired_layout in zip(inputs, self.input_layouts, self.desired_input_layouts):
             if input_layout is not None:
                 if isinstance(inp, DTensor):
-                    assert inp.placements[0] == input_layout
+                    # TODO: re-enable the check once we fix the compile path
+                    # assert inp.placements[0] == input_layout
                     dt_inp = inp
                 else:
                     dt_inp = DTensor.from_local(inp, device_mesh, (input_layout,), run_check=False)
@@ -354,12 +356,13 @@ class PrepareModuleOutput(ParallelStyle):
         prepared_outputs = []
         if not isinstance(outputs, tuple):
             outputs = (outputs,)
-        assert len(outputs) == len(self.output_layouts), \
-            "module outputs and output_layouts should have same length!"
+        if len(outputs) != len(self.output_layouts):
+            raise ValueError("module outputs and output_layouts should have same length!")
         for out, out_layout, desired_out_layout in zip(outputs, self.output_layouts, self.desired_output_layouts):
             if out_layout is not None:
                 if isinstance(out, DTensor):
-                    assert out.placements[0] == out_layout
+                    # TODO: re-enable the check once we fix the compile path
+                    # assert out.placements[0] == out_layout
                     dt_out = out
                 else:
                     dt_out = DTensor.from_local(out, device_mesh, (out_layout,), run_check=False)

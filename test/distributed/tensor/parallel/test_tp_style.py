@@ -138,7 +138,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         prepare_inps_short_dimension = PrepareModuleInput(input_layouts=Shard(0), desired_input_layouts=Replicate())
         parallelize_module(test_mod.linear, mesh, ColwiseParallel())
         parallelize_module(test_mod, mesh, prepare_inps_short_dimension)
-        with self.assertRaisesRegex(AssertionError, "module inputs and input_layouts should have same length!"):
+        with self.assertRaisesRegex(ValueError, "module inputs and input_layouts should have same length!"):
             output = test_mod(
                 torch.randn(2, 8, device=self.device_type),
                 torch.ones(self.world_size * 2, 8 // self.world_size, device=self.device_type)
