@@ -17,7 +17,7 @@ from numbers import Number
 from typing import Dict, Any
 from packaging import version
 from torch.testing._internal.common_cuda import \
-    (SM53OrLater, SM80OrLater)
+    (SM53OrLater, SM80OrLater, TEST_MULTIGPU)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes)
@@ -868,7 +868,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(None, x1.grad)
 
     @coalescedonoff
-    @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @dtypes(torch.double, torch.cdouble)
     def test_Sparse_to_Sparse_copy_multi_gpu(self, device, dtype, coalesced):
         # This is for testing torch.copy_(SparseTensor, SparseTensor) across GPU devices
@@ -2653,7 +2653,7 @@ class TestSparse(TestSparseBase):
         self._test_new_device((30, 20, 10, 0), 0)
 
     @onlyCUDA
-    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_new_device_multi_gpu(self):
         self._test_new_device((), 1)
         self._test_new_device((30, 20), 1)
