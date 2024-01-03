@@ -1717,7 +1717,7 @@ def forward(self, x_1):
         result = torch._C._jit_resolve_packet("aten::sum", x, dim=1)
         self.assertEqual(result, "dim_IntList")
 
-        with self.assertRaisesRegex(RuntimeError, "failed to many any schema"):
+        with self.assertRaisesRegex(RuntimeError, "failed to match any schema"):
             result = torch._C._jit_resolve_packet("aten::sum", x, x, x)
 
     def test_define_bad_schema(self):

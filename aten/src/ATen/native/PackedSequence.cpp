@@ -18,7 +18,7 @@
 
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 static void checkLongTensor(const Tensor& tensor) {
   TORCH_CHECK(tensor.dim() == 1 && tensor.device().type() == at::kCPU && tensor.scalar_type() == at::kLong,
@@ -237,4 +237,4 @@ Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value
   return out;
 }
 
-}} // namespace at::native
+} // namespace at::native

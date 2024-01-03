@@ -127,8 +127,8 @@ __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
   }
 }
 
-template <typename scalar_t, typename accscalar_t>
-__global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const scalar_t* const top_diff,
+template <typename scalar_t, typename accscalar_t, typename index_t>
+__global__ void avg_pool2d_backward_out_cuda_frame(const index_t nthreads, const scalar_t* const top_diff,
     const int64_t channels, const int64_t height,
     const int64_t width, const int64_t pooled_height, const int64_t pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
@@ -183,8 +183,8 @@ __global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const sca
   }
 }
 
-template <typename scalar_t, typename accscalar_t>
-__global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const int nthreads,
+template <typename scalar_t, typename accscalar_t, typename index_t>
+__global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const index_t nthreads,
     const scalar_t* const top_diff,
     const int64_t channels, const int64_t height,
     const int64_t width, const int pooled_height, const int pooled_width,
@@ -277,7 +277,7 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda)
 
   Tensor input = input_.contiguous(memory_format);
 
-  const int32_t count = safe_downcast<int32_t, int64_t>(output.numel());
+  const auto count = safe_downcast<int32_t, int64_t>(output.numel());
   const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   const uint32_t num_blocks = ceil_div<uint32_t>(count, num_threads);
 
@@ -394,7 +394,7 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
 
 
-  const int32_t count = safe_downcast<int32_t, int64_t>(input.numel());
+  const auto count = input.numel();
   if (count == 0) {
     return;
   }
@@ -413,46 +413,51 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
       const scalar_t *gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
       scalar_t *gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
 
-      switch (memory_format) {
-        case MemoryFormat::ChannelsLast: {
-          gradInput.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
-          avg_pool2d_backward_out_cuda_frame_nhwc<scalar_t, accscalar_t>
-            <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-              count,
-              gradOutput_data,
-              nInputPlane,
-              inputHeight, inputWidth,
-              outputHeight, outputWidth,
-              kH, kW,
-              dH, dW,
-              padH, padW,
-              gradInput_data,
-              divisor_override_value,
-              count_include_pad, use_divisor);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-          break;
-        }
-        case MemoryFormat::Contiguous: {
-          avg_pool2d_backward_out_cuda_frame<scalar_t, accscalar_t>
-            <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-              count,
-              gradOutput_data,
-              nInputPlane,
-              inputHeight, inputWidth,
-              outputHeight, outputWidth,
-              kH, kW,
-              dH, dW,
-              padH, padW,
-              gradInput_data,
-              divisor_override_value,
-              count_include_pad, use_divisor);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-          break;
-        }
-        default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
-      }
-    }
-  );
+      AT_DISPATCH_INDEX_TYPES(
+        at::native::canUse32BitIndexMath(input, INT_MAX) ? ScalarType::Int : ScalarType::Long,
+        "avg_pool2d_backward_out_cuda_frame_launcher",
+        [&] {
+              switch (memory_format) {
+
+                case MemoryFormat::ChannelsLast: {
+                  gradInput.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
+                  avg_pool2d_backward_out_cuda_frame_nhwc<scalar_t, accscalar_t, index_t>
+                    <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                      count,
+                      gradOutput_data,
+                      nInputPlane,
+                      inputHeight, inputWidth,
+                      outputHeight, outputWidth,
+                      kH, kW,
+                      dH, dW,
+                      padH, padW,
+                      gradInput_data,
+                      divisor_override_value,
+                      count_include_pad, use_divisor);
+                  C10_CUDA_KERNEL_LAUNCH_CHECK();
+                  break;
+                }
+                case MemoryFormat::Contiguous: {
+                  avg_pool2d_backward_out_cuda_frame<scalar_t, accscalar_t, index_t>
+                    <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                      count,
+                      gradOutput_data,
+                      nInputPlane,
+                      inputHeight, inputWidth,
+                      outputHeight, outputWidth,
+                      kH, kW,
+                      dH, dW,
+                      padH, padW,
+                      gradInput_data,
+                      divisor_override_value,
+                      count_include_pad, use_divisor);
+                  C10_CUDA_KERNEL_LAUNCH_CHECK();
+                  break;
+                }
+                default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+              }
+            });
+        });
 }
 
 } // namespace at::native
