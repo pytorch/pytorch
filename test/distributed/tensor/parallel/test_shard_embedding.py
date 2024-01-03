@@ -23,14 +23,12 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 class DistShardEmbeddingTest(DTensorTestBase):
     # Test that sharding behavior is consistent regardless of the order of the sharded
     # dimension. This would be helpful when we shard multiple embedding modules in sequence
-    # parallelism, we we might need to make element-wise addition (after broadcasting).
+    # parallelism, where we might need to make element-wise addition (after broadcasting).
     @with_comms
     @skip_unless_torch_gpu
     def test_sharding_consistency_under_reordered_dimension(self):
-        vocab_size, batch_size, seq_len, dim = 25, 5, 13, 13
-        # The assertions are commented out to demonstrate they are unnecessary.
-        # assert dim % self.world_size == 0  # embedding is sharded on dim
-        # assert seq_len % self.world_size == 0  # output is sharded on seq_len
+        vocab_size, batch_size, seq_len, dim = 25, 5, 8, 13
+        assert seq_len % self.world_size == 0  # output is sharded on seq_len
 
         torch.manual_seed(5)
         emb_output_shard_0 = nn.Embedding(vocab_size, dim)
@@ -77,9 +75,6 @@ class DistShardEmbeddingTest(DTensorTestBase):
                 return output
 
         vocab_size, max_seq_len, dim = 11, 25, 13
-        # The assertions are commented out to demonstrate they are unnecessary.
-        # assert dim % self.world_size == 0  # embeddings are sharded on dim
-        # assert vocab_size % self.world_size == 0  # last layer is sharded on vocab_size
         torch.manual_seed(5)
         model = EmbeddingModule(vocab_size, max_seq_len, dim).to(self.device_type)
         model_sp = deepcopy(model)
@@ -97,9 +92,11 @@ class DistShardEmbeddingTest(DTensorTestBase):
                 output_layouts=Shard(0) if is_input_sharded else Replicate(),
             ),
         }
+        parallelize_module(model_sp, device_mesh, parallelize_plan)
 
-        input_size = [7, 13]  # [batch_size, seq_len]
-        # assert input_size[1] % self.world_size == 0  # output is sharded on seq_len
+        input_size = [7, 8]  # [batch_size, seq_len]
+        # Outputs of intermediate embedding modules are sharded on seq_len.
+        assert input_size[1] % self.world_size == 0
         rng_seed = self.rank if is_input_sharded else 0
         torch.manual_seed(rng_seed)
         inp = torch.randint(vocab_size, input_size, device=self.device_type)
