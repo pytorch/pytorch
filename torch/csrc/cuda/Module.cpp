@@ -88,7 +88,7 @@ void THCPModule_setDevice(int device) {
 
 PyObject* THCPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to setDevice");
+  THPUtils_assert_ext(THPUtils_checkLong(arg), "invalid argument to setDevice");
   int64_t device = THPUtils_unpackLong(arg);
 
   torch::utils::cuda_lazy_init();
@@ -150,9 +150,9 @@ PyObject* THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args) {
         "(int device, int peer_device);");
     return nullptr;
   }
-  THPUtils_assert(
+  THPUtils_assert_ext(
       THPUtils_checkLong(arg1), "invalid argument to canDeviceAccessPeer");
-  THPUtils_assert(
+  THPUtils_assert_ext(
       THPUtils_checkLong(arg2), "invalid argument to canDeviceAccessPeer");
   int64_t device = THPUtils_unpackLong(arg1);
   int64_t peer_device = THPUtils_unpackLong(arg2);
@@ -192,7 +192,7 @@ PyObject* THCPModule_getCurrentStream_wrap(
     PyObject* /* unused */,
     PyObject* device_index) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  THPUtils_assert_ext(
       THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
   int64_t device = THPUtils_unpackLong(device_index);
   auto stream = at::cuda::getCurrentCUDAStream(device);
@@ -215,7 +215,7 @@ PyObject* THCPModule_getCurrentStream_raw(
     PyObject* /* unused */,
     PyObject* device_index) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  THPUtils_assert_ext(
       THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
   int64_t device = THPUtils_unpackLong(device_index);
   return PyLong_FromVoidPtr(at::cuda::getCurrentCUDAStream(device).stream());
@@ -226,7 +226,7 @@ PyObject* THCPModule_getDefaultStream_wrap(
     PyObject* /* unused */,
     PyObject* device_index) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  THPUtils_assert_ext(
       THPUtils_checkLong(device_index), "invalid argument to getDefaultStream");
   int64_t device = THPUtils_unpackLong(device_index);
   auto stream = at::cuda::getDefaultCUDAStream(device);
@@ -372,19 +372,19 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
   const bool return_by_ref = THPUtils_unpackBool(return_by_ref_o);
   const int num_outputs = static_cast<int>(THPUtils_unpackLong(num_outputs_o));
 
-  THPUtils_assert(
+  THPUtils_assert_ext(
       PyTuple_Check(tensors_o),
       "tensors argument is expected to "
-      "be a tuple, but got %s",
+      "be a tuple, but got {}",
       THPUtils_typename(tensors_o));
   Py_ssize_t num_tensors = PyTuple_GET_SIZE(tensors_o);
 
   c10::SmallVector<at::Tensor> tensors;
   for (const auto i : c10::irange(num_tensors)) {
     PyObject* _tensor = PyTuple_GET_ITEM(tensors_o, i);
-    THPUtils_assert(
+    THPUtils_assert_ext(
         THPVariable_Check(_tensor),
-        "%d of input tensors tuple is not a Tensor",
+        "{} of input tensors tuple is not a Tensor",
         i);
 
     tensors.emplace_back(THPVariable_Unpack(_tensor));
@@ -466,7 +466,7 @@ PyObject* THCPModule_cudaIPCCollect(PyObject* _unused, PyObject* noargs) {
 
 PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  THPUtils_assert_ext(
       THPUtils_checkLong(cycles), "torch.cuda._sleep(): expected 'int'");
   int64_t unpacked_cycles = THPUtils_unpackLong(cycles);
   {
@@ -514,7 +514,7 @@ PyObject* THCPModule_cudaUnlockMutex(PyObject* module, PyObject* noargs) {
 
 PyObject* THCPModule_hasPrimaryContext(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  THPUtils_assert_ext(
       THPUtils_checkLong(arg), "invalid argument to has_primary_context");
   int64_t device_index = static_cast<int64_t>(THPUtils_unpackLong(arg));
   if (c10::cuda::hasPrimaryContext(device_index)) {
@@ -555,7 +555,7 @@ PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
 
 PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  THPUtils_assert_ext(
       THPUtils_checkLong(arg), "invalid argument to memory_allocated");
   const int device = (int)THPUtils_unpackLong(arg);
 
@@ -611,7 +611,7 @@ PyObject* THCPModule_resetAccumulatedMemoryStats(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  THPUtils_assert_ext(
       THPUtils_checkLong(arg),
       "invalid argument to reset_accumulated_memory_stats");
   const int device = (int)THPUtils_unpackLong(arg);
@@ -622,7 +622,7 @@ PyObject* THCPModule_resetAccumulatedMemoryStats(
 
 PyObject* THCPModule_resetPeakMemoryStats(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  THPUtils_assert_ext(
       THPUtils_checkLong(arg), "invalid argument to reset_peak_memory_stats");
   const int device = (int)THPUtils_unpackLong(arg);
   c10::cuda::CUDACachingAllocator::resetPeakStats(device);
@@ -831,7 +831,7 @@ PyObject* THCPModule_cudaSetSyncDebugMode(PyObject* _unused, PyObject* arg) {
   TORCH_WARN_ONCE(
       "Synchronization debug mode is a prototype feature and does not yet detect all "
       "synchronizing operations");
-  THPUtils_assert(
+  THPUtils_assert_ext(
       THPUtils_checkLong(arg), "invalid argument to set_sync_debug_mode");
   int64_t debug_mode = THPUtils_unpackLong(arg);
   TORCH_CHECK(
@@ -1350,10 +1350,10 @@ static PyObject* THCPModule_isCurrentStreamCapturing_wrap(
 }
 
 PyObject* THCPModule_setBenchmarkLimitCuDNN(PyObject* _unused, PyObject* arg) {
-  THPUtils_assert(
+  THPUtils_assert_ext(
       THPUtils_checkLong(arg),
       "set_benchmark_limit_cudnn expects an int, "
-      "but got %s",
+      "but got {}",
       THPUtils_typename(arg));
 #if defined(USE_ROCM)
   TORCH_WARN_ONCE(

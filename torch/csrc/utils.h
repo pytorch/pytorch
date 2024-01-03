@@ -2,6 +2,9 @@
 #define THP_UTILS_H
 
 #include <ATen/ATen.h>
+#if __has_include(<fmt/format.h>)
+#include <fmt/format.h>
+#endif
 #include <torch/csrc/Storage.h>
 #include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -166,6 +169,25 @@ TORCH_PYTHON_API void THPUtils_invalidArguments(
     const char* function_name,
     size_t num_options,
     ...);
+
+#if __has_include(<fmt/format.h>)
+template <typename U, typename... T>
+void THPUtils_setError_ext(U&& format, T&&... args) {
+  if constexpr (sizeof...(args) == 0) {
+    PyErr_SetString(PyExc_RuntimeError, std::forward<U>(format));
+  } else {
+    auto error = fmt::vformat(fmt::format_string<U>(format), fmt::make_format_args(std::forward<T>(args)...));
+    PyErr_SetString(PyExc_RuntimeError, error.c_str());
+  }
+}
+#define THPUtils_assert_ext(cond, ...) \
+  THPUtils_assertRet_ext(nullptr, cond, __VA_ARGS__)
+#define THPUtils_assertRet_ext(value, cond, ...) \
+  if (THP_EXPECT(!(cond), 0)) {              \
+    THPUtils_setError_ext(__VA_ARGS__);          \
+    return value;                            \
+  }
+#endif
 
 bool THPUtils_checkIntTuple(PyObject* arg);
 std::vector<int> THPUtils_unpackIntTuple(PyObject* arg);
