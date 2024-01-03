@@ -247,11 +247,8 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
         ]
 
     def inner_fn_with_anomaly(*args):
-        with (
-            fx_traceback.preserve_node_meta(),
-            warnings.catch_warnings(),
-            FunctionalTensorMode(aot_config.pre_dispatch),
-        ):
+        with fx_traceback.preserve_node_meta(), warnings.catch_warnings(), \
+                FunctionalTensorMode(aot_config.pre_dispatch):
             warnings.filterwarnings("ignore", "Anomaly Detection has been enabled.")
             with torch.autograd.detect_anomaly(check_nan=False):
                 return inner_fn(*args)

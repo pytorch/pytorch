@@ -397,7 +397,7 @@ def is_contiguous_general(func, *args, **kwargs):
     )
     if new_kwargs["memory_format"] == torch.preserve_format:
         return True
-    return is_contiguous_for_memory_format(inp.values(), **new_kwargs)
+    return is_contiguous_for_memory_format(inp._values, **new_kwargs)
 
 
 register_jagged_func(
@@ -1026,7 +1026,7 @@ def _nested_view_from_values_offsets_lengths_default(func, *args, **kwargs):
     return NestedTensor(values, offsets, lengths=lengths)
 
 
-@register_jagged_func(torch.ops.aten._nested_get_values.default, "self: jt")
+@register_jagged_func(torch.ops.aten._nested_get_values.default, "self: jt_all")
 def _nested_get_values(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
