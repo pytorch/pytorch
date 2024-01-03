@@ -146,16 +146,9 @@ jobs:
         run: |
           set -x
 
-          if [[ $TEST_CONFIG == 'multigpu' ]]; then
-            TEST_COMMAND=.ci/pytorch/multigpu-test.sh
-          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
-            TEST_COMMAND=.ci/caffe2/test.sh
-          else
-            TEST_COMMAND=.ci/pytorch/test.sh
-          fi
+          TEST_COMMAND=.ci/pytorch/test.sh
 
           # detached container should get cleaned up by teardown_ec2_linux
-          # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \

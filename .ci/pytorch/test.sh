@@ -139,6 +139,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+  # Source Intel oneAPI envrioment script to enable xpu runtime related libraries
+  # refer to https://www.intel.com/content/www/us/en/docs/oneapi/programming-guide/2024-0/use-the-setvars-and-oneapi-vars-scripts-with-linux.html
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
   # Check XPU status before testing
