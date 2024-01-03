@@ -299,7 +299,6 @@ FIXME_default_non_strict = {
     "torch_np/numpy_tests/fft/test_pocketfft",
     "torch_np/numpy_tests/lib/test_arraypad",
     "torch_np/numpy_tests/lib/test_arraysetops",
-    "torch_np/numpy_tests/lib/test_function_base",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -1390,6 +1389,52 @@ dynamo_expected_failures = {
     "TestHistogramdd.test_simple",
     "TestHistogram.test_one_bin",
     "TestHistogram.test_unsigned_monotonicity_check",
+    "TestQuantile.test_quantile_monotonic_method_weibull",
+    "TestGradient.test_badargs",
+    "TestRot90.test_basic",
+    "TestDiff.test_axis",
+    "TestQuantile.test_quantile_monotonic_method_median_unbiased",
+    "TestGradient.test_values",
+    "TestCov.test_aweights",
+    "TestQuantile.test_quantile_monotonic_method_interpolated_inverted_cdf",
+    "TestQuantile.test_quantile_monotonic_method_inverted_cdf",
+    "TestPercentile.test_keepdims_out_q1_axis_1",
+    "TestSortComplex.test_sort_real_type_in_g_type_out_G",
+    "TestMedian.test_keepdims_out_axis2",
+    "TestMeshgrid.test_invalid_arguments",
+    "TestGradient.test_specific_axes",
+    "TestPercentile.test_keepdims_out_q_7_axis4",
+    "TestPercentile.test_keepdims_out_q1_axis4",
+    "TestDelete.test_slices",
+    "TestPercentile.test_extended_axis_invalid",
+    "TestGradient.test_second_order_accurate",
+    "TestMedian.test_keepdims_out_axis0",
+    "TestDiff.test_prepend",
+    "TestMedian.test_keepdims_out_axis_1",
+    "TestPercentile.test_keepdims_out_q1_axis0",
+    "TestQuantile.test_quantile_monotonic_method_averaged_inverted_cdf",
+    "TestMedian.test_keepdims_out_axis4",
+    "TestBincount.test_with_incorrect_minlength",
+    "TestSortComplex.test_sort_real_type_in_H_type_out_F",
+    "TestDiff.test_n",
+    "TestMeshgrid.test_indexing",
+    "TestQuantile.test_quantile_monotonic_method_closest_observation",
+    "TestFlip.test_axes",
+    "TestPercentile.test_keepdims_out_q1_axis3",
+    "TestPercentile.test_keepdims_out_q_7_axis0",
+    "TestMedian.test_keepdims_out_axis3",
+    "TestCov.test_fweights",
+    "TestDiff.test_append",
+    "TestPercentile.test_scalar_q",
+    "TestMedian.test_extended_axis_invalid",
+    "TestMedian.test_out",
+    "TestPercentile.test_keepdims_out_q_7_axis2",
+    "TestPercentile.test_keepdims_out_q1_axis2",
+    "TestQuantile.test_quantile_monotonic_method_hazen",
+    "TestPercentile.test_keepdims_out_q_7_axis3",
+    "TestPercentile.test_keepdims_out_q_7_axis_1",
+    "TestPercentile.test_api",
+    "TestQuantile.test_quantile_monotonic_method_normal_unbiased",
 }
 
 dynamo_skips = {
@@ -1429,4 +1474,11 @@ dynamo_skips = {
     "TestVander.test_dtypes",  # known py311 fail
     "TestDstack.test_generator",  # known py311 fail
     "TestColumnStack.test_generator",  # known py311 fail
+    "TestCov.test_complex",  # known py311 fail
+    "TestSortComplex.test_sort_complex",  # known py311 fail
+    "TestCorrCoef.test_xy",  # known py311 fail
+    "TestCov.test_xy",  # known py311 fail
+    "TestCorrCoef.test_complex",  # known py311 fail
+    "TestUnique.test_simple_complex",  # known py311 fail
+    "TestDigitize.test_casting_error",  # known py311 fail
 }
