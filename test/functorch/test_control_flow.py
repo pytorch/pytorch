@@ -9,7 +9,6 @@ from functorch.experimental import control_flow
 from functorch.experimental.control_flow import UnsupportedAliasMutationException, cond
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch._dynamo.exc import CondOpArgsMismatchError
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch._subclasses.functional_tensor import FunctionalTensor
 
@@ -316,7 +315,7 @@ class TestControlFlowTraced(TestCase):
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False), torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True), torch.tensor(True)), f(x, torch.tensor(True), torch.tensor(True)))
 
-    def test_cond_functionalized(self):
+    def test_cond_functionalized_hah(self):
         def true_fn(x):
             y = x.sin()
             y.add_(4)
@@ -685,15 +684,17 @@ def forward(self, x_1, pred_1, pred2_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
+    getitem = conditional[0];  conditional = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
     conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
-    add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
+    getitem_1 = conditional_1[0];  conditional_1 = None
+    add = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
     return add""")  # noqa: B950
         self.assertExpectedInline(graph.true_graph_0.code.strip(), """\
 def forward(self, arg0_1):
     mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
-    return mul""")
+    return (mul,)""")
 
     def test_raise_error_on_mismatch_type_size(self):
         def true_fn(x):
@@ -724,8 +725,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            CondOpArgsMismatchError,
-            "Expected each tensor to have same metadata but got",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile"
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -836,15 +837,17 @@ def forward(self, x_1, pred_1, pred2_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
+    getitem = conditional[0];  conditional = None
     true_graph_1 = self.true_graph_1
     false_graph_1 = self.false_graph_1
     conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
-    add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
+    getitem_1 = conditional_1[0];  conditional_1 = None
+    add = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
     return add""")  # noqa: B950
         self.assertExpectedInline(graph.true_graph_0.code.strip(), """\
 def forward(self, arg0_1):
     mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
-    return mul""")
+    return (mul,)""")
 
     def test_raise_error_on_mismatch_type_size_fake_tensor(self):
         def true_fn(x):
@@ -876,8 +879,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            CondOpArgsMismatchError,
-            "Expected each tensor to have same metadata but got",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile"
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
@@ -1260,7 +1263,8 @@ def forward(self, x_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
-    return conditional""")  # noqa: B950
+    getitem = conditional[0];  conditional = None
+    return getitem""")  # noqa: B950
 
         # We expect the traced graph module to work even if input size changes.
         x = torch.ones(4, 3, 2)
@@ -1334,17 +1338,18 @@ def forward(self, x_1):
     _tensor_constant0 = self._tensor_constant0
     _tensor_constant1 = self._tensor_constant1
     conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [x_1, _tensor_constant0, _tensor_constant1]);  true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = _tensor_constant1 = None
-    return conditional""")  # noqa: B950
+    getitem = conditional[0];  conditional = None
+    return getitem""")  # noqa: B950
         self.assertExpectedInline(gm.true_graph_0.code.strip(), """\
 def forward(self, arg0_1, arg1_1, arg2_1):
     add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-    return add""")
+    return (add,)""")
 
     def test_cond_with_module_param_closure(self):
         class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_parameter("param", torch.nn.Parameter(torch.ones(2, 3)))
+                self.register_parameter("param", torch.nn.Parameter(torch.ones(2, 3), requires_grad=False))
                 self.register_buffer("buffer", torch.ones(2, 3) + 1)
 
         my_mode = Mod()
@@ -1455,7 +1460,8 @@ def forward(self, arg0_1, arg1_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0, [arg0_1]);  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
-    return [conditional]""")  # noqa: B950
+    getitem = conditional[0];  conditional = None
+    return [getitem]""")  # noqa: B950
 
     def test_cond_make_fx_preserve_stack_trace_for_nodes_in_subgraph(self):
 
@@ -1503,7 +1509,9 @@ def forward(self, arg0_1, arg1_1):
         for _ in range(iter_n):
             # each lambda has a different object id thus fails the guard
             self.assertEqual(foo(inp, make_dummy_fn("cos"), make_dummy_fn("sin")), exp_out)
-        self.assertEqual(counters["stats"]["calls_captured"], iter_n)
+
+        # each iteration captures a cond and a getitem from the tuple output
+        self.assertEqual(counters["stats"]["calls_captured"], iter_n * 2)
         self.assertEqual(counters["stats"]["unique_graphs"], iter_n)
 
     def test_cond_with_consecutive_make_fx_symbolic(self):
@@ -1526,19 +1534,20 @@ def forward(self, x_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
-    return conditional""")  # noqa: B950
+    getitem = conditional[0];  conditional = None
+    return getitem""")  # noqa: B950
 
             self.assertExpectedInline(gm.true_graph_0.code.strip(), """\
 def forward(self, arg0_1):
     cos = torch.ops.aten.cos.default(arg0_1)
     sub = torch.ops.aten.sub.Tensor(arg0_1, cos);  arg0_1 = cos = None
-    return sub""")
+    return (sub,)""")
 
             self.assertExpectedInline(gm.false_graph_0.code.strip(), """\
 def forward(self, arg0_1):
     sin = torch.ops.aten.sin.default(arg0_1)
     add = torch.ops.aten.add.Tensor(arg0_1, sin);  arg0_1 = sin = None
-    return add""")
+    return (add,)""")
 
     def _create_test_fns_for_cond(self, pred, inner_most_fn, operands, closure_list, nested_level):
         if nested_level == 0:
@@ -1555,11 +1564,11 @@ def forward(self, arg0_1):
                 def false_fn(*operands):
                     return inner_most_fn(*operands)
 
-            def fn(pred, operands):
+            def fn(*operands):
                 if len(operands) == 0 and len(closure_list) == 0:
                     return torch.zeros(1)
                 return cond(pred, true_fn, false_fn, operands)
-            return (pred, operands), fn
+            return operands, fn
         else:
             args, inner_fn = self._create_test_fns_for_cond(pred <= 0, inner_most_fn, operands, closure_list, nested_level - 1)
 
@@ -1569,11 +1578,11 @@ def forward(self, arg0_1):
             def false_fn(*operands):
                 return inner_most_fn(*operands) - inner_fn(*args)
 
-            def fn(pred, operands):
+            def fn(*operands):
                 if len(operands) == 0 and len(closure_list) == 0:
                     return torch.ones(1)
                 return cond(pred, true_fn, false_fn, operands)
-            return (pred, operands), fn
+            return operands, fn
 
     def _init_predicate(self, pred_type):
         if pred_type == "bool":
@@ -1614,6 +1623,142 @@ def forward(self, arg0_1):
             with self.subTest(tracing_mode=tracing_mode):
                 gm = make_fx(fn, tracing_mode=tracing_mode, _allow_non_fake_inputs=True)(*args)
                 self.assertEqual(gm(*args), eager_res)
+
+    @parametrize("predType", ["boolTensor"])
+    @parametrize("innerFnType", ["function", "module", "object"])
+    @parametrize("nOperands", [1, 2])
+    @parametrize("nClosure", [0, 1])
+    @parametrize("nesting", [0])
+    def test_cond_vmap(self, predType, innerFnType, nOperands, nClosure, nesting):
+        pred = self._init_predicate(predType)
+        inner_fn = self._init_fn(innerFnType)
+        operands = [torch.ones(2, 3) + i for i in range(nOperands)]
+        closure = [torch.ones(2, 3) - i for i in range(nClosure)]
+        args, fn = self._create_test_fns_for_cond(pred, inner_fn, operands, closure, nesting)
+        eager_res = fn(*args)
+        out = torch.vmap(fn)(*args)
+        if nClosure == 0:
+            self.assertEqual(eager_res, out)
+        else:
+            self.assertEqual(eager_res, out[0])
+            self.assertEqual(eager_res, out[1])
+
+    def test_cond_vmap_simple(self):
+
+        def fn(x):
+            return torch.cond(
+                pred=torch.tensor([True]),
+                true_fn=lambda x: x + 100,
+                false_fn=lambda x: x,
+                operands=(x,)
+            )
+
+        a = torch.arange(15).reshape((3, 5))
+        res = torch.vmap(fn, in_dims=(0,))(a)
+        self.assertEqual(res.shape, (3, 5))
+        self.assertEqual(res, a + 100)
+
+    def test_cond_vmap_multiple_inputs(self):
+
+        def fn(x, y):
+            return torch.cond(
+                pred=x.sum() < y.sum(),
+                true_fn=lambda x, y: x + 100,
+                false_fn=lambda x, y: y,
+                operands=(x, y)
+            )
+
+        a = torch.arange(15).reshape(3, 5)
+        b = torch.ones_like(a) + 3
+        res = torch.vmap(fn, in_dims=(0, 0))(a, b)
+        expected = torch.tensor(
+            [
+                [100, 101, 102, 103, 104],
+                [4, 4, 4, 4, 4],
+                [4, 4, 4, 4, 4]
+            ]
+        )
+        self.assertEqual(res.shape, (3, 5))
+        self.assertEqual(expected, res)
+
+    def test_cond_vmap_single_input_with_closure(self):
+
+        a = torch.ones((3, 5)) + 3
+        c = torch.arange(5)
+
+        def fn(x):
+            return torch.cond(
+                pred=torch.tensor([True]),
+                true_fn=lambda x: x + c,
+                false_fn=lambda x: x - c,
+                operands=(x,)
+            )
+
+        res = torch.vmap(fn, in_dims=(0,))(a,)
+        self.assertEqual(a + c, res)
+
+    def test_cond_vmap_multiple_args_with_closure(self):
+
+        a = torch.ones((3, 5), dtype=torch.int64) + 3
+        b = torch.arange(15).reshape(3, 5)
+        c = torch.arange(5)
+
+        def fn(x, y):
+            return torch.cond(
+                pred=torch.tensor([False]),
+                true_fn=lambda x, y: x + c,
+                false_fn=lambda x, y: y - c,
+                operands=(x, y)
+            )
+
+        res = torch.vmap(fn)(a, b)
+        self.assertEqual(b - c, res)
+
+    @parametrize("nClosure", [0, 1])
+    def test_cond_vmap_multiple_outputs(self, nClosure):
+
+        if nClosure:
+            c = torch.ones(5, dtype=torch.int64) + 5
+
+            def fn(x):
+                return torch.cond(
+                    pred=torch.tensor([True]),
+                    true_fn=lambda x: (x + c, x - c),
+                    false_fn=lambda x: (x, x),
+                    operands=(x,)
+                )
+        else:
+            def fn(x):
+                return torch.cond(
+                    pred=torch.tensor([True]),
+                    true_fn=lambda x: (x + 1, x - 1),
+                    false_fn=lambda x: (x, x),
+                    operands=(x,)
+                )
+
+        a = torch.arange(15).reshape(3, 5)
+        res = torch.vmap(fn)(a,)
+        self.assertEqual(len(res), 2)
+        if nClosure:
+            self.assertEqual(res, (a + c, a - c))
+        else:
+            self.assertEqual(res, (a + 1, a - 1))
+
+    def test_vmap_vmap(self):
+        def fn(x):
+            return torch.cond(
+                pred=torch.tensor([True]),
+                true_fn=lambda x: x + 1,
+                false_fn=lambda x: x - 1,
+                operands=(x,)
+            )
+
+        def wrapper(x):
+            return torch.vmap(fn)(x)
+
+        a = torch.ones((3, 4, 5))
+        res = torch.vmap(wrapper)(a)
+        self.assertEqual(res, a + 1)
 
 instantiate_parametrized_tests(TestControlFlowTraced)
 

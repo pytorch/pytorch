@@ -355,6 +355,14 @@ struct __attribute__ ((packed)) packed_uint5{{
   uint32_t x; uint32_t y; uint32_t z; uint32_t w; uint32_t u;
 }};
 
+template<typename Y, typename X>
+Y cast(const X x);
+
+template<>
+{1} cast<{1}, {0}>(const {0} x) {{
+ return {2};
+}}
+
 kernel void scatter_kernel_5(uint linear_index              [[thread_position_in_grid]],
                              constant void * src_           [[buffer(0)]],
                              device void * dst_             [[buffer(1)]],
@@ -380,7 +388,7 @@ kernel void scatter_kernel_5(uint linear_index              [[thread_position_in
     strided_index.w = local_index.w * stride.w;
     strided_index.u = local_index.u * stride.u;
 
-    dst[strided_index.x + strided_index.y + strided_index.z + strided_index.w + strided_index.u] = src[linear_index];
+    dst[strided_index.x + strided_index.y + strided_index.z + strided_index.w + strided_index.u] = cast<{1}>(src[linear_index]);
 }}
 
 kernel void scatter_kernel_4(uint linear_index              [[thread_position_in_grid]],
@@ -401,7 +409,7 @@ kernel void scatter_kernel_4(uint linear_index              [[thread_position_in
     local_index.w = linear_index % size[3];
 
     const packed_uint4 strided_index = local_index * stride;
-    dst[strided_index.x + strided_index.y + strided_index.z + strided_index.w] = src[linear_index];
+    dst[strided_index.x + strided_index.y + strided_index.z + strided_index.w] = cast<{1}>(src[linear_index]);
 }}
 
 kernel void scatter_kernel_3(uint linear_index              [[thread_position_in_grid]],
@@ -421,7 +429,7 @@ kernel void scatter_kernel_3(uint linear_index              [[thread_position_in
     local_index.z = linear_index % size[2];
 
     const packed_uint3 strided_index = local_index * stride;
-    dst[strided_index.x + strided_index.y + strided_index.z] = src[linear_index];
+    dst[strided_index.x + strided_index.y + strided_index.z] = cast<{1}>(src[linear_index]);
 }}
 
 kernel void scatter_kernel_2(uint linear_index              [[thread_position_in_grid]],
@@ -440,7 +448,7 @@ kernel void scatter_kernel_2(uint linear_index              [[thread_position_in
     local_index.y = linear_index % size[1];
 
     const packed_uint2 strided_index = local_index * stride;
-    dst[strided_index.x + strided_index.y] = src[linear_index];
+    dst[strided_index.x + strided_index.y] = cast<{1}>(src[linear_index]);
 }}
 
 kernel void scatter_kernel_1(uint linear_index              [[thread_position_in_grid]],
@@ -456,7 +464,7 @@ kernel void scatter_kernel_1(uint linear_index              [[thread_position_in
 
     const int local_index = linear_index % size;
     const int strided_index = local_index * stride;
-    dst[strided_index] = src[linear_index];
+    dst[strided_index] = cast<{1}>(src[linear_index]);
 }}
 )METAL_SCATTER";
 
@@ -464,6 +472,14 @@ static const char *GATHER_OPS_TEMPLATE = R"METAL_GATHER(
 struct __attribute__ ((packed)) packed_uint5{{
   uint32_t x; uint32_t y; uint32_t z; uint32_t w; uint32_t u;
 }};
+
+template<typename Y, typename X>
+Y cast(const X x);
+
+template<>
+{1} cast<{1}, {0}>(const {0} x) {{
+ return {2};
+}}
 
 kernel void gather_kernel_5(uint linear_index               [[thread_position_in_grid]],
                             constant void * src_            [[buffer(0)]],
@@ -491,7 +507,7 @@ kernel void gather_kernel_5(uint linear_index               [[thread_position_in
     strided_index.w = local_index.w * stride.w;
     strided_index.u = local_index.u * stride.u;
 
-    dst[linear_index] = src[strided_index.x + strided_index.y + strided_index.z + strided_index.w + strided_index.u];
+    dst[linear_index] = cast<{1}>(src[strided_index.x + strided_index.y + strided_index.z + strided_index.w + strided_index.u]);
 }}
 
 kernel void gather_kernel_4(uint linear_index               [[thread_position_in_grid]],
@@ -512,7 +528,7 @@ kernel void gather_kernel_4(uint linear_index               [[thread_position_in
     local_index.w = linear_index % size[3];
 
     const packed_uint4 strided_index = local_index * stride;
-    dst[linear_index] = src[strided_index.x + strided_index.y + strided_index.z + strided_index.w];
+    dst[linear_index] = cast<{1}>(src[strided_index.x + strided_index.y + strided_index.z + strided_index.w]);
 }}
 
 kernel void gather_kernel_3(uint linear_index               [[thread_position_in_grid]],
@@ -532,7 +548,7 @@ kernel void gather_kernel_3(uint linear_index               [[thread_position_in
     local_index.z = linear_index % size[2];
 
     const packed_uint3 strided_index = local_index * stride;
-    dst[linear_index] = src[strided_index.x + strided_index.y + strided_index.z];
+    dst[linear_index] = cast<{1}>(src[strided_index.x + strided_index.y + strided_index.z]);
 }}
 
 kernel void gather_kernel_2(uint linear_index               [[thread_position_in_grid]],
@@ -551,7 +567,7 @@ kernel void gather_kernel_2(uint linear_index               [[thread_position_in
     local_index.y = linear_index % size[1];
 
     const packed_uint2 strided_index = local_index * stride;
-    dst[linear_index] = src[strided_index.x + strided_index.y];
+    dst[linear_index] = cast<{1}>(src[strided_index.x + strided_index.y]);
 }}
 
 kernel void gather_kernel_1(uint linear_index               [[thread_position_in_grid]],
@@ -567,7 +583,7 @@ kernel void gather_kernel_1(uint linear_index               [[thread_position_in
 
     const int local_index = linear_index % size;
     const int strided_index = local_index * stride;
-    dst[linear_index] = src[strided_index];
+    dst[linear_index] = cast<{1}>(src[strided_index]);
 }}
 )METAL_GATHER";
 } // namespace at::mps

@@ -21,6 +21,7 @@
 #ifdef USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
@@ -598,10 +599,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           [](::c10d::Reducer& reducer) { return reducer.check_finalized(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_force_bucket_rebuild",
-          [](::c10d::Reducer& reducer) {
-            return reducer.force_bucket_rebuild();
-          },
+          "_reset_state",
+          [](::c10d::Reducer& reducer) { return reducer.reset_state(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_update_process_group",
@@ -705,7 +704,7 @@ Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex ten
 
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
-:func:`reduce`, :func:`all_reduce_multigpu`, etc.
+:func:`reduce`.
 
 This class does not support ``__members__`` property.)");
 
@@ -1035,6 +1034,29 @@ Example::
     >>> store.add("first_key", 6)
     >>> # Should return 7
     >>> store.get("first_key")
+)")
+          .def(
+              "check",
+              &::c10d::Store::check,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+The call to check whether a given list of ``keys`` have value stored in
+the store. This call immediately returns in normal cases but still suffers
+from some edge deadlock cases, e.g, calling check after TCPStore has been destroyed.
+Calling :meth:`~torch.distributed.store.check` with a list of keys that
+one wants to check whether stored in the store or not.
+
+Arguments:
+    keys (lisr[str]): The keys to query whether stored in the store.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> from datetime import timedelta
+    >>> # Using TCPStore as an example, other store types can also be used
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
+    >>> store.add("first_key", 1)
+    >>> # Should return 7
+    >>> store.check(["first_key"])
 )")
           .def(
               "delete_key",
@@ -1809,6 +1831,10 @@ Arguments:
               "group_name",
               &::c10d::ProcessGroup::getGroupName,
               "(Gets this process group name. It's cluster unique)")
+          .def_property(
+              "bound_device_id",
+              &::c10d::ProcessGroup::getBoundDeviceId,
+              &::c10d::ProcessGroup::setBoundDeviceId)
           .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
             return torch::jit::toPyObject(c10::IValue(std::move(self)));
           })
@@ -1873,6 +1899,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def("rank", &::c10d::Backend::getRank)
           .def("size", &::c10d::Backend::getSize)
           .def("name", &::c10d::Backend::getBackendName)
+          .def_property_readonly(
+              "supports_splitting",
+              &::c10d::Backend::supportsSplitting,
+              "(test whether the backend supports splitting)")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -2143,6 +2173,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("wait_all_ranks") = false,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "eager_connect_single_device",
+              &::c10d::Backend::eagerConnectSingleDevice)
+          .def(
               "_get_backend_name",
               &::c10d::Backend::getBackendName,
               py::call_guard<py::gil_scoped_release>())
@@ -2233,6 +2266,14 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           py::arg("size"),
           py::arg("timeout") = kProcessGroupDefaultTimeout,
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_default_timeout",
+          [](const c10::intrusive_ptr<::c10d::ProcessGroupGloo>& self,
+             std::chrono::milliseconds timeout) {
+            self->getOptions()->timeout = timeout;
+          },
+          py::arg("timeout"),
+          py::call_guard<py::gil_scoped_release>())
       .def_property_readonly("options", &::c10d::ProcessGroupGloo::getOptions);
 
   // ProcessGroupWrapper is a wrapper pg that includes a helper gloo process
@@ -2290,10 +2331,30 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::call_guard<py::gil_scoped_release>())
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
+          .def(
+              "comm_split_count",
+              &::c10d::ProcessGroupNCCL::getCommSplitCounter)
+          .def(
+              "_set_default_timeout",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
+                 std::chrono::milliseconds timeout) {
+                self->getOptions()->timeout = timeout;
+              },
+              py::arg("timeout"),
+              py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)
-          .def_property_readonly(
-              "is_ucc_available", &::c10d::ProcessGroupNCCL::isUCCAvailable);
+          .def_property(
+              "bound_device_id",
+              &::c10d::ProcessGroupNCCL::getBoundDeviceId,
+              &::c10d::ProcessGroupNCCL::setBoundDeviceId)
+          .def(
+              "perform_nocolor_split",
+              &::c10d::ProcessGroupNCCL::performNocolorSplit);
+
+  module.def(
+      "_get_intra_node_comm_usage_counter",
+      &::c10d::intra_node_comm::getIntraNodeCommUsageCounter);
 
 #ifdef NCCL_HAS_COMM_CTA_CGA
   py::class_<ncclConfig_t>(
@@ -2354,15 +2415,18 @@ Example::
       )")
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
 #ifdef NCCL_HAS_COMM_CTA_CGA
+      .def_readwrite("config", &::c10d::ProcessGroupNCCL::Options::config)
+#endif
       .def_readwrite(
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream)
-      .def_readwrite("config", &::c10d::ProcessGroupNCCL::Options::config);
-#else
       .def_readwrite(
-          "is_high_priority_stream",
-          &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream);
-#endif
+          "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
+      .def_readwrite(
+          "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
+      .def_readwrite(
+          "global_ranks_in_group",
+          &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group);
 
 #endif
 
@@ -2433,7 +2497,11 @@ Example::
   py::class_<
       ::c10d::Work,
       c10::intrusive_ptr<::c10d::Work>,
-      ::c10d::PyProcessGroup::PyWork>(module, "Work")
+      ::c10d::PyProcessGroup::PyWork>(module, "Work", R"(
+A `Work` object represents the handle to a pending asynchronous operation in
+PyTorch's distributed package. It is returned by non-blocking collective operations,
+such as `dist.all_reduce(tensor, async_op=True)`.
+)")
       .def(py::init<>())
       .def("is_completed", &::c10d::Work::isCompleted)
       .def(
@@ -2505,7 +2573,7 @@ Example::
                 ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
                 with PyTorch's current device streams to ensure we can have asynchronous CUDA
                 execution and it does not wait for the entire operation to complete on GPU. Note that
-                ``CUDAFuture``  does not support ``NCCL_BLOCKING_WAIT`` flag or NCCL's ``barrier()``.
+                ``CUDAFuture``  does not support ``TORCH_NCCL_BLOCKING_WAIT`` flag or NCCL's ``barrier()``.
                 In addition, if a callback function was added by ``fut.then()``, it will wait until
                 ``WorkNCCL``'s NCCL streams synchronize with ``ProcessGroupNCCL``'s dedicated callback
                 stream and invoke the callback inline after running the callback on the callback stream.
@@ -2534,7 +2602,7 @@ Example::
 
               .. warning ::
                   This API only works for NCCL backend for now and must set
-                  NCCL_ENABLE_TIMING environment variable.
+                  TORCH_NCCL_ENABLE_TIMING environment variable.
             )")
       .def(
           "boxed",
@@ -2724,6 +2792,16 @@ Example::
            )");
 
 #ifdef USE_C10D_NCCL
+  module.def(
+      "_hash_tensors",
+      [](const std::vector<at::Tensor>& tensors) {
+        return ::c10d::hashTensors(tensors);
+      },
+      py::arg("tensors"),
+      R"(
+        Arguments:
+          tensors(List[torch.Tensor]): List of tensors we want to hash.
+      )");
   module.def("_dump_nccl_trace", []() {
     return py::bytes(::c10d::dump_nccl_trace());
   });

@@ -24,15 +24,7 @@ import torch
 import torch._logging
 from torch._guards import Checkpointable, tracing, TracingContext
 
-from . import (
-    config,
-    exc,
-    logging as torchdynamo_logging,
-    side_effects,
-    skipfiles,
-    variables,
-)
-from .allowed_functions import is_allowed, is_builtin_constant, is_forbidden
+from . import config, exc, logging as torchdynamo_logging, skipfiles, variables
 from .bytecode_analysis import (
     get_indexof,
     JUMP_OPNAMES,
@@ -65,6 +57,7 @@ from .source import (
     LocalSource,
     Source,
 )
+from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     counters,
     get_fake_value,
@@ -118,7 +111,6 @@ from .variables.tensor import (
     SymNodeVariable,
     TensorVariable,
 )
-from .variables.torch import TorchVariable
 from .variables.user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -651,36 +643,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
         self.push(fn.call_function(self, args, kwargs))
 
-    def update_locals_and_stack(self, oldvar: VariableTracker, newvar: VariableTracker):
-        def repl(v: VariableTracker):
-            if v.mutable_local is oldvar.mutable_local:
-                return newvar
-            return v
-
-        recursive_parents = oldvar.parents_tracker.recursive_parents()
-
-        def skip(v: VariableTracker):
-            return v.parents_tracker not in recursive_parents
-
-        cache: Dict[int, Tuple[object, object]] = dict()
-        self.output.side_effects.apply(repl, cache, skip_fn=skip)
-        self.stack = [
-            VariableTracker.apply(repl, x, cache, skip_fn=skip) for x in self.stack
-        ]
-        for k, x in self.symbolic_locals.items():
-            self.symbolic_locals[k] = VariableTracker.apply(
-                repl, x, cache, skip_fn=skip
-            )
-
-    def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
-        if isinstance(oldvar.mutable_local, side_effects.MutableSideEffects):
-            newvar = self.output.side_effects.mutation(oldvar, newvar)
-        else:
-            assert isinstance(oldvar.mutable_local, variables.base.MutableLocal)
-            newvar = newvar.clone(mutable_local=variables.base.MutableLocal())
-        self.update_locals_and_stack(oldvar, newvar)
-        return newvar
-
     def inline_user_function_return(self, fn, args, kwargs):
         """
         A call to some user defined function by inlining it.
@@ -1059,9 +1021,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if config.replay_record_enabled:
             self.exec_recorder.add_local_mod(recorded_name, value)
 
-        if is_allowed(value):
-            self.push(TorchVariable(value, source=source))
-        elif istype(value, (types.ModuleType, DummyModule)):
+        if istype(value, (types.ModuleType, DummyModule)):
             self.push(PythonModuleVariable(value, source=source))
         else:
             unimplemented(f"IMPORT_NAME {typestr(value)}")
@@ -1122,15 +1082,32 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.popn(2)
         self.push(None)
 
+    def CALL_FINALLY(self, inst):
+        """
+        pushes the address of the next instruction onto the stack and increments
+        bytecode counter by delta
+        """
+        # Python 3.8 only
+        assert self.next_instruction is not None
+        addr = self.indexof[self.next_instruction]
+        self.push(ConstantVariable.create(addr))
+        self.instruction_pointer = self.indexof[inst.target]
+
     def END_FINALLY(self, inst):
+        # Python 3.8 only
+        # https://docs.python.org/3.8/library/dis.html#opcode-END_FINALLY
         tos = self.pop()
-        assert tos is None
+        if isinstance(tos, ConstantVariable):
+            self.instruction_pointer = tos.as_python_constant()
+        else:
+            pass
 
     def POP_FINALLY(self, inst):
+        # Python 3.8 only
         preserve_tos = inst.argval
         if preserve_tos:
             tos = self.pop()
-        assert self.pop() is None
+        _ = self.pop()
         if preserve_tos:
             self.push(tos)
 
@@ -1450,15 +1427,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ConstDictVariable)
         assert obj.mutable_local
-        items = dict(obj.items)
-        items[k.as_python_constant()] = v
-        self.replace_all(
-            obj,
-            ConstDictVariable(
-                items,
-                obj.user_cls,
-            ),
-        )
+        self.output.side_effects.mutation(obj)
+        obj.items[k.as_python_constant()] = v
 
     def SET_ADD(self, inst):
         v = self.pop()
@@ -1474,12 +1444,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ListVariable)
         assert obj.mutable_local
-        self.replace_all(
-            obj,
-            ListVariable(
-                obj.items + [v],
-            ),
-        )
+        self.output.side_effects.mutation(obj)
+        obj.items.append(v)
 
     def MAKE_FUNCTION(self, inst):
         flags = inst.arg
@@ -1521,16 +1487,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def UNPACK_SEQUENCE(self, inst):
         seq = self.pop()
-        if isinstance(seq, (BaseListVariable, SetVariable)):
-            val = seq.unpack_var_sequence(self)
-        elif seq.is_python_constant() and isinstance(seq, ConstantVariable):
-            val = seq.unpack_var_sequence(self)
-        elif isinstance(seq, TensorVariable):
+        if isinstance(seq, TensorVariable):
             val = seq.unpack_var_sequence(self, idxes=range(inst.argval))
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             val = [wrap_fx_proxy(self, proxy[i]) for i in range(inst.argval)]
+        elif seq.has_unpack_var_sequence(self):
+            val = seq.unpack_var_sequence(self)
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
         assert len(val) == inst.argval
@@ -1621,12 +1585,28 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
 
     def BUILD_STRING(self, inst):
-        result = ""
-        for _ in range(inst.arg):
-            str_var = self.pop()
-            assert isinstance(str_var, ConstantVariable)
-            result = str_var.value + result
-        self.push(ConstantVariable.create(value=result))
+        format_string_parts: List[str] = []
+        args: List[VariableTracker] = []
+        kwargs: Dict[str, VariableTracker] = {}
+        for part in self.popn(inst.arg):
+            if isinstance(part, ConstantVariable):
+                format_string_parts.append("{}")
+                args.append(part)
+            elif isinstance(part, variables.StringFormatVariable):
+                format_string_parts.append(part.format_string)
+                args.extend(part.sym_args)
+                if set(kwargs.keys()) & set(part.sym_kwargs.keys()):
+                    unimplemented(
+                        f"BUILD_STRING key conflict {kwargs} & {part.sym_kwargs}"
+                    )
+                kwargs.update(part.sym_kwargs)
+            else:
+                unimplemented(f"BUILD_STRING {part}")
+        self.push(
+            variables.StringFormatVariable.create(
+                "".join(format_string_parts), args, kwargs
+            )
+        )
 
     def IS_OP(self, inst):
         assert inst.argval == 0 or inst.argval == 1
@@ -2119,12 +2099,22 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])
 
+    def get_example_value(self, source: Source):
+        if isinstance(source, LocalSource):
+            return self.f_locals[source.local_name]
+        if isinstance(source, GlobalSource):
+            return self.f_globals[source.global_name]
+        raise KeyError()
+
     def run(self):
         super().run()
 
     def match_nested_cell(self, name, cell):
         """Match a cell in this method to one in a function we are inlining"""
-        value = cell.cell_contents
+        try:
+            value = cell.cell_contents
+        except ValueError:
+            return None
         # TODO(jansel): check the id of the cell rather than the contents
         if id(value) != self._freevars_ids.get(name):
             return None
@@ -2261,18 +2251,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         result = skipfiles.check_verbose(func, is_inlined_call=True)
         if result.skipped:
-            from torch._dynamo.variables.misc import (
-                produce_trampoline_autograd_apply,
-                produce_trampoline_autograd_bwd,
-                produce_trampoline_autograd_fwd,
-            )
+            from torch._dynamo.variables.misc import produce_trampoline_autograd_apply
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
             if hasattr(func.fn, "_origin") and func.fn._origin in [
-                produce_trampoline_autograd_fwd,
                 produce_trampoline_autograd_apply,
-                produce_trampoline_autograd_bwd,
             ]:
                 # Known sound
                 return skipfiles.SkipResult(False, "allowlist in dynamo known function")
@@ -2502,16 +2486,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented(
                 "HigherOrderOperator: Mutating a variable not in the current scope (replace_all)"
             )
-
-    def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
-        self.check_replace_is_safe(oldvar)
-        newvar = super().replace_all(oldvar, newvar)
-        # recursively check and update parent's locals and stack in case oldvar is from parent
-        translator: InstructionTranslatorBase = self
-        while hasattr(translator, "parent"):
-            translator = translator.parent  # type: ignore[attr-defined]
-            translator.update_locals_and_stack(oldvar, newvar)
-        return newvar
 
     def should_compile_partial_graph(self):
         return False  # inlining functions is all-or-nothing

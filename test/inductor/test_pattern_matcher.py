@@ -50,10 +50,6 @@ class TestPatternMatcher(TestCase):
         if len(codes) == 1:
             codes = codes[0]
         torch.testing.assert_close(actual, expected)
-        if inductor_config.cpp_wrapper:
-            # CPP wrapper runs everything twice, so we'll match the pattern twice
-            expected_matches *= 2
-            expected_nodes *= 2
 
         self.assertEqual(
             counters["inductor"]["pattern_matcher_count"], expected_matches
@@ -482,6 +478,28 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(expect, actual)
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
 
+    def test_addmm_broadcasting_bias(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.functional.linear
+                self.linear_weight = torch.randn(4, 4).cuda()
+                self.bias = torch.randn(1, 4).cuda()
+
+            def forward(self, x):
+                x = self.linear(x, self.linear_weight, self.bias)
+                return x
+
+        input_tensor = torch.randn(1, 3, 4).cuda()
+
+        func = Model().cuda()
+
+        res1 = func(input_tensor)
+        jit_func = torch.compile(func)
+        res2 = jit_func(input_tensor)
+
+        self.assertEqual(res1, res2)
+
     def test_cat_mm(self):
         def fn(a, b, c):
             return torch.cat(
@@ -518,14 +536,7 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 2, 5)
 
-    def test_cat_slice_cat(self):
-        def check_counter(counter, expected):
-            if not inductor_config.cpp_wrapper:
-                self.assertEqual(counter, expected)
-            else:
-                # cpp_wrapper for the CUDA backend runs two passes
-                self.assertEqual(counter, 2 * expected)
-
+    def test_cat_slice_cat_cuda(self):
         def fn(a, b):
             cat_1 = torch.ops.aten.cat.default([a, b], 1)
             slice_1 = torch.ops.aten.slice.Tensor(cat_1, 0, 0, 9223372036854775807)
@@ -548,8 +559,8 @@ class TestPatternMatcher(TestCase):
         torch.testing.assert_close(actual, expected)
         # We don't recompile for dynamic-shape cases.
         if dynamo_config.assume_static_by_default:
-            check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-            check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
 
         # Verify we fallback to non-optimal path for negative `end`.
         def fn(a, b):

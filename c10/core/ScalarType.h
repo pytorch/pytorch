@@ -16,9 +16,12 @@
 #include <c10/util/quint4x2.h>
 #include <c10/util/quint8.h>
 
-#include <complex>
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <ostream>
+#include <type_traits>
 
 namespace c10 {
 
@@ -348,6 +351,7 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
 #define DEFINE_CONSTANT(_, name) \
   constexpr ScalarType k##name = ScalarType::name;
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-const-variable)
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CONSTANT)
 #undef DEFINE_CONSTANT
 
@@ -440,15 +444,14 @@ static inline ScalarType toQIntType(ScalarType t) {
 static inline ScalarType toUnderlying(ScalarType t) {
   switch (t) {
     case ScalarType::QUInt8:
+    case ScalarType::QUInt4x2:
+      [[fallthrough]];
+    case ScalarType::QUInt2x4:
       return ScalarType::Byte;
     case ScalarType::QInt8:
       return ScalarType::Char;
     case ScalarType::QInt32:
       return ScalarType::Int;
-    case ScalarType::QUInt4x2:
-      return ScalarType::Byte;
-    case ScalarType::QUInt2x4:
-      return ScalarType::Byte;
     default:
       return t;
   }

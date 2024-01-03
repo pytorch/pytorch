@@ -17,7 +17,7 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
 )
 from torch.distributed._tensor import DTensor
-from torch.distributed._tensor.device_mesh import _mesh_resources
+from torch.distributed.device_mesh import _mesh_resources
 
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
@@ -775,7 +775,7 @@ def _pre_state_dict_hook(
             "be returned."
         )
     else:
-        _set_use_dtensor(module, fsdp_state)
+        _set_use_dtensor(fsdp_state)
         context = contextlib.nullcontext()
 
     with context:
@@ -793,10 +793,10 @@ def _pre_state_dict_hook(
 
 
 @no_type_check
-def _set_use_dtensor(fsdp_state: _FSDPState, module: nn.Module) -> None:
+def _set_use_dtensor(fsdp_state: _FSDPState) -> None:
     # If device_mesh is passed in when initalizing FSDP, we automatically turn the
     # _use_dtensor flag to be true for ShardedStateDictConfig().
-    if getattr(module, "device_mesh", None):
+    if getattr(fsdp_state, "_device_mesh", None):
         state_dict_type = fsdp_state._state_dict_type
         if state_dict_type == StateDictType.LOCAL_STATE_DICT:
             raise RuntimeError(
@@ -834,7 +834,7 @@ def _pre_load_state_dict_hook(
             "be returned."
         )
     else:
-        _set_use_dtensor(module, fsdp_state)
+        _set_use_dtensor(fsdp_state)
         context = contextlib.nullcontext()
 
     _lazy_init(fsdp_state, module)

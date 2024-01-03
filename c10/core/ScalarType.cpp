@@ -18,16 +18,12 @@ constexpr auto c4 = ScalarType::ComplexFloat;
 constexpr auto c8 = ScalarType::ComplexDouble;
 constexpr auto b1 = ScalarType::Bool;
 constexpr auto bf = ScalarType::BFloat16;
-constexpr auto b8 = ScalarType::Float8_e5m2;
-constexpr auto h8 = ScalarType::Float8_e4m3fn;
-constexpr auto a8 = ScalarType::Float8_e5m2fnuz;
-constexpr auto d8 = ScalarType::Float8_e4m3fnuz;
 constexpr auto ud = ScalarType::Undefined;
 
 constexpr int64_t NUM_PROMOTE_TYPES = 20;
 
 constexpr std::array<ScalarType, NUM_PROMOTE_TYPES> index2dtype =
-    {u1, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, b1, bf, b8, h8, a8, d8};
+    {u1, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, b1, bf};
 
 constexpr std::array<int64_t, static_cast<size_t>(ScalarType::NumOptions)>
 calculate_dtype2index() {
@@ -51,11 +47,12 @@ ScalarType promoteTypes(ScalarType a, ScalarType b) {
     return ScalarType::Undefined;
   }
 
-  // For QInt types, we only allow exact match
-  if (isQIntType(a) && a == b) {
+  // If the two types are equal, return that type
+  if (a == b) {
     return a;
   }
 
+  // Handle identically equal types
   if (isQIntType(a) || isQIntType(b)) {
     TORCH_CHECK(
         false,
@@ -65,10 +62,17 @@ ScalarType promoteTypes(ScalarType a, ScalarType b) {
         toString(b));
   }
 
-  if (isBitsType(a) && a == b) {
-    return a;
-  } else if (isBitsType(a) || isBitsType(b)) {
+  if (isBitsType(a) || isBitsType(b)) {
     return ScalarType::Undefined;
+  }
+
+  if (isFloat8Type(a) || isFloat8Type(b)) {
+    TORCH_CHECK(
+        false,
+        "Promotion for Float8 Types is not supported, attempted to promote ",
+        toString(a),
+        " and ",
+        toString(b));
   }
 
   auto ix_a = dtype2index[static_cast<int64_t>(a)];
@@ -78,27 +82,24 @@ ScalarType promoteTypes(ScalarType a, ScalarType b) {
 
   // This table axes must be consistent with index2dtype
   // clang-format off
-  static constexpr ScalarType _promoteTypesLookup[
-      NUM_PROMOTE_TYPES][NUM_PROMOTE_TYPES] = {
-      /*        u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1  bf  b8  h8  a8  d8*/
-      /* u1 */ {u1, i2, i2, i4, i8, f2, f4, f8, c2, c4, c8, u1, bf, b8, h8, a8, d8},
-      /* i1 */ {i2, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, i1, bf, b8, h8, a8, d8},
-      /* i2 */ {i2, i2, i2, i4, i8, f2, f4, f8, c2, c4, c8, i2, bf, b8, h8, a8, d8},
-      /* i4 */ {i4, i4, i4, i4, i8, f2, f4, f8, c2, c4, c8, i4, bf, b8, h8, a8, d8},
-      /* i8 */ {i8, i8, i8, i8, i8, f2, f4, f8, c2, c4, c8, i8, bf, b8, h8, a8, d8},
-      /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, c2, c4, c8, f2, f4, f4, f4, f4, f4},
-      /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, c4, c4, c8, f4, f4, f4, f4, f4, f4},
-      /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, c8, c8, c8, f8, f8, f8, f8, f8, f8},
-      /* c2 */ {c2, c2, c2, c2, c2, c2, c4, c8, c2, c4, c8, c2, c4, c4, c4, c4, c4},
-      /* c4 */ {c4, c4, c4, c4, c4, c4, c4, c8, c4, c4, c8, c4, c4, c4, c4, c4, c4},
-      /* c8 */ {c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8},
-      /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, b1, bf, b8, h8, a8, d8},
-      /* bf */ {bf, bf, bf, bf, bf, f4, f4, f8, c4, c4, c8, bf, bf, bf, bf, bf, bf},
-      /* b8 */ {b8, b8, b8, b8, b8, f4, f4, f8, c4, c4, c8, b8, bf, b8, ud, a8, ud},
-      /* h8 */ {h8, h8, h8, h8, h8, f4, f4, f8, c4, c4, c8, h8, bf, ud, h8, ud, d8},
-      /* a8 */ {a8, a8, a8, a8, a8, f4, f4, f8, c4, c4, c8, a8, bf, a8, ud, a8, ud},
-      /* d8 */ {d8, d8, d8, d8, d8, f4, f4, f8, c4, c4, c8, d8, bf, ud, d8, ud, d8},
-  };
+  static constexpr std::
+  array<std::array<ScalarType, NUM_PROMOTE_TYPES>, NUM_PROMOTE_TYPES>
+      _promoteTypesLookup = {{
+      /*        u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1  bf*/
+      /* u1 */ {u1, i2, i2, i4, i8, f2, f4, f8, c2, c4, c8, u1, bf},
+      /* i1 */ {i2, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, i1, bf},
+      /* i2 */ {i2, i2, i2, i4, i8, f2, f4, f8, c2, c4, c8, i2, bf},
+      /* i4 */ {i4, i4, i4, i4, i8, f2, f4, f8, c2, c4, c8, i4, bf},
+      /* i8 */ {i8, i8, i8, i8, i8, f2, f4, f8, c2, c4, c8, i8, bf},
+      /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, c2, c4, c8, f2, f4},
+      /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, c4, c4, c8, f4, f4},
+      /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, c8, c8, c8, f8, f8},
+      /* c2 */ {c2, c2, c2, c2, c2, c2, c4, c8, c2, c4, c8, c2, c4},
+      /* c4 */ {c4, c4, c4, c4, c4, c4, c4, c8, c4, c4, c8, c4, c4},
+      /* c8 */ {c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8},
+      /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, b1, bf},
+      /* bf */ {bf, bf, bf, bf, bf, f4, f4, f8, c4, c4, c8, bf, bf},
+  }};
   // clang-format on
   return _promoteTypesLookup[ix_a][ix_b];
 }

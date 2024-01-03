@@ -20,6 +20,7 @@
 #include <ATen/DLConvertor.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TracerMode.h>
 #include <ATen/dlpack.h>
@@ -193,6 +194,7 @@ ScalarType infer_scalar_type(PyObject* obj) {
         return *scalarType;
       }
     }
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *scalarType;
   }
   AT_ERROR("Could not infer dtype of ", Py_TYPE(obj)->tp_name);

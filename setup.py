@@ -160,6 +160,9 @@
 #   USE_ZSTD
 #     Enables use of ZSTD, if the libraries are found
 #
+#   USE_ROCM_KERNEL_ASSERT=1
+#     Enable kernel assert in ROCm platform
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
@@ -1040,50 +1043,6 @@ def configure_extension_build():
     return extensions, cmdclass, packages, entry_points, extra_install_requires
 
 
-def add_triton(install_requires, extras_require) -> None:
-    """
-    Add triton package as a dependency when it's needed
-    """
-    # NB: If the installation requirments list already includes triton dependency,
-    # there is no need to add it one more time as an extra dependency. In nightly
-    # or when release PyTorch, that is done by setting PYTORCH_EXTRA_INSTALL_REQUIREMENTS
-    # environment variable on pytorch/builder
-    has_triton = any("triton" in pkg for pkg in install_requires)
-    if has_triton:
-        return
-
-    cmake_cache_vars = get_cmake_cache_vars()
-    use_rocm = cmake_cache_vars["USE_ROCM"]
-    use_cuda = cmake_cache_vars["USE_CUDA"]
-
-    # Triton is only needed for CUDA or ROCm
-    if not use_rocm and not use_cuda:
-        return
-
-    if use_rocm:
-        triton_text_file = "triton-rocm.txt"
-        triton_package_name = "pytorch-triton-rocm"
-    else:
-        triton_text_file = "triton.txt"
-        triton_package_name = "pytorch-triton"
-    triton_pin_file = os.path.join(
-        cwd, ".ci", "docker", "ci_commit_pins", triton_text_file
-    )
-    triton_version_file = os.path.join(cwd, ".ci", "docker", "triton_version.txt")
-
-    if os.path.exists(triton_pin_file) and os.path.exists(triton_version_file):
-        with open(triton_pin_file) as f:
-            triton_pin = f.read().strip()
-        with open(triton_version_file) as f:
-            triton_version = f.read().strip()
-
-        if "dynamo" not in extras_require:
-            extras_require["dynamo"] = []
-        extras_require["dynamo"].append(
-            triton_package_name + "==" + triton_version + "+" + triton_pin[:10]
-        )
-
-
 # post run, warnings, printed at the end to make them more visible
 build_update_message = """
     It is no longer necessary to use the 'build' or 'rebuild' targets
@@ -1117,11 +1076,6 @@ def main():
         "fsspec",
     ]
 
-    if IS_WINDOWS and sys.version_info >= (3, 12, 0):
-        # torch.version requires this and it is not part
-        # of the default cpython install on windows in 3.12+
-        install_requires.append("packaging")
-
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
     dist = Distribution()
@@ -1151,10 +1105,6 @@ def main():
         "optree": ["optree>=0.9.1"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
-    # Triton is only available on Linux atm
-    if platform.system() == "Linux":
-        extras_require["dynamo"] = ["jinja2"]
-        add_triton(install_requires=install_requires, extras_require=extras_require)
 
     # Read in README.md for our long_description
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
@@ -1267,6 +1217,7 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
         "include/torch/csrc/inductor/aoti_torch/*.h",
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
@@ -1291,6 +1242,7 @@ def main():
         "include/torch/csrc/profiler/*.h",
         "include/torch/csrc/profiler/orchestration/*.h",
         "include/torch/csrc/profiler/stubs/*.h",
+        "include/torch/csrc/profiler/unwind/*.h",
         "include/torch/csrc/utils/*.h",
         "include/torch/csrc/tensor/*.h",
         "include/torch/csrc/lazy/backend/*.h",
