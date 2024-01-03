@@ -513,6 +513,29 @@ class TestCompiledAutograd(TestCase):
 
         self.check_output_and_recompiles(fn, 2)
 
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_custom_fn_output_metadata(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return gO
+
+            x = torch.arange(1, 10, requires_grad=True, dtype=torch.float16, device="cuda")
+            x_view = x.view(3,3)
+            out = MyFn.apply(x_view)
+            loss = out.sum()
+            loss.backward()
+            yield x.dtype
+            yield x.device
+            yield x.grad
+
+        self.check_output_and_recompiles(fn, 1)
+
     def test_custom_fns_with_same_graph(self):
         def fn():
             class MyFn1(torch.autograd.Function):

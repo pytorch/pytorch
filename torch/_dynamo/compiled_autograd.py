@@ -94,7 +94,7 @@ class AutogradCompilerInstance:
     def proxy_call_backward(
         self,
         inputs,
-        output_sizes,
+        output_metadatas,
         saved_tensors,
         backward_idx: int,
     ):
@@ -113,7 +113,13 @@ class AutogradCompilerInstance:
 
         with disable_proxy_modes_tracing():
             # create fake Tensors
-            grad_ins = [torch.Tensor(output_size) for output_size in output_sizes]
+            grad_ins = []
+            for output_metadata in output_metadatas:
+                if output_metadata is None:
+                    continue
+
+                layout, device, dtype, size = output_metadata
+                grad_ins.append(torch.empty(size=size, dtype=dtype, layout=layout, device=device))
             self.bind_tensors_to_proxies(grad_ins, proxies)
         return tuple(grad_ins)
 
