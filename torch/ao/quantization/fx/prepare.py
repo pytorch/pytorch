@@ -1585,7 +1585,7 @@ def insert_observers_for_model(
                             # should resolve this inconsistency by inserting DeQuantStubs for all custom
                             # modules, not just for LSTM.
                             _insert_dequant_stubs_for_custom_module_lstm_output(node, model, named_modules, model.graph)
-                            if(node.target not in custom_module_names_already_swapped):
+                            if node.target not in custom_module_names_already_swapped:
                                 custom_module_names_already_swapped.add(node.target)
                                 _swap_custom_module_to_observed(node, qconfig, named_modules, prepare_custom_config)
                         else:
@@ -1627,7 +1627,7 @@ def insert_observers_for_model(
                                         _remove_output_observer(node, model, named_modules)
 
                                 if qhandler is not None and qhandler.is_custom_module():
-                                    if(node.target not in custom_module_names_already_swapped):
+                                    if node.target not in custom_module_names_already_swapped:
                                         custom_module_names_already_swapped.add(node.target)
                                         _swap_custom_module_to_observed(node, qconfig, named_modules, prepare_custom_config)
 
@@ -1771,8 +1771,8 @@ def prepare(
             "in a future version. Please pass in a BackendConfig instead.")
         backend_config = BackendConfig.from_dict(backend_config)
 
-    assert(isinstance(qconfig_mapping, QConfigMapping))
-    assert(isinstance(_equalization_config, QConfigMapping))
+    assert isinstance(qconfig_mapping, QConfigMapping)
+    assert isinstance(_equalization_config, QConfigMapping)
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
     _equalization_config = copy.deepcopy(_equalization_config)
 

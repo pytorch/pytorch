@@ -108,7 +108,7 @@ _ref_test_ops = tuple(
 )
 
 def reduction_dtype_filter(op):
-    if(not isinstance(op, ReductionPythonRefInfo) or not op.supports_out
+    if (not isinstance(op, ReductionPythonRefInfo) or not op.supports_out
        or torch.int16 not in op.dtypes):
         return False
 

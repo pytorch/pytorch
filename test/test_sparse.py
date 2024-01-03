@@ -3988,11 +3988,11 @@ class TestSparse(TestSparseBase):
             yield (make_diags((1, 3)), make_offsets([0]), (3, 2, 3)), "Output shape must be 2d"
             yield (make_diags((2, 3)), make_offsets([[1, 2], [0, 3]]), (3, 3)), "Offsets must be scalar or vector"
             yield (make_diags((3, 2, 3)), make_offsets([0, 1, 2]), (4, 4)), "Diagonals must be vector or matrix"
-            yield (make_diags((3, 3)), make_offsets([-1, 0]), (3, 3)),\
+            yield (make_diags((3, 3)), make_offsets([-1, 0]), (3, 3)), \
                 r"Number of diagonals \(\d\) does not match the number of offsets \(\d\)"
-            yield (make_diags((5,)), make_offsets([0, 1, 2, 3, 4]), (3, 3)),\
+            yield (make_diags((5,)), make_offsets([0, 1, 2, 3, 4]), (3, 3)), \
                 r"Number of diagonals \(\d\) does not match the number of offsets \(\d\)"
-            yield (make_diags((2, 2)), make_offsets([-1, 0]), (2, 3), torch.strided),\
+            yield (make_diags((2, 2)), make_offsets([-1, 0]), (2, 3), torch.strided), \
                 r"Only output layouts \(\w+, \w+, \w+\) are supported, got \w+"
             yield (make_diags((2, 5)), make_offsets([0, 0]), (5, 5)), "Offset tensor contains duplicate values"
             yield (make_diags((1, 5)), make_offsets([0]).to(torch.int32), (5, 5)), r"Offset Tensor must have dtype Long but got \w+"

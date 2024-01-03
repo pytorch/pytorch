@@ -1388,7 +1388,7 @@ torch.cuda.synchronize()
         scaler.scale(l).backward()
         scaler.step(optimizer)
         scaler.update()
-        assert(scaler._scale != float('inf') and scaler._scale != float('nan'))
+        assert scaler._scale != float('inf') and scaler._scale != float('nan')
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):

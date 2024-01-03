@@ -329,7 +329,7 @@ class FlopCounterMode(TorchDispatchMode):
         class PushState(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *args):
-                assert(self.parents[-1] == name)
+                assert self.parents[-1] == name
                 self.parents.pop()
                 args = tree_map(lambda x: x.clone() if isinstance(x, torch.Tensor) else x, args)
                 return args
@@ -351,7 +351,7 @@ class FlopCounterMode(TorchDispatchMode):
 
             @staticmethod
             def backward(ctx, *grad_outs):
-                assert(self.parents[-1] == name)
+                assert self.parents[-1] == name
                 self.parents.pop()
                 return grad_outs
 

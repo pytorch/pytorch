@@ -166,7 +166,7 @@ class TestOptim(TestCase):
             pass
         elif constructor_accepts_maximize:
 
-            def four_arg_constructor(weight, bias, maximize, foreach):
+            def four_arg_constructor(weight, bias, maximize, foreach):  # noqa: F811
                 self.assertFalse(foreach)
                 return constructor(weight, bias, maximize)
 

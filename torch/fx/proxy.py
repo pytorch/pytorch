@@ -510,7 +510,7 @@ class ParameterProxy(Proxy):
     """
     def __init__(self, tracer: TracerBase, node: Node, name, param):
         super().__init__(node, tracer)
-        assert(isinstance(param, torch.nn.Parameter))
+        assert isinstance(param, torch.nn.Parameter)
         self.param = param
         self.name = name
 

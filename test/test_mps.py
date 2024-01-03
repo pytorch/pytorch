@@ -1032,7 +1032,7 @@ class MpsMemoryLeakCheck:
             if driver_mem_allocated > self.driver_before:
                 driver_discrepancy = True
 
-            if not(caching_allocator_discrepancy or driver_discrepancy):
+            if not (caching_allocator_discrepancy or driver_discrepancy):
                 # Leak was false positive, exit loop
                 discrepancy_detected = False
                 break
@@ -4122,7 +4122,7 @@ class TestMPS(TestCaseMPS):
         def helper(dtype):
             # Test with axis -1
             cpu_x = None
-            if(dtype == torch.float32):
+            if dtype == torch.float32:
                 cpu_x = torch.randn(10, 3, device='cpu', dtype=torch.float32)
             else:
                 cpu_x = torch.randint(0, 20, (10, 3), device='cpu', dtype=torch.float32)
@@ -4157,7 +4157,7 @@ class TestMPS(TestCaseMPS):
         def helper(dtype):
             # Test with axis -1
             cpu_x = None
-            if(dtype == torch.float32):
+            if dtype == torch.float32:
                 cpu_x = torch.randn(10, 3, device='cpu', dtype=torch.float32)
             else:
                 cpu_x = torch.randint(0, 20, (10, 3), device='cpu', dtype=torch.float32)
