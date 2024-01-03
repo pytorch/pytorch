@@ -6,7 +6,7 @@ from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
 from torch._functorch.aot_autograd import AOTConfig, create_joint, from_fun
 
-from torch._higher_order_ops.cond import (
+from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
     UnsupportedAliasMutationException,
