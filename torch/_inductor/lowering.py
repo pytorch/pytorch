@@ -4955,7 +4955,7 @@ def cumsum(x, axis=None, dtype=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     result = ir.Scan.create(**kwargs, combine_fn=ops.add, init=0)
     if result is None:
-        return fallback_cumsum(x, dim=axis, dtype=dtype)
+        return fallback_cumsum(x, axis, dtype=dtype)
     return result
 
 
@@ -4969,7 +4969,7 @@ def cumprod(x, axis=None, dtype=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     result = ir.Scan.create(**kwargs, combine_fn=ops.mul, init=1)
     if result is None:
-        return fallback_cumprod(x, dim=axis, dtype=dtype)
+        return fallback_cumprod(x, axis, dtype=dtype)
     return result
 
 
