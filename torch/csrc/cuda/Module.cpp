@@ -384,7 +384,8 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
     PyObject* _tensor = PyTuple_GET_ITEM(tensors_o, i);
     TORCH_CHECK(
         THPVariable_Check(_tensor),
-        i," of input tensors tuple is not a Tensor");
+        i,
+        " of input tensors tuple is not a Tensor");
 
     tensors.emplace_back(THPVariable_Unpack(_tensor));
   }
@@ -554,8 +555,7 @@ PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
 
 PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPUtils_checkLong(arg), "invalid argument to memory_allocated");
+  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
   const int device = (int)THPUtils_unpackLong(arg);
 
   using c10::cuda::CUDACachingAllocator::DeviceStats;

@@ -219,10 +219,11 @@ PyObject* THPEngine_run_backward(
   Py_ssize_t num_gradients = PyTuple_GET_SIZE(grad_tensors);
   TORCH_CHECK(
       num_tensors == num_gradients,
-      "got %ld tensors and %ld "
-      "gradients",
+      "got ",
       num_tensors,
-      num_gradients);
+      " tensors and ",
+      num_gradients,
+      " gradients");
 
   // The user either called autograd.backward(...) or autograd.grad(...) to get
   // here
@@ -241,8 +242,9 @@ PyObject* THPEngine_run_backward(
     PyObject* _tensor = PyTuple_GET_ITEM(tensors, i);
     TORCH_CHECK(
         THPVariable_Check(_tensor),
-        "element ",i," of tensors "
-        "tuple is not a Tensor");
+        "element ",
+        i,
+        " of tensors tuple is not a Tensor");
     const auto& variable = THPVariable_Unpack(_tensor);
     TORCH_CHECK(
         !isBatchedTensor(variable),
@@ -256,7 +258,9 @@ PyObject* THPEngine_run_backward(
     auto gradient_edge = torch::autograd::impl::gradient_edge(variable);
     TORCH_CHECK(
         gradient_edge.function,
-        "element ",i," of tensors does not require grad and does not have a grad_fn");
+        "element ",
+        i,
+        " of tensors does not require grad and does not have a grad_fn");
     roots.push_back(std::move(gradient_edge));
 
     PyObject* grad = PyTuple_GET_ITEM(grad_tensors, i);
@@ -274,10 +278,14 @@ PyObject* THPEngine_run_backward(
     } else {
       TORCH_CHECK(
           grad == Py_None,
-          "element ",i," of gradients tuple is not a Tensor or None");
+          "element ",
+          i,
+          " of gradients tuple is not a Tensor or None");
       TORCH_CHECK(
           !variable.requires_grad(),
-          "element ",i," of gradients tuple is None, but the corresponding Tensor requires grad");
+          "element ",
+          i,
+          " of gradients tuple is None, but the corresponding Tensor requires grad");
     }
   }
 

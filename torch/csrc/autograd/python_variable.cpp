@@ -918,7 +918,8 @@ int THPVariable_set_data(THPVariable* self, PyObject* data, void* unused) {
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "data", data);
   }
-  TORCH_CHECK(data, "Deleting tensor data is not allowed. Delete tensor instead!");
+  TORCH_CHECK(
+      data, "Deleting tensor data is not allowed. Delete tensor instead!");
   if (!THPVariable_Check(data)) {
     throw torch::TypeError(
         "Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
@@ -944,8 +945,8 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
       THPVariable_Check(py_grad),
       "assigned grad expected to be a Tensor or None but got grad of type ",
       THPUtils_typename(py_grad));
-  TORCH_CHECK(self != (THPVariable*)py_grad,
-      "can't assign Variable as its own grad");
+  TORCH_CHECK(
+      self != (THPVariable*)py_grad, "can't assign Variable as its own grad");
 
   const auto& grad = THPVariable_Unpack(py_grad);
   TORCH_CHECK(
@@ -1107,7 +1108,8 @@ int THPVariable_set_names(PyObject* self, PyObject* names, void* unused) {
   if (names == Py_None) {
     at::internal_set_names_inplace(var, at::nullopt);
   } else {
-    TORCH_CHECK(THPUtils_checkDimnameList(names),
+    TORCH_CHECK(
+        THPUtils_checkDimnameList(names),
         "names must either be None or a tuple of dim names");
     at::internal_set_names_inplace(var, torch::parseDimnameList(names));
   }
@@ -1123,7 +1125,7 @@ int THPVariable_set_requires_grad(
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "requires_grad", obj);
   }
-  TORCH_CHECK( obj && PyBool_Check(obj), "requires_grad must be a bool");
+  TORCH_CHECK(obj && PyBool_Check(obj), "requires_grad must be a bool");
   const auto& var = THPVariable_Unpack(self);
   auto requires_grad = (obj == Py_True);
   if (!var.is_leaf()) {
@@ -1216,7 +1218,7 @@ int THPVariable_set_post_accumulate_grad_hooks(
     return handle_torch_function_setter(
         self, "_post_accumulate_grad_hooks", obj);
   }
-  TORCH_CHECK( obj, "Deletion of _post_accumulate_grad_hooks not allowed!");
+  TORCH_CHECK(obj, "Deletion of _post_accumulate_grad_hooks not allowed!");
   if (obj == Py_None) {
     obj = nullptr;
   }

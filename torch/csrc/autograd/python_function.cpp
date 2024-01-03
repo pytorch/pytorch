@@ -383,7 +383,9 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction* self) {
     THPFunction_assert(
         THPVariable_Check(obj),
         "mark_dirty can "
-        "only accept variables, but argument ",i," is of type ",
+        "only accept variables, but argument ",
+        i,
+        " is of type ",
         THPUtils_typename(obj));
 
     const auto& tensor = THPVariable_Unpack(obj);
@@ -1171,8 +1173,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
 
 PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPVariable_Check(_var), "_register_hook_dict expected a Tensor");
+  TORCH_CHECK(THPVariable_Check(_var), "_register_hook_dict expected a Tensor");
   THPVariable* var = reinterpret_cast<THPVariable*>(_var);
   const auto& tensor = THPVariable_Unpack(var);
   std::unique_ptr<FunctionPreHook> hook(

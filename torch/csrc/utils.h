@@ -2,6 +2,7 @@
 #define THP_UTILS_H
 
 #include <ATen/ATen.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/Storage.h>
 #include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -10,7 +11,6 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-#include <c10/util/Exception.h>
 
 #ifdef USE_CUDA
 #include <c10/cuda/CUDAStream.h>
