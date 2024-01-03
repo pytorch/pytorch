@@ -12,6 +12,7 @@
     - [`pytorch/builder` / PyTorch domain libraries](#pytorchbuilder--pytorch-domain-libraries)
     - [Making release branch specific changes for PyTorch](#making-release-branch-specific-changes-for-pytorch)
     - [Making release branch specific changes for domain libraries](#making-release-branch-specific-changes-for-domain-libraries)
+  - [Running Launch Execution team Core XFN sync](#running-launch-execution-team-core-xfn-sync)
   - [Drafting RCs (Release Candidates) for PyTorch and domain libraries](#drafting-rcs-release-candidates-for-pytorch-and-domain-libraries)
     - [Release Candidate Storage](#release-candidate-storage)
     - [Release Candidate health validation](#release-candidate-health-validation)
@@ -167,9 +168,7 @@ Following POC's should be assigned from each of the workstreams:
 * Release notes
 * Partner
 
-The meetings should start after the release branch is created and should continue until the week of the release.
-
-### `pytorch/pytorch`
+**NOTE**: The meetings should start after the release branch is created and should continue until the week of the release.
 
 ## Drafting RCs (Release Candidates) for PyTorch and domain libraries
 
