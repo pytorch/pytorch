@@ -1,9 +1,7 @@
 from contextlib import contextmanager
-from dataclasses import dataclass
 
 import torch
 import torch._subclasses.functional_tensor
-import torch.fx.traceback as fx_traceback
 
 import torch.utils._pytree as pytree
 
@@ -13,16 +11,13 @@ from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     make_fx,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
-from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils._python_dispatch import _get_current_dispatch_mode, _disable_current_modes
+from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
 @contextmanager
@@ -35,6 +30,7 @@ def _set_compilation_env():
         yield
     finally:
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
+
 
 @exposed_in("torch")
 def strict_mode(callable, operands):
@@ -50,15 +46,18 @@ def strict_mode(callable, operands):
 
 strict_mode_op = HigherOrderOperator("strict_mode")
 
+
 @strict_mode_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def strict_mode_op_dense(callable, operands):
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     return callable(*operands)
 
+
 strict_mode_op.py_impl(DispatchKey.Autograd)(
     autograd_not_implemented(strict_mode_op, deferred_error=True)
 )
+
 
 @strict_mode_op.py_impl(ProxyTorchDispatchMode)
 def inner(mode, callable, operands):
@@ -66,6 +65,7 @@ def inner(mode, callable, operands):
         return trace_strict_mode(mode, strict_mode_op, callable, operands)
     else:
         return strict_mode_op(callable, operands)
+
 
 def trace_strict_mode(mode, strict_mode_op, callable, operands):
     pre_dispatch = getattr(mode, "pre_dispatch", False)
@@ -96,11 +96,13 @@ def trace_strict_mode(mode, strict_mode_op, callable, operands):
     out = graph(*operands)
     return track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
 
+
 @strict_mode_op.py_impl(FakeTensorMode)
 def strict_mode_fake_tensor_mode(mode, callable, operands):
     with mode:
         true_outs = callable(*operands)
     return true_outs
+
 
 @strict_mode_op.py_functionalize_impl
 def strict_mode_func(ctx, callable, inputs):
@@ -108,7 +110,5 @@ def strict_mode_func(ctx, callable, inputs):
     with ctx.redispatch_to_next():
         functional_callable = ctx.functionalize(callable)
 
-        cond_return = strict_mode_op(
-            functional_callable, unwrapped_inputs
-        )
+        cond_return = strict_mode_op(functional_callable, unwrapped_inputs)
         return ctx.wrap_tensors(cond_return)

@@ -34,7 +34,7 @@
 #include <utility>
 #include <vector>
 
-namespace at { namespace native {
+namespace at::native {
 
 // Parse environment variable "TORCH_LINEAR_FLATTEN_3D"
 static inline bool parseLinearFlatten3d() {
@@ -816,4 +816,4 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   return result;
 }
 
-}}  // namespace at::native
+}  // namespace at::native

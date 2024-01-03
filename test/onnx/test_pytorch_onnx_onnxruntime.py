@@ -5902,7 +5902,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 split_list: List[Tensor] = input.split(split_sizes)
 
                 for ob in split_list:
-                    out.append(ob)
+                    out.append(ob)  # noqa: PERF402
                 return torch.cat(out, dim=0)
 
         x = torch.randn(6, 4, 3)
@@ -13609,7 +13609,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
                 self.bano1 = torch_geometric_nn.BatchNorm(512)
                 self.relu = torch.nn.ReLU()
-                self.dense1 = torch.nn.Seq(Lin(512, 1))
+                self.dense1 = torch.nn.Seq(Lin(512, 1))  # noqa: F821
                 self.sigmoid = torch.nn.Sigmoid()
 
             def forward(self, coords0, coords1, edge_from, edge_to):
