@@ -2825,7 +2825,7 @@ class Buffer(IRNode):
     def get_reads(self):
         return self.get_read_writes().reads
 
-    def get_unbacked_symbol_defs(self):
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         """
         Returns the unbacked symbols which are defined by this IR node,
         because this is a data-dependent IR node, or item()
@@ -2867,7 +2867,7 @@ class Buffer(IRNode):
         )
         return defs - self.get_unbacked_symbol_uses()
 
-    def get_unbacked_symbol_uses(self):
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         """
         Returns the unbacked symbols which are required to be in scope in
         order to successfully perform codegen for this buffer.  For example,
@@ -3000,7 +3000,7 @@ class ComputedBuffer(Buffer):
                     self.data.get_size(),
                 )
 
-    def get_unbacked_symbol_uses(self):
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         # Ordinarily, we'd like to just peek at the arguments list,
         # but ComputedBuffers have no argument list.
         #
@@ -3312,7 +3312,7 @@ class CUDATemplateBuffer(TemplateBuffer):
         inputs,
         make_kernel_render,
         workspace_size: int,
-        template: "CUDATemplate",  # type: ignore[name-defined]
+        template: "CUDATemplate",  # type: ignore[name-defined]  # noqa: F821
     ):
         super().__init__(layout, inputs, make_kernel_render)
         # Global memory (in bytes) needed for this template.
@@ -3871,7 +3871,7 @@ class ExternKernel(InputsKernel):
         index = sympy_subs(sympy.expand(index), replacement)
         return index, tuple(new_sizes)
 
-    def get_unbacked_symbol_uses(self):
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         # NB: It's not necessary to check regular inputs as we automatically
         # have dependencies on them
         r = set()
@@ -4026,8 +4026,8 @@ class UserDefinedTritonKernel(ExternKernel):
         # modifies input in place, do not let it get DCEd
         return True
 
-    def get_unbacked_symbol_defs(self):
-        return {}
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     def get_mutation_names(self):
         return []
@@ -4122,8 +4122,8 @@ class InplaceBernoulliFallback(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self):
-        return {}
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     def __init__(self, x, *constant_args):
         super().__init__(
@@ -4155,8 +4155,8 @@ class AccumulateGrad(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self):
-        return {}
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     def __init__(self, variable, new_grad):
         super().__init__(
@@ -4225,8 +4225,8 @@ class ScatterFallback(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self):
-        return {}
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     def __init__(
         self,
@@ -4295,8 +4295,8 @@ class IndexPutFallback(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self):
-        return {}
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     def __init__(self, x, indices, values, accumulate):
         self.indices = indices
@@ -4375,7 +4375,7 @@ class DynamicScalar(ExternKernel):
             self.sym = sym.args[0]
             self.is_bool = True
 
-    def get_unbacked_symbol_defs(self):
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return {self.sym}
 
     def codegen(self, wrapper):
@@ -4397,6 +4397,21 @@ has_c_shim = {
     aten.repeat_interleave.Tensor,
     aten.nonzero.default,
 }
+
+
+def get_aten_cpp_kernel_name(kernel):
+    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+    # repeat_interleave(const at::Tensor & self, int64_t repeats,
+    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+    assert (
+        isinstance(kernel, torch._ops.OpOverload) and kernel.namespace == "aten"
+    ), "Invalid aten kernel"
+    return (
+        f"at::{kernel.__name__.split('.')[0]}"
+        if kernel._overloadname == "default"
+        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+    )
 
 
 class FallbackKernel(ExternKernelAlloc):
@@ -4468,7 +4483,12 @@ class FallbackKernel(ExternKernelAlloc):
     def is_legacy_abi_kernel(self):
         return "_scaled_dot_product_flash_attention" in str(self.python_kernel_name)
 
-    def get_arg_default_value(self, pos):
+    def get_pos_arg_value(self, pos, kwargs):
+        # positional args may be provided in kwargs
+        pos_arg_name = self.args_default_value[pos]["name"]
+        if pos_arg_name in kwargs:
+            return kwargs[pos_arg_name]
+
         assert hasattr(
             self, "args_default_value"
         ), "self.args_default_value has to be provided"
@@ -4536,10 +4556,11 @@ class FallbackKernel(ExternKernelAlloc):
         if V.graph.cpp_wrapper and hasattr(self, "args_default_value"):
             n_args = len(args)
             n_pos_args = len(self.args_default_value)
-            # Some positional args are not provided, need to use their default value in cpp wrapper
+            # For cpp wrapper, if some positional args are not provided, we need to check
+            # if they're in the kwargs or use their default value
             if n_args < n_pos_args:
                 pos_args = [
-                    self.get_arg_default_value(i) for i in range(n_args, n_pos_args)
+                    self.get_pos_arg_value(i, kwargs) for i in range(n_args, n_pos_args)
                 ]
                 pos_args = [V.graph.wrapper_code.val_to_arg_str(x) for x in pos_args]
                 args.extend(pos_args)
@@ -4655,8 +4676,6 @@ class FallbackKernel(ExternKernelAlloc):
         if kernel.namespace == "aten":
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
-            op_base_name = kernel.__name__.split(".")[0]
-
             if V.graph.cpp_wrapper:
                 if config.is_fbcode() and kernel not in has_c_shim:
                     log.warning(
@@ -4666,19 +4685,14 @@ class FallbackKernel(ExternKernelAlloc):
                     self.use_runtime_dispatch = True
                     self.set_cpp_kernel(kernel)
                 else:
-                    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-                    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
-                    # repeat_interleave(const at::Tensor & self, int64_t repeats,
-                    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
-                    self.cpp_kernel_name = (
-                        f"at::{op_base_name}"
-                        if kernel._overloadname == "default"
-                        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
-                    )
+                    self.cpp_kernel_name = get_aten_cpp_kernel_name(kernel)
                     schema = kernel._schema
-
                     self.args_default_value = [
-                        {"type": x.real_type, "value": x.default_value}
+                        {
+                            "name": x.name,
+                            "type": x.real_type,
+                            "value": x.default_value,
+                        }
                         for x in schema.arguments
                         if not x.kwarg_only
                     ]
@@ -4691,7 +4705,7 @@ class FallbackKernel(ExternKernelAlloc):
                         if x.kwarg_only
                     }
             else:
-                self.python_kernel_name = f"aten.{op_base_name}"
+                self.python_kernel_name = str(kernel)
 
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
@@ -4825,6 +4839,7 @@ class ComplexView(ExternKernelAlloc):
         self,
         layout,
         python_kernel_name,
+        cpp_kernel_name,
         tensor_args,
         nontensor_args,
     ):
@@ -4838,6 +4853,7 @@ class ComplexView(ExternKernelAlloc):
         # output through the abi-compatible interface.
         self.outputs: Sequence[Any] = []
         self.python_kernel_name = python_kernel_name
+        self.cpp_kernel_name = cpp_kernel_name
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
@@ -4854,7 +4870,11 @@ class ComplexView(ExternKernelAlloc):
         assert device, "Not sure where to find device info"
 
         packed = ComplexView(
-            MultiOutputLayout(device), str(kernel), tensor_args, non_tensor_args
+            MultiOutputLayout(device),
+            str(kernel),
+            get_aten_cpp_kernel_name(kernel),
+            tensor_args,
+            non_tensor_args,
         )
 
         layout = FixedLayout(
@@ -4908,7 +4928,7 @@ class MultiOutput(ExternKernel):
         self.name = V.graph.register_buffer(self)
         self.indices = indices
 
-    def get_unbacked_symbol_uses(self):
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         return self.inputs[0].get_unbacked_symbol_uses()
 
     def should_allocate(self):
@@ -5317,8 +5337,8 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self):
-        return {}
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     @classmethod
     def create(
@@ -6034,8 +6054,8 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
     def get_mutation_names(self):
         return [self.inputs[self.idx_for_inplace_sum].get_name()]
 
-    def get_unbacked_symbol_defs(self):
-        return {}
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     @classmethod
     def create(
@@ -6546,7 +6566,7 @@ class LoopBody:
         return self.indexing[name]
 
     def __call__(self, *indices):
-        index = list(itertools.chain(*indices))
+        index = list(itertools.chain.from_iterable(indices))
         assert len(index) == len(self.var_ranges), (index, self.var_ranges)
         assert all(v not in self.var_ranges for v in index)
         replacements = dict(zip(self.var_ranges.keys(), index))
@@ -6968,8 +6988,8 @@ class Broadcast(InPlaceCollectiveKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self):
-        return {}
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     @classmethod
     def create(
@@ -7003,8 +7023,8 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self):
-        return {}
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     @classmethod
     def create(
@@ -7043,8 +7063,8 @@ class AllReduce(InPlaceCollectiveKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self):
-        return {}
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     @classmethod
     def create(
@@ -7417,7 +7437,7 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
         self.output_split_sizes = output_split_sizes
         self.input_split_sizes = input_split_sizes
 
-    def get_unbacked_symbol_uses(self):
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         r = set()
         if self.output_split_sizes is not None:
             r |= free_unbacked_symbols(self.output_split_sizes)
