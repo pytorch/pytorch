@@ -1,7 +1,7 @@
 import functools
 import itertools
 import logging
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import sympy
 from sympy import Expr
@@ -393,7 +393,7 @@ class SizeVarAllocator:
 
     def size_hints(
         self,
-        exprs: List[Expr],
+        exprs: Iterable[Expr],
         *,
         fallback: Optional[int] = None,
     ) -> Tuple[int, ...]:
@@ -491,9 +491,7 @@ class SizeVarAllocator:
         return result
 
     def stride_order(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
-        strides = tuple(
-            map(abs, self.stride_hints(index, vars))  # type: ignore[arg-type]
-        )
+        strides = tuple(map(abs, self.stride_hints(index, vars)))
         order = list(range(len(strides)))
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
         return order

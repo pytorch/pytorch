@@ -136,6 +136,7 @@ if(HIP_FOUND)
   set(hiprand_DIR ${ROCM_PATH}/lib/cmake/hiprand)
   set(rocblas_DIR ${ROCM_PATH}/lib/cmake/rocblas)
   set(hipblas_DIR ${ROCM_PATH}/lib/cmake/hipblas)
+  set(hipblaslt_DIR ${ROCM_PATH}/lib/cmake/hipblaslt)
   set(miopen_DIR ${ROCM_PATH}/lib/cmake/miopen)
   set(rocfft_DIR ${ROCM_PATH}/lib/cmake/rocfft)
   set(hipfft_DIR ${ROCM_PATH}/lib/cmake/hipfft)
@@ -154,6 +155,9 @@ if(HIP_FOUND)
   find_package_and_print_version(hiprand REQUIRED)
   find_package_and_print_version(rocblas REQUIRED)
   find_package_and_print_version(hipblas REQUIRED)
+  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
+    find_package_and_print_version(hipblaslt REQUIRED)
+  endif()
   find_package_and_print_version(miopen REQUIRED)
   if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
     find_package_and_print_version(hipfft REQUIRED)
@@ -183,8 +187,60 @@ if(HIP_FOUND)
   else()
     find_library(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${ROCM_PATH}/lib)
   endif()
-  # hiprtc is part of HIP
-  find_library(ROCM_HIPRTC_LIB amdhip64 HINTS ${ROCM_PATH}/lib)
+  find_library(ROCM_HIPRTC_LIB hiprtc HINTS ${ROCM_PATH}/lib)
   # roctx is part of roctracer
   find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCM_PATH}/lib)
+
+  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
+    # check whether hipblaslt is using its own datatype
+    set(file "${PROJECT_BINARY_DIR}/hipblaslt_test_data_type.cc")
+    file(WRITE ${file} ""
+      "#include <hipblaslt/hipblaslt.h>\n"
+      "int main() {\n"
+      "    hipblasltDatatype_t bar = HIPBLASLT_R_16F;\n"
+      "    return 0;\n"
+      "}\n"
+      )
+
+    try_compile(hipblaslt_compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
+      CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
+      COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
+      OUTPUT_VARIABLE hipblaslt_compile_output)
+
+    if(hipblaslt_compile_result)
+      set(HIPBLASLT_CUSTOM_DATA_TYPE ON)
+      #message("hipblaslt is using custom data type: ${hipblaslt_compile_output}")
+      message("hipblaslt is using custom data type")
+    else()
+      set(HIPBLASLT_CUSTOM_DATA_TYPE OFF)
+      #message("hipblaslt is NOT using custom data type: ${hipblaslt_compile_output}")
+      message("hipblaslt is NOT using custom data type")
+    endif()
+
+    # check whether hipblaslt is using its own compute type
+    set(file "${PROJECT_BINARY_DIR}/hipblaslt_test_compute_type.cc")
+    file(WRITE ${file} ""
+      "#include <hipblaslt/hipblaslt.h>\n"
+      "int main() {\n"
+      "    hipblasLtComputeType_t baz = HIPBLASLT_COMPUTE_F32;\n"
+      "    return 0;\n"
+      "}\n"
+      )
+
+    try_compile(hipblaslt_compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
+      CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
+      COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
+      OUTPUT_VARIABLE hipblaslt_compile_output)
+
+    if(hipblaslt_compile_result)
+      set(HIPBLASLT_CUSTOM_COMPUTE_TYPE ON)
+      #message("hipblaslt is using custom compute type: ${hipblaslt_compile_output}")
+      message("hipblaslt is using custom compute type")
+    else()
+      set(HIPBLASLT_CUSTOM_COMPUTE_TYPE OFF)
+      #message("hipblaslt is NOT using custom compute type: ${hipblaslt_compile_output}")
+      message("hipblaslt is NOT using custom compute type")
+    endif()
+  endif()
+
 endif()

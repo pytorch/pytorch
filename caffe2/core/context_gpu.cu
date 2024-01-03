@@ -336,10 +336,6 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
     return &Delete;
   }
 
-  void copy_data(void* dest, const void* src, std::size_t count) const final {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for PinnedCPUAllocator");
-  }
-
  private:
   static void Delete(void* data) {
     if (!data) {
@@ -583,10 +579,6 @@ struct DefaultCUDAAllocator final : public at::Allocator {
 
   at::DeleterFnPtr raw_deleter() const override {
     return &Delete;
-  }
-
-  void copy_data(void* dest, const void* src, std::size_t count) const final {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for DefaultCUDAAllocator");
   }
 
  private:
