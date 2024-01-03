@@ -1,0 +1,30 @@
+name: Check mergeability and dependencies for ghstack prs
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  check-regex:
+    runs-on: ubuntu-latest
+    outputs:
+      regex-match: ${{ steps.regex-match.outputs.match }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: regex-match
+        uses: actions-ecosystem/action-regex-match@d50fd2e7a37d0e617aea3d7ada663bd56862b9cc
+        with:
+          text: ${{ github.head_ref }}
+          regex: '^(gh/[^/]+/[0-9]+/)head$'
+
+  pr-dependencies-check:
+    needs: check-regex
+    if: ${{ needs.check-regex.outputs.regex-match != '' }}
+    uses: pytorch/test-infra/.github/workflows/pr-dependencies-check.yml@main
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
