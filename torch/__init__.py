@@ -191,7 +191,7 @@ def _load_global_deps() -> None:
             'nccl': 'libnccl.so.*[0-9]',
             'nvtx': 'libnvToolsExt.so.*[0-9]',
         }
-        is_cuda_lib_err = [lib for lib in cuda_libs.values() if(lib.split('.')[0] in err.args[0])]
+        is_cuda_lib_err = [lib for lib in cuda_libs.values() if lib.split('.')[0] in err.args[0]]
         if not is_cuda_lib_err:
             raise err
         for lib_folder, lib_name in cuda_libs.items():
