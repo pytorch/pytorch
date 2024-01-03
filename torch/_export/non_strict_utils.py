@@ -52,7 +52,7 @@ def fake_tree(mode, arg, t_constraints, source, sources):
     Call fakify while recursively mapping on lists and dictionaries. Using pytree map
     would be ideal here, but we are also building sources as we recurse.
     """
-    if isinstance(arg, list):
+    if isinstance(arg, (tuple, list)):
         return [
             fake_tree(mode, arg, t_constraints, GetItemSource(source, i), sources)
             for i, arg in enumerate(arg)
