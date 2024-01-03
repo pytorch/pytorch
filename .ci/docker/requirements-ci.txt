@@ -299,7 +299,7 @@ pywavelets==1.4.1
 #Pinned versions: 1.4.1
 #test that import:
 
-lxml==4.9.4
+lxml==5.0.0.
 #Description: This is a requirement of unittest-xml-reporting
-# have to pin to 4.9.4 because 5.0.0 release on Dec 29th missing
+
 # Python-3.9 binaries
