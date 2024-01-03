@@ -11,6 +11,7 @@ import torch.fx
 
 import torch.utils._pytree as pytree
 from torch._dynamo.exc import UserError, UserErrorType
+from torch._export.non_strict_utils import make_constraints, make_fake_inputs
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
@@ -27,6 +28,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError
+
 from .dynamic_shapes import _process_constraints, Constraint
 from .exported_program import (
     _disable_prexisiting_fake_mode,
@@ -372,13 +374,17 @@ def _export_non_strict(
     fake_params_buffers,
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
+    pre_dispatch=False,
 ):
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
     with torch.nn.utils.stateless._reparametrize_module(mod, fake_params_buffers):
         gm, graph_signature = transform(aot_export_module)(
-            mod, (*fake_args, *fake_kwargs.values()), trace_joint=False
+            mod,
+            (*fake_args, *fake_kwargs.values()),
+            trace_joint=False,
+            pre_dispatch=pre_dispatch,
         )
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
@@ -464,6 +470,7 @@ def _export(
     *,
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
+    pre_dispatch: bool = False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -491,7 +498,6 @@ def _export(
     if not strict:
         assert isinstance(f, torch.nn.Module)
         assert len(preserve_module_call_signature) == 0
-        assert len(constraints) == 0, "dynamic shape NYI"
         assert len(kwargs) == 0, "keyword arguments NYI"
         out_spec = None
 
@@ -512,11 +518,13 @@ def _export(
                 gm, sig = aot_export(Wrapper(mod), args, **kwargs)
 
                 def strip_root(x):
-                    return (
-                        x[len("_export_root.") :]
-                        if x.startswith("_export_root.")
-                        else x
-                    )
+                    if isinstance(x, str) and x.startswith("_export_root"):
+                        stripped = x[len("_export_root") :]
+                        return stripped[1:] if stripped.startswith(".") else stripped
+                    return x
+
+                def fixup_key(x):
+                    return "L__self__" + strip_root(x)
 
                 sig.parameters = pytree.tree_map(strip_root, sig.parameters)
                 sig.buffers = pytree.tree_map(strip_root, sig.buffers)
@@ -529,12 +537,30 @@ def _export(
                 sig.buffers_to_mutate = pytree.tree_map(
                     strip_root, sig.buffers_to_mutate
                 )
+                for node in gm.graph.nodes:
+                    if "nn_module_stack" in node.meta:
+                        nn_module_stack = node.meta["nn_module_stack"]
+                        # Delete the wrapper module reference
+                        del nn_module_stack[""]
+                        node.meta["nn_module_stack"] = {
+                            fixup_key(key): val
+                            for key, val in pytree.tree_map(
+                                strip_root, nn_module_stack
+                            ).items()
+                        }
+
                 return gm, sig
 
             return _aot_export_non_strict
 
+        fake_mode, fake_args, src_equalities, original_signature = make_fake_inputs(
+            f, args, constraints
+        )
         ep_non_strict = _export_non_strict(
-            f, args, {}, f.state_dict(), transform=_tuplify_outputs
+            f, fake_args, {}, f.state_dict(), transform=_tuplify_outputs
+        )
+        range_constraints, equality_constraints = make_constraints(
+            fake_mode, src_equalities, original_signature, ep_non_strict.gm
         )
         assert out_spec is not None
         return ExportedProgram(
@@ -542,8 +568,8 @@ def _export(
             ep_non_strict.gm.graph,
             ep_non_strict.sig,
             _get_params_buffers(f),
-            {},
-            [],
+            range_constraints,
+            equality_constraints,
             [
                 ModuleCallEntry(
                     "",
@@ -681,6 +707,7 @@ def _export(
         _reorder_kwargs_by_names(orig_args, fake_args, fake_kwargs),
         fake_params_buffers,
         transform=_process_user_inputs,
+        pre_dispatch=pre_dispatch,
     )
 
     gm = ep_non_strict.gm
