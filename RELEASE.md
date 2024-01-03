@@ -153,6 +153,24 @@ Follow these examples of PR that updates the version and sets RC Candidate uploa
 * torchvision : https://github.com/pytorch/vision/pull/5400
 * torchaudio: https://github.com/pytorch/audio/pull/2210
 
+## Running Launch Execution team Core XFN sync
+
+The series of meetings for Core XFN sync should be organized. The goal of these meetings are the following:
+1. Establish release POC's from each of the workstreams
+2. Cover the tactical phase of releasing minor releases to the market
+3. Discuss possible release blockers
+
+Following POC's should be assigned from each of the workstreams:
+* Core/Marketing
+* Release Eng
+* Doc Eng
+* Release notes
+* Partner
+
+The meetings should start after the release branch is created and should continue until the week of the release.
+
+### `pytorch/pytorch`
+
 ## Drafting RCs (Release Candidates) for PyTorch and domain libraries
 
 To draft RCs, a user with the necessary permissions can push a git tag to the main `pytorch/pytorch` git repository. Please note: exactly same process is used for each of the domain library
