@@ -1244,6 +1244,46 @@ def forward(self, arg_0):
             )
         )
 
+    @testing.expectedFailureNonStrict  # non-strict does not add deferred runtime assertions
+    def test_automatic_constrain_size(self):
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.item()
+                return y.sum() + torch.ones(n, 5).sum()
+
+        ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Deferred runtime assertion failed -i0 <= 0"):
+            _ = ep(torch.tensor(-1), torch.randn(4, 5))
+
+        self.assertTrue(
+            torch.allclose(
+                ep(torch.tensor(1), torch.ones(4, 5)),
+                M()(torch.tensor(1), torch.ones(4, 5)),
+            )
+        )
+
+    def test_constrain_decomp(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.freq = torch.ones(5, 5)
+
+            def forward(self, start_pos: torch.Tensor):
+                pos = start_pos.item()
+                torch._constrain_as_size(pos, min=0, max=4)
+                return self.freq[pos] * self.freq[pos]
+
+        ep = torch.export.export(M(), (torch.tensor(1),))
+        FileCheck().check_count(
+            "torch.ops.aten._assert_async.msg", 2, exactly=True
+        ).run(ep.graph_module.code)
+        decompose_ep = ep.run_decompositions()
+        FileCheck().check_count(
+            "torch.ops.aten._assert_async.msg", 2, exactly=True
+        ).run(decompose_ep.graph_module.code)
+
     @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_mixed_input(self):
@@ -1762,7 +1802,6 @@ def forward(self, arg_0):
         self.assertTrue(torch.allclose(ep(inp), torch.nonzero(inp)))
 
     @testing.expectedFailureSerDer
-    @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
     def test_redundant_asserts(self):
         def f(x):

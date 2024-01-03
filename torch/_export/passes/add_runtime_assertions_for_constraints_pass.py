@@ -95,6 +95,8 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
             messages: List[str] = []
             if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
                 symbol = val.node._expr
+                if symbol in self.existing_inline_assertions:
+                    return call_backs, messages
                 if isinstance(symbol, sympy.Symbol) and symbol.name.startswith("i"):
                     if symbol in self._asserts_generated_unbacked_symbols:
                         return call_backs, messages
@@ -108,6 +110,7 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
                     )
                     messages.append(assert_msg)
                     self._asserts_generated_unbacked_symbols.add(symbol)
+
             elif isinstance(val, torch.Tensor):
                 for i, sym in enumerate(val.shape):
                     cbs, msgs = add_assertions(sym)
@@ -126,12 +129,17 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
                         call_backs.append(partial(sym_size_cb, dim=i))
                         messages.append(f".shape[{i}]" + msg)
             return call_backs, messages
+
         callbacks, messages = add_assertions(val)
         for cb, msg in zip(callbacks, messages):
             cb(proxy=ret, assert_msg=f"{ret.node}" + msg)
         return ret
 
     def call(self, graph_module):
+        self.existing_inline_assertions = _get_existing_inline_assertions(
+            graph_module, self.range_constraints
+        )
+
         # Add runtime asserts for inline constraints
         val = super().call(graph_module)
 
@@ -146,3 +154,79 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
                 node.meta["stack_trace"] = "".join(traceback.format_stack(limit=1))
 
         return PassResult(val.graph_module, val.modified)
+
+
+def _get_existing_inline_assertions(
+    graph_module: torch.fx.GraphModule,
+    range_constraints: Dict[sympy.Symbol, ValueRanges],
+) -> Dict[sympy.Symbol, ValueRanges]:
+    existing_inline_assertions: Dict[sympy.Symbol, ValueRanges] = {}
+
+    for module in graph_module.modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
+
+        # Find all the existing inline assertions. They will look something like:
+        # %_local_scalar_dense = call_function[target=torch.ops.aten._local_scalar_dense.default](args = (%arg1_1,), kwargs = {})
+        # %ge = call_function[target=operator.ge](args = (%_local_scalar_dense, 0), kwargs = {})
+        # %scalar_tensor = call_function[target=torch.ops.aten.scalar_tensor.default](args = (%ge,), kwargs = {})
+        # %_assert_async = call_function[target=torch.ops.aten._assert_async.msg](args = (%scalar_tensor, "..."), kwargs = {})
+        for node in module.graph.nodes:
+            if node.target != torch.ops.aten._assert_async.msg:
+                continue
+
+            scalar_tensor_arg = node.args[0]
+            if not (
+                scalar_tensor_arg.op == "call_function" and
+                scalar_tensor_arg.target == torch.ops.aten.scalar_tensor.default
+            ):
+                continue
+
+            compare_arg = scalar_tensor_arg.args[0]
+            if not (
+                compare_arg.op == "call_function" and
+                compare_arg.target in (operator.le, operator.ge) and
+                len(compare_arg.args) == 2
+            ):
+                continue
+
+            compare_op = compare_arg.target
+            maybe_symint_arg, compare_int = compare_arg.args
+
+            # x >= 0 will sometimes be canonicalized to -x <= 0, so in some
+            # cases the operation before the comparison is to multiply by -1. We
+            # can undo the canonicalization here
+            if (
+                maybe_symint_arg.op == "call_function" and
+                maybe_symint_arg.target == operator.mul and
+                maybe_symint_arg.args[0] == -1
+            ):
+                maybe_symint_arg = maybe_symint_arg.args[1]
+                compare_op = operator.ge
+                compare_int = -1 * compare_int
+
+            if not (
+                "val" in maybe_symint_arg.meta and
+                isinstance(maybe_symint_arg.meta["val"], torch.SymInt)
+            ):
+                continue
+
+            symint = maybe_symint_arg.meta["val"].node._expr
+            if not isinstance(symint, sympy.Symbol):
+                continue
+
+            if symint not in range_constraints:
+                raise RuntimeError(f"Unable to find symint {symint} in {range_constraints}")
+
+            found_range = existing_inline_assertions.get(symint, ValueRanges(-math.inf, math.inf))
+
+            if compare_arg.target == operator.le:
+                existing_inline_assertions[symint] = ValueRanges(
+                    lower=found_range.lower, upper=compare_int
+                )
+            elif compare_arg.target == operator.ge:
+                existing_inline_assertions[symint] = ValueRanges(
+                    lower=compare_int, upper=found_range.upper
+                )
+
+    return existing_inline_assertions
