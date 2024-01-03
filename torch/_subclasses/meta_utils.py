@@ -485,19 +485,28 @@ class MetaConverter:
                                 # fake_t -> fake_base via reverse view func
                                 fake_base = t._rev_view_func_unsafe(fake_t)
 
+                                # TODO: Clean up this mess wrt requires_grad / is_leaf!
                                 # fake_base -> fake_input_base
                                 # pull from cache if possible; detach and store in cache otherwise
                                 fake_input_base = self.get_tensor_memo(base)
                                 if fake_input_base is None:
-                                    # TODO: Fix this! the requires_grad and is_leaf statuses
-                                    # are wrong after the detach()
                                     fake_input_base = fake_base.detach().requires_grad_(
                                         base.requires_grad
                                     )
+                                    if not base.is_leaf:
+                                        with torch.enable_grad():
+                                            # non-view thing that makes fake_input_base not a leaf
+                                            # TODO: Fix this!
+                                            fake_input_base = fake_input_base + 0
                                     self.set_tensor_memo(base, fake_input_base)
 
                                 # fake_base -> fake_view with correct view relationship
-                                return fake_base._rev_view_func_unsafe(fake_input_base)
+                                out = fake_base._rev_view_func_unsafe(
+                                    fake_input_base
+                                ).requires_grad_(t.requires_grad)
+                                if not t.is_leaf:
+                                    out = out.view(out.shape)
+                                return out
                             else:
                                 # TODO: Handle dense view of subclass
                                 (
@@ -515,7 +524,10 @@ class MetaConverter:
                             # As it's a leaf, we can directly assign requires_grad
                             r.requires_grad = t.requires_grad
                         else:
-                            if t._base.requires_grad == t.requires_grad:
+                            if (
+                                t._base.requires_grad == t.requires_grad
+                                or is_traceable_wrapper_subclass(t)
+                            ):
                                 # Easy case, just run the view op
                                 with torch.enable_grad(), maybe_suppress():
                                     r = _view_from_base(base, t)
