@@ -18,7 +18,7 @@ from ..source import AttrSource, GetItemSource
 from ..utils import istype, iter_contains, specialize_symnode
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
-
+import torch
 
 # Note: [Adding a new supported class the keys of ConstDictVarialble]
 # You'll need to add it to:
@@ -36,7 +36,7 @@ def is_hashable_python_var(x):
 
     return (
         ConstantVariable.is_literal(x)
-        or isinstance(x, (Tensor, enum.Enum))
+        or isinstance(x, (Tensor, enum.Enum, torch.nn.Module))
         or is_builtin_callable(x)
         or (isinstance(x, tuple) and all(is_hashable_python_var(e) for e in x))
     )
@@ -60,6 +60,7 @@ def is_hashable(x):
                 variables.SymNodeVariable,
                 variables.ConstantVariable,
                 variables.EnumVariable,
+                variables.NNModuleVariable,
             ),
         )
 
@@ -85,6 +86,8 @@ class ConstDictVariable(VariableTracker):
             elif isinstance(self.vt, variables.TupleVariable):
                 Hashable = ConstDictVariable._HashableTracker
                 x = tuple(Hashable(e).underlying_value for e in self.vt.items)
+            elif isinstance(self.vt, variables.NNModuleVariable):
+                return self.vt.module
             else:
                 x = self.vt.as_python_constant()
             return x
