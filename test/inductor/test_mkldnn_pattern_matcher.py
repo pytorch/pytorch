@@ -1135,21 +1135,35 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfRocm
     def test_qlinear_input_dim_exceeds_2_and_not_contiguous(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module.
         * Input dim exceeds 2
         * Input not contiguous
         """
         for bias in [True, False]:
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 2
+                )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                    17 if bias else 16,
+                )
+
             self._qlinear_cpu_test_helper(
-                (torch.randn((2, 4, 3, 4)),), do_permute=True, bias=bias
+                (torch.randn((2, 4, 3, 4)),),
+                do_permute=True,
+                matcher_check_fn=matcher_check_fn,
+                bias=bias,
             )
 
     @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
     @skipIfRocm
     def test_qlinear_int8_mixed_bf16_input_dim_exceeds_2_and_not_contiguous(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module for int8_bf16.
         * Input dim exceeds 2
         * Input not contiguous
         """
