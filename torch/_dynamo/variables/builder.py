@@ -38,6 +38,7 @@ from torch.nested._internal.nested_tensor import NestedTensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef
 from .. import config, mutation_guard, replay_record, skipfiles, trace_rules
+from ..allowed_functions import is_builtin_callable, is_callable_allowed, is_numpy
 
 from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, unimplemented
@@ -56,7 +57,6 @@ from ..source import (
     Source,
     TupleIteratorGetItemSource,
 )
-from ..trace_rules import is_builtin_callable, is_callable_allowed, is_numpy
 from ..utils import (
     build_checkpoint_variable,
     clone_input,
@@ -561,9 +561,7 @@ class VariableBuilder:
             # handle aliased autograd function `apply` calls
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return GetAttrVariable(
-                AutogradFunctionVariable(
-                    value.__self__, source=AttrSource(self.source, member="__self__")
-                ),
+                AutogradFunctionVariable(value.__self__, source=self.source),
                 "apply",
             )
         elif np and isinstance(value, np.number):

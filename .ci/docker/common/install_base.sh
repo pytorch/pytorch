@@ -74,7 +74,6 @@ install_ubuntu() {
     libtool \
     vim \
     unzip \
-    gpg-agent \
     gdb
 
   # Should resolve issues related to various apt package repository cert issues

@@ -1,5 +1,4 @@
 # Owner(s): ["oncall: quantization"]
-from typing import Set
 
 import torch
 import torch.nn as nn

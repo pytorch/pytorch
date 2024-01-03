@@ -3,7 +3,6 @@
 import torch
 
 from torch.testing._internal.common_utils import TestCase
-from torch import float32, float16
 import torch._lazy
 import torch._lazy.ts_backend
 

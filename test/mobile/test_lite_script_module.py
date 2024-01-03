@@ -3,7 +3,6 @@
 import torch
 import torch.utils.bundled_inputs
 import io
-from tempfile import TemporaryFileName
 from typing import Dict, List
 import inspect
 from torch.testing import FileCheck
