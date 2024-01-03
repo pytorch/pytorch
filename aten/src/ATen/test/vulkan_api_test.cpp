@@ -1,5 +1,7 @@
 #ifdef USE_VULKAN_API
 
+// @lint-ignore-every CLANGTIDY
+
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/Dispatcher.h>
@@ -489,6 +491,47 @@ TEST_F(VulkanAPITest, add_zero_dim) {
  test_add({2, 6, 5, 6}, {}, 1.5f);
 }
 
+void test_add_other_cpu_int(
+    const at::IntArrayRef input_shape,
+    const at::IntArrayRef other_shape,
+    float alpha) {
+  const auto in_cpu =
+      at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto other_cpu =
+      (at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat)) * 100)
+          .to(at::kInt);
+
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::add(in_cpu, other_cpu, alpha);
+  const auto out_vulkan = at::add(in_vulkan, other_cpu, alpha);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, add_other_cpu_int) {
+  test_add_other_cpu_int({2, 3}, {2, 3}, 1.0f);
+  test_add_other_cpu_int({11, 7, 139, 109}, {11, 7, 139, 109}, 2.1f);
+}
+
+TEST_F(VulkanAPITest, add_broadcast0_other_cpu_int) {
+  test_add_other_cpu_int({3, 5, 179, 221}, {3, 5, 1, 1}, 1.8f);
+}
+
+TEST_F(VulkanAPITest, add_other_cpu_unsupported_type_should_fail) {
+  const auto in_cpu = at::rand({2,2,2}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto other_cpu =
+    at::zeros({2, 2, 2}, at::device(at::kCPU).dtype(at::kComplexFloat));
+
+  EXPECT_THROW(at::add(in_cpu.vulkan(), other_cpu.vulkan(), 1.0f), ::c10::Error);
+}
+
 TEST_F(VulkanAPITest, add_) {
   auto a_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
@@ -501,7 +544,7 @@ TEST_F(VulkanAPITest, add_) {
 
   const auto check = almostEqual(a_cpu, a_vulkan.cpu());
   if (!check) {
-    showRtol(b_cpu, b_vulkan.cpu());
+    showRtol(a_cpu, a_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
@@ -519,10 +562,30 @@ TEST_F(VulkanAPITest, add_broadcast0_) {
 
   const auto check = almostEqual(a_cpu, a_vulkan.cpu());
   if (!check) {
-    showRtol(b_cpu, b_vulkan.cpu());
+    showRtol(a_cpu, a_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, add_other_cpu_int_) {
+  std::vector<int64_t> input_shape{12, 17, 29, 33};
+  const auto in_cpu =
+      at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto other_cpu =
+      (at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat)) * 100)
+          .to(at::kInt);
+
+  const auto in_vulkan = in_cpu.vulkan();
+
+  float alpha = -8.31f;
+  in_cpu.add(other_cpu, alpha);
+  in_vulkan.add(other_cpu, alpha);
+
+  const auto check = almostEqual(in_cpu, in_vulkan.cpu());
+  if (!check) {
+    showRtol(in_cpu, in_vulkan.cpu());
+  }
 }
 
 TEST_F(VulkanAPITest, add_broadcast1_) {
@@ -938,7 +1001,8 @@ void test_baddbmm(
   const auto out_cpu = at::baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 
   const auto m1_vulkan = m1_cpu.vulkan();
-  const auto out_vulkan = at::baddbmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha);
+  const auto out_vulkan =
+      at::baddbmm(bias_cpu, m1_vulkan, m2_cpu.vulkan(), beta, alpha);
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
@@ -946,27 +1010,46 @@ void test_baddbmm(
   }
 
   ASSERT_TRUE(check);
-
 }
 
 TEST_F(VulkanAPITest, baddbmm) {
   constexpr float alpha = 1.5f;
   constexpr float beta = 2.0f;
+  int batch = 9;
+  int n = 10;
+  int p = 41;
+  int m = 13;
 
-  const auto bias_cpu = at::rand({150, 179, 163}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu =
+      at::rand({batch, n, m}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu =
+      at::rand({batch, n, p}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({batch, p, m}, at::device(at::kCPU).dtype(at::kFloat));
 
   test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 }
 
 TEST_F(VulkanAPITest, baddbmm_small) {
-  constexpr float alpha = 2.1f;
-  constexpr float beta = 3.4f;
+  constexpr float alpha = -1.0f;
+  constexpr float beta = 2.0f;
+  int batch = 3;
+  int n = 3;
+  int p = 5;
+  int m = 4;
 
-  const auto bias_cpu = at::rand({3, 7, 3}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m1_cpu = at::rand({3, 7, 6}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({3, 6, 3}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu_0 =
+      at::rand({1, n, m}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu_1 =
+      at::ones({1, n, m}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu_2 =
+      at::rand({1, n, m}, at::device(at::kCPU).dtype(at::kFloat)) * -1;
+  const auto bias_cpu = at::cat({bias_cpu_0, bias_cpu_1, bias_cpu_2}, 0);
+
+  const auto m1_cpu =
+      at::rand({batch, n, p}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({batch, p, m}, at::device(at::kCPU).dtype(at::kFloat));
 
   test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 }
@@ -975,9 +1058,12 @@ TEST_F(VulkanAPITest, baddbmm_one) {
   constexpr float alpha = 2.1f;
   constexpr float beta = 103.24;
 
-  const auto bias_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m1_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu =
+      at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu =
+      at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
 
   test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 }
@@ -987,91 +1073,122 @@ TEST_F(VulkanAPITest, baddbmm_bais_error) {
   constexpr float beta = 103.24;
 
   // mismatched dimensions of batch sizes.
-  const auto bias_cpu = at::rand({200, 179, 163}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu =
+      at::rand({200, 179, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu =
+      at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m1_vulkan = m1_cpu.vulkan();
-  EXPECT_THROW(at::baddbmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha), ::c10::Error);
+  EXPECT_THROW(
+      at::baddbmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha), ::c10::Error);
 }
 
 TEST_F(VulkanAPITest, baddbmm_bias_boardcast_batch) {
   constexpr float alpha = 1.5f;
   constexpr float beta = 2.0f;
-  const auto bias_cpu = at::rand({1, 179, 163}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu =
+      at::rand({1, 179, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu =
+      at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 }
 
 TEST_F(VulkanAPITest, baddbmm_bias_boardcast_height) {
   constexpr float alpha = 1.5f;
   constexpr float beta = 2.0f;
-  const auto bias_cpu = at::rand({150, 1, 163}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu =
+      at::rand({150, 1, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu =
+      at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 }
 
 TEST_F(VulkanAPITest, baddbmm_bias_boardcast_width) {
   constexpr float alpha = 1.5f;
   constexpr float beta = 2.0f;
-  const auto bias_cpu = at::rand({150, 179, 1}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu =
+      at::rand({150, 179, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu =
+      at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 }
 
 TEST_F(VulkanAPITest, baddbmm_bias_boardcast_batch_width) {
   constexpr float alpha = 1.5f;
   constexpr float beta = 2.0f;
-  const auto bias_cpu = at::rand({1, 179, 1}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu =
+      at::rand({1, 179, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu =
+      at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 }
 
 TEST_F(VulkanAPITest, baddbmm_bias_boardcast_batch_height) {
   constexpr float alpha = 1.5f;
   constexpr float beta = 2.0f;
-  const auto bias_cpu = at::rand({1, 1, 163}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu =
+      at::rand({1, 1, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu =
+      at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 }
 
 TEST_F(VulkanAPITest, baddbmm_bias_boardcast_one) {
   constexpr float alpha = 1.5f;
   constexpr float beta = 2.0f;
-  const auto bias_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu =
+      at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu =
+      at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 }
 
 TEST_F(VulkanAPITest, baddbmm_bias_boardcast_reduce_batch) {
   constexpr float alpha = 1.5f;
   constexpr float beta = 2.0f;
-  const auto bias_cpu = at::rand({179, 163}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu =
+      at::rand({179, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu =
+      at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 }
 
 TEST_F(VulkanAPITest, baddbmm_bias_boardcast_reduce_batch1) {
   constexpr float alpha = 1.5f;
   constexpr float beta = 2.0f;
-  const auto bias_cpu = at::rand({179, 1}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu =
+      at::rand({179, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu =
+      at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 }
 
 TEST_F(VulkanAPITest, baddbmm_bias_boardcast_reduce_batch2) {
   constexpr float alpha = 1.5f;
   constexpr float beta = 2.0f;
-  const auto bias_cpu = at::rand({1, 163}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu =
+      at::rand({1, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu =
+      at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 }
 
@@ -1079,8 +1196,10 @@ TEST_F(VulkanAPITest, baddbmm_bias_boardcast_reduce_batch_height) {
   constexpr float alpha = 1.5f;
   constexpr float beta = 2.0f;
   const auto bias_cpu = at::rand({163}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu =
+      at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 }
 
@@ -1088,16 +1207,73 @@ TEST_F(VulkanAPITest, baddbmm_bias_boardcast_reduce_all) {
   constexpr float alpha = 1.5f;
   constexpr float beta = 2.0f;
   const auto bias_cpu = at::rand({1}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu =
+      at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 }
 
-void test_bmm(at::Tensor m1_cpu, at::Tensor m2_cpu) {
+void test_matmul(
+    at::Tensor m1_cpu,
+    at::Tensor m2_cpu,
+    bool m2_use_vulkan = false) {
+  c10::InferenceMode mode;
+  const auto out_cpu = at::matmul(m1_cpu, m2_cpu);
+  auto out_vk =
+      at::matmul(m1_cpu.vulkan(), m2_use_vulkan ? m2_cpu.vulkan() : m2_cpu);
+
+  const auto check = almostEqual(out_cpu, out_vk.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vk.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, DISABLED_matmul_3d_weight_vulkan) {
+  // This will call at::bmm. Will crash for unknow reason.
+  const auto m1_cpu =
+      at::rand({13, 23, 45}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({13, 45, 26}, at::device(at::kCPU).dtype(at::kFloat));
+  test_matmul(m1_cpu, m2_cpu, true);
+}
+
+TEST_F(VulkanAPITest, DISABLED_matmul_3d_weight_cpu) {
+  // This will call at::bmm. Will crash for unknow reason.
+  const auto m1_cpu =
+      at::rand({13, 23, 45}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({13, 45, 26}, at::device(at::kCPU).dtype(at::kFloat));
+  test_matmul(m1_cpu, m2_cpu);
+}
+
+TEST_F(VulkanAPITest, matmul_2d_weight_vulkan) {
+  // This will call at::mm
+  const auto m1_cpu = at::rand({7, 42}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({42, 9}, at::device(at::kCPU).dtype(at::kFloat));
+  test_matmul(m1_cpu, m2_cpu, true);
+}
+
+TEST_F(VulkanAPITest, matmul_2d_weight_cpu) {
+  // This will call at::mm
+  const auto m1_cpu =
+      at::rand({23, 45}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({45, 26}, at::device(at::kCPU).dtype(at::kFloat));
+  test_matmul(m1_cpu, m2_cpu);
+}
+
+void test_bmm(
+    at::Tensor m1_cpu,
+    at::Tensor m2_cpu,
+    bool m2_use_vulkan = false) {
   const auto out_cpu = m1_cpu.bmm(m2_cpu);
 
   const auto m1_vulkan = m1_cpu.vulkan();
-  const auto out_vulkan = m1_vulkan.bmm(m2_cpu);
+  const auto out_vulkan =
+      m1_vulkan.bmm(m2_use_vulkan ? m2_cpu.vulkan() : m2_cpu);
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
@@ -1105,14 +1281,37 @@ void test_bmm(at::Tensor m1_cpu, at::Tensor m2_cpu) {
   }
 
   ASSERT_TRUE(check);
-
 }
 
-TEST_F(VulkanAPITest, bmm) {
+TEST_F(VulkanAPITest, bmm_vulkan_small) {
   const auto m1_cpu =
-      at::rand({131, 235, 546}, at::device(at::kCPU).dtype(at::kFloat));
+      at::rand({5, 2, 3}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m2_cpu =
-      at::rand({131, 546, 267}, at::device(at::kCPU).dtype(at::kFloat));
+      at::rand({5, 3, 4}, at::device(at::kCPU).dtype(at::kFloat));
+  test_bmm(m1_cpu, m2_cpu, true);
+}
+
+TEST_F(VulkanAPITest, bmm_vulkan_small_width) {
+  const auto m1_cpu =
+      at::rand({9, 32, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({9, 5, 13}, at::device(at::kCPU).dtype(at::kFloat));
+  test_bmm(m1_cpu, m2_cpu, true);
+}
+
+TEST_F(VulkanAPITest, bmm_vulkan_large_width) {
+  const auto m1_cpu =
+      at::rand({9, 7, 45}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({9, 45, 6}, at::device(at::kCPU).dtype(at::kFloat));
+  test_bmm(m1_cpu, m2_cpu, true);
+}
+
+TEST_F(VulkanAPITest, bmm_cpu) {
+  const auto m1_cpu =
+      at::rand({13, 23, 45}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({13, 45, 26}, at::device(at::kCPU).dtype(at::kFloat));
   test_bmm(m1_cpu, m2_cpu);
 }
 
@@ -2510,6 +2709,66 @@ TEST_F(VulkanAPITest, hardtanh_) {
   }
 
   ASSERT_TRUE(check);
+}
+
+void test_packed_layer_norm(
+    const at::IntArrayRef input_shape,
+    const at::IntArrayRef normalized_shape,
+    const at::IntArrayRef weight_shape,
+    const at::IntArrayRef bias_shape,
+    const float eps) {
+  c10::InferenceMode mode;
+
+  const auto input_cpu =
+      at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_vulkan = input_cpu.vulkan();
+
+  const auto weight_cpu =
+      at::rand(weight_shape, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto bias_cpu =
+      at::rand(bias_shape, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto output_cpu = at::layer_norm(
+      input_cpu, normalized_shape, weight_cpu, bias_cpu, eps, false);
+
+  auto prepack = callOpByName(
+      "vulkan_prepack::create_layernorm_context",
+      "",
+      weight_cpu, bias_cpu, eps);
+
+  auto vulkan_output = callOpByName(
+      "vulkan_prepack::run_layernorm_context",
+      "",
+      input_cpu.vulkan(), normalized_shape, prepack[0]);
+
+  auto output_vulkan = vulkan_output[0].toTensor();
+
+  const auto check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    showRtol(output_cpu, output_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, packed_layer_norm_2d) {
+  test_packed_layer_norm({5, 7}, {7}, {7}, {7}, 1e-05);
+  test_packed_layer_norm({5, 7}, {5, 7}, {5, 7}, {5, 7}, 1e-05);
+}
+
+TEST_F(VulkanAPITest, packed_layer_norm_3d) {
+  test_packed_layer_norm({11, 5, 7}, {7}, {7}, {7}, 1e-05);
+  test_packed_layer_norm({11, 5, 7}, {5, 7}, {5, 7}, {5, 7}, 1e-05);
+  test_packed_layer_norm({11, 5, 7}, {11, 5, 7}, {11, 5, 7}, {11, 5, 7}, 1e-05);
+}
+
+TEST_F(VulkanAPITest, packed_layer_norm_4d) {
+  test_packed_layer_norm({3, 11, 5, 7}, {7}, {7}, {7}, 1e-05);
+  test_packed_layer_norm({3, 11, 5, 7}, {5, 7}, {5, 7}, {5, 7}, 1e-05);
+  test_packed_layer_norm({3, 11, 5, 7}, {11, 5, 7}, {11, 5, 7}, {11, 5, 7}, 1e-05);
+  test_packed_layer_norm(
+      {3, 11, 5, 7}, {3, 11, 5, 7}, {3, 11, 5, 7}, {3, 11, 5, 7}, 1e-05);
 }
 
 TEST_F(VulkanAPITest, layer_norm_invalid_inputs) {

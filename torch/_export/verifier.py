@@ -1,4 +1,5 @@
 import inspect
+import math
 import operator
 from collections.abc import Iterable
 from typing import Any, Dict, final, List, Optional, Tuple, Type
@@ -6,13 +7,13 @@ from typing import Any, Dict, final, List, Optional, Tuple, Type
 import torch
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     ExportGraphSignature,
     InputKind,
     SymIntArgument,
     TensorArgument,
 )
-from torch.export.exported_program import ExportedProgram
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import SymBool, SymFloat, SymInt
 
@@ -101,6 +102,11 @@ class Verifier(metaclass=_VerifierMeta):
             operator.and_,
             operator.or_,
             operator.not_,
+            operator.pow,
+            operator.neg,
+            operator.abs,
+            math.ceil,
+            math.floor,
         ]
 
     def allowed_op_types(self) -> Tuple[Type[Any], ...]:
@@ -152,7 +158,15 @@ class Verifier(metaclass=_VerifierMeta):
                 return ret
 
             # TODO Remove this allowlist.
-            _allowed_torch_functions = (torch.autograd.grad_mode.set_grad_enabled,)
+            _allowed_torch_functions = (
+                torch.autograd.grad_mode.set_grad_enabled,
+                torch.sym_int,
+                torch.sym_ite,
+                torch.sym_max,
+                torch.sym_min,
+                torch.sym_not,
+                torch.sym_sqrt,
+            )
 
             if not isinstance(op, _allowed_op_types()):
                 if op not in _allowed_builtin_ops() and op not in _allowed_torch_functions:
@@ -197,12 +211,23 @@ class Verifier(metaclass=_VerifierMeta):
                     if isinstance(attr, torch.nn.Module):
                         def _is_type(name, ty):
                             return isinstance(getattr(attr, name, None), ty)
-                        if type(attr).__name__ == "LoweredBackendModule" \
-                                and _is_type("backend_id", str) \
-                                and _is_type("processed_bytes", bytes) \
-                                and _is_type("compile_specs", list) \
-                                and hasattr(attr, "original_module"):
-                            continue
+                        if type(attr).__name__ == "LoweredBackendModule":
+                            if _is_type("backend_id", str) \
+                                    and _is_type("processed_bytes", bytes) \
+                                    and _is_type("compile_specs", list) \
+                                    and hasattr(attr, "original_module"):
+                                continue
+                            else:
+                                backend_id = getattr(attr, "backend_id", None)
+                                processed_bytes = getattr(attr, "processed_bytes", None)
+                                compile_specs = getattr(attr, "compile_specs", None)
+                                raise SpecViolationError(
+                                    f"Invalid get_attr type {type(attr)}. \n"
+                                    f"LoweredBackendModule fields: "
+                                    f"backend_id(str) : {type(backend_id)}, "
+                                    f"processed_bytes(bytes) : {type(processed_bytes)}, "
+                                    f"compile_specs(list) : {type(compile_specs)}"
+                                )
 
                     if not isinstance(attr, _allowed_getattr_types()):
                         raise SpecViolationError(
@@ -223,12 +248,6 @@ class Verifier(metaclass=_VerifierMeta):
 def _verify_exported_program_signature(exported_program) -> None:
     # Check ExportedProgram signature matches
     gs = exported_program.graph_signature
-
-    bs_grad_to_param = {}
-    bs_grad_to_user_inputs = {}
-    if gs.backward_signature is not None:
-        bs_grad_to_param = gs.backward_signature.gradients_to_parameters
-        bs_grad_to_user_inputs = gs.backward_signature.gradients_to_user_inputs
 
     # Check every node in the signature exists in the graph
     input_node_names = [node.name for node in exported_program.graph.nodes if node.op == "placeholder"]
@@ -318,19 +337,28 @@ def _verify_exported_program_signature(exported_program) -> None:
             f"Number of user outputs: {len(gs.user_outputs)}. \n"
         )
 
-    buffer_mutate_nodes = output_nodes[:len(gs.buffers_to_mutate)]
-    user_output_nodes = output_nodes[len(gs.buffers_to_mutate):len(gs.user_outputs) + len(gs.buffers_to_mutate)]
+    end = len(gs.buffers_to_mutate) + len(gs.user_inputs_to_mutate)
+    mutate_nodes: List[str] = output_nodes[:end]
+    user_output_nodes = output_nodes[end:end + len(gs.user_outputs)]
 
-    for buffer_node in buffer_mutate_nodes:
-        if (
-            buffer_node not in gs.buffers_to_mutate or
-            gs.buffers_to_mutate[buffer_node] not in gs.buffers
-        ):
+    for mutation_node in mutate_nodes:
+        if mutation_node in gs.buffers_to_mutate:
+            if gs.buffers_to_mutate[mutation_node] not in gs.buffers:
+                raise SpecViolationError(
+                    f"Buffer output {mutation_node} does not point to a buffer that exists. \n"
+                    f"Dict of buffers that are mutated, in order: {gs.buffers_to_mutate} \n"
+                    f"Buffer nodes available: {gs.buffers} \n"
+                )
+        elif mutation_node in gs.user_inputs_to_mutate:
+            if gs.user_inputs_to_mutate[mutation_node] not in gs.user_inputs:
+                raise SpecViolationError(
+                    f"User input output {mutation_node} does not point to a user input that exists. \n"
+                    f"Dict of user inputs that are mutated, in order: {gs.user_inputs_to_mutate} \n"
+                    f"User input nodes available: {gs.user_inputs} \n")
+        else:
             raise SpecViolationError(
-                f"Buffer output {buffer_node} is not in buffer mutation dictionary "
-                "or, it does not point to a buffer that exists. \n"
-                f"Dict of buffers that are mutated, in order: {gs.buffers_to_mutate} \n"
-                f"Buffer nodes available: {gs.buffers} \n"
+                f"Mutation node {mutation_node} is neither a buffer nor a user input. "
+                f"Buffers to mutate: {gs.buffers_to_mutate}, User inputs to mutate: {gs.user_inputs_to_mutate}"
             )
 
     for user_output_node, user_output_name in zip(user_output_nodes, gs.user_outputs):

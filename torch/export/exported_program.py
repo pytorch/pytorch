@@ -1,5 +1,7 @@
 import copy
 import dataclasses
+import functools
+import types
 from typing import (
     Any,
     Callable,
@@ -26,6 +28,7 @@ import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
+from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
@@ -66,6 +69,15 @@ class ModuleCallSignature:
 class ModuleCallEntry:
     fqn: str
     signature: Optional[ModuleCallSignature] = None
+
+
+def _disable_prexisiting_fake_mode(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with maybe_disable_fake_tensor_mode():
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 
 class ExportedProgram:
@@ -232,11 +244,10 @@ class ExportedProgram:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
-        from torch._export import combine_args_kwargs
 
         if self.call_spec.in_spec is not None:
             try:
-                user_args = combine_args_kwargs(args, kwargs)
+                user_args = (args, kwargs or {})
                 args = fx_pytree.tree_flatten_spec(
                     user_args, self.call_spec.in_spec, exact_structural_match=True
                 )  # type: ignore[assignment]
@@ -262,9 +273,7 @@ class ExportedProgram:
             )
         else:
             ordered_tensor_constants = ()
-        self._check_input_constraints(
-            *ordered_params, *ordered_buffers, *ordered_tensor_constants, *args
-        )
+        self._check_input_constraints(*args)
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
         # See: torch/_functorch/aot_autograd.py#L1034
@@ -277,9 +286,10 @@ class ExportedProgram:
         )
 
         if self.call_spec.out_spec is not None:
-            mutation = self.graph_signature.buffers_to_mutate
-            num_mutated = len(mutation)
-            mutated_buffers = res[:num_mutated]
+            buffer_mutation = self.graph_signature.buffers_to_mutate
+            user_input_mutation = self.graph_signature.user_inputs_to_mutate
+            num_mutated = len(buffer_mutation) + len(user_input_mutation)
+            mutated_values = res[:num_mutated]
 
             # Exclude dependency token from final result.
             assertion_dep_token = self.graph_signature.assertion_dep_token
@@ -299,10 +309,27 @@ class ExportedProgram:
                     f"{received_spec}"
                 )
             finally:
-                ix = 0
-                for buffer in self.graph_signature.buffers_to_mutate.values():
-                    self.state_dict[buffer] = mutated_buffers[ix]
-                    ix += 1
+                user_inputs = [
+                    spec
+                    for spec in self.graph_signature.input_specs
+                    if spec.kind == InputKind.USER_INPUT
+                ]
+                for i, value in enumerate(mutated_values):
+                    output_spec = self.graph_signature.output_specs[i]
+                    if output_spec.kind == OutputKind.BUFFER_MUTATION:
+                        assert output_spec.target is not None
+                        self.state_dict[output_spec.target] = value
+                    elif output_spec.kind == OutputKind.USER_INPUT_MUTATION:
+                        assert output_spec.target is not None
+                        index = next(
+                            i
+                            for i, spec in enumerate(user_inputs)
+                            if spec.arg.name == output_spec.target
+                        )
+                        args[index].copy_(value)
+                    else:
+                        raise AssertionError(f"Unexpected kind: {output_spec.kind}")
+
         return res
 
     def __str__(self) -> str:
@@ -318,18 +345,25 @@ class ExportedProgram:
         )
         return string
 
-    def module(self, *, flat: bool = True) -> torch.nn.Module:
+    def module(self) -> torch.nn.Module:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
         """
-        from torch._export.exported_program import unlift_exported_program_lifted_states
-        from torch._export.unflatten import unflatten
+        from ._unlift import _unlift_exported_program_lifted_states
 
-        if flat:
-            return unlift_exported_program_lifted_states(self)
-        else:
-            return unflatten(self)
+        module = _unlift_exported_program_lifted_states(self)
 
+        def _train(self, mode: bool = True):
+            raise NotImplementedError("Calling train() is not supported yet.")
+
+        def _eval(self, mode: bool = True):
+            raise NotImplementedError("Calling eval() is not supported yet.")
+
+        module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
+        module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
+        return module
+
+    @_disable_prexisiting_fake_mode
     def run_decompositions(
         self, decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None
     ) -> "ExportedProgram":
@@ -365,7 +399,6 @@ class ExportedProgram:
         decomp_table = decomp_table or core_aten_decompositions()
 
         old_placeholders = _get_placeholders(self.graph_module)
-        old_outputs = list(self.graph.nodes)[-1].args[0]
         fake_args = [node.meta["val"] for node in old_placeholders]
 
         buffers_to_remove = [name for name, _ in self.graph_module.named_buffers()]
@@ -438,14 +471,13 @@ class ExportedProgram:
             for inp_dim1, inp_dim2 in self.equality_constraints
         ]
 
-        state_dict = self.state_dict.copy()
-        lift_constant_tensor_pass(gm, new_graph_signature, state_dict)
+        lift_constant_tensor_pass(gm, new_graph_signature)
         _replace_sym_size_ops_pass(gm)
         exported_program = ExportedProgram(
             gm,
             gm.graph,
             new_graph_signature,
-            state_dict,
+            self.state_dict,
             new_range_constraints,
             new_equality_constraints,
             copy.deepcopy(self.module_call_graph),
@@ -540,9 +572,15 @@ class ExportedProgram:
     def _check_input_constraints(self, *args):
         from torch._export.utils import _check_input_constraints_for_graph
 
+        placeholders = [p for p in self.graph.nodes if p.op == "placeholder"]
+        input_placeholders = [
+            p
+            for p, s in zip(placeholders, self.graph_signature.input_specs)
+            if s.kind == InputKind.USER_INPUT
+        ]
         _check_input_constraints_for_graph(
-            self.graph, self.range_constraints, self.equality_constraints
-        )(*args)
+            input_placeholders, args, self.range_constraints
+        )
 
     def _validate(self):
         self.verifier().check(self)

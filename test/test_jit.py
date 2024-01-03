@@ -75,6 +75,7 @@ from jit.test_dce import TestDCE  # noqa: F401
 from jit.test_sparse import TestSparse  # noqa: F401
 from jit.test_tensor_methods import TestTensorMethods  # noqa: F401
 from jit.test_dataclasses import TestDataclasses  # noqa: F401
+from jit.test_generator import TestGenerator  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -1978,7 +1979,7 @@ graph(%Ra, %Rb):
             self.assertEqual(_zero_rate(grad[0]), _zero_rate(grad_ref[0]), rtol=1e-3, atol=1e-4)
 
     def test_torch_ops_overloaded(self):
-        with self.assertRaisesRegex(RuntimeError, "failed to many any schema"):
+        with self.assertRaisesRegex(RuntimeError, "failed to match any schema"):
             torch.ops.aten.add("a", 1)
         self.assertEqual("ab", torch.ops.aten.add("a", "b"))
         a, b = torch.rand(3, 4), torch.rand(3, 4)
@@ -8162,7 +8163,7 @@ dedent """
 
             @torch.jit.script
             def foo(a):
-                return pyfunc2(a) + pyfunc(a)
+                return pyfunc2(a) + pyfunc(a)  # noqa: F821
 
             inputs = self._make_scalar_vars([1], torch.float)
             outputs = self._make_scalar_vars([6], torch.float)
@@ -14169,6 +14170,41 @@ dedent """
 
             FileCheck().check_not("prim::PythonOp").run(cu.test.graph)
 
+    def test_nn_init_generator(self):
+        init_fns = (
+            'uniform_', 'normal_', 'xavier_normal_', 'xavier_uniform_',
+        )
+
+        for name in init_fns:
+            # Build test code
+            code = dedent('''
+                def test(tensor, generator):
+                    # type: (Tensor, Generator)
+                    return torch.nn.init.{name}(tensor, generator=generator)
+            ''').format(name=name)
+            cu = torch.jit.CompilationUnit(code)
+
+            # Compare functions
+            init_fn = getattr(torch.nn.init, name)
+
+            torch.manual_seed(1)
+
+            g = torch.Generator()
+            g.manual_seed(2023)
+            script_out = cu.test(torch.ones(2, 2), g)
+
+            # Change the seed of the default generator to make
+            # sure that we're using the provided generator
+            torch.manual_seed(2)
+
+            g = torch.Generator()
+            g.manual_seed(2023)
+            eager_out = init_fn(torch.ones(2, 2), generator=g)
+
+            self.assertEqual(script_out, eager_out)
+
+            FileCheck().check_not("prim::PythonOp").run(cu.test.graph)
+
     def test_early_return_rewrite(self):
         def test_foo(x: bool):
             if x:
@@ -15739,7 +15775,7 @@ dedent """
             # type: (Dict[str, int]) -> List[int]
             out = [1]
             for i in range(d["hi"] if "hi" in d else 6):
-                out.append(i)
+                out.append(i)  # noqa: PERF402
             return out
 
         self.checkScript(fn, ({'hi': 2, 'bye': 3},))

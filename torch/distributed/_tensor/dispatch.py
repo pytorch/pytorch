@@ -8,7 +8,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._tensor.api as dtensor
 import torch.distributed._tensor.random as random
-from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor._utils import try_find_mesh_from_args
 from torch.distributed._tensor.op_schema import (
     _is_inplace_op,
     _is_out_variant_op,
@@ -20,6 +20,11 @@ from torch.distributed._tensor.placement_types import DTensorSpec, Replicate, Te
 from torch.distributed._tensor.random import is_rng_supported_mesh
 from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
+from torch.distributed._tensor.tp_conv import (
+    convolution_backward_handler,
+    convolution_handler,
+)
+from torch.distributed.device_mesh import DeviceMesh
 
 try:
     from torch.utils import _cxx_pytree as pytree
@@ -73,11 +78,21 @@ class OpDispatcher:
             aten.randint_like.low_dtype,
             aten.randint_like.low_dtype_out,
             aten.uniform_.default,
+            aten.bernoulli.default,
+            aten.bernoulli_.float,
         }
         self._custom_op_handlers = {
             aten.linear.default: decompose_handler,
             aten.is_same_size.default: is_same_size_handler,
+            aten.convolution.default: convolution_handler,
+            aten.convolution_backward.default: convolution_backward_handler,
         }
+
+        # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
+        # as implicitly replicated or we throw error to user.
+        # NOTE: It is EXTREMELY UNSAFE to turn this flag on by default so we intentionally leave
+        # it as False by default.
+        self._allow_implicit_replication = False
 
     def dispatch(
         self,
@@ -285,7 +300,8 @@ class OpDispatcher:
                 else:
                     mesh = arg.device_mesh
             elif isinstance(arg, torch.Tensor):
-                if arg.ndim == 0 and mesh is not None:
+                if arg.ndim == 0 or self._allow_implicit_replication:
+                    mesh = mesh or try_find_mesh_from_args(op_call, args_list)
                     # scalar tensor can be safely treated as replicated
                     args_schema.append(
                         DTensorSpec(
