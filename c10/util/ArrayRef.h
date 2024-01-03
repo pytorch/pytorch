@@ -125,7 +125,6 @@ class ArrayRef final {
 
   /// Construct an ArrayRef from a C array.
   template <size_t N>
-  // NOLINTNEXTLINE(*c-arrays*)
   /* implicit */ constexpr ArrayRef(const T (&Arr)[N]) : Data(Arr), Length(N) {}
 
   /// Construct an ArrayRef from a std::initializer_list.
@@ -239,7 +238,6 @@ class ArrayRef final {
   /// continues to select the move assignment operator.
   template <typename U>
   std::enable_if_t<std::is_same_v<U, T>, ArrayRef<T>>& operator=(
-      // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
       U&& Temporary) = delete;
 
   /// Disallow accidental assignment from a temporary.
@@ -332,7 +330,6 @@ ArrayRef<T>& makeArrayRef(ArrayRef<T>& Vec) {
 
 /// Construct an ArrayRef from a C array.
 template <typename T, size_t N>
-// NOLINTNEXTLINE(*c-arrays*)
 ArrayRef<T> makeArrayRef(const T (&Arr)[N]) {
   return ArrayRef<T>(Arr);
 }
