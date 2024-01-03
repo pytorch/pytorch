@@ -268,7 +268,7 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 trace_numpy = True
 
 # Trace through torch.distributed code
-trace_distributed = True
+trace_distributed = False
 
 # Default NumPy dtypes when tracing with torch.compile
 # We default to 64bits. For efficiency, one may want to change these to float32
