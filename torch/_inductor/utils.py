@@ -19,6 +19,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+from dataclasses import dataclass
 from io import StringIO
 from typing import (
     Any,
@@ -433,37 +434,107 @@ def aggregate_origins(node_schedule):
         return set()
 
 
-def get_fused_kernel_name(node_schedule, descriptive_names):
+def get_module_name_from_meta(meta_dict):
+    mod_name = ""
+    torch_op = ""
+    if "nn_module_stack" in meta_dict:
+        # nn_module_stack is set in multiple places and can be organized
+        # differently.  The key is always the module name.  The value
+        # can either be a tuple or a string.  When it is a tuple, the
+        # last element of the tuple contains the torch_op.  When it is
+        # a string, the string is the torch_op.
+        # Example contents of nn_module_stack
+        # {'L__self___conv1': ("L['self'].conv1",
+        #                 <class 'torch.nn.modules.conv.Conv2d'>)}
+        # {'L__self___bn3': ("L['self'].bn3",
+        #                 <class 'torch.nn.modules.batchnorm.BatchNorm2d'>)}
+        # The key is the unique module name.  The value contains the
+        # torch_op type eg. <class 'torch.nn.modules.batchnorm.BatchNorm2d'>
+        mod_name, extra = list(meta_dict["nn_module_stack"].items())[-1]
+        if isinstance(extra, tuple):
+            torch_op = extra[-1]
+        else:
+            torch_op = extra
+
+        # Clean up the module name so it has similar format to
+        # the output of torch.nn.Module.named_modules()
+        # Examples for mod_name clean up.
+        # Before: 'getattr_L__self___layer4___1___relu'
+        # After: 'L.layer4.1.relu'
+        # Before: 'getattr_L__self___layer4___0___downsample_1'
+        # After: L.layer4.0.downsample_1
+        mod_name = re.sub(r"___", ".", mod_name)
+        mod_name = re.sub(r".*(L)__self", r"\g<1>", mod_name)
+
+        # Clean up the torch_op string by removing the
+        # <class > tag.
+        # Example <class 'torch.nn.modules.conv.Conv2d'> is reduced to
+        # torch.nn.modules.conv.Conv2d
+        res = re.search(r"<class\s+'(\S+)'>", str(torch_op))
+        if res:
+            torch_op = res.group(1)
+
+    return mod_name, torch_op
+
+
+def get_origin_op_info(node_schedule, descriptive_names):
     all_origins = aggregate_origins(node_schedule)
+    sources = OriginOpList([], "")
+    # Unique op_names might constrain the origin modules
+    # Possible that multiple ops w/ same name can have different modules
+    unique_op_names = {}
     if descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
-        sources = [
-            origin.meta["original_aten"]._overloadpacket.__name__
-            for origin in all_origins
-            if origin.op == "call_function"
-            and "original_aten" in origin.meta
-            and origin.meta["original_aten"] is not None
-        ]
-        sources = sorted(set(sources))
+        for origin in all_origins:
+            if (
+                origin.op == "call_function"
+                and "original_aten" in origin.meta
+                and origin.meta["original_aten"] is not None
+            ):
+                op_name = origin.meta["original_aten"]._overloadpacket.__name__
+                mod_name, torch_op = get_module_name_from_meta(origin.meta)
+                seq_nr = origin.meta.get("seq_nr", -1)
+                if op_name not in unique_op_names:
+                    sources.oi_list.append(
+                        OriginOpInfo(op_name, mod_name, torch_op, seq_nr)
+                    )
+                    unique_op_names[op_name] = mod_name
     elif descriptive_names == "torch":
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
-        sources = []
         for origin in all_origins:
             if origin.op == "call_function" and "source_fn_stack" in origin.meta:
+                mod_name, torch_op = get_module_name_from_meta(origin.meta)
                 source_fn = origin.meta["source_fn_stack"][-1]
                 if isinstance(source_fn[1], str):
-                    sources.append(source_fn[1])
+                    op_name = source_fn[1]
                 else:
-                    sources.append(source_fn[1].__name__)
-        sources = sorted(set(sources))
+                    op_name = source_fn[1].__name__
+                seq_nr = origin.meta.get("seq_nr", -1)
+                if op_name not in unique_op_names:
+                    sources.oi_list.append(
+                        OriginOpInfo(op_name, mod_name, torch_op, seq_nr)
+                    )
+                    unique_op_names[op_name] = mod_name
     elif descriptive_names == "inductor_node":
-        sources = [
+        sources.oi_list = [
             origin.name for origin in all_origins if origin.op == "call_function"
         ]
     else:
         raise NotImplementedError
-    sources = sources
-    return "_".join(["fused"] + sources)
+    # Note that nn_modules needs to be sorted in same order as sources
+    # that means they should probably be a tuple
+    # sources = set(sources)
+    # sources = sorted(sources)[: config.kernel_name_max_ops]
+    return sources
+
+
+def get_fused_kernel_name(node_schedule, descriptive_names):
+    sources = get_origin_op_info(node_schedule, descriptive_names)
+    # op_info is a tuple of (op_type, mod_name)
+    op_types = [op_info.op_type for op_info in sources.oi_list]
+    # op_types = set(op_types)
+    op_types = sorted(op_types)[: config.kernel_name_max_ops]
+    return "_".join(["fused"] + op_types)
 
 
 def get_kernel_metadata(node_schedule, wrapper):
@@ -903,6 +974,36 @@ class DebugDirManager:
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
+@dataclass
+class OriginOpInfo:
+    op_type: str
+    mod_name: str
+    torch_op: str
+    seq_nr: int
+
+    def __repr__(self):
+        return str(self.__dict__)
+
+
+@dataclass
+class OriginOpList:
+    oi_list: List[OriginOpInfo]
+    kernel_prefix: str
+
+    def __repr__(self):
+        return str(list(self.oi_list))
+
+    def codegen(self, code: IndentedBuffer, line: str):
+        marker_string = str(self)
+        prefix = f"{self.kernel_prefix}_kernel, OriginOps: "
+        code.writeline(
+            f'with torch._C._profiler._RecordFunctionFast("{prefix}{marker_string}"):'
+        )
+        with code.indent():
+            code.writeline(line)
+        return
+
+
 def run_and_get_code(fn, *args, **kwargs):
     from .graph import GraphLowering
 
@@ -1196,6 +1297,8 @@ class Placeholder(enum.Enum):
     # The descriptive name of the triton kernel; when unique_kernel_names = False, this
     # placeholder will be replaced with a string with more information.
     DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
+
+    ORIGIN_INFO = "ORIGIN_INFO"
 
 
 # A utility function for easier AOTInductor testing

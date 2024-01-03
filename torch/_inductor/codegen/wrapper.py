@@ -28,6 +28,7 @@ from ..utils import (
     cache_on_self,
     get_benchmark_name,
     LineContext,
+    OriginOpList,
     sympy_product,
     sympy_str,
 )
@@ -629,6 +630,7 @@ class WrapperCodeGen(CodeGen):
                 self.memory_plan_reuse()
 
             device_cm_stack = contextlib.ExitStack()
+            origin_info_list = None
             for line in self.lines:
                 if isinstance(line, MemoryPlanningLine):
                     line.codegen(self.wrapper_call)
@@ -640,6 +642,23 @@ class WrapperCodeGen(CodeGen):
                     ),
                 ):
                     line.codegen(self.wrapper_call, device_cm_stack)
+                elif isinstance(line, OriginOpList):
+                    # Save the line containing OriginOp Info so
+                    # it can be added to the nvtx marker when the
+                    # the kernel launch instruction is generated.
+                    origin_info_list = line
+                elif (
+                    origin_info_list
+                    and isinstance(line, str)
+                    and not re.search(r"^#", line)
+                    and config.profiler_mark_wrapper_call
+                ):
+                    # Inspect the contents of line to see if
+                    # it is an external kernel. Skip comment lines.
+                    # Emit record_function() into code stream around
+                    # the extern kernel call.
+                    origin_info_list.codegen(self.wrapper_call, line)
+                    origin_info_list = None
                 else:
                     self.wrapper_call.writeline(line)
 

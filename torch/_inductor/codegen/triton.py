@@ -46,6 +46,7 @@ from ..utils import (
     do_bench,
     get_fused_kernel_name,
     get_kernel_metadata,
+    get_origin_op_info,
     green_text,
     is_welford_reduction,
     next_power_of_2,
@@ -2207,6 +2208,9 @@ class TritonKernel(Kernel):
             "mutated_arg_names": mutated_args,
         }
 
+        if config.profiler_mark_wrapper_call:
+            inductor_meta["origin_ops"] = str(Placeholder.ORIGIN_INFO)
+
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
                 sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
@@ -2913,11 +2917,17 @@ class TritonScheduling(BaseScheduling):
             wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
 
+            op_info = None
+            if node_schedule and config.triton.descriptive_names:
+                op_info = get_origin_op_info(
+                    node_schedule, config.triton.descriptive_names
+                )
             # DESCRIPTIVE_NAME is used for profiling purposes; it shows the full kernel name
             # even when unique_kernel_names is turned off. Meanwhile, KERNEL_NAME is sometimes set
             # to "triton_" to maximize caching opportunities (when unique_kernel_names = False).
             src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
             src_code = src_code.replace(str(Placeholder.KERNEL_NAME), subs_name)
+            src_code = src_code.replace(f"'{Placeholder.ORIGIN_INFO}'", str(op_info))
 
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.

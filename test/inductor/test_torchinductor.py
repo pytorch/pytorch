@@ -8834,12 +8834,93 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
                 seq_nr_set = bwd_seq_nr_set if idx > 0 else fwd_seq_nr_set
                 prefix = "BWD" if idx > 0 else "FWD"
                 for line in code.split("\n"):
-                    if "seq_nr" in line:
-                        res = re.search(r"seq_nr:(\d+)", line)
-                        if res:
-                            seq_nr_set.add(int(res.group(1)))
+                    res = re.search(r"seq_nr:(\d+)", line)
+                    if res:
+                        seq_nr_set.add(int(res.group(1)))
 
             self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
+
+        @patch("torch._inductor.config.profiler_mark_wrapper_call", True)
+        def test_inductor_extern_kernel_mod_name(self):
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.conv1 = torch.nn.Conv2d(
+                        in_channels=16,
+                        out_channels=16,
+                        kernel_size=(1, 1),
+                        stride=1,
+                        padding="same",
+                        bias=True,
+                    )
+                    self.bn1 = torch.nn.BatchNorm2d(num_features=16)
+                    self.relu1 = torch.nn.ReLU()
+                    self.loss_fn = torch.nn.L1Loss()
+
+                def forward(self, x, target):
+                    y = x
+                    x = self.conv1(x)
+                    x = self.bn1(x)
+                    x = self.relu1(x)
+                    x = x + y
+                    x = torch.flatten(x)
+                    output = self.loss_fn(x, target)
+                    return (output,)
+
+            def get_triton_codegen(optimized_module, args):
+                def run_with_backward():
+                    result = optimized_module(*args)
+                    result[0].backward()
+                    return result
+
+                res, (fwd_code, bwd_code) = run_and_get_code(run_with_backward)
+                return fwd_code, bwd_code
+
+            x = torch.rand(100, 16, 32, 32, requires_grad=True, device="cuda")
+            target = torch.rand(1, device="cuda")
+            args = [x, target]
+            model = Model().cuda()
+            opt_model = torch.compile(model)
+            fwd_code, _ = get_triton_codegen(opt_model, args)
+
+            mod_name_list = []
+            for line in fwd_code.split("\n"):
+                mod_name = ""
+                res = re.search(
+                    r"RecordFunctionFast.*extern_.*'mod_name':\s+'(\S+)'", line
+                )
+                if res:
+                    mod_name = res.group(1)
+                    mod_name_list.append(mod_name)
+
+            # Now test the module names to make sure the regex in
+            # torch._inductor.utils.get_module_name_from_meta() is
+            # working as expected.
+            self.assertTrue(len(mod_name_list) > 0, "No module names found")
+            self.assertTrue(
+                all(mod.find("L.") == 0 for mod in mod_name_list),
+                "Module name string format L.* at index 0 expected",
+            )
+
+        @patch("torch._inductor.config.profiler_mark_wrapper_call", True)
+        def test_inductor_extern_kernel_marker(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(x):
+                return torch.mm(x, x)
+
+            x = torch.rand(32, 32, requires_grad=False, device="cuda")
+            _, fwd_code = run_and_get_code(fn, x)
+            record_mm_detected = False
+            for code in fwd_code:
+                for line in code.split("\n"):
+                    # Record function markers are inserted in generated code
+                    # for extern_kernels.  Extern kernels directly
+                    # call cuBlas or cuDNN, rather than generating
+                    # a triton kernel.
+                    res = re.search(r"RecordFunctionFast.*extern_kernel.*mm", line)
+                    if res:
+                        record_mm_detected = True
+            self.assertTrue(record_mm_detected)
 
     class RNNTest(TestCase):
         class Model(torch.nn.Module):

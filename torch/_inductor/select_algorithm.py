@@ -122,7 +122,14 @@ class TritonTemplateKernel(TritonKernel):
         }
         triton_meta["configs"] = [config_of(signature)]
 
-        inductor_meta = {"kernel_name": str(Placeholder.DESCRIPTIVE_NAME)}
+        inductor_meta = {
+            "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
+        }
+
+        # Include details of originating ops in the profiler message
+        if config.profiler_mark_wrapper_call:
+            inductor_meta["origin_ops"] = str(Placeholder.ORIGIN_INFO)
+
         return textwrap.dedent(
             f"""
             @template(

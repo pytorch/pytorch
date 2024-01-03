@@ -43,6 +43,7 @@ from .utils import (
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
+    get_origin_op_info,
     green_text,
     red_text,
     sympy_product,
@@ -2258,6 +2259,23 @@ class Scheduler:
                 node, *epilogue = node.get_nodes()
                 self.get_backend(device).codegen_template(node, epilogue)
             elif node.is_extern():
+                # Insert marker info
+                if config.triton.descriptive_names:
+                    op_info = get_origin_op_info(
+                        [node], config.triton.descriptive_names
+                    )
+                    write_op = True
+                    if isinstance(node.node, ir.FallbackKernel):
+                        op_info.kernel_prefix = "fallback"
+                    elif isinstance(
+                        node.node, (ir.ExternKernelOut, ir.ExternKernelAlloc)
+                    ):
+                        op_info.kernel_prefix = "extern"
+                    else:
+                        write_op = False
+
+                    if write_op:
+                        V.graph.wrapper_code.writeline(op_info)
                 self.codegen_extern_call(node)
             elif node.is_foreach():
                 self.get_backend(device).codegen_foreach(node)
