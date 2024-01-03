@@ -1,0 +1,36 @@
+[
+    { include: ["@<ATen/cpu/vec/vec512/.*>", private, "<ATen/cpu/vec/vec.h>", public] },
+    { include: ["@<ATen/cpu/vec/vec256/.*>", private, "<ATen/cpu/vec/vec.h>", public] },
+    { include: ["<ATen/cpu/vec/vec_base.h>", private, "<ATen/cpu/vec/vec.h>", public] },
+    { include: ["<ATen/cpu/vec/functional_base.h>", private, "<ATen/cpu/vec/functional.h>", public] },
+    { include: ["<ATen/cpu/vec/functional_bfloat16.h>", private, "<ATen/cpu/vec/functional.h>", public] },
+
+    { include: ["<ATen/core/Dict_inl.h>", private, "<ATen/core/Dict.h>", public] },
+    { include: ["<ATen/core/ivalue_inl.h>", private, "<ATen/core/ivalue.h>", public] },
+    { include: ["<ATen/core/DimVector.h>", public, "<ATen/DimVector.h>", public] },
+    { include: ["<ATen/core/Dimname.h>", public, "<ATen/Dimname.h>", public] },
+    { include: ["<ATen/core/symbol.h>", public, "<ATen/core/Dimname.h>", public] },
+    { include: ["<ATen/TensorIterator.h>", public, "<ATen/core/TensorIterator.h>", public] },
+
+    { include: ["<c10/core/WrapDimMinimal.h>", public, "<ATen/WrapDimUtils.h>", public] },
+    { include: ["<c10/util/SmallVector.h>", public, "<ATen/core/DimVector.h>", public] },
+
+    { include: ["<c10/util/MaybeOwned.h>", public, "<ATen/core/TensorBase.h>", public] },
+    { include: ["<c10/core/TensorImpl.h>", public, "<ATen/core/TensorBase.h>", public] },
+    { include: ["<c10/core/UndefinedTensorImpl.h>", public, "<ATen/core/TensorBase.h>", public] },
+    { include: ["<c10/core/TensorOptions.h>", public, "<ATen/core/TensorBase.h>", public] },
+
+    { include: ["<ATen/core/TensorBase.h>", public, "<ATen/core/Tensor.h>", public] },
+    { include: ["<ATen/core/TensorBody.h>", private, "<ATen/core/Tensor.h>", public] },
+    { symbol: ["at::Tensor", private, "<ATen/core/Tensor.h>", public] },
+
+    { include: ["<ATen/Parallel-inl.h>", private, "<ATen/Parallel.h>", public] },
+    { include: ["<ATen/ParallelOpenMP.h>", private, "<ATen/Parallel.h>", public] },
+    { include: ["<ATen/ParallelNative.h>", private, "<ATen/Parallel.h>", public] },
+    { include: ["<ATen/ParallelNativeTBB.h>", private, "<ATen/Parallel.h>", public] },
+
+    { include: ["<qnnpack/common.h>", public, "<pack_block_sparse.h>", public] },
+    { include: ["<qnnpack/math.h>", public, "<pack_block_sparse.h>", public] },
+    { include: ["<qnnpack/operator.h>", public, "<qnnpack_func.h>", public] },
+    { include: ["<qnnpack/log.h>", public, "<pytorch_qnnpack.h>", public] },
+]

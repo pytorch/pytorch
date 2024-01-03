@@ -1,0 +1,210 @@
+name: mac-build
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      runner-type:
+        required: true
+        type: string
+        description: Name of the GitHub-managed runner type to use for the build.
+      build-generates-artifacts:
+        required: true
+        type: boolean
+        description: If set, upload generated build artifacts.
+      xcode-version:
+        required: false
+        type: string
+        default: ""
+        description: What xcode version to build with.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
+      python-version:
+        required: false
+        type: string
+        default: "3.8"
+        description: |
+          The python version to be used. Will be 3.8 by default
+      environment-file:
+        required: false
+        type: string
+        description: Set the conda environment file used to setup macOS build.
+      test-matrix:
+        required: false
+        type: string
+        description: |
+          An option JSON description of what test configs to run later on. This
+          is moved here from the Linux test workflow so that we can apply filter
+          logic using test-config labels earlier and skip unnecessary builds
+      sccache-use-gha:
+        required: false
+        type: boolean
+        default: false
+        description: If true, use the Github cache as the storage option for sccache instead of S3.
+
+    outputs:
+      test-matrix:
+        value: ${{ jobs.build.outputs.test-matrix }}
+        description: An optional JSON description of what test configs to run later on.
+      build-outcome:
+        value: ${{ jobs.build.outputs.build-outcome }}
+        description: The outcome of the build step. This is used to influence test filtering logic later on.
+
+jobs:
+  build:
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch'
+    runs-on: ${{ inputs.runner-type }}
+    env:
+      BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+      SCCACHE_USE_GHA: ${{ inputs.sccache-use-gha }}  # this is placed here instead of the sccache step to appease actionlint
+    outputs:
+      build-outcome: ${{ steps.build.outcome }}
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+    steps:
+      - name: Clean up disk space before running MacOS workflow
+        uses: pytorch/test-infra/.github/actions/check-disk-space@main
+
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
+      - name: Set xcode version
+        env:
+          XCODE_VERSION: ${{ inputs.xcode-version }}
+        run: |
+          if [ -n "${XCODE_VERSION}" ]; then
+            echo "DEVELOPER_DIR=/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Setup miniconda
+        if: inputs.environment-file == ''
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python-version: ${{ inputs.python-version }}
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
+
+      # This option is used when cross-compiling arm64 from x86-64. Specifically, we need arm64 conda
+      # environment even though the arch is x86-64
+      - name: Setup miniconda using the provided environment file
+        if: inputs.environment-file != ''
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python-version: ${{ inputs.python-version }}
+          environment-file: ${{ inputs.environment-file }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
+
+      - name: Install sccache (only for non-forked PRs, and pushes to trunk)
+        uses: nick-fields/retry@v2.8.2
+        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            set -ex
+
+            DOWNLOAD_SCCACHE=0
+            SCCACHE_VERSION="0.4.1"
+            LOCAL_PATH="/usr/local/bin"
+
+            if [ ! -f "${LOCAL_PATH}/sccache" ]; then
+              DOWNLOAD_SCCACHE=1
+            else
+              LOCAL_VERSION=$("${LOCAL_PATH}/sccache" --version | cut -d" " -f2)
+
+              if [ "${LOCAL_VERSION}" != "${SCCACHE_VERSION}" ]; then
+                DOWNLOAD_SCCACHE=1
+              fi
+            fi
+
+            if [ "${DOWNLOAD_SCCACHE}" == "1" ]; then
+              sudo curl --retry 3 --retry-all-errors "https://s3.amazonaws.com/ossci-macos/sccache/sccache-v0.4.1-${RUNNER_ARCH}" --output "${LOCAL_PATH}/sccache"
+              sudo chmod +x "${LOCAL_PATH}/sccache"
+            fi
+
+            if [[ "${SCCACHE_USE_GHA}" == "true" ]]; then
+              echo "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL}" >> "${GITHUB_ENV}"
+              echo "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN}" >> "${GITHUB_ENV}"
+              echo "SCCACHE_GHA_ENABLED=on" >> "${GITHUB_ENV}"
+            else
+              # The runner has access to the S3 bucket via IAM profile without the need
+              # for any credential
+              echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
+              echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
+            fi
+
+            # This is needed so that later build script could find sccache (which sccache)
+            echo "${LOCAL_PATH}" >> $GITHUB_PATH
+
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Apply the filter logic to the build step too if the test-config label is already there
+      - name: Select all requested test configurations (if the test matrix is available)
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+          job-name: ${{ steps.get-job-id.outputs.job-name }}
+
+      - name: Build
+        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
+        id: build
+        env:
+          OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+        run: |
+          echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
+
+          if [[ -n "$CONDA_ENV" ]]; then
+            # Use binaries under conda environment
+            export PATH="$CONDA_ENV/bin":$PATH
+          fi
+
+          # NB: Same trick as Linux, there is no need to initialize sccache with the risk of getting
+          # it hangs or timeout at initialization. The cache will be started automatically
+          export SKIP_SCCACHE_INITIALIZATION=1
+          ${CONDA_RUN} .ci/pytorch/macos-build.sh
+
+      - name: Archive artifacts into zip
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
+        run: |
+          zip -1 -r artifacts.zip dist/ build/.ninja_log build/compile_commands.json .additional_ci_files
+
+      - name: Store PyTorch Build Artifacts on GHA
+        uses: actions/upload-artifact@v3
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
+        with:
+          name: ${{ env.BUILD_ENVIRONMENT }}
+          retention-days: 14
+          if-no-files-found: error
+          path: artifacts.zip
+
+      - name: Upload sccache stats to GHA
+        uses: actions/upload-artifact@v3
+        # Only if sccache is installed, see above
+        if: ${{ (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && steps.build.outcome != 'skipped' }}
+        with:
+          name: sccache-stats-${{ inputs.build-environment }}-runattempt${{ github.run_attempt }}-${{ steps.get-job-id.outputs.job-id }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: sccache-stats-*.json
+
+      - name: Clean up disk space
+        if: always()
+        continue-on-error: true
+        uses: pytorch/test-infra/.github/actions/check-disk-space@main
