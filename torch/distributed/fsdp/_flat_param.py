@@ -2707,15 +2707,15 @@ def _warn_use_fake_reduce(log: logging.Logger, warning: str):
 
 @torch._dynamo.allow_in_graph
 def _same_storage(a, b):
-    return a.untyped_storage()._data_ptr() == b.untyped_storage()._data_ptr()
+    return a.untyped_storage().data_ptr() == b.untyped_storage().data_ptr()
 
 
 @torch._dynamo.allow_in_graph
 def _same_storage_size(a: torch.Tensor, b: int):
-    return a.untyped_storage()._size() == b
+    return a.untyped_storage().size() == b
 
 
 @torch._dynamo.allow_in_graph
 def _storage_size_allocated(tensor: Tensor):
-    storage_size: int = tensor.untyped_storage()._size()
+    storage_size: int = tensor.untyped_storage().size()
     return storage_size > 0
