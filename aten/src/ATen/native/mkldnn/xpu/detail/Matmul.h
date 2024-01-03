@@ -28,9 +28,9 @@ static inline void matmul(
       "oneDNN input matrixes must have the same ranks");
   TORCH_CHECK(result.defined(), "oneDNN matmul result should be defined");
 
-  at::Device curDevice = at::Device(at::kXPU, current_device());
-  auto engine = GpuEngineManager::Instance().get_engine(curDevice);
-  auto strm = GpuStreamManager::Instance().get_stream();
+  at::Device cur_device = at::Device(at::kXPU, current_device());
+  auto engine = GpuEngineManager::Instance().get_engine(cur_device);
+  auto stream = GpuStreamManager::Instance().get_stream();
 
   at::Tensor m1 =
       xpu::onednn::is_onednn_matmul_strides(mat1) ? mat1 : mat1.contiguous();
@@ -234,7 +234,7 @@ static inline void matmul(
     args.insert({DNNL_ARG_BIAS, bias_m});
   }
 
-  XPU_ONEDNN_EXEC(matmul_p, strm, args);
+  XPU_ONEDNN_EXEC(matmul_p, stream, args);
 
   if (!dst.is_same(result))
     result.copy_(dst);
