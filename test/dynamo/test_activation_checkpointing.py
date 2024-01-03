@@ -20,10 +20,6 @@ from torch.utils.checkpoint import _pt2_selective_checkpoint_context_fn_gen, che
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
-def not_none(obj):
-    return obj is not None
-
-
 def count_ops(
     gm, args, freq=None, freq_ge=None, op=None, freqs=None, freqs_ge=None, ops=None
 ):
@@ -38,11 +34,11 @@ def count_ops(
     assert ((freq or freq_ge) and op) or ((freqs or freqs_ge) and ops)
     if op:
         ops = [op]
-    if not_none(freq):
+    if freq:
         freqs = [freq]
-    if not_none(freq_ge):
+    if freq_ge:
         freqs_ge = [freq_ge]
-    if not_none(freqs):
+    if freqs:
         for op, freq in zip(ops, freqs):
             actual_count = 0
             for node in gm.graph.nodes:
@@ -52,7 +48,7 @@ def count_ops(
                 actual_count == freq
             ), f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
     else:
-        assert not_none(freqs_ge)
+        assert freqs_ge is not None
         for op, freq_ge in zip(ops, freqs_ge):
             actual_count = 0
             for node in gm.graph.nodes:
@@ -94,9 +90,9 @@ def op_count(gm):
     return result
 
 
-def _get_custom_policy(func_list=None):
+def _get_custom_policy(no_recompute_list=None):
     def _custom_policy(mode, func, *args, **kwargs):
-        return func in func_list
+        return func in no_recompute_list
 
     return _custom_policy
 
@@ -484,87 +480,14 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
-    def test_compile_selective_checkpoint_must_recompute(self):
-        def context_fn_must_recompute_sigmoid():
-            no_recompute_list = [
-                torch.ops.aten.mm.default,
-            ]
-            must_recompute_list = [
-                torch.ops.aten.sigmoid.default,
-            ]
-            return context_fn_gen(
-                no_recompute_policy_fn=_get_custom_policy(func_list=no_recompute_list),
-                must_recompute_policy_fn=_get_custom_policy(
-                    func_list=must_recompute_list
-                ),
-            )
-
-        def context_fn_let_partitioner_decide_on_sigmoid():
-            no_recompute_list = [
-                torch.ops.aten.mm.default,
-            ]
-            return _pt2_selective_checkpoint_context_fn_gen(
-                _get_custom_policy(func_list=no_recompute_list)
-            )
-
-        def _test(context_fn, bw_compiler):
-            def gn(x):
-                # NOTE: Normally in this case, sigmoid doesn't need to be recomputed
-                # (because we always have its output which is the program output).
-                # But here we show that we can force its recomputation by using
-                # `context_fn_gen`'s `must_recompute_policy_fn` arg.
-                return torch.sigmoid(torch.matmul(x, x))
-
-            def fn(x):
-                return torch.utils.checkpoint.checkpoint(
-                    gn,
-                    x,
-                    use_reentrant=False,
-                    context_fn=context_fn,
-                )
-
-            x = torch.randn(4, 4, requires_grad=True)
-
-            fw_compiler = functools.partial(
-                count_ops,
-                freq=1,
-                op=torch.ops.aten.sigmoid.default,
-            )
-
-            backend = aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                partition_fn=min_cut_rematerialization_partition,
-            )
-            self._validate(fn, backend, x)
-
-        _test(
-            context_fn=context_fn_must_recompute_sigmoid,
-            bw_compiler=functools.partial(
-                count_ops,
-                freq=1,  # sigmoid should be recomputed
-                op=torch.ops.aten.sigmoid.default,
-            ),
-        )
-        _test(
-            context_fn=context_fn_let_partitioner_decide_on_sigmoid,
-            bw_compiler=functools.partial(
-                count_ops,
-                freq=0,  # sigmoid should not be recomputed
-                op=torch.ops.aten.sigmoid.default,
-            ),
-        )
-
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @torch._dynamo.config.patch(
-        "_experimental_support_context_fn_in_torch_utils_checkpoint", True
-    )
-    def test_compile_selective_checkpoint_exclude_gemm_only(self):
+    def test_compile_selective_checkpoint_gemm_only(self):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
                 torch.ops.aten.mm.default,
             ]
-            return context_fn_gen(_get_custom_policy(func_list=no_recompute_list))
+            return _pt2_selective_checkpoint_context_fn_gen(
+                _get_custom_policy(no_recompute_list=no_recompute_list)
+            )
 
         def gn(x, y):
             return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
@@ -682,7 +605,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 torch.ops.aten.sigmoid.default,
             ]
             return _pt2_selective_checkpoint_context_fn_gen(
-                _get_custom_policy(func_list=no_recompute_list),
+                _get_custom_policy(no_recompute_list=no_recompute_list),
             )
 
         def gn(x, y):
@@ -734,7 +657,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 torch.ops.aten.sigmoid.default,
             ]
             return _pt2_selective_checkpoint_context_fn_gen(
-                _get_custom_policy(func_list=no_recompute_list)
+                _get_custom_policy(no_recompute_list=no_recompute_list)
             )
 
         def gn(x, y):
@@ -785,7 +708,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                     torch.ops.aten.sigmoid.default,
                 ]
                 return _pt2_selective_checkpoint_context_fn_gen(
-                    _get_custom_policy(func_list=no_recompute_list)
+                    _get_custom_policy(no_recompute_list=no_recompute_list)
                 )
 
             def gn(x):

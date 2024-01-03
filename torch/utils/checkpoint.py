@@ -1175,23 +1175,19 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
     A :class:`TorchDispatchMode` to implement selective activation checkpointing
     that's compatible with torch.compile. Used together with _CachedTorchDispatchMode.
     """
-    def __init__(self, no_recompute_policy_fn, must_recompute_policy_fn, storage):
-        self.no_recompute_policy_fn = no_recompute_policy_fn
-        self.must_recompute_policy_fn = must_recompute_policy_fn
+    def __init__(self, policy_fn, storage):
+        self.policy_fn = policy_fn
         self.storage = storage
 
     def push_into_storage(self, out, func, args, kwargs):
         out_detached = tree_map(_detach, out)
         self.storage[func].append(out_detached)
 
-    def _handle_compile_in_forward_ctx(self, no_recompute, must_recompute, func, args, kwargs):
+    def _handle_compile_in_forward_ctx(self, should_not_recompute, func, args, kwargs):
         if func in _ignored_ops:
             return func(*args, **kwargs)
-        assert not (no_recompute and must_recompute)
-        if no_recompute:
+        if should_not_recompute:
             fx_traceback.current_meta["recompute"] = 0
-        if must_recompute:
-            fx_traceback.current_meta["recompute"] = -1
         # NOTE: Here we just store and reuse output of all ops, since in torch.compile mode
         # we decide and handle recomputation in the partitioner.
         out = func(*args, **kwargs)
@@ -1201,13 +1197,11 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-        no_recompute = self.no_recompute_policy_fn("forward", func, *args, **kwargs)
-        must_recompute = self.must_recompute_policy_fn("forward", func, *args, **kwargs)
-        assert not (no_recompute and must_recompute), f"{func} cannot be both no_recompute and must_recompute at the same time"
+        should_not_recompute = self.policy_fn("forward", func, *args, **kwargs)
         if _is_compiling(func, args, kwargs):
-            return self._handle_compile_in_forward_ctx(no_recompute, must_recompute, func, args, kwargs)
+            return self._handle_compile_in_forward_ctx(should_not_recompute, func, args, kwargs)
         else:
-            if no_recompute:
+            if should_not_recompute:
                 out = func(*args, **kwargs)
                 self.push_into_storage(out, func, args, kwargs)
             else:
@@ -1220,9 +1214,8 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
     A :class:`TorchDispatchMode` to implement selective activation checkpointing
     that's compatible with torch.compile. Used together with _CachingTorchDispatchMode.
     """
-    def __init__(self, no_recompute_policy_fn, must_recompute_policy_fn, storage):
-        self.no_recompute_policy_fn = no_recompute_policy_fn
-        self.must_recompute_policy_fn = must_recompute_policy_fn
+    def __init__(self, policy_fn, storage):
+        self.policy_fn = policy_fn
         self.storage = storage
 
     def pop_from_storage(self, func, args, kwargs):
@@ -1230,7 +1223,7 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         out = self.storage[func].pop(0)
         return out
 
-    def _handle_compile_in_recompute_ctx(self, func, args, kwargs):
+    def _handle_compile_in_recompute_ctx(self, should_not_recompute, func, args, kwargs):
         if func in _ignored_ops:
             return func(*args, **kwargs)
         out = self.pop_from_storage(func, args, kwargs)
@@ -1239,18 +1232,18 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+        should_not_recompute = self.policy_fn("recompute", func, *args, **kwargs)
         if _is_compiling(func, args, kwargs):
-            return self._handle_compile_in_recompute_ctx(func, args, kwargs)
+            return self._handle_compile_in_recompute_ctx(should_not_recompute, func, args, kwargs)
         else:
-            no_recompute = self.no_recompute_policy_fn("recompute", func, *args, **kwargs)
-            if no_recompute:
+            if should_not_recompute:
                 out = self.pop_from_storage(func, args, kwargs)
             else:
                 out = func(*args, **kwargs)
             return out
 
 
-def _pt2_selective_checkpoint_context_fn_gen(no_recompute_policy_fn=None, must_recompute_policy_fn=None):
+def _pt2_selective_checkpoint_context_fn_gen(policy_fn):
     """
     A helper function that generates a pair of contexts to be later passed into
     `torch.utils.checkpoint` API to implment selective checkpointing.
@@ -1259,23 +1252,14 @@ def _pt2_selective_checkpoint_context_fn_gen(no_recompute_policy_fn=None, must_r
         This is context_fn is intended for use with torch.compile only.
 
     Args:
-        no_recompute_policy_fn (Callable[[Callable, List[Any], Dict[str, Any]], bool]): Policy function
+        policy_fn (Callable[[Callable, List[Any], Dict[str, Any]], bool]): Policy function
             to decide whether a particular op should be recomputed in backward pass or not.
             In eager mode:
-                If no_recompute_policy_fn(...) returns True, the op is guaranteed to NOT be recomputed.
-                If no_recompute_policy_fn(...) returns False, the op is guaranteed to be recomputed.
+                If policy_fn(...) returns True, the op is guaranteed to NOT be recomputed.
+                If policy_fn(...) returns False, the op is guaranteed to be recomputed.
             In torch.compile mode:
-                If no_recompute_policy_fn(...) returns True, the op is guaranteed to NOT be recomputed.
-                If no_recompute_policy_fn(...) returns False, the op may or may not be recomputed
-                (it's up to the partitioner to decide).
-        must_recompute_policy_fn (Callable[[Callable, List[Any], Dict[str, Any]], bool]): Policy function
-            to decide whether a particular op should be recomputed in backward pass or not.
-            In eager mode:
-                If must_recompute_policy_fn(...) returns True, the op is guaranteed to be recomputed.
-                If must_recompute_policy_fn(...) returns False, the op is guaranteed to NOT be recomputed.
-            In torch.compile mode:
-                If must_recompute_policy_fn(...) returns True, the op is guaranteed to be recomputed.
-                If must_recompute_policy_fn(...) returns False, the op may or may not be recomputed
+                If policy_fn(...) returns True, the op is guaranteed to NOT be recomputed.
+                If policy_fn(...) returns False, the op may or may not be recomputed
                 (it's up to the partitioner to decide).
 
     Returns:
@@ -1284,26 +1268,16 @@ def _pt2_selective_checkpoint_context_fn_gen(no_recompute_policy_fn=None, must_r
     Example:
         >>> # xdoctest: +REQUIRES(LINUX)
         >>>
-        >>> def get_custom_policy(func_list=None):
-        >>>     def _custom_policy(mode, func, *args, **kwargs):
-        >>>         return func in func_list
-        >>>     return _custom_policy
-        >>>
-        >>> def selective_checkpointing_context_fn():
+        >>> def get_custom_policy():
         >>>     no_recompute_list = [
         >>>         torch.ops.aten.mm.default,
         >>>     ]
-        >>>     must_recompute_list = [
-        >>>         torch.ops.aten.sigmoid.default,
-        >>>     ]
-        >>>     return context_fn_gen(
-        >>>         no_recompute_policy_fn=get_custom_policy(
-        >>>             func_list=no_recompute_list
-        >>>         ),
-        >>>         must_recompute_policy_fn=get_custom_policy(
-        >>>             func_list=must_recompute_list
-        >>>         ),
-        >>>     )
+        >>>     def custom_policy(mode, func, *args, **kwargs):
+        >>>         return func in no_recompute_list
+        >>>     return custom_policy
+        >>>
+        >>> def selective_checkpointing_context_fn():
+        >>>     return _pt2_selective_checkpoint_context_fn_gen(get_custom_policy())
         >>>
         >>> def gn(x, y):
         >>>     return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
@@ -1320,27 +1294,8 @@ def _pt2_selective_checkpoint_context_fn_gen(no_recompute_policy_fn=None, must_r
         >>>
         >>> compiled_fn = torch.compile(fn)
     """
-    assert not (no_recompute_policy_fn is None and must_recompute_policy_fn is None), \
-        "At least one of no_recompute_policy_fn and must_recompute_policy_fn needs to be specified."
-
-    def noop_policy(mode, func, *args, **kwargs):
-        return False
-
-    if no_recompute_policy_fn is None:
-        no_recompute_policy_fn = noop_policy
-
-    if must_recompute_policy_fn is None:
-        must_recompute_policy_fn = noop_policy
-
     storage: Dict[Any, List[Any]] = defaultdict(list)
-    return (
-        _CachingTorchDispatchMode(
-            no_recompute_policy_fn, must_recompute_policy_fn, storage
-        ),
-        _CachedTorchDispatchMode(
-            no_recompute_policy_fn, must_recompute_policy_fn, storage
-        ),
-    )
+    return _CachingTorchDispatchMode(policy_fn, storage), _CachedTorchDispatchMode(policy_fn, storage)
 
 
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and

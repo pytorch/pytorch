@@ -29,7 +29,7 @@ class AsyncFuncHandle:
   We use this class to represent the function that needs to be scheduled.
   It also has methods for checking whether the function has been scheduled or completed.
   """
-  _gm_to_handle_mapping: Dict[torch.fx.GraphModule, "AsyncFuncHandle"] = {}
+  gm_to_handle_mapping: Dict[torch.fx.GraphModule, "AsyncFuncHandle"] = {}
 
   def __init__(self, compiled_fn, args, outs_async, scheduler):
     self.cuda_event = torch.cuda.Event()
@@ -45,7 +45,7 @@ class AsyncFuncHandle:
     if self.is_going_to_be_scheduled:
       return
     self.is_going_to_be_scheduled = True
-    gm = self._scheduler()._handle_to_gm_map[self]
+    gm = self._scheduler().handle_to_gm_map[self]
     AsyncTensor.wait_until_materialized(self.args)
     args_materialized = pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor, pytree.tree_map(lambda x: x.detach(), self.args))
     self.outs = self.compiled_fn(list(args_materialized))
@@ -128,9 +128,10 @@ class LazyScheduler:
   """
   LazyScheduler is used to decide when to schedule the execution of a graph module (based on the schedule).
   """
-  def __init__(self):
-    self._gm_to_handle_map = OrderedDict()
-    self._handle_to_gm_map = OrderedDict()
+  def __init__(self, schedule):
+    self.schedule = schedule
+    self.gm_to_handle_map = OrderedDict()
+    self.handle_to_gm_map = OrderedDict()
 
   def _compile_fx_with_segment_info(
     self,
@@ -201,12 +202,12 @@ class LazyScheduler:
       outs_fake = gm(*args_fake)
 
     outs_async = tuple(AsyncTensor(fake_tensor=out_fake) for out_fake in outs_fake)
-    if gm in self._gm_to_handle_map:
-      cur_handle = self._gm_to_handle_map[gm]
+    if gm in self.gm_to_handle_map:
+      cur_handle = self.gm_to_handle_map[gm]
     else:
       cur_handle = AsyncFuncHandle(compiled_fn, args=args, outs_async=outs_async, scheduler=self)
-      self._gm_to_handle_map[gm] = cur_handle
-      self._handle_to_gm_map[cur_handle] = gm
+      self.gm_to_handle_map[gm] = cur_handle
+      self.handle_to_gm_map[cur_handle] = gm
     for out_async in outs_async:
       out_async.set_handle(cur_handle)
 
@@ -234,8 +235,7 @@ class TestModule(torch.nn.Module):
     return torch.matmul(x, z)
 
   def func2(self, x, y):
-    z = torch.add(x, y)
-    return z
+    return torch.add(x, y)
 
   def forward(self, x, y):
     z = self.func1(x, y)
@@ -377,7 +377,7 @@ class TestLazyScheduler(TestCase):
 
     segment_dict = {}
 
-    # This is roughly how the register_segment function will look like
+    # This is roughly how the official register_segment function will look like
     def register_segment(method, name):
       nonlocal segment_dict
       segment_dict[method] = name
@@ -407,9 +407,8 @@ class TestLazyScheduler(TestCase):
       **kwargs,
     ):
       gm_after_split = lazy_scheduler.compile_fx(gm, example_inputs, segment_assignment_fn, **kwargs)
-      # func2 is the middle function in TestModule, so should produce 3 submodules
+      # func2 is the middle function in TestModule, so the segment should cut the module into 3 submodules
       self.assertEqual(len(list(gm_after_split.named_children())), 3)
-      print(f"gm_after_split: {gm_after_split}")
       for name, submod in gm_after_split.named_children():
         self.assertTrue(isinstance(submod, _LazilyCompiledModule))
       return gm_after_split
@@ -425,10 +424,121 @@ class TestLazyScheduler(TestCase):
       y,
     )
 
+  def test_explicit_schedule(self):
+    class TestScheduleModule(torch.nn.Module):
+      def __init__(self):
+        super().__init__()
+
+      def func1(self, x, y):
+        return torch.matmul(x, y)
+
+      def func2(self, x, y):
+        return torch.add(x, y)
+
+      def forward(self, x, y):
+        z1 = self.func1(x, y)
+        z2 = self.func2(x, y)
+        z = z1 * z2
+        return z
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    m = TestScheduleModule()
+    m = m.to(device)
+    x = torch.randn(4, 4, requires_grad=True, device=device)
+    y = torch.randn(4, 4, requires_grad=True, device=device)
+
+    # This is the explicit schedule (i.e. execution order)
+    schedule = ["func2", "func1"]
+    lazy_scheduler = LazyScheduler(schedule)
+
+    segment_dict = {}
+
+    # This is roughly how the official register_segment function will look like
+    def register_segment(method, name):
+      nonlocal segment_dict
+      segment_dict[method] = name
+
+    register_segment(m.func1, "func1")
+    register_segment(m.func2, "func2")
+
+    def segment_assignment_fn(gm):
+      nonlocal segment_dict
+      next_unnamed_segment_id = 0
+      in_unnamed_segment = False
+      for _, node in enumerate(gm.graph.nodes):
+        assert "nn_module_method" in node.meta
+        if node.meta["nn_module_method"] in segment_dict:
+          if in_unnamed_segment:
+            in_unnamed_segment = False
+            next_unnamed_segment_id += 1
+          node.meta["segment"] = str(node.meta["nn_module_method"])
+        else:
+          if not in_unnamed_segment:
+            in_unnamed_segment = True
+          node.meta["segment"] = str(next_unnamed_segment_id)
+
+    def compile_fx_count_submods(
+      gm: torch.fx.GraphModule,
+      example_inputs: List[torch.Tensor],
+      segment_assignment_fn=None,
+      **kwargs,
+    ):
+      gm_after_split = lazy_scheduler.compile_fx(gm, example_inputs, segment_assignment_fn, **kwargs)
+      # 3 submodules: func1, func2, rest of forward
+      self.assertEqual(len(list(gm_after_split.named_children())), 3)
+      for name, submod in gm_after_split.named_children():
+        self.assertTrue(isinstance(submod, _LazilyCompiledModule))
+      return gm_after_split
+
+    self._validate(
+      m,
+      functools.partial(
+        compile_fx_count_submods,
+        inner_compile=lazy_scheduler.compile_fx_inner,
+        segment_assignment_fn=segment_assignment_fn
+      ),
+      x,
+      y,
+    )
+
+    # TODO: assert that execution order is as expected
+
+    pass  # TODO
+
+  def test_register_segment_hook(self):
+    # Use segment hook instead of explicit schedule to specify the execution order
+    """
+    class SDDModule(nn.Module):
+      def forward(self, x):
+        return x
+
+    sdd_m = SDDModule()
+    register_segment(sdd_m.forward, call=0, name="sdd_0")
+
+
+    class OverArchModule(nn.Module):
+      def func1(self, x):
+        return x
+
+      def func2(self, x):
+        return x
+
+      def forward(self, x):
+        x = self.func1(x)
+        x = self.func2(x)
+        return x
+
+    overarch_m = OverArchModule()
+    # register_segment_forward_hook("overarch_0", ...)
+    register_segment(overarch_m.func1, call=0, name="overarch_0")
+    register_segment_backward_hook("overarch_0", "sdd_0")
+    """
+    pass
+
 """
 TODO:
-1. Enable test_segment_tagging to check segment tagging is working
-2. Add scheduling logic, add unit test to check it's working
+1. Add scheduling logic, add unit test to check it's working
+2. Draw the workflow in a flowchart, show to Boyuan
 """
 
 if __name__ == "__main__":
