@@ -587,6 +587,8 @@ static inline bool canCast(const ScalarType from, const ScalarType to) {
   return true;
 }
 
+C10_API ScalarType promoteTypes(ScalarType a, ScalarType b);
+
 inline std::ostream& operator<<(
     std::ostream& stream,
     at::ScalarType scalar_type) {
