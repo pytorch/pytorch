@@ -4161,13 +4161,6 @@ def upsample_nearest2d_backward(
     return rv
 
 
-fallbacks_avg_poolnd = (
-    fallback_handler(aten.avg_pool1d.default, add_to_fallback_set=False),
-    fallback_handler(aten.avg_pool2d.default, add_to_fallback_set=False),
-    fallback_handler(aten.avg_pool3d.default, add_to_fallback_set=False),
-)
-
-
 @register_lowering(aten.avg_pool1d, type_promotion_kind=None)
 def avg_pool1d(
     x,
@@ -4260,11 +4253,11 @@ def _avg_poolnd(
 
     x.realize_hint()
     batch = x.get_size()[:-dim]
-    dhw = x.get_size()[-dim:]
+    h = x.get_size()[-dim:]
 
     h_out, ceil_modes = zip(
         *[
-            pooling_size(dhw[i], i, kernel_size, stride, padding, ceil_mode)
+            pooling_size(h[i], i, kernel_size, stride, padding, ceil_mode)
             for i in range(dim)
         ]
     )
@@ -4279,60 +4272,51 @@ def _avg_poolnd(
     new_size = list(batch) + list(h_out)
     dtype = x.get_dtype()
 
-    window_size = functools.reduce(operator.mul, kernel_size)
-    if window_size > 25:
-        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
-        return fallbacks_avg_poolnd[dim - 1](
-            x,
-            kernel_size,
-            stride,
-            padding,
-            ceil_mode,
-            count_include_pad,
-            divisor_override,
-        )
+    def fn_sum(loader):
+        def fn_inner(idx, reduction_idx):
+            prefix = idx[:-dim]
+            bh = idx[-dim:]
+            ih = reduction_idx
+            ih = [bh[i] * stride[i] + ih[i] - padding[i] for i in range(dim)]
+            return loader([*prefix, *ih])
 
-    def fn_sum(idx, loader):
-        prefix = idx[:-dim]
-        b = idx[-dim:]
-        total = None
-        for idhw in itertools.product(*[range(kernel_size[i]) for i in range(dim)]):
-            inp = [b[i] * stride[i] + idhw[i] - padding[i] for i in range(dim)]
-            val = loader([*prefix, *inp])
-            if total is None:
-                total = val
-            else:
-                total = ops.add(val, total)
-        return total
+        rv = Reduction.create(
+            reduction_type="sum",
+            input_node=x,
+            device=x.get_device(),
+            dst_dtype=dtype,
+            src_dtype=dtype,
+            inner_fn=fn_inner,
+            ranges=new_size,
+            reduction_ranges=kernel_size,
+        )
+        if isinstance(rv.data.data, Reduction):
+            # Only realize if reduction isn't unrolled
+            rv.realize()
+        return rv
 
     if not had_padding or divisor_override:
         if divisor_override:
             scale = 1 / divisor_override
         else:
-            scale = 1.0 / window_size
+            scale = 1.0 / functools.reduce(operator.mul, kernel_size)
 
-        def fn(idx):
-            return ops.mul(fn_sum(idx, x_loader), ops.constant(scale, dtype))
-
+        return mul(fn_sum(x_loader), scale)
     else:
-        ones_loader = constant_boundary_condition(
-            ones_like(x),
-            1.0 if count_include_pad else 0.0,
-            dim=dim,
-        )
 
-        def fn(idx):
-            # TODO(jansel): optimize to do `int(x<h)` rather than `x<h?1:0`
-            return ops.truediv(fn_sum(idx, x_loader), fn_sum(idx, ones_loader))
+        def ones_loader(idx):
+            prefix = idx[:-dim]
+            bh = idx[-dim:]
+            lower = [-padding[i] if count_include_pad else 0 for i in range(dim)]
+            upper = [
+                h[i] + padding[i] if count_include_pad else h[i] for i in range(dim)
+            ]
+            masks = [range_mask(bh[i], upper[i], lower[i]) for i in range(dim)]
+            mask = functools.reduce(ops.and_, masks)
+            return ops.masked(mask, lambda: ops.constant(1, dtype), 0)
 
-    rv = Pointwise.create(
-        device=x.get_device(),
-        dtype=dtype,
-        inner_fn=fn,
-        ranges=new_size,
-    )
-    # TODO(jansel): should we force these to be realized?
-    return rv
+        # TODO(jansel): optimize to do `int(x<h)` rather than `x<h?1:0`
+        return div(fn_sum(x_loader), fn_sum(ones_loader))
 
 
 fallback_avg_pool2d_backward = fallback_handler(
