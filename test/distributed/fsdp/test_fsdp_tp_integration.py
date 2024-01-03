@@ -329,9 +329,9 @@ class TestTPFSDPIntegration(FSDPTest):
         self.assertEqual(fsdp_out, tp_fsdp_out)
 
     @skip_if_lt_x_gpu(4)
-    def test_fsdp_tp_gradient_layout(self):
+    def test_fsdp_tp_extension_grad(self):
         """
-        Tests TP + FSDP extension with consistent gradient layout
+        Tests TP + FSDP extension with correct gradient (i.e. no ACT)
         """
         mesh_2d = init_device_mesh(
             "cuda", (self.world_size // 2, 2), mesh_dim_names=["dp", "tp"]
@@ -376,9 +376,6 @@ class TestTPFSDPIntegration(FSDPTest):
         grads = [p.grad for p in fsdp_2d_model.parameters() if p.grad is not None]
 
         for grad in grads:
-            if isinstance(grad, DTensor):
-                grad = grad.full_tensor()
-
             self.assertFalse(grad.isnan().any().item())
 
 
