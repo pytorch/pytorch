@@ -220,7 +220,7 @@ class UnionFind:
         par = self.parent[v]
         if v == par:
             return v
-        assert (par is not None)
+        assert par is not None
         self.parent[v] = self.find(par)
         return cast(int, self.parent[v])
 
@@ -360,7 +360,7 @@ def optimize_for_inference(
             node.start_color = cur_idx
             uf.make_set(cur_idx)
         elif node.op == 'call_method' and node.target == 'to_dense':
-            assert (get_color(node.args[0]) is not None)
+            assert get_color(node.args[0]) is not None
             node.end_color = get_color(node.args[0])
         else:
             cur_colors = [get_color(i) for i in node.all_input_nodes if isinstance(i, fx.Node) if get_color(i) is not None]

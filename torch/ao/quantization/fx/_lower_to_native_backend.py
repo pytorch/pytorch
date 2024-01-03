@@ -785,7 +785,7 @@ def _lower_static_weighted_ref_functional(
         assert isinstance(input_dq_node, Node)
         assert isinstance(weight_dq_node, Node)
         quantized_weight = weight_dq_node.args[0]
-        assert (isinstance(quantized_weight, Node))
+        assert isinstance(quantized_weight, Node)
         if quantized_weight.op != "call_function" or\
                 quantized_weight.target not in (torch.quantize_per_tensor, torch.quantize_per_channel):
             continue

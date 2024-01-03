@@ -129,7 +129,7 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
         with warnings.catch_warnings(record=True) as w:
             self.checkModule(M(), ([1, 2, 3],))
-        assert (len(w) == 0)
+        assert len(w) == 0
 
     def test_annotated_empty_list(self):
         class M(torch.nn.Module):

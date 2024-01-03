@@ -4101,7 +4101,7 @@ class TestQuantizedLinear(TestCase):
                        qparams=hu.qparams(dtypes=torch.qint8)))
     @override_qengines
     def test_qlinear_qnnpack_free_memory_and_unpack(self, W):
-        assert (qengine_is_qnnpack)
+        assert qengine_is_qnnpack
         W, (W_scale, W_zp, torch_type) = W
         qlinear_prepack = torch.ops.quantized.linear_prepack
         qlinear_unpack = torch.ops.quantized.linear_unpack
