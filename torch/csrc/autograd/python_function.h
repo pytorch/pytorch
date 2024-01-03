@@ -16,13 +16,11 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 struct Graph;
 }
-} // namespace torch
-namespace torch {
-namespace autograd {
+
+namespace torch::autograd {
 
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
@@ -71,8 +69,7 @@ inline bool ensure_tuple(THPObjectPtr& obj) {
   return true;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPFunction {

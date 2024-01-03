@@ -30,6 +30,7 @@ const std::set<libkineto::ActivityType> kCpuTypes{
 const std::set<libkineto::ActivityType> kCudaTypes = {
     libkineto::ActivityType::GPU_MEMCPY,
     libkineto::ActivityType::GPU_MEMSET,
+    libkineto::ActivityType::GPU_USER_ANNOTATION,
     libkineto::ActivityType::CONCURRENT_KERNEL,
     // CUDA_RUNTIME appears in both kCpuTypes and kCudaTypes.
     libkineto::ActivityType::CUDA_RUNTIME,
