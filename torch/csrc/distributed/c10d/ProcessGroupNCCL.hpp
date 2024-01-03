@@ -550,9 +550,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void enableCollectivesTiming() override;
 
-  // Provide an API for users to define their own ways to store NCCL debug info.
-  void registerDebugInfoWriter(std::unique_ptr<DebugInfoWriter> writer);
-
   // Helper function for iteratively aborting communicators in the provided map
   void abortCommsFromMap(
       std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
@@ -967,9 +964,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   uint64_t seq_{0};
 
   std::exception_ptr watchDogException_ = nullptr;
-
-  // The callback function to store NCCL debug info.
-  std::unique_ptr<DebugInfoWriter> debugInfoWriter_ = nullptr;
 
   size_t uid_;
 
