@@ -335,24 +335,13 @@ class DTensorExtensions(FSDPExtensions):
     def post_unflatten_transform(
         self, tensor: torch.Tensor, param_extension: Any
     ) -> torch.Tensor:
-        if self.compute_stream is not None:
+        stream = self.compute_stream or self.device_handle.current_stream()
+        with self.device_handle.stream(stream):
             # runtime we put the unflattened tensor call on the compute stream since
             # the unflattened tensor might contain computations in fwd/bwd where we
             # need to sync properly.
             # TODO: this is a short term fix and we should make the get_unflat_views
             # directly happen in the compute stream.
-            with self.device_handle.stream(self.compute_stream):
-                result = _unflatten_tensor(
-                    tensor,
-                    param_extension,
-                    device_handle=self.device_handle,
-                    compute_stream=self.compute_stream
-                )
-                _set_fsdp_flattened(result)
-                return result
-        else:
-            # this would only happen in the FSDP initialization, where we
-            # don't have the compute stream yet.
             result = _unflatten_tensor(
                 tensor,
                 param_extension,
@@ -361,7 +350,6 @@ class DTensorExtensions(FSDPExtensions):
             )
             _set_fsdp_flattened(result)
             return result
-
 
     def chunk_tensor(
         self,

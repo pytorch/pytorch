@@ -281,7 +281,7 @@ class PrepareModuleInput(ParallelStyle):
         if not isinstance(inputs, tuple):
             inputs = (inputs,)
         if len(inputs) != len(self.input_layouts):
-            raise RuntimeError("module inputs and input_layouts should have same length!")
+            raise ValueError("module inputs and input_layouts should have same length!")
 
         for inp, input_layout, desired_layout in zip(inputs, self.input_layouts, self.desired_input_layouts):
             if input_layout is not None:
@@ -357,7 +357,7 @@ class PrepareModuleOutput(ParallelStyle):
         if not isinstance(outputs, tuple):
             outputs = (outputs,)
         if len(outputs) != len(self.output_layouts):
-            raise RuntimeError("module outputs and output_layouts should have same length!")
+            raise ValueError("module outputs and output_layouts should have same length!")
         for out, out_layout, desired_out_layout in zip(outputs, self.output_layouts, self.desired_output_layouts):
             if out_layout is not None:
                 if isinstance(out, DTensor):
