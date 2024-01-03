@@ -334,7 +334,6 @@ class TestLazyScheduler(TestCase):
       **kwargs,
     ):
       gm_after_split = lazy_scheduler.compile_fx(gm, example_inputs, segment_assignment_fn, **kwargs)
-      num_call_fns = len([node for node in gm.graph.nodes if node.op == "call_function"])
       # Test that one submodule is created for each NN module method: forward, func1, func2.
       self.assertEqual(len(list(gm_after_split.named_children())), 3)
       for _, submod in enumerate(gm_after_split.named_children()):
@@ -399,7 +398,6 @@ def test_segment_tagging(self):
       **kwargs,
     ):
       gm_after_split = lazy_scheduler.compile_fx(gm, example_inputs, segment_assignment_fn, **kwargs)
-      num_call_fns = len([node for node in gm.graph.nodes if node.op == "call_function"])
       # func2 is the middle function, so should produce 3 submodules
       self.assertEqual(len(list(gm_after_split.named_children())), 3)
       for _, submod in enumerate(gm_after_split.named_children()):
