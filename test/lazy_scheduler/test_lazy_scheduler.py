@@ -377,6 +377,7 @@ def test_segment_tagging(self):
 
     segment_dict = {}
 
+    # This is roughly how the register_segment function will look like
     def register_segment(method, name):
       global segment_dict
       segment_dict[method] = name
