@@ -298,7 +298,6 @@ FIXME_default_non_strict = {
     "torch_np/numpy_tests/fft/test_helper",
     "torch_np/numpy_tests/fft/test_pocketfft",
     "torch_np/numpy_tests/lib/test_arraypad",
-    "torch_np/numpy_tests/lib/test_arraysetops",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -1435,6 +1434,19 @@ dynamo_expected_failures = {
     "TestPercentile.test_keepdims_out_q_7_axis_1",
     "TestPercentile.test_api",
     "TestQuantile.test_quantile_monotonic_method_normal_unbiased",
+    "TestSetOps.test_in1d_mixed_dtype_dtype11_dtype21_kind_table",
+    "TestSetOps.test_in1d_mixed_dtype_dtype10_dtype20_kind0",
+    "TestSetOps.test_in1d_mixed_dtype_dtype10_dtype20_kind_table",
+    "TestSetOps.test_ediff1d_forbidden_type_casts_ary1_prepend1_append1_expected_to_begin",
+    "TestSetOps.test_in1d_mixed_dtype_dtype11_dtype21_kind0",
+    "TestSetOps.test_in1d_mixed_dtype_dtype11_dtype21_kind_sort",
+    "TestSetOps.test_in1d_table_timedelta_fails",
+    "TestUnique.test_unique_axis_errors",
+    "TestSetOps.test_setdiff1d",
+    "TestSetOps.test_in1d_mixed_dtype_dtype10_dtype20_kind_sort",
+    "TestSetOps.test_in1d_timedelta_kind_sort",
+    "TestSetOps.test_in1d_timedelta_kind0",
+    "TestUnique.test_unique_axis",
 }
 
 dynamo_skips = {
