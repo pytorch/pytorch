@@ -82,7 +82,7 @@ ENV_XDG_CACHE_HOME = 'XDG_CACHE_HOME'
 DEFAULT_CACHE_DIR = '~/.cache'
 VAR_DEPENDENCY = 'dependencies'
 MODULE_HUBCONF = 'hubconf.py'
-READ_DATA_CHUNK = 131072
+READ_DATA_CHUNK = 128 * 1024
 _hub_dir = None
 
 
