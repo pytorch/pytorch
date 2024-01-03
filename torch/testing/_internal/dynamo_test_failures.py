@@ -297,7 +297,6 @@ FIXME_default_non_strict = {
     "torch_np/numpy_tests/core/test_shape_base",
     "torch_np/numpy_tests/fft/test_helper",
     "torch_np/numpy_tests/fft/test_pocketfft",
-    "torch_np/numpy_tests/lib/test_arraypad",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -1447,6 +1446,8 @@ dynamo_expected_failures = {
     "TestSetOps.test_in1d_timedelta_kind_sort",
     "TestSetOps.test_in1d_timedelta_kind0",
     "TestUnique.test_unique_axis",
+    "TestConstant.test_check_constant_float3",
+    "TestConstant.test_check_constant_pad_2d",
 }
 
 dynamo_skips = {
@@ -1493,4 +1494,5 @@ dynamo_skips = {
     "TestCorrCoef.test_complex",  # known py311 fail
     "TestUnique.test_simple_complex",  # known py311 fail
     "TestDigitize.test_casting_error",  # known py311 fail
+    "TestConstant.test_check_constant",  # known py311 fail
 }
