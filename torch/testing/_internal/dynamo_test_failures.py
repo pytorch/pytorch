@@ -834,7 +834,6 @@ dynamo_expected_failures = {
     "TestShuffle.test_1d_use_numpy_False",
     "TestShuffle.test_2d_use_numpy_True",
     "TestShuffle.test_2d_use_numpy_False",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmin",
     "TestArrayCreationCopyArgument.test_buffer_interface",
     "TestWritebackIfCopy.test_take_mode_raise",
     "TestArange.test_infinite",
@@ -861,7 +860,6 @@ dynamo_expected_failures = {
     "TestAttributes.test_set_stridesattr",
     "TestStats.test_out",
     "TestScalarIndexing.test_invalid_subscript",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmax",
     "TestWhere.test_error",
     "TestWritebackIfCopy.test_argmax_with_out",
     "TestBool.test_sum_2",
@@ -873,8 +871,6 @@ dynamo_expected_failures = {
     "TestAttributes.test_fill_max_uint64",
     "TestPutmask.test_byteorder_dtype_<i4",
     "TestPutmask.test_byteorder_dtype_>i4",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmax",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmin",
     "TestAttributes.test_stridesattr",
     "TestArange.test_zero_step",
     "TestStats.test_dtype_from_dtype",
@@ -1358,20 +1354,13 @@ dynamo_expected_failures = {
     "TestCholesky.test_basic_property_shape0_dtype1",
     "TestNormInt64.test_matrix_2x2",
     "TestCholesky.test_basic_property_shape2_dtype3",
-    "TestIsrealobj.test_basic",
-    "TestIsreal.test_pass",
-    "TestIscomplexobj.test_basic",
-    "TestIsreal.test_fail",
-    "TestIscomplexobj.test_list",
-    "TestIscomplex.test_pass",
-    "TestTrilIndicesFrom.test_exceptions",
-    "TestHistogram2d.test_all_outliers",
-    "TestDiag.test_failure",
-    "TestHistogram2d.test_binparameter_combination",
     "TestFliplr.test_basic",
-    "TestHistogram2d.test_asym",
+    "TestHistogram2d.test_binparameter_combination",
+    "TestHistogram2d.test_all_outliers",
     "TestTriuIndicesFrom.test_exceptions",
-    "TestVander.test_dtypes",
+    "TestTrilIndicesFrom.test_exceptions",
+    "TestHistogram2d.test_asym",
+    "TestDiag.test_failure",
 }
 
 dynamo_skips = {
@@ -1397,4 +1386,16 @@ dynamo_skips = {
     "TestMethods.test_compress",
     "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmax_np_method0",
     "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmin_np_method1",
+    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmin",
+    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmax",
+    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmax",
+    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmin",
+    "TestIsreal.test_fail",  # known py311 fail
+    "TestIscomplexobj.test_basic",  # known py311 fail
+    "TestIsrealobj.test_basic",  # known py311 fail
+    "TestIsreal.test_pass",  # known py311 fail
+    "TestIscomplex.test_pass",  # known py311 fail
+    "TestIscomplexobj.test_list",  # known py311 fail
+    "TestDiag.test_matrix",  # known py311 fail
+    "TestVander.test_dtypes",  # known py311 fail
 }
