@@ -714,7 +714,6 @@
     "PlaceholderObserver",
     "QConfig",
     "QConfigAny",
-    "QConfigDynamic",
     "QuantStub",
     "QuantType",
     "QuantWrapper",
@@ -843,7 +842,6 @@
   "torch.quantization.qconfig": [
     "QConfig",
     "QConfigAny",
-    "QConfigDynamic",
     "_add_module_to_qconfig_obs_ctr",
     "_assert_valid_qconfig",
     "get_default_qat_qconfig",
