@@ -6,6 +6,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensorMode,
     UnsupportedFakeTensorException,
 )
+from torch._subclasses.async_tensor import AsyncTensor
 
 from torch._subclasses.fake_utils import CrossRefFakeMode
 

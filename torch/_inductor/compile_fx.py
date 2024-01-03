@@ -1034,14 +1034,14 @@ def compile_fx(
     # 2. Do subgraph splitting below AOTAutograd, within inner_compile (Good: likely more friendly to existing extension point, Bad: per-node nn method info passing might be tricky)
     # Let's try (1) first. With (1), here all nodes are from the same nn method.
 
-    # nn_module_method = None
-    # for node in model_.graph.nodes:
-    #     if node.op != "placeholder":
-    #         if nn_module_method is None:
-    #             nn_module_method = node.meta.get("nn_module_method", None)
-    #         else:
-    #             # All nodes in this GraphModule should be from the same nn module method
-    #             assert nn_module_method == node.meta.get("nn_module_method", None)
+    nn_module_method = None
+    for node in model_.graph.nodes:
+        if node.op != "placeholder" and node.op != "output":
+            if nn_module_method is None:
+                nn_module_method = node.meta.get("nn_module_method", None)
+            else:
+                # All nodes in this GraphModule should be from the same nn module method
+                assert nn_module_method == node.meta.get("nn_module_method", None), f"Expected {nn_module_method}, but got {node.meta.get('nn_module_method', None)}. {node}. {node.meta}. {node.op}"
 
     @dynamo_utils.dynamo_timed
     def fw_compiler_base(
@@ -1108,9 +1108,9 @@ def compile_fx(
                 if isinstance(n, torch.fx.Node)
             }
 
-        # if nn_module_method is not None:
-        #     for node in model.graph.nodes:
-        #         node.meta["nn_module_method"] = nn_module_method
+        if nn_module_method is not None:
+            for node in model.graph.nodes:
+                node.meta["nn_module_method"] = nn_module_method
 
         return inner_compile(
             model,
@@ -1148,9 +1148,9 @@ def compile_fx(
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         fixed = count_tangents(model)
 
-        # if nn_module_method is not None:
-        #     for node in model.graph.nodes:
-        #         node.meta["nn_module_method"] = nn_module_method
+        if nn_module_method is not None:
+            for node in model.graph.nodes:
+                node.meta["nn_module_method"] = nn_module_method
 
         return inner_compile(
             model,

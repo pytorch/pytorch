@@ -1,6 +1,6 @@
 """
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_backward_simple_no_segment
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_split_module_based_on_segment_info
+pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_single_segment
+pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_split_module_above_aotautograd
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_compile_fx_with_segment_info
 """
 
@@ -12,6 +12,7 @@ import functools
 import itertools
 from typing import Optional, Dict, Callable, List
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.async_tensor import AsyncTensor
 from collections import defaultdict, OrderedDict
 import weakref
 import threading
@@ -21,107 +22,6 @@ from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.compile_fx import compile_fx_inner as inductor_compile_fx_inner
 
 fake_mode = FakeTensorMode()
-
-class AsyncTensor(torch.Tensor):
-  """
-  This is a subclass of Tensor that represents a "lazy tensor".
-  This tensor will be materialized by calling any tensor methods on it.
-  """
-  def __new__(cls, fake_tensor, *args, **kwargs):
-    shape = fake_tensor.shape
-    tensor_ctor_kwargs = {}
-    tensor_ctor_kwargs["strides"] = fake_tensor.stride()
-    tensor_ctor_kwargs["storage_offset"] = fake_tensor.storage_offset()
-    tensor_ctor_kwargs["device"] = fake_tensor.device
-    tensor_ctor_kwargs["layout"] = fake_tensor.layout
-    tensor_ctor_kwargs["requires_grad"] = fake_tensor.requires_grad
-    tensor_ctor_kwargs["dtype"] = fake_tensor.dtype
-    out = torch.Tensor._make_wrapper_subclass(cls, shape, **tensor_ctor_kwargs)
-    return out
-
-  def __init__(self, fake_tensor, materialized_tensor=None):
-    super().__init__()
-    self._materialized_tensor = materialized_tensor
-    self._fake = fake_tensor
-    self._handle = None
-
-  def async_repr(self):
-    return f"AsyncTensor({self._handle}, {self._fake})"
-
-  def __repr__(self):
-    # NOTE: `print(tensor)` goes through this
-    if self._handle is not None:
-      AsyncTensor.wait_until_materialized([self])
-      return self._materialized_tensor.__repr__()
-    else:
-      return self.async_repr()
-
-  def __format__(self, format_spec):
-    # NOTE: `print(f"{tensor}")` goes through this
-    AsyncTensor.wait_until_materialized([self])
-    return self._materialized_tensor.__format__(format_spec)
-
-  def handle(self):
-    assert self._handle is not None
-    handle = self._handle()
-    assert handle is not None
-    return handle
-
-  def set_handle(self, handle):
-    self._handle = weakref.ref(handle)
-
-  # NOTE: Any PyTorch reads or mutations in eager region will go through __torch_dispatch__,
-  # so we materialize the underlying tensor here and returns it.
-  @classmethod
-  def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-    # TODO: implement randn_like etc. method that doesn't require a materialized tensor as input
-    # TODO: implement other new_X etc. similar to new_empty_strided
-    # print(f"func: {func}")
-    if func in [torch.ops.aten.ones_like.default]:
-      shape = args[0].shape
-      dtype = args[0].dtype
-      device = args[0].device
-      requires_grad = args[0].requires_grad
-      return torch.ones(shape, dtype=dtype, device=device, requires_grad=requires_grad)
-    elif func in [torch.ops.aten.new_empty_strided.default]:
-      args_except_self_tensor = list(args)[1:]
-      return torch.empty_strided(*args_except_self_tensor, **kwargs)
-    else:
-      # TODO: handle tuple / list / etc in args
-      # TODO: handle kwargs
-      assert kwargs is None or len(kwargs) == 0
-      AsyncTensor.wait_until_materialized(args)
-      args_materialized = pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor, args)
-      # kwargs_materialized = {k: pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor, v) for k, v in kwargs.items()}
-      # out = func(*args_materialized, **kwargs_materialized)
-      out = func(*args_materialized)
-      # NOTE: if we don't re-wrap the output with AsyncTensor, sometimes the output will still be re-wrapped as AsyncTensor
-      # (by another unknown mechanism outside of this code) but lose all its AsyncTensor attributes like `_materialized_tensor`
-      if isinstance(out, torch.Tensor) and not isinstance(out, AsyncTensor):
-        out = AsyncTensor(fake_tensor=fake_mode.from_tensor(out), materialized_tensor=out)
-      return out
-      # return return_and_correct_aliasing(func, args, kwargs, out)
-
-  def materialize_with_value(self, tensor):
-    self._materialized_tensor = tensor
-
-  @staticmethod
-  def check_materialized(async_tensors):
-    all_materialized = True
-    for t in async_tensors:
-      if isinstance(t, AsyncTensor) and t._materialized_tensor is None:
-          all_materialized = False
-          break
-    return all_materialized
-
-  @staticmethod
-  def wait_until_materialized(async_tensors):
-    for async_tensor in async_tensors:
-      if not AsyncTensor.check_materialized([async_tensor]):
-        # NOTE: recursively schedule the deps first
-        AsyncTensor.wait_until_materialized([async_tensor.handle().args])
-        async_tensor.handle().schedule()
-        async_tensor.handle().wait_for_completion()
 
 
 class AsyncFuncHandle:
@@ -167,9 +67,7 @@ class AsyncFuncHandle:
     return scheduler
 
 
-# NOTE: this is only for threading outputs through multiple submodules when doing module splitting above AOTAutograd.
-# This is different from LazySchedulerGraphModule where the decision to run is given to the LazyScheduler.
-# TODO: consider whether we can merge LazilyCompiledModule and LazySchedulerGraphModule
+# NOTE: this is only for threading outputs through multiple submodules when doing module splitting above AOTAutograd (but after Dynamo).
 class _LazilyCompiledModule(torch.nn.Module):
   def __init__(self, submod, compiler):
     super().__init__()
@@ -238,10 +136,11 @@ class LazyScheduler:
     self,
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
-    segment_assignment_fn,
+    segment_assignment_fn=None,
     **kwargs,
   ):
-    segment_assignment_fn(gm)
+    if segment_assignment_fn is not None:
+      segment_assignment_fn(gm)
     # Assumes `gm` already has segment info in each of its nodes
     gm_after_split = split_module_based_on_segment_info(gm)
     for name, sub_gm in gm_after_split.named_children():
@@ -251,16 +150,18 @@ class LazyScheduler:
       )
       setattr(gm_after_split, name, lazy_sub_gm)
     # Trigger compile_fx in all submodules
-    return gm_after_split(*example_inputs)
+    gm_after_split(*example_inputs)
+    return gm_after_split
 
   def compile_fx(
     self,
     # NOTE: matches positional args in compile_fx signature
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
+    segment_assignment_fn=None,
     **kwargs,
   ):
-    return _compile_fx_with_segment_info(gm, example_inputs, set_segment_info, **kwargs)
+    return self._compile_fx_with_segment_info(gm, example_inputs, segment_assignment_fn, **kwargs)
 
   def compile_fx_inner(
     self,
@@ -329,12 +230,16 @@ class TestModule(torch.nn.Module):
   def __init__(self):
     super().__init__()
 
-  def func1(self, x, y):
-    z = torch.matmul(x, y)
+  def func1(self, x, z):
+    return torch.matmul(x, z)
+
+  def func2(self, x, y):
+    z = torch.add(x, y)
     return z
 
   def forward(self, x, y):
     z = self.func1(x, y)
+    z = self.func2(x, z)
     z = z * z
     return z
 
@@ -344,9 +249,6 @@ class TestLazyScheduler(TestCase):
     cloned_args = []
     for arg in args:
       cloned_args.append(arg.clone().detach().requires_grad_(arg.requires_grad))
-
-    for arg, cloned_arg in zip(args, cloned_args):
-      print(f"arg.grad: {arg.grad}, cloned_arg.grad: {cloned_arg.grad}")
 
     # Eager, 1st iter
     torch.manual_seed(0)
@@ -363,7 +265,8 @@ class TestLazyScheduler(TestCase):
     # Compiled, 1st iter
     torch.manual_seed(0)
     result = compiled_fn(*cloned_args)
-    result.sum().backward()
+    r_sum = result.sum()
+    r_sum.backward()
 
     # Compiled, 2nd iter
     torch.manual_seed(0)
@@ -383,125 +286,140 @@ class TestLazyScheduler(TestCase):
           msg=f"Gradient mismatch between torch.compile and eager versions. arg.grad: {arg.grad}, cloned_arg.grad: {cloned_arg.grad}",
         )
 
-  def test_backward_simple_no_segment(self):
+  def test_single_segment(self):
+    # Check that output and gradients are correct when there is only one segment in the model.
     device = "cuda" if torch.cuda.is_available() else "cpu"
     m = TestModule()
     m = m.to(device)
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
-
     lazy_scheduler = LazyScheduler()
-    self._validate(
-      m,
-      # TODO: change this to use the new "split-subgraph-above-AOTAutograd" design
-      functools.partial(inductor_compile_fx, inner_compile=lazy_scheduler.compile_fx_inner),
-      x,
-      y,
-    )
-
-  def test_split_module_based_on_segment_info(self):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    m = TestModule()
-    m = m.to(device)
-    x = torch.randn(4, 4, requires_grad=True, device=device)
-    y = torch.randn(4, 4, requires_grad=True, device=device)
-
-    def check_num_submods(gm, *args):
-      num_call_fns = len([node for node in gm.graph.nodes if node.op == "call_function"])
-      for i, node in enumerate(gm.graph.nodes):
-        if node.op == "placeholder":
-          node.meta["segment"] = "placeholder"
-        elif node.op == "output":
-          node.meta["segment"] = "output"
-        elif node.op == "call_function":
-          # Tag each call_function node with its own unique segment index
-          node.meta["segment"] = i
-      gm_after_split = split_module_based_on_segment_info(gm)
-      self.assertEqual(len(list(gm_after_split.named_children())), num_call_fns)
-      return gm_after_split
-
-    # TODO: this is not working (grad check fails), need fix (seems compiled version gradient has wrong stride (value is same across columns), need to figure out why)
-    self._validate(
-      m,
-      # TODO: change this to use the new "split-subgraph-above-AOTAutograd" design
-      aot_autograd(fw_compiler=check_num_submods, bw_compiler=check_num_submods),
-      x,
-      y,
-    )
-
-  def test_compile_fx_with_segment_info(self):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    m = TestModule()
-    m = m.to(device)
-    x = torch.randn(4, 4, requires_grad=True, device=device)
-    y = torch.randn(4, 4, requires_grad=True, device=device)
-
-    num_call_fns = None
 
     def segment_assignment_fn(gm):
-      global num_call_fns
-      num_call_fns = len([node for node in gm.graph.nodes if node.op == "call_function"])
       for i, node in enumerate(gm.graph.nodes):
-        if node.op == "placeholder":
-          node.meta["segment"] = "placeholder"
-        elif node.op == "output":
-          node.meta["segment"] = "output"
-        elif node.op == "call_function":
-          # Tag each call_function node with its own unique segment index
-          node.meta["segment"] = i
-      assert num_call_fns is not None
+        node.meta["segment"] = "seg1"
 
-    def check_num_submods(gm, *args, **kwargs):
-      # TODO: we need to fix node.meta["segment"] propagation in compile_fx fw_compiler_base and bw_compiler
-      self.assertEqual(len(list(gm.named_children())), num_call_fns)
-      return gm
-
-    lazy_scheduler = LazyScheduler()
-    compiled_m = torch.compile(
+    self._validate(
       m,
-      backend=functools.partial(
-        functools.partial(lazy_scheduler._compile_fx_with_segment_info, segment_assignment_fn=segment_assignment_fn),
-        inner_compile=check_num_submods
+      functools.partial(
+        lazy_scheduler.compile_fx,
+        inner_compile=lazy_scheduler.compile_fx_inner,
+        segment_assignment_fn=segment_assignment_fn
       ),
-      fullgraph=False
+      x,
+      y,
     )
-    out = compiled_m(x, y)
-    out.sum().backward()
 
-  def DISABLED_test_segment_tagging(self):
+  def test_split_module_above_aotautograd(self):
+    # Check that GraphModule produced by Dynamo is correctly split
+    # (each submodule only contains one NN method from original module, which maps to one segment)
+    # before entering AOTAutograd.
     device = "cuda" if torch.cuda.is_available() else "cpu"
     m = TestModule()
     m = m.to(device)
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
-
-    # Eager, 1st iter
-    actual_e = m(x, y)
-    actual_e.sum().backward()
-    # Eager, 2nd iter
-    actual_e = m(x, y)
-    actual_e.sum().backward()
-
-    register_segment(m.func1, "segment1")
-
     lazy_scheduler = LazyScheduler()
 
-    def compile_then_check_segment_info(*args, **kwargs):
-      lazy_gm = lazy_scheduler.compile(*args, **kwargs)
-      for node in lazy_gm.graph.nodes:
-        print(f"node.meta: {node.meta}")
+    def segment_assignment_fn(gm):
+      for _, node in enumerate(gm.graph.nodes):
+        assert "nn_module_method" in node.meta
+        # One NN module method maps to one segment
+        node.meta["segment"] = str(node.meta["nn_module_method"])
 
-    lazy_scheduler = LazyScheduler()
-    compiled_m_ls = torch.compile(
+    def compile_fx_count_submods(
+      gm: torch.fx.GraphModule,
+      example_inputs: List[torch.Tensor],
+      segment_assignment_fn=None,
+      **kwargs,
+    ):
+      gm_after_split = lazy_scheduler.compile_fx(gm, example_inputs, segment_assignment_fn, **kwargs)
+      num_call_fns = len([node for node in gm.graph.nodes if node.op == "call_function"])
+      # Test that one submodule is created for each NN module method: forward, func1, func2.
+      self.assertEqual(len(list(gm_after_split.named_children())), 3)
+      for _, submod in enumerate(gm_after_split.named_children()):
+        self.assertTrue(isinstance(submod, _LazilyCompiledModule))
+      return gm_after_split
+
+    def compile_fx_inner_assert_single_nn_method(
+      gm: torch.fx.GraphModule,
+      *args,
+      **kwargs,
+    ):
+      # All nodes in a fwd or bwd GraphModule should belong to the same NN module method.
+      nn_module_method_name = None
+      for i, node in enumerate(gm.graph.nodes):
+        if node.op == "call_function":
+          assert "nn_module_method" in node.meta
+          if nn_module_method_name is None:
+            nn_module_method_name = node.meta["nn_module_method"]
+          else:
+            self.assertEqual(node.meta["nn_module_method"], nn_module_method_name)
+      return lazy_scheduler.compile_fx_inner(gm, *args, **kwargs)
+
+    self._validate(
       m,
-      backend=functools.partial(lazy_scheduler.compile_fx, inner_compile=compile_then_check_segment_info),
-      fullgraph=False
+      functools.partial(
+        compile_fx_count_submods,
+        inner_compile=compile_fx_inner_assert_single_nn_method,
+        segment_assignment_fn=segment_assignment_fn
+      ),
+      x,
+      y,
+    )
+
+def test_segment_tagging(self):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    m = TestModule()
+    m = m.to(device)
+    x = torch.randn(4, 4, requires_grad=True, device=device)
+    y = torch.randn(4, 4, requires_grad=True, device=device)
+    lazy_scheduler = LazyScheduler()
+
+    segment_dict = {}
+
+    def register_segment(method, name):
+      global segment_dict
+      segment_dict[method] = name
+
+    register_segment(m.func2, "func2")
+
+    def segment_assignment_fn(gm):
+      for _, node in enumerate(gm.graph.nodes):
+        assert "nn_module_method" in node.meta
+        if node.meta["nn_module_method"] in segment_dict:
+          node.meta["segment"] = str(node.meta["nn_module_method"])
+        else:
+          # TODO: add unnamed segment
+
+    def compile_fx_count_submods(
+      gm: torch.fx.GraphModule,
+      example_inputs: List[torch.Tensor],
+      segment_assignment_fn=None,
+      **kwargs,
+    ):
+      gm_after_split = lazy_scheduler.compile_fx(gm, example_inputs, segment_assignment_fn, **kwargs)
+      num_call_fns = len([node for node in gm.graph.nodes if node.op == "call_function"])
+      # func2 is the middle function, so should produce 3 submodules
+      self.assertEqual(len(list(gm_after_split.named_children())), 3)
+      for _, submod in enumerate(gm_after_split.named_children()):
+        self.assertTrue(isinstance(submod, _LazilyCompiledModule))
+      return gm_after_split
+
+    self._validate(
+      m,
+      functools.partial(
+        compile_fx_count_submods,
+        inner_compile=compile_fx_inner_assert_single_nn_method,
+        segment_assignment_fn=segment_assignment_fn
+      ),
+      x,
+      y,
     )
 
 """
 TODO:
-0. Check gradients equivalence for eager vs. compile in test_backward_simple_no_segment
-1. Add segment registration logic (do subgraph splitting above AOTAutograd, overwrite compile_fx and call compile_fx inside), enable test_segment_tagging to check segment tagging is working
+1. Enable test_segment_tagging to check segment tagging is working
 2. Add scheduling logic, add unit test to check it's working
 """
 

@@ -20,7 +20,7 @@ from torch._dynamo.utils import lazy_format_graph_code
 from torch._guards import detect_fake_mode, tracing, TracingContext
 from torch._logging import getArtifactLogger
 from torch._prims_common import CUDARngStateHelper
-from torch._subclasses import FakeTensor
+from torch._subclasses import FakeTensor, AsyncTensor
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 from .. import config
@@ -650,7 +650,7 @@ def aot_dispatch_autograd(
             # - at runtime in the backward our types are torch.Tensor...
             # - unless we're running compiled backward, in which case they are also FakeTensor
             grad_output_types_ = [
-                torch.Tensor if x is FakeTensor else x for x in grad_output_types
+                torch.Tensor if (x is FakeTensor or x is AsyncTensor) else x for x in grad_output_types
             ]
             assert (
                 grad_output_types_ == CompiledFunction.metadata.output_types

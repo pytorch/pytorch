@@ -2335,6 +2335,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 code_context.get_context(code)[
                     "orig_nnmodule"
                 ] = module
+                # Need to do this specially for `forward` method.
+                code_context.get_context(module.forward.__code__)[
+                    "orig_nnmodule"
+                ] = module
 
         tracer: InliningInstructionTranslator
         if is_generator(code):
