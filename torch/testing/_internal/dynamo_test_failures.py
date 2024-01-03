@@ -269,7 +269,6 @@ FIXME_default_non_strict = {
     "test_tensor_creation_ops",
     "test_tensorboard",
     "test_tensorexpr",
-    "test_tensorexpr_pybind",
     "test_torch",
     "test_unary_ufuncs",
     "test_utils",
@@ -1862,6 +1861,11 @@ dynamo_expected_failures = {
     "TestAssertCloseQuantized.test_mismatching_qscheme",  # test_testing
     "TestAssertCloseQuantized.test_matching_per_tensor",  # test_testing
     "TestAssertCloseSparseCSC.test_mismatching_ccol_indices_msg",  # test_testing
+    "TestExprHandlePyBind.test_unary_ops",  # test_tensorexpr_pybind
+    "TestTensorExprPyBind.test_dynamic_shape_2d",  # test_tensorexpr_pybind
+    "TestTensorExprPyBind.test_simple_sum",  # test_tensorexpr_pybind
+    "TestTensorExprPyBind.test_dynamic_shape",  # test_tensorexpr_pybind
+    "TestTensorExprPyBind.test_external_calls",  # test_tensorexpr_pybind
 }
 
 dynamo_skips = {
@@ -1936,4 +1940,5 @@ dynamo_skips = {
     "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape1_cpu",  # known py311 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_2_shape1_cpu",  # known py311 fail
     "TestFrameworkUtils.test_filtering_env_var",  # known py38 fail
+    "TestTensorExprPyBind.test_call_raw",  # known py311 fail
 }
