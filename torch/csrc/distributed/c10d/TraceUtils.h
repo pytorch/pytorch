@@ -291,6 +291,8 @@ DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
   if (writer_ == nullptr) {
     std::string fileNamePrefix = getCvarString(
         {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
+    // Using std::unique_ptr here to auto-delete the writer object
+    // when the pointer itself is destroyed.
     std::unique_ptr<DebugInfoWriter> writerPtr(
         new DebugInfoWriter(fileNamePrefix, rank));
     DebugInfoWriter::registerWriter(std::move(writerPtr));
@@ -301,14 +303,14 @@ DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
 void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
   TORCH_CHECK_WITH(
       DistBackendError,
-      hasWriterRegistered_ == false,
+      hasWriterRegistered_.load() == false,
       "debugInfoWriter already registered");
-  hasWriterRegistered_ = true;
+  hasWriterRegistered_.store(true);
   writer_ = std::move(writer);
 }
 
 std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
-bool DebugInfoWriter::hasWriterRegistered_ = false;
+std::atomic<bool> DebugInfoWriter::hasWriterRegistered_(false);
 
 inline std::string pickle_str(const c10::IValue& v) {
   std::vector<char> result;
