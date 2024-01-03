@@ -372,6 +372,7 @@ def checkpoint(
 
     .. warning::
 
+        You must pass in the ``use_reentrant`` parameter explicitly.
         If you are using the ``use_reentrant=True`` variant, please refer to the
         note below for important considerations and potential limitations.
 
@@ -503,6 +504,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
     be saved for re-running the segment in the backward pass.
 
     .. warning::
+        You must pass in the ``use_reentrant`` parameter explicitly.
         If you are using the ``use_reentrant=True` variant (this is the
         default), please see :func:`~torch.utils.checkpoint.checkpoint` for
         the important considerations and limitations of this variant. It is
