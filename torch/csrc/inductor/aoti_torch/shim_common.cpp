@@ -28,6 +28,7 @@
 #include <ATen/ops/mm.h>
 #include <ATen/ops/nonzero.h>
 #include <ATen/ops/scatter.h>
+#include <ATen/ops/scatter_reduce.h>
 
 #endif
 
@@ -610,6 +611,30 @@ AOTITorchError aoti_torch_scatter_out(
     at::Tensor* index_tensor = tensor_handle_to_tensor_pointer(index);
     at::Tensor* src_tensor = tensor_handle_to_tensor_pointer(src);
     at::scatter_out(*out_tensor, *self_tensor, dim, *index_tensor, *src_tensor);
+  });
+}
+
+AOTITorchError aoti_torch_scatter_reduce_out(
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    int64_t dim,
+    AtenTensorHandle index,
+    AtenTensorHandle src,
+    const char* reduce,
+    int32_t include_self) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* out_tensor = tensor_handle_to_tensor_pointer(out);
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor* index_tensor = tensor_handle_to_tensor_pointer(index);
+    at::Tensor* src_tensor = tensor_handle_to_tensor_pointer(src);
+    at::scatter_reduce_out(
+        *out_tensor,
+        *self_tensor,
+        dim,
+        *index_tensor,
+        *src_tensor,
+        reduce,
+        (bool)include_self);
   });
 }
 
