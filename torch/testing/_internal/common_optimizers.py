@@ -704,6 +704,7 @@ def optim_error_inputs_func_rprop(device, dtype):
 def optim_inputs_func_sgd(device=None):
     return [
         OptimizerInput(params=None, kwargs={"lr": 1e-2}, desc="default"),
+        OptimizerInput(params=None, kwargs={"lr": 1e-2}, desc="Tensor lr"),
         OptimizerInput(
             params=None, kwargs={"lr": 1e-2, "momentum": 0.9}, desc="momentum"
         ),
