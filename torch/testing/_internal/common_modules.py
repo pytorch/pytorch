@@ -3906,6 +3906,8 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_pickle", dtypes=[torch.float16], device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", dtypes=[torch.float16],
                                 device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
+                                device_type='cuda'),
                    DecorateInfo(unittest.expectedFailure, 'TestModule', dtypes=[torch.float64], device_type='mps'),),
                ),
     ModuleInfo(torch.nn.CTCLoss,
