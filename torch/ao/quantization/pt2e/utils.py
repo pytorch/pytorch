@@ -2,7 +2,7 @@ import operator
 import types
 
 import torch
-from torch._export import capture_pre_autograd_graph
+from torch.export._trace import _export
 from torch.fx import (
     GraphModule,
     Node,
@@ -296,11 +296,7 @@ def get_aten_graph_module(
     """
     if is_cuda:
         example_inputs = tuple([x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs])
-    aten_pattern = capture_pre_autograd_graph(
-        pattern,
-        example_inputs,
-        kwargs,
-    )
+    aten_pattern = _export(pattern, example_inputs, kwargs, pre_dispatch=True).module()
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()
     return aten_pattern
