@@ -1352,7 +1352,7 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
                     fn(*args, **kwargs)
             return wrapper
 
-        assert (isinstance(fn, type))
+        assert isinstance(fn, type)
         if TEST_WITH_TORCHDYNAMO:  # noqa: F821
             fn.__unittest_skip__ = True
             fn.__unittest_skip_why__ = msg
@@ -1374,7 +1374,7 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
                     fn(*args, **kwargs)
             return wrapper
 
-        assert (isinstance(fn, type))
+        assert isinstance(fn, type)
         if condition:
             fn.__unittest_skip__ = True
             fn.__unittest_skip_why__ = msg
@@ -1440,7 +1440,7 @@ def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT exe
                     fn(*args, **kwargs)
             return wrapper
 
-        assert (isinstance(fn, type))
+        assert isinstance(fn, type)
         if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
             fn.__unittest_skip__ = True
             fn.__unittest_skip_why__ = msg

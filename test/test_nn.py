@@ -6865,7 +6865,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         elif weight_layout == torch.sparse_coo:
             module.weight = nn.Parameter(module.weight.to_sparse_coo())
         else:
-            assert False
+            raise AssertionError()
 
         inp = torch.randn(4, requires_grad=True, device=device)
         res = module(inp)

@@ -2127,7 +2127,7 @@ class TestQuantizedOps(TestCase):
 
             quantized_out = torch.topk(qX, k, dim=dim, largest=larg, sorted=sort)
 
-            assert (len(unquantized_out) == len(quantized_out))
+            assert len(unquantized_out) == len(quantized_out)
             torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
             torch.testing.assert_close(quantized_out[1], unquantized_out[1])
 

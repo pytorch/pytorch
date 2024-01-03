@@ -1771,8 +1771,8 @@ def prepare(
             "in a future version. Please pass in a BackendConfig instead.")
         backend_config = BackendConfig.from_dict(backend_config)
 
-    assert (isinstance(qconfig_mapping, QConfigMapping))
-    assert (isinstance(_equalization_config, QConfigMapping))
+    assert isinstance(qconfig_mapping, QConfigMapping)
+    assert isinstance(_equalization_config, QConfigMapping)
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
     _equalization_config = copy.deepcopy(_equalization_config)
 

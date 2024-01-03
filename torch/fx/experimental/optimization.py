@@ -42,7 +42,7 @@ def matches_module_pattern(pattern: Iterable[Type], node: fx.Node, modules: Dict
 
 
 def replace_node_module(node: fx.Node, modules: Dict[str, Any], new_module: torch.nn.Module):
-    assert (isinstance(node.target, str))
+    assert isinstance(node.target, str)
     parent_name, name = _parent_name(node.target)
     modules[node.target] = new_module
     setattr(modules[parent_name], name, new_module)
@@ -133,11 +133,11 @@ def modules_to_mkldnn(nodes: List[fx.Node], modules: Dict[str, nn.Module]):
     old_modules: Dict[nn.Module, nn.Module] = {}
     for node in nodes:
         if node.op == 'call_module':
-            assert (isinstance(node.target, str))
+            assert isinstance(node.target, str)
             cur_module = modules[node.target]
             if type(cur_module) in mkldnn_map:
                 new_module = mkldnn_map[type(cur_module)](cur_module, torch.float)
-                assert (isinstance(new_module, nn.Module))
+                assert isinstance(new_module, nn.Module)
                 old_modules[new_module] = copy.deepcopy(cur_module)
                 replace_node_module(node, modules, new_module)
     return old_modules
@@ -294,8 +294,8 @@ def optimize_for_inference(
                 supports_mkldnn = MklSupport.YES
                 sample_parameter = next(cur_module.parameters(), None)
                 if sample_parameter is not None:
-                    assert (sample_parameter.dtype == torch.float), "this pass is only for torch.float modules"
-                    assert (sample_parameter.device == torch.device('cpu')), "this pass is only for CPU modules"
+                    assert sample_parameter.dtype == torch.float, "this pass is only for torch.float modules"
+                    assert sample_parameter.device == torch.device('cpu'), "this pass is only for CPU modules"
         elif node.op == 'call_function':
             if node.target in mkldnn_supported:
                 supports_mkldnn = MklSupport.YES
@@ -367,7 +367,7 @@ def optimize_for_inference(
 
             if len(cur_colors) == 0:
                 continue
-            assert (not any(i is None for i in cur_colors))
+            assert not any(i is None for i in cur_colors)
             cur_colors = sorted(cur_colors)
             node.color = cur_colors[0]
             for other_color in cur_colors[1:]:
