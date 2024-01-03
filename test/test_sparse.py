@@ -17,7 +17,7 @@ from numbers import Number
 from typing import Dict, Any
 from packaging import version
 from torch.testing._internal.common_cuda import \
-    (SM53OrLater, SM80OrLater)
+    (SM53OrLater, SM80OrLater, TEST_MULTIGPU)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes)
@@ -868,7 +868,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(None, x1.grad)
 
     @coalescedonoff
-    @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @dtypes(torch.double, torch.cdouble)
     def test_Sparse_to_Sparse_copy_multi_gpu(self, device, dtype, coalesced):
         # This is for testing torch.copy_(SparseTensor, SparseTensor) across GPU devices
@@ -952,6 +952,11 @@ class TestSparse(TestSparseBase):
             s.permute(dims=(1, 0))
         with self.assertRaisesRegex(RuntimeError, "duplicate dims"):
             s.permute(dims=(1, 1, 1))
+        # Calling permute on a sparse tensor with an empty tuple used to segfault,
+        # see https://github.com/pytorch/pytorch/issues/116325
+        x = torch.rand((), device=device, dtype=dtype).to_sparse()
+        x.permute(())
+        self.assertEqual(len(x.values()), 1)
 
         def test_shape(sparse_dims, nnz, with_size):
             ndim = len(with_size)
@@ -2648,7 +2653,7 @@ class TestSparse(TestSparseBase):
         self._test_new_device((30, 20, 10, 0), 0)
 
     @onlyCUDA
-    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_new_device_multi_gpu(self):
         self._test_new_device((), 1)
         self._test_new_device((30, 20), 1)
@@ -3983,11 +3988,11 @@ class TestSparse(TestSparseBase):
             yield (make_diags((1, 3)), make_offsets([0]), (3, 2, 3)), "Output shape must be 2d"
             yield (make_diags((2, 3)), make_offsets([[1, 2], [0, 3]]), (3, 3)), "Offsets must be scalar or vector"
             yield (make_diags((3, 2, 3)), make_offsets([0, 1, 2]), (4, 4)), "Diagonals must be vector or matrix"
-            yield (make_diags((3, 3)), make_offsets([-1, 0]), (3, 3)),\
+            yield (make_diags((3, 3)), make_offsets([-1, 0]), (3, 3)), \
                 r"Number of diagonals \(\d\) does not match the number of offsets \(\d\)"
-            yield (make_diags((5,)), make_offsets([0, 1, 2, 3, 4]), (3, 3)),\
+            yield (make_diags((5,)), make_offsets([0, 1, 2, 3, 4]), (3, 3)), \
                 r"Number of diagonals \(\d\) does not match the number of offsets \(\d\)"
-            yield (make_diags((2, 2)), make_offsets([-1, 0]), (2, 3), torch.strided),\
+            yield (make_diags((2, 2)), make_offsets([-1, 0]), (2, 3), torch.strided), \
                 r"Only output layouts \(\w+, \w+, \w+\) are supported, got \w+"
             yield (make_diags((2, 5)), make_offsets([0, 0]), (5, 5)), "Offset tensor contains duplicate values"
             yield (make_diags((1, 5)), make_offsets([0]).to(torch.int32), (5, 5)), r"Offset Tensor must have dtype Long but got \w+"
@@ -5065,11 +5070,6 @@ class TestSparseAny(TestCase):
                      torch.Tensor.to_sparse,
                      torch.Tensor.values,
                      ):
-            if layout in sparse_compressed_layouts and func.__name__ == 'values':
-                # FIXME: RuntimeError: indices expected sparse
-                # coordinate tensor layout but got SparseCsr. Likely
-                # works when gh-107126 is fixed.
-                continue
             for x in self.generate_simple_inputs(
                     layout,
                     device=device,
