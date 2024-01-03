@@ -727,6 +727,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
+  logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
@@ -799,6 +800,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
             << "NCCL version: " << getNcclVersion() << ", size: " << size
+            << ", global rank: " << globalRank()
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
@@ -1109,8 +1111,17 @@ void ProcessGroupNCCL::abortCommsFromMap(
     // their responsibility to destroy the process group and recreate
     // it to recover from errors.
 
+    c10::StreamId streamId = -1;
+    if (ncclStreams_.find(devName) != ncclStreams_.end()) {
+      auto streams = ncclStreams_.at(devName);
+      if (streams.size() > 0) {
+        streamId = streams[0].id();
+      }
+    }
+
     LOG(INFO) << logPrefix() << "] Destroyed " << ncclComms.size()
-              << "communicators on CUDA device " << devName;
+              << "communicators on CUDA device: " << devName
+              << " with stream: " << streamId;
   }
 }
 
@@ -1178,15 +1189,6 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 #endif
 }
 
-void ProcessGroupNCCL::registerDebugInfoWriter(
-    std::unique_ptr<DebugInfoWriter> writer) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      debugInfoWriter_ == nullptr,
-      "ProcessGroupNCCL debugInfoWriter already registered");
-  debugInfoWriter_ = std::move(writer);
-}
-
 bool ProcessGroupNCCL::dumpDebuggingInfo() {
   // Serialize all calls to this function to avoid corrupting data, but allow
   // multiple calls in one runtime. User is responsible for preserving the
@@ -1199,13 +1201,8 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
     auto ncclTrace = dump_nccl_trace();
-    if (debugInfoWriter_ == nullptr) {
-      // Dump the trace blob into local disk as a fallback.
-      std::unique_ptr<DebugInfoWriter> debugInfoWriterPtr =
-          std::make_unique<DebugInfoWriter>(rank_);
-      registerDebugInfoWriter(std::move(debugInfoWriterPtr));
-    }
-    debugInfoWriter_->write(ncclTrace);
+    DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
+    writer.write(ncclTrace);
     return true;
   }
   return false;
@@ -1426,9 +1423,17 @@ struct DumpPipe {
 };
 #endif
 
+std::string ProcessGroupNCCL::createLogPrefix() const {
+  return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
+}
+
 const std::string& ProcessGroupNCCL::logPrefix() const {
-  static std::string prefix = c10::str("[PG ", uid_, " Rank ", rank_, "] ");
-  return prefix;
+  return logPrefix_;
+}
+
+const int& ProcessGroupNCCL::globalRank() const {
+  static int globalRank = rank_;
+  return globalRank;
 }
 
 void ProcessGroupNCCL::watchdogHandler() {
@@ -1457,10 +1462,12 @@ void ProcessGroupNCCL::watchdogHandler() {
     // Bump up heart beat by one.
     heartbeat_++;
 
-    // poll store to see if some ranks have flagged a timeout when
+    // Assuming that we always init a process group containing all ranks,
+    // we only use the watchdog thread to listen for the global signal to dump
+    // and abort. We poll store to see if some ranks have flagged a timeout when
     // we haven't polled for `heartbeat_timeout` seconds and there haven't
     // any work added or removed for `watchdog_timeout` seconds.
-    if (dumpOnTimeout_) {
+    if (dumpOnTimeout_ && uid_ == 0) {
       auto currentTime = std::chrono::steady_clock::now();
       auto timeSinceLastWorkListUpdate =
           std::chrono::duration_cast<std::chrono::milliseconds>(

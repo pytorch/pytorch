@@ -7,7 +7,7 @@ from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_
 
 
 class TestAutogradLogging(LoggingTestCase):
-    @make_logging_test(autograd=logging.INFO)
+    @make_logging_test(autograd=logging.DEBUG)
     def test_logging(self, records):
         a = torch.rand(10, requires_grad=True)
         b = a.mul(2).div(3).sum()

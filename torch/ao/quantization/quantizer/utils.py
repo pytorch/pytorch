@@ -67,6 +67,8 @@ def _get_conv_unary_pattern(
     has_bn: bool = False,  # Usually need for QAT pattern
     unary_fn: Optional[Callable[[Any], Any]] = None,
 ):
+    # A helper function to generate a Conv Unary pattern,
+    # which serves as an input to create a SubgraphMatcherWithNameNodeMap.
     def _conv_unary(
         x,
         conv_weight,

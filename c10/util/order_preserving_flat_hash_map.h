@@ -8,6 +8,7 @@
 // - make sherwood_v3_table::convertible_to_iterator public because GCC5 seems
 // to have issues with it otherwise
 // - fix compiler warnings in operator templated_iterator<const value_type>
+// - make use of 'if constexpr' and eliminate AssignIfTrue template
 
 //          Copyright Malte Skarupke 2017.
 // Distributed under the Boost Software License, Version 1.0.
@@ -139,9 +140,11 @@ struct KeyOrValueEquality : functor_storage<bool, key_equal> {
 static constexpr int8_t min_lookups = 4;
 template <typename T>
 struct sherwood_v3_entry {
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   sherwood_v3_entry() {}
   sherwood_v3_entry(int8_t distance_from_desired)
       : distance_from_desired(distance_from_desired) {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~sherwood_v3_entry() {}
 
   bool has_value() const {
@@ -187,21 +190,6 @@ inline int8_t log2(uint64_t value) {
   value |= value >> 32;
   return table[((value - (value >> 1)) * 0x07EDD5E59A4E28C2) >> 58];
 }
-
-template <typename T, bool>
-struct AssignIfTrue {
-  void operator()(T& lhs, const T& rhs) {
-    lhs = rhs;
-  }
-  void operator()(T& lhs, T&& rhs) {
-    lhs = std::move(rhs);
-  }
-};
-template <typename T>
-struct AssignIfTrue<T, false> {
-  void operator()(T&, const T&) {}
-  void operator()(T&, T&&) {}
-};
 
 inline uint64_t next_power_of_two(uint64_t i) {
   --i;
@@ -383,15 +371,13 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
       return *this;
 
     clear();
-    if (AllocatorTraits::propagate_on_container_copy_assignment::value) {
+    if constexpr (AllocatorTraits::propagate_on_container_copy_assignment::
+                      value) {
       if (static_cast<EntryAlloc&>(*this) !=
           static_cast<const EntryAlloc&>(other)) {
         reset_to_empty_state();
       }
-      AssignIfTrue<
-          EntryAlloc,
-          AllocatorTraits::propagate_on_container_copy_assignment::value>()(
-          *this, other);
+      static_cast<EntryAlloc&>(*this) = other;
     }
     _max_load_factor = other._max_load_factor;
     static_cast<Hasher&>(*this) = other;
@@ -403,13 +389,11 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
   sherwood_v3_table& operator=(sherwood_v3_table&& other) noexcept {
     if (this == std::addressof(other))
       return *this;
-    else if (AllocatorTraits::propagate_on_container_move_assignment::value) {
+    else if constexpr (AllocatorTraits::propagate_on_container_move_assignment::
+                           value) {
       clear();
       reset_to_empty_state();
-      AssignIfTrue<
-          EntryAlloc,
-          AllocatorTraits::propagate_on_container_move_assignment::value>()(
-          *this, std::move(other));
+      static_cast<EntryAlloc&>(*this) = std::move(other);
       swap_pointers(other);
     } else if (
         static_cast<EntryAlloc&>(*this) == static_cast<EntryAlloc&>(other)) {
@@ -598,8 +582,9 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
   void rehash(uint64_t num_buckets) {
     num_buckets = std::max(
         num_buckets,
-        static_cast<uint64_t>(
-            std::ceil(num_elements / static_cast<double>(_max_load_factor))));
+        static_cast<uint64_t>(std::ceil(
+            static_cast<double>(num_elements) /
+            static_cast<double>(_max_load_factor))));
     if (num_buckets == 0) {
       reset_to_empty_state();
       return;
@@ -920,8 +905,9 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
       Args&&... args) {
     using std::swap;
     if (num_slots_minus_one == 0 || distance_from_desired == max_lookups ||
-        num_elements + 1 >
-            (num_slots_minus_one + 1) * static_cast<double>(_max_load_factor)) {
+        static_cast<double>(num_elements + 1) >
+            static_cast<double>(num_slots_minus_one + 1) *
+                static_cast<double>(_max_load_factor)) {
       grow();
       return emplace(std::forward<Key>(key), std::forward<Args>(args)...);
     } else if (current_entry->is_empty()) {

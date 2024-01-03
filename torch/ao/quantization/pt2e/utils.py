@@ -165,6 +165,7 @@ def _is_supported_batch_norm_for_training(node: Node):
     ]
     return node.target in supported_ops
 
+# TODO: rename this to _is_conv_node
 def _is_conv(n: Node):
     """
     Return whether the node refers to an aten conv op.
@@ -174,6 +175,7 @@ def _is_conv(n: Node):
         torch.ops.aten.conv2d.default,
     ]
 
+# TODO: rename this to _is_conv_transpose_node
 def _is_conv_transpose(n: Node):
     """
     Return whether the node refers to an aten conv_transpose op.
@@ -182,6 +184,9 @@ def _is_conv_transpose(n: Node):
         torch.ops.aten.conv_transpose1d,
         torch.ops.aten.conv_transpose2d,
     ]
+
+def _is_bn_node(n: Node):
+    return _is_supported_batch_norm_for_training(n) or n.target == torch.ops.aten._native_batch_norm_legit_no_training.default
 
 def fold_bn_weights_into_conv_node(
     conv_node: Node,
@@ -256,6 +261,9 @@ def fold_bn_weights_into_conv_node(
 
 # fuse conv bn weights, inplace modification of the graph_module and graph
 def _fuse_conv_bn_(m: GraphModule) -> None:
+    has_bn = any(_is_bn_node(n) for n in m.graph.nodes)
+    if not has_bn:
+        return
     for n in m.graph.nodes:
         if n.op != "call_function" or n.target != torch.ops.aten._native_batch_norm_legit_no_training.default:
             continue
