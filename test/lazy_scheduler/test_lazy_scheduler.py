@@ -1,7 +1,7 @@
 """
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_single_segment
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_split_module_above_aotautograd
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_compile_fx_with_segment_info
+pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_segment_tagging
 """
 
 import torch
@@ -336,7 +336,7 @@ class TestLazyScheduler(TestCase):
       gm_after_split = lazy_scheduler.compile_fx(gm, example_inputs, segment_assignment_fn, **kwargs)
       # Test that one submodule is created for each NN module method: forward, func1, func2.
       self.assertEqual(len(list(gm_after_split.named_children())), 3)
-      for _, submod in enumerate(gm_after_split.named_children()):
+      for name, submod in gm_after_split.named_children():
         self.assertTrue(isinstance(submod, _LazilyCompiledModule))
       return gm_after_split
 
@@ -367,7 +367,7 @@ class TestLazyScheduler(TestCase):
       y,
     )
 
-def test_segment_tagging(self):
+  def test_segment_tagging(self):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     m = TestModule()
     m = m.to(device)
@@ -379,18 +379,26 @@ def test_segment_tagging(self):
 
     # This is roughly how the register_segment function will look like
     def register_segment(method, name):
-      global segment_dict
+      nonlocal segment_dict
       segment_dict[method] = name
 
     register_segment(m.func2, "func2")
 
     def segment_assignment_fn(gm):
+      nonlocal segment_dict
+      next_unnamed_segment_id = 0
+      in_unnamed_segment = False
       for _, node in enumerate(gm.graph.nodes):
         assert "nn_module_method" in node.meta
         if node.meta["nn_module_method"] in segment_dict:
+          if in_unnamed_segment:
+            in_unnamed_segment = False
+            next_unnamed_segment_id += 1
           node.meta["segment"] = str(node.meta["nn_module_method"])
         else:
-          # TODO: add unnamed segment
+          if not in_unnamed_segment:
+            in_unnamed_segment = True
+          node.meta["segment"] = str(next_unnamed_segment_id)
 
     def compile_fx_count_submods(
       gm: torch.fx.GraphModule,
@@ -399,9 +407,10 @@ def test_segment_tagging(self):
       **kwargs,
     ):
       gm_after_split = lazy_scheduler.compile_fx(gm, example_inputs, segment_assignment_fn, **kwargs)
-      # func2 is the middle function, so should produce 3 submodules
+      # func2 is the middle function in TestModule, so should produce 3 submodules
       self.assertEqual(len(list(gm_after_split.named_children())), 3)
-      for _, submod in enumerate(gm_after_split.named_children()):
+      print(f"gm_after_split: {gm_after_split}")
+      for name, submod in gm_after_split.named_children():
         self.assertTrue(isinstance(submod, _LazilyCompiledModule))
       return gm_after_split
 
@@ -409,7 +418,7 @@ def test_segment_tagging(self):
       m,
       functools.partial(
         compile_fx_count_submods,
-        inner_compile=compile_fx_inner_assert_single_nn_method,
+        inner_compile=lazy_scheduler.compile_fx_inner,
         segment_assignment_fn=segment_assignment_fn
       ),
       x,
