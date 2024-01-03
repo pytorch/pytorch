@@ -1467,7 +1467,7 @@ if TYPE_CHECKING:
     from torch._C._VariableFunctions import *  # type: ignore[assignment, misc] # noqa: F403
     # Fixup segment_reduce visibility
     _segment_reduce = segment_reduce
-    del segment_reduce
+    del segment_reduce  # noqa: F821
 
 # Ops not to be exposed in `torch` namespace,
 # mostly helper ops.
