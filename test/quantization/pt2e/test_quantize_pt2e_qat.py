@@ -5,7 +5,6 @@ import unittest
 from typing import Any, Optional, Tuple, Type
 
 import torch
-from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
     default_fake_quant,
     FusedMovingAvgObsFakeQuantize,
@@ -35,6 +34,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
 )
+from torch.export._trace import _export
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
@@ -134,10 +134,11 @@ class PT2EQATTestCase(QuantizationTestCase):
                 is_per_channel=is_per_channel, is_qat=True
             )
         )
-        model_pt2e = capture_pre_autograd_graph(
+        model_pt2e = _export(
             model_pt2e,
             example_inputs,
-        )
+            pre_dispatch=True,
+        ).module()
         model_pt2e = prepare_qat_pt2e(model_pt2e, quantizer)
         torch.manual_seed(MANUAL_SEED)
         after_prepare_result_pt2e = model_pt2e(*example_inputs)
@@ -219,10 +220,11 @@ class PT2EQATTestCase(QuantizationTestCase):
         quantizer.set_global(
             get_symmetric_quantization_config(is_per_channel, is_qat=True)
         )
-        m = capture_pre_autograd_graph(
+        m = _export(
             m,
             example_inputs,
-        )
+            pre_dispatch=True,
+        ).module()
         m = prepare_qat_pt2e(m, quantizer)
         m(*example_inputs)
 
@@ -554,7 +556,7 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
 
         # Program capture
         m = M(self.conv_class, self.bn_class)
-        m = capture_pre_autograd_graph(m, self.example_inputs)
+        m = _export(m, self.example_inputs, pre_dispatch=True).module()
         m.graph.eliminate_dead_code()
         m.recompile()
         (_, original_conv_bn_getitem_node) = _get_getitem_nodes(m)
@@ -628,7 +630,7 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         m = M(self.conv_class, self.bn_class, backbone)
         quantizer = XNNPACKQuantizer()
         quantizer.set_global(get_symmetric_quantization_config(is_qat=True))
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = _export(m, example_inputs, pre_dispatch=True).module()
         m = prepare_qat_pt2e(m, quantizer)
         m(*example_inputs)
         m = convert_pt2e(m)
@@ -684,7 +686,7 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
     def test_qat_conv_bn_bias_derived_qspec(self):
         m = self._get_conv_bn_model()
         example_inputs = self.example_inputs
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = _export(m, example_inputs, pre_dispatch=True).module()
         quantizer = ConvBnDerivedBiasQuantizer()
         m = prepare_qat_pt2e(m, quantizer)
         m(*example_inputs)
@@ -731,7 +733,7 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
     def test_qat_per_channel_weight_custom_dtype(self):
         m = self._get_conv_bn_model()
         example_inputs = self.example_inputs
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = _export(m, example_inputs, pre_dispatch=True).module()
         quantizer = ConvBnInt32WeightQuantizer()
         m = prepare_qat_pt2e(m, quantizer)
         m(*example_inputs)
@@ -960,7 +962,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
                     in_channels = child.linear1.weight.size(1)
 
                 example_input = (torch.rand((1, in_channels)),)
-                traced_child = capture_pre_autograd_graph(child, example_input)
+                traced_child = _export(child, example_input, pre_dispatch=True).module()
                 quantizer = XNNPACKQuantizer()
                 quantization_config = get_symmetric_quantization_config(
                     is_per_channel=True, is_qat=True
@@ -991,10 +993,11 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         self._convert_qat_linears(model)
         quant_result_pt2e = model(*example_inputs)
 
-        model_pt2e = capture_pre_autograd_graph(
+        model_pt2e = _export(
             model,
             example_inputs,
-        )
+            pre_dispatch=True,
+        ).module()
 
         quantizer = XNNPACKQuantizer()
         quantizer.set_module_type(torch.nn.Linear, None)
