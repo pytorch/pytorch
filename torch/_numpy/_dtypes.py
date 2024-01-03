@@ -408,6 +408,9 @@ def issubclass_(arg, klass):
 
 def issubdtype(arg1, arg2):
     # cf https://github.com/numpy/numpy/blob/v1.24.0/numpy/core/numerictypes.py#L356-L420
+
+    # We also accept strings even if NumPy doesn't as dtypes are serialized as their
+    # string representation in dynamo's graph
     def str_to_abstract(t):
         if isinstance(t, str) and t in _abstract_dtypes:
             return globals()[t]

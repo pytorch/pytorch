@@ -293,22 +293,6 @@ class InspectParameterVariable(VariableTracker):
     pass
 
 
-def produce_trampoline_autograd_fwd(fn_cls):
-    def trampoline_autograd_fwd(*args, **kwargs):
-        return fn_cls.forward(*args, **kwargs)
-
-    trampoline_autograd_fwd._origin = produce_trampoline_autograd_fwd
-    return trampoline_autograd_fwd
-
-
-def produce_trampoline_autograd_bwd(fn_cls):
-    def trampoline_autograd_bwd(*args, **kwargs):
-        return fn_cls.backward(*args, **kwargs)
-
-    trampoline_autograd_bwd._origin = produce_trampoline_autograd_bwd
-    return trampoline_autograd_bwd
-
-
 def produce_trampoline_autograd_apply(fn_cls):
     def trampoline_autograd_apply(*args, **kwargs):
         return fn_cls.apply(*args, **kwargs)
@@ -339,9 +323,6 @@ class AutogradFunctionVariable(VariableTracker):
 
         VariableTracker.apply(visit, (args, kwargs))
 
-        ctx = AutogradFunctionContextVariable.create(tx)
-        args = [ctx, *args]
-
         if (
             requires_grad
             and torch.is_grad_enabled()
@@ -365,70 +346,28 @@ class AutogradFunctionVariable(VariableTracker):
             if jvp_fn is not torch.autograd.Function.jvp:
                 unimplemented("NYI - User defind jvp")
 
-            from .higher_order_ops import TorchHigherOrderOperatorVariable
+            from .higher_order_ops import AutogradFunctionApplyVariable
 
-            trampoline_autograd_apply = produce_trampoline_autograd_apply(self.fn_cls)
-            trampoline_autograd_fwd = produce_trampoline_autograd_fwd(self.fn_cls)
-            trampoline_autograd_bwd = produce_trampoline_autograd_bwd(self.fn_cls)
+            source = self.source
+            if source is None:
+                source = AttrSource(
+                    tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
+                )
 
-            # NOTE [On Tracing autograd.Function w/ grad]
-            # The complex system described here revolves around the soundness evaluation of an autograd.Function in
-            # PyTorch. The system follows a well-defined strategy for tracing, which involves three key steps: tracing
-            # forward, tracing backward, and if both are sound the potential recording of an "apply" operation into the
-            # graph.We trace forward, and evaluate soundness. Soundness, in this context, refers to the absence of side
-            # effects, the avoidance of lifting new arguments into the trace, the production of a single tensor output,
-            # and a limited input scope confined to contexts, tensors, and constants. If the forward trace is sound,
-            # we install any guards accumulated from tracing. If not, we graph break. We trace backward, and evaluate
-            # for soundness, same as forward, except with more strictness. We enable a strict mode on the tx, and
-            # reject certain ops when running under this strict mode. If both the forward and backward traces are sound,
-            # we write the autograd function’s apply into the graph.
-
-            # For tracing forward and backward, we use UserFunctionVariable. Although it does not directly contribute
-            # to soundness evaluation, it plus a  GlobalSource makes sure we can produce valid guards,
-            # and that we can inline properly here. Inlining is required in order to be able to ensure that the
-            # soundness evaluation works as described above.
-
-            module_source = AttrSource(
-                tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
-            )
-            fwd_bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
-                tx.output,
-                parent=tx.output.current_tracer,
-                source_target="autograd.Function",
-            )
-            higher_order_autograd_fn = TorchHigherOrderOperatorVariable.make(
-                trampoline_autograd_fwd,
-                source=AttrSource(module_source, "forward"),
-                fwd_bwd_tracer=fwd_bwd_tracer,
-            )
-            speculated_fwd_result = higher_order_autograd_fn.call_function(
-                tx, args, kwargs
-            )
-
-            if isinstance(speculated_fwd_result, variables.TupleVariable):
-                bwd_args = [ctx, *speculated_fwd_result.items]
-            else:
-                bwd_args = [ctx, speculated_fwd_result]
-
-            TorchHigherOrderOperatorVariable.make(
-                trampoline_autograd_bwd,
-                source=AttrSource(module_source, "backward"),
-                fwd_bwd_tracer=fwd_bwd_tracer,
-            ).call_function(tx, bwd_args, {})
-
-            # If fwd and backward are sound, we want apply in the graph.
-            # We don't want backward because we are tracing forwards.
-            args = args[1:]
-            return TorchHigherOrderOperatorVariable.make(
-                trampoline_autograd_apply,
-                fwd_bwd_tracer=None,
+            return AutogradFunctionApplyVariable(
+                self.fn_cls.forward,
+                self.fn_cls.backward,
+                source,
+                source=AttrSource(source, member="apply"),
             ).call_function(tx, args, kwargs)
 
+        source = None
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), "forward")
-        else:
-            source = None
+
         fn = self.fn_cls.forward
+        ctx = AutogradFunctionContextVariable.create(tx)
+        args = [ctx, *args]
         if isinstance(fn, types.FunctionType):
             return variables.UserFunctionVariable(fn, source=source).call_function(
                 tx, args, kwargs
@@ -454,11 +393,11 @@ class AutogradFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ):
-        from ..allowed_functions import is_user_defined_allowed
+        from ..trace_rules import is_callable_allowed
         from .builder import wrap_fx_proxy
 
         if name == "apply":
-            if is_user_defined_allowed(self.fn_cls):
+            if is_callable_allowed(self.fn_cls):
                 trampoline_autograd_apply = produce_trampoline_autograd_apply(
                     self.fn_cls
                 )
@@ -915,18 +854,11 @@ class NumpyVariable(VariableTracker):
         return self.value
 
     def as_proxy(self):
-        # this handles numpy dtype attribute such as np.float32. TODO(larryliu0820): we should split NumpyVariable
-        #  into NumpyVariable for instances/objects and NumpyVariable for types.
         if config.trace_numpy and isinstance(self.value, type):
-            # retrieve attribute str. E.g., "float32" if given np.float32
-
-            # get tnp equivalent
-            tnp_dtype = getattr(tnp, self.value.__name__)
-
-            # returning a string here because we are assuming all `dtype` kwargs for numpy
-            # functions can take an equivalent string and the behavior of the function would
-            # be the same as taking a numpy dtype.
-            return tnp_dtype.name
+            # This handles numpy dtype attributes such as np.float32
+            # We return a string as we don't want to serialize non-PyTorch objects in the output FX graph
+            # In torch/_numpy we normalize strings to their dtypes when the input is a dtype, as NumPy does
+            return self.value.__name__
 
         return super().as_proxy()
 
