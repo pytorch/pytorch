@@ -44,6 +44,7 @@ import numpy as np
 import torch
 import torch.utils._pytree as pytree
 from itertools import product
+import operator
 
 test_consistency_op_db = copy.deepcopy(op_db)
 test_error_inputs_op_db = copy.deepcopy(op_db)
@@ -228,34 +229,67 @@ def mps_ops_modifier(ops):
     SUPPORTED_COMPLEX_OPS = {
         '__radd__',
         '__rmul__',
+        '__getitem__',
         'add',
         'atleast_1d',
         'atleast_2d',
         'atleast_3d',
+        'as_strided',
+        'as_strided_scatter',
+        'broadcast_tensors',
+        'broadcast_to',
+        'cfloat',
+        'chalf',
+        'chunk',
         'clone',
         'contiguous',
+        'diag',
+        'diag_embed',
+        'diagflat',
+        'diagonal',
+        'diagonal_copy',
+        'diagonal_scatter',
+        'dsplit',
         'empty',
         'empty_permuted',
         'empty_strided',
         'eye',
+        'expand',
+        'expand_as',
         'flatten',
         'fill',
         'full',
+        'hsplit',
         'imag',
         'isfinite',
         'isinf',
         'isreal',
         'item',
         'kron',
+        'linalg.inv',
+        'linalg.inv_ex',
+        'linalg.diagonal',
+        'linalg.svd',
+        'linalg.tensorinv',
         'linspace',
         'logspace',
         'linspacetensor_overload',
         'logspacetensor_overload',
+        'mT',
+        'masked_scatter',
+        'masked_select',
+        'meshgridlist_of_tensors',
+        'meshgridvariadic_tensors',
+        'movedim',
         'mul',
+        'narrow',
+        'narrow_copy',
+        'nn.functional.padcircular',
         'nn.functional.feature_alpha_dropoutwithout_train',
         'nn.functional.unfold',
         'ones',
         'outer',
+        'permute',
         'positive',
         'randn',
         'ravel',
@@ -265,13 +299,24 @@ def mps_ops_modifier(ops):
         'resolve_conj',
         'resolve_neg',
         'scalar_tensor',
+        'select',
         'sgn',
+        'slice',
         'split',
+        'split_with_sizes',
+        'splitlist_args',
         'squeeze',
         'squeezemultiple',
         'sub',
         't',
+        'tensor_split',
+        'transpose',
+        'T',
+        'unbind',
         'unflatten',
+        'unfold',
+        'unfold_copy',
+        'unsafe_chunk',
         'unsafe_split',
         'unsqueeze',
         'view_as',
@@ -664,9 +709,9 @@ def mps_ops_modifier(ops):
         'log_normal': None,
         'bfloat16': None,
         'cdouble': None,
-        'cfloat': None,
-        'double': None,
+        'cfloat': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.float16, torch.float32],
         'chalf': None,
+        'double': None,
         'nn.functional.softminwith_dtype': None,
         'log_softmaxwith_dtype': None,
         'softmaxwith_dtype': None,
@@ -987,7 +1032,7 @@ class MpsMemoryLeakCheck:
             if driver_mem_allocated > self.driver_before:
                 driver_discrepancy = True
 
-            if not(caching_allocator_discrepancy or driver_discrepancy):
+            if not (caching_allocator_discrepancy or driver_discrepancy):
                 # Leak was false positive, exit loop
                 discrepancy_detected = False
                 break
@@ -1344,11 +1389,11 @@ class TestAvgPool(TestCaseMPS):
         return joined_x.view(1, joined_x.numel())
 
     def _avg_pool2d(self, x, kernel_size):
-        size = reduce((lambda x, y: x * y), kernel_size)
+        size = reduce(operator.mul, kernel_size)  # noqa: F821
         return self._sum_pool2d(x, kernel_size) / size
 
     def _avg_pool3d(self, x, kernel_size):
-        size = reduce((lambda x, y: x * y), kernel_size)
+        size = reduce(operator.mul, kernel_size)  # noqa: F821
         return self._sum_pool3d(x, kernel_size) / size
 
     def test_avg_pool2d_with_zero_divisor(self):
@@ -4077,7 +4122,7 @@ class TestMPS(TestCaseMPS):
         def helper(dtype):
             # Test with axis -1
             cpu_x = None
-            if(dtype == torch.float32):
+            if dtype == torch.float32:
                 cpu_x = torch.randn(10, 3, device='cpu', dtype=torch.float32)
             else:
                 cpu_x = torch.randint(0, 20, (10, 3), device='cpu', dtype=torch.float32)
@@ -4112,7 +4157,7 @@ class TestMPS(TestCaseMPS):
         def helper(dtype):
             # Test with axis -1
             cpu_x = None
-            if(dtype == torch.float32):
+            if dtype == torch.float32:
                 cpu_x = torch.randn(10, 3, device='cpu', dtype=torch.float32)
             else:
                 cpu_x = torch.randint(0, 20, (10, 3), device='cpu', dtype=torch.float32)
@@ -4568,6 +4613,14 @@ class TestMPS(TestCaseMPS):
         out2 = nn.BCELoss(weight)(sigmoid(output), target)
 
         self.assertEqual(out1, out2)
+
+    def test_cross_entropy_loss(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/116095
+        loss = nn.CrossEntropyLoss()
+        pred = torch.randn(3, 5, requires_grad=True, dtype=torch.float16, device='mps')
+        target = torch.ones(3, dtype=torch.long, device='mps')
+        output = loss(pred, target)
+        output.backward()
 
     def test_log_softmax(self):
         values = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
@@ -6475,7 +6528,7 @@ class TestMPS(TestCaseMPS):
             devices += ['mps']
 
             def _gelu_ref(X):
-                return X * stats.norm.cdf(X)
+                return X * stats.norm.cdf(X)  # noqa: F821
 
             for d in devices:
                 X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
@@ -11060,6 +11113,8 @@ class TestConsistency(TestCaseMPS):
         'cross', 'linalg.cross',
         'prod', 'masked.prod',
         'nextafter',
+        'native_layer_norm',
+        'nn.functional.layer_norm',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',

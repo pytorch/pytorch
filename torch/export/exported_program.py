@@ -1,6 +1,7 @@
 import copy
 import dataclasses
 import functools
+import types
 from typing import (
     Any,
     Callable,
@@ -344,17 +345,23 @@ class ExportedProgram:
         )
         return string
 
-    def module(self, *, flat: bool = True) -> torch.nn.Module:
+    def module(self) -> torch.nn.Module:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
         """
-        from torch._export.unflatten import unflatten
         from ._unlift import _unlift_exported_program_lifted_states
 
-        if flat:
-            return _unlift_exported_program_lifted_states(self)
-        else:
-            return unflatten(self)
+        module = _unlift_exported_program_lifted_states(self)
+
+        def _train(self, mode: bool = True):
+            raise NotImplementedError("Calling train() is not supported yet.")
+
+        def _eval(self, mode: bool = True):
+            raise NotImplementedError("Calling eval() is not supported yet.")
+
+        module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
+        module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
+        return module
 
     @_disable_prexisiting_fake_mode
     def run_decompositions(
@@ -416,12 +423,24 @@ class ExportedProgram:
         new_placeholders = _get_placeholders(gm)
         new_outputs = list(gm.graph.nodes)[-1].args[0]
 
+        # To match the output target with correct input for input mutations
+        # need to find the old to new placeholder map
+        old_new_placeholder_map = {
+            spec.arg.name: new_placeholders[i].name
+            for i, spec in enumerate(self.graph_signature.input_specs)
+            if not isinstance(spec.arg, ConstantArgument)
+        }
+
         input_specs = [
             InputSpec(spec.kind, update_arg(spec.arg, new_placeholders[i]), spec.target)
             for i, spec in enumerate(self.graph_signature.input_specs)
         ]
         output_specs = [
-            OutputSpec(spec.kind, update_arg(spec.arg, new_outputs[i]), spec.target)
+            OutputSpec(
+                spec.kind,
+                update_arg(spec.arg, new_outputs[i]),
+                old_new_placeholder_map.get(spec.target, spec.target),
+            )
             for i, spec in enumerate(self.graph_signature.output_specs)
         ]
 

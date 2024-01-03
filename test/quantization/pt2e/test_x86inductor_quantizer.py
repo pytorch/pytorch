@@ -1232,7 +1232,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             node_occurrence = {
                 torch.ops.quantized_decomposed.choose_qparams.tensor: 1,
                 torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
-                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 3,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
                 # quantize_per_channel for weights are const propagated
                 torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                 torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
@@ -1269,7 +1269,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             node_occurrence = {
                 torch.ops.quantized_decomposed.choose_qparams.tensor: 1,
                 torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
-                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 3,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
                 # quantize_per_channel for weights are const propagated
                 torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                 torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
