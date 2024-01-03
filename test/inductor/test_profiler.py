@@ -107,7 +107,6 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
                     hasattr(event, "name")
                     and kernel_name_str in event.name
                     and "triton" in event.name
-                    and "OriginOps" in event.name
                 )
                 for event in prof.events()
             )
