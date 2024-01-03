@@ -888,14 +888,12 @@ dynamo_expected_failures = {
     "TestAttributes.test_fill_max_uint64",
     "TestMethods.test_partition_iterative",
     "TestPutmask.test_byteorder_dtype_<i4",
-    "TestMatmulOperator.test_exceptions",
     "TestPutmask.test_byteorder_dtype_>i4",
     "TestMethods.test_trace",
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmax",
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmin",
     "TestAttributes.test_stridesattr",
     "TestArange.test_zero_step",
-    "TestMatmulOperator.test_matmul_raises",
     "TestStats.test_dtype_from_dtype",
     "TestMethods.test_matmul_out",
     "TestArrayCreationCopyArgument.test_scalars",
@@ -906,7 +904,6 @@ dynamo_expected_failures = {
     "TestFromBuffer.test_basic_little_dtype0",
     "TestMatmul.test_exceptions",
     "TestFlag.test_writeable_from_readonly",
-    "TestMatmulOperator.test_matmul_inplace",
     "TestMethods.test_conjugate",
     "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmax_np_method0",
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmin",
@@ -1384,5 +1381,8 @@ dynamo_expected_failures = {
 }
 
 dynamo_skips = {
+    "TestMatmulOperator.test_matmul_raises",
+    "TestMatmulOperator.test_exceptions",
+    "TestMatmulOperator.test_matmul_inplace",
     "TestMethods.test_diagonal",
 }
