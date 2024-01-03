@@ -352,12 +352,17 @@ def run_functionalized_fw_and_collect_metadata(
                     and o is not curr
                 ]
             )
+
+            # might do lazy view rebase, so enable FunctionalTensorMode
+            with FunctionalTensorMode():
+                grad_fn = o.grad_fn
+
             is_result_of_custom_autograd_fn = False
             if isinstance(o, Tensor):
                 # Need to check for both custom cpp (CppFunction) and python (BackwardCFunction) autograd fns
-                if type(o.grad_fn).__name__ == "CppFunction":
+                if type(grad_fn).__name__ == "CppFunction":
                     is_result_of_custom_autograd_fn = True
-                if isinstance(o.grad_fn, torch.autograd.function.BackwardCFunction):
+                if isinstance(grad_fn, torch.autograd.function.BackwardCFunction):
                     is_result_of_custom_autograd_fn = True
 
             if not isinstance(o, Tensor):
@@ -365,7 +370,7 @@ def run_functionalized_fw_and_collect_metadata(
                 base_idx = None
             elif (
                 curr_storage in inp_storage_refs
-                and o.grad_fn is not None
+                and grad_fn is not None
                 and is_result_of_custom_autograd_fn
             ):
                 output_type = OutputType.custom_function_view
@@ -384,7 +389,7 @@ def run_functionalized_fw_and_collect_metadata(
                     num_aliased_outs - num_multi_output_view_outs
                 )
                 if (
-                    o.grad_fn is not None
+                    grad_fn is not None
                     and num_aliased_outs_that_are_not_multi_output_views == 0
                 ):
                     # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
