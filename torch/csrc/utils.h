@@ -10,6 +10,7 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+#include <c10/util/Exception.h>
 
 #ifdef USE_CUDA
 #include <c10/cuda/CUDAStream.h>
