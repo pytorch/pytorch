@@ -71,7 +71,7 @@ class ForeachFuncWrapper:
 
 class InplaceForeachVersionBumpCheck:
 
-    def __init__(self, testcase: TestCase, tensorlist: "List[torch.Tensor]") -> None:
+    def __init__(self, testcase: TestCase, tensorlist: "List[torch.Tensor]") -> None:  # noqa: F821
         self._testcase = testcase
         self._tensorlist = tensorlist
         self._orig_version_counts = [t._version for t in tensorlist]

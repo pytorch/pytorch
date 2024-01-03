@@ -70,9 +70,6 @@ static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
 static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
     "TORCH_NCCL_TRACE_BUFFER_SIZE"};
 
-static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_SLEEP_MILSEC = {
-    "TORCH_NCCL_WAIT_TIMEOUT_DUMP_SLEEP_MILSEC"};
-
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 constexpr const char* TIMEOUT_DUMP = "timeout_dump";
@@ -720,9 +717,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Generates a prefix that is unique to this process group and rank, for
   // disambiguating logs
-  std::string createLogPrefix() const;
-
-  // Returns the unique prefix created in createLogPrefix
   const std::string& logPrefix() const;
 
   // Returns the global rank of the device. This function assumes that users
@@ -826,9 +820,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // The time interval used for deciding whether there is no watchdog heartbeat.
   int heartbeatTimeoutInSec_;
-
-  // Extra time of sleep when waiting for timeout dump to finish.
-  int waitTimeoutDumpSleepInMilSec_;
 
   // Size of ring buffer where we store NCCL Traces for debugging.
   int ncclTraceBufferSize_;
@@ -978,8 +969,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unique_ptr<DebugInfoWriter> debugInfoWriter_ = nullptr;
 
   size_t uid_;
-
-  std::string logPrefix_;
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
 };

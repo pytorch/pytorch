@@ -440,7 +440,9 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
         sources = [
             origin.meta["original_aten"]._overloadpacket.__name__
             for origin in all_origins
-            if origin.op == "call_function" and "original_aten" in origin.meta
+            if origin.op == "call_function"
+            and "original_aten" in origin.meta
+            and origin.meta["original_aten"] is not None
         ]
         sources = sorted(set(sources))
     elif descriptive_names == "torch":
@@ -471,7 +473,7 @@ def get_kernel_metadata(node_schedule, wrapper):
     from_node_dict = collections.defaultdict(list)
     original_aten_dict = collections.defaultdict(list)
     for node in inductor_nodes:
-        if "original_aten" in node.meta:
+        if "original_aten" in node.meta and node.meta["original_aten"] is not None:
             key = str(node.meta["original_aten"]._overloadpacket)
             original_aten_dict[key].append(node.name)
         if "from_node" in node.meta:
