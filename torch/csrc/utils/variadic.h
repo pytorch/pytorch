@@ -73,13 +73,13 @@ struct MakeIndices<0, Is...> {
 //===----------------------------------------------------------------------===//
 
 template <bool value, typename T = void>
-using enable_if_t = std::enable_if_t<value, T>;
+using enable_if_t = typename std::enable_if<value, T>::type;
 
 template <bool value, typename T = void>
 using disable_if_t = enable_if_t<!value, T>;
 
 template <typename T>
-using decay_t = std::decay_t<T>;
+using decay_t = typename std::decay<T>::type;
 
 namespace detail {
 template <bool...>
@@ -112,7 +112,7 @@ using enable_if_all_of_t = enable_if_t<all_of<values...>::value>;
 
 template <typename T, typename... Ts>
 using disable_if_contains_t =
-    enable_if_all_of_t<(!std::is_same_v<T, decay_t<Ts>>)...>;
+    enable_if_all_of_t<(!std::is_same<T, decay_t<Ts>>::value)...>;
 
 template <typename Function, typename... Ts>
 void apply(Function function, Ts&&... ts) {

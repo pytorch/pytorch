@@ -9,15 +9,16 @@
 #include <torch/csrc/profiler/util.h>
 
 namespace torch {
-
-namespace profiler::impl {
+namespace profiler {
+namespace impl {
 struct Result;
 namespace kineto {
 struct ActivityTraceWrapper;
 } // namespace kineto
-} // namespace profiler::impl
-
-namespace autograd::profiler {
+} // namespace impl
+} // namespace profiler
+namespace autograd {
+namespace profiler {
 using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
 using extra_meta_t = std::unordered_map<std::string, std::string>;
 
@@ -176,13 +177,16 @@ TORCH_API void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities);
 
-} // namespace autograd::profiler
+} // namespace profiler
+} // namespace autograd
 
-namespace profiler::impl {
+namespace profiler {
+namespace impl {
 
 // Experimental.
 TORCH_API void _reportVulkanEventToProfiler(vulkan_id_t id);
 
-} // namespace profiler::impl
+} // namespace impl
+} // namespace profiler
 
 } // namespace torch

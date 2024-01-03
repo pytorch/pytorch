@@ -17,9 +17,14 @@
 #include <torch/csrc/autograd/jit_decomp_interface.h>
 #include <torch/csrc/utils/variadic.h>
 
+#include <array>
 #include <cstddef>
 #include <functional>
+#include <initializer_list>
 #include <memory>
+#include <stdexcept>
+#include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -112,8 +117,8 @@ inline void rebase_history(Variable& var, std::shared_ptr<Node> grad_fn) {
 }
 
 inline void rebase_history(
-    const std::vector<Variable>& vars,
-    const std::shared_ptr<Node>& grad_fn) {
+    std::vector<Variable>&& vars,
+    std::shared_ptr<Node> grad_fn) {
   if (grad_fn) {
     for (auto& var : vars) {
       if (var.defined()) {
@@ -132,7 +137,6 @@ inline void increment_version(const at::Tensor& t) {
 
 struct Flatten : IterArgs<Flatten> {
   Flatten(variable_list& out) : out(out) {}
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   variable_list& out;
   void operator()(const at::Tensor& x) {
     out.emplace_back(x);

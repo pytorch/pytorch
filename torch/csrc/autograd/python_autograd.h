@@ -4,11 +4,13 @@
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused);
 void THPAutograd_initFunctions();
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 PyMethodDef* python_functions();
 
 }
+} // namespace torch
 
 #include <torch/csrc/autograd/python_engine.h>
 #include <torch/csrc/autograd/python_function.h>

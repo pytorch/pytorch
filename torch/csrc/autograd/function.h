@@ -24,7 +24,8 @@
 #include <utility>
 #include <vector>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 struct Edge;
 struct FunctionPostHook;
@@ -756,4 +757,5 @@ struct TypeAndSize {
   at::TensorOptions options;
 };
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

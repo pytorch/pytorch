@@ -28,7 +28,8 @@ PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true);
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonOrSharedTypePtr<T>);
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonTypePtr<T>, true);
 
-namespace pybind11::detail {
+namespace pybind11 {
+namespace detail {
 
 // torch.Tensor <-> at::Tensor conversions (without unwrapping)
 template <>
@@ -323,9 +324,11 @@ struct type_caster<c10::complex<T>> {
   }
 };
 
-} // namespace pybind11::detail
+} // namespace detail
+} // namespace pybind11
 
-namespace torch::impl {
+namespace torch {
+namespace impl {
 
 // Use this function if you have a C++ object that is used from both C++
 // and Python contexts, and you need its GIL to be released when you
@@ -381,4 +384,5 @@ inline void destroy_without_gil(T* ptr) {
   }
 }
 
-} // namespace torch::impl
+} // namespace impl
+} // namespace torch
