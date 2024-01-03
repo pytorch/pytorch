@@ -27,7 +27,6 @@ set(generated_file_path "@generated_file_path@") # path
 set(generated_file_internal "@generated_file@") # path
 set(SYCL_executable "@SYCL_EXECUTABLE@") # path
 set(SYCL_flags @SYCL_FLAGS@) # list
-set(SYCL_host_flags @SYCL_host_flags@) # list
 set(SYCL_include_dirs [==[@SYCL_include_dirs@]==]) # list
 set(SYCL_compile_definitions [==[@SYCL_compile_definitions@]==]) # list
 
@@ -48,7 +47,11 @@ foreach(def ${SYCL_compile_definitions})
   list(APPEND SYCL_flags "-D${def}")
 endforeach()
 
-foreach(flag ${SYCL_host_flags})
+# Choose host flags in FindSYCL.cmake
+@SYCL_host_flags@
+
+list(REMOVE_DUPLICATES CMAKE_HOST_FLAGS)
+foreach(flag ${CMAKE_HOST_FLAGS})
   # Extra quotes are added around each flag to help Intel SYCL parse out flags with spaces.
   string(APPEND SYCL_host_compiler_flags "${flag} ")
 endforeach()

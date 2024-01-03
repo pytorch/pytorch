@@ -238,7 +238,9 @@ macro(SYCL_WRAP_SRCS sycl_target generated_files)
     set(SYCL_HOST_SHARED_FLAGS)
   endif()
 
-  set(SYCL_host_flags ${CMAKE_${SYCL_C_OR_CXX}_FLAGS} ${SYCL_HOST_SHARED_FLAGS} ${SYCL_HOST_FLAGS})
+  set(_sycl_c_or_cxx_flags ${CMAKE_${SYCL_C_OR_CXX}_FLAGS})
+  set(_sycl_host_flags "set(CMAKE_HOST_FLAGS ${_sycl_c_or_cxx_flags} ${SYCL_HOST_SHARED_FLAGS} ${SYCL_HOST_FLAGS})")
+  set(SYCL_host_flags ${_sycl_host_flags})
 
   # Reset the output variable
   set(_SYCL_wrap_generated_files "")
