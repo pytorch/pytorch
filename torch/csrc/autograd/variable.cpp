@@ -15,10 +15,13 @@
 #include <ATen/MemoryOverlap.h>
 #include <c10/util/Exception.h>
 
+#include <iostream>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <typeinfo>
 #include <utility>
 #include <vector>
 
