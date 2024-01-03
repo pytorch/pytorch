@@ -78,63 +78,21 @@ static void initDeviceProperties(DeviceProp* device_prop, int device) {
   // Get raw sycl device associated with device index.
   auto& raw_device = *gDevicePool.devices[device];
 
-  // clang-format off
   // Initialize the device properties associated with the specific device.
-  device_prop->device_name = raw_device.get_info<device::name>();
-  device_prop->device_type = raw_device.get_info<device::device_type>();
-  device_prop->platform_name = raw_device.get_info<device::platform>().get_info<platform::name>();
-  device_prop->vendor = raw_device.get_info<device::vendor>();
-  device_prop->driver_version = raw_device.get_info<device::driver_version>();
-  device_prop->is_available = raw_device.get_info<device::is_available>();
-  device_prop->max_param_size = raw_device.get_info<device::max_parameter_size>();
-  device_prop->max_compute_units = raw_device.get_info<device::max_compute_units>();
-  device_prop->max_work_item_dims = raw_device.get_info<device::max_work_item_dimensions>();
-  device_prop->max_work_group_size = raw_device.get_info<device::max_work_group_size>();
-  device_prop->max_num_sub_groups = raw_device.get_info<device::max_num_sub_groups>();
-  device_prop->sub_group_sizes = raw_device.get_info<device::sub_group_sizes>();
-  device_prop->max_clock_freq = raw_device.get_info<device::max_clock_frequency>();
-  device_prop->address_bits = raw_device.get_info<device::address_bits>();
-  device_prop->max_mem_alloc_size = raw_device.get_info<device::max_mem_alloc_size>();
-  device_prop->mem_base_addr_align = raw_device.get_info<device::mem_base_addr_align>();
-  device_prop->half_fp_config = raw_device.get_info<device::half_fp_config>();
-  device_prop->single_fp_config = raw_device.get_info<device::single_fp_config>();
-  device_prop->double_fp_config = raw_device.get_info<device::double_fp_config>();
-  device_prop->global_mem_size = raw_device.get_info<device::global_mem_size>();
-  device_prop->global_mem_cache_type = raw_device.get_info<device::global_mem_cache_type>();
-  device_prop->global_mem_cache_size = raw_device.get_info<device::global_mem_cache_size>();
-  device_prop->global_mem_cache_line_size = raw_device.get_info<device::global_mem_cache_line_size>();
-  device_prop->local_mem_type = raw_device.get_info<device::local_mem_type>();
-  device_prop->local_mem_size = raw_device.get_info<device::local_mem_size>();
-  device_prop->max_sub_devices = raw_device.get_info<device::partition_max_sub_devices>();
-  device_prop->profiling_resolution = raw_device.get_info<device::profiling_timer_resolution>();
-  device_prop->pref_vec_width_char = raw_device.get_info<device::preferred_vector_width_char>();
-  device_prop->pref_vec_width_short = raw_device.get_info<device::preferred_vector_width_short>();
-  device_prop->pref_vec_width_int = raw_device.get_info<device::preferred_vector_width_int>();
-  device_prop->pref_vec_width_long = raw_device.get_info<device::preferred_vector_width_long>();
-  device_prop->pref_vec_width_float = raw_device.get_info<device::preferred_vector_width_float>();
-  device_prop->pref_vec_width_double = raw_device.get_info<device::preferred_vector_width_double>();
-  device_prop->pref_vec_width_half = raw_device.get_info<device::preferred_vector_width_half>();
-  device_prop->native_vec_width_char = raw_device.get_info<device::native_vector_width_char>();
-  device_prop->native_vec_width_short = raw_device.get_info<device::native_vector_width_short>();
-  device_prop->native_vec_width_int = raw_device.get_info<device::native_vector_width_int>();
-  device_prop->native_vec_width_long = raw_device.get_info<device::native_vector_width_long>();
-  device_prop->native_vec_width_float = raw_device.get_info<device::native_vector_width_float>();
-  device_prop->native_vec_width_double = raw_device.get_info<device::native_vector_width_double>();
-  device_prop->native_vec_width_half = raw_device.get_info<device::native_vector_width_half>();
+#define ASSIGN_DEVICE_PROP(property) \
+  device_prop->property = raw_device.get_info<device::property>();
 
-  device_prop->gpu_eu_count = raw_device.has(sycl::aspect::ext_intel_gpu_eu_count)
-      ? raw_device.get_info<intel::info::device::gpu_eu_count>()
-      : 512;
-  device_prop->gpu_eu_count_per_subslice = raw_device.has(sycl::aspect::ext_intel_gpu_eu_count_per_subslice)
-      ? raw_device.get_info<intel::info::device::gpu_eu_count_per_subslice>()
-      : 8;
-  device_prop->gpu_eu_simd_width = raw_device.has(sycl::aspect::ext_intel_gpu_eu_simd_width)
-      ? raw_device.get_info<intel::info::device::gpu_eu_simd_width>()
-      : 8;
-  device_prop->gpu_hw_threads_per_eu = raw_device.has(sycl::aspect::ext_intel_gpu_hw_threads_per_eu)
-      ? raw_device.get_info<intel::info::device::gpu_hw_threads_per_eu>()
-      : 8;
-  // clang-format on
+#define ASSIGN_EXT_DEVICE_PROP(property, default_value)                      \
+  device_prop->property = raw_device.has(sycl::aspect::ext_intel_##property) \
+      ? raw_device.get_info<intel::info::device::property>()                 \
+      : default_value;
+
+  AT_FORALL_XPU_DEVICE_PROPERTIES(ASSIGN_DEVICE_PROP);
+
+  device_prop->platform_name =
+      raw_device.get_info<device::platform>().get_info<platform::name>();
+
+  AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(ASSIGN_EXT_DEVICE_PROP);
   return;
 }
 

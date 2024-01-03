@@ -38,6 +38,7 @@ TEST(XPUDeviceTest, DeviceProperties) {
   c10::xpu::DeviceProp device_prop{};
   c10::xpu::get_device_properties(&device_prop, 0);
 
+  ASSERT_TRUE(device_prop.max_compute_units > 0);
   ASSERT_TRUE(device_prop.gpu_eu_count > 0);
 }
 
