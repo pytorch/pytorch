@@ -569,7 +569,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
         if func in _side_effectful_need_to_be_preserved_pre_dispatch:
-            # It's for passing the verifier which needs to verify the meta['val']
+            # It's for passing the export verifier which needs to verify the meta['val']
             # TODO(chundian): we should systematically couple it with expoert verifier,
             # instead of hardcoding it here.
             node = self.tracer.create_node("call_function", func, args, {})

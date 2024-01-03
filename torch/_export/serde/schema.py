@@ -1,42 +1,15 @@
 # NOTE: This is a placeholder for iterating on export serialization schema design.
 #       Anything is subject to change and no guarantee is provided at this point.
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
 
+from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
 SCHEMA_VERSION = 2
 TREESPEC_VERSION = 1
-
-# TODO (zhxchen17) Move to a separate file.
-class _Union:
-    @classmethod
-    def create(cls, **kwargs):
-        assert len(kwargs) == 1
-        return cls(**{**{f.name: None for f in fields(cls)}, **kwargs})  # type: ignore[arg-type]
-
-    def __post_init__(self):
-        assert sum(1 for f in fields(self) if getattr(self, f.name) is not None) == 1  # type: ignore[arg-type, misc]
-
-    @property
-    def value(self):
-        val = next((getattr(self, f.name) for f in fields(self) if getattr(self, f.name) is not None), None)  # type: ignore[arg-type]
-        assert val is not None
-        return val
-
-    @property
-    def type(self):
-        val_type = next((f.name for f in fields(self) if getattr(self, f.name) is not None), None)  # type: ignore[arg-type]
-        assert val_type is not None
-        return val_type
-
-    def __str__(self):
-        return self.__repr__()
-
-    def __repr__(self):
-        return f"{type(self).__name__}({self.type}={self.value})"
 
 
 class ScalarType(IntEnum):
@@ -252,7 +225,7 @@ class InputToTensorConstantSpec:
     tensor_constant_name: str
 
 
-@dataclass
+@dataclass(repr=False)
 class InputSpec(_Union):
     user_input: UserInputSpec
     parameter: InputToParameterSpec
@@ -288,7 +261,7 @@ class GradientToUserInputSpec:
     user_input_name: str
 
 
-@dataclass
+@dataclass(repr=False)
 class OutputSpec(_Union):
     user_output: UserOutputSpec
     loss_output: LossOutputSpec
