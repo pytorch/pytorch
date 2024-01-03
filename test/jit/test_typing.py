@@ -382,7 +382,7 @@ class TestTyping(JitTestCase):
             @torch.jit.script
             def outer_scope_cannot_access_comprehension_variables():
                 d = {i : chr(i + 65) for i in range(4)}
-                i = i + 1  # noqa: F821
+                i = i + 1
 
     def test_for_tuple_assign(self):
         def test_simple_assign(x):
@@ -596,7 +596,7 @@ class TestTyping(JitTestCase):
     def test_namedtuple_error_source_attribution(self):
         class _NamedTupleBadMemberType(NamedTuple):
             f1: torch.Tensor
-            f2: "ABadForwardRefType"  # noqa: F821
+            f2: "ABadForwardRefType"
 
         make_global(_NamedTupleBadMemberType)  # see [local resolution in python]
 

@@ -17,9 +17,8 @@ import warnings
 import weakref
 from contextlib import contextmanager
 from decimal import Decimal
-from tempfile import mkstemp
 
-from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
+from unittest import expectedFailure as xfail, skipIf as skipif
 
 import numpy
 import pytest

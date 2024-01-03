@@ -7,7 +7,7 @@ import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
 from torch.testing._internal.common_nn import module_tests, new_module_tests
-from torch.testing._internal.common_utils import is_iterable_of_tensors, noncontiguous_like
+from torch.testing._internal.common_utils import is_iterable_of_tensors
 
 import collections
 from copy import deepcopy

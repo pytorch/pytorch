@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import unittest
-from typing import Any, Dict
 
 import torch
 import torch._export as export
@@ -250,7 +249,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
                     eps=2**-12
                 ),
             )
-            weight_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (  # noqa: F821
+            weight_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
                 MinMaxObserver
             )
 
@@ -267,7 +266,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
                 ),
             )
 
-            bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (  # noqa: F821
+            bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
                 PlaceholderObserver
             )
             bias_quantization_spec = QuantizationSpec(

@@ -61,7 +61,6 @@ from torch._dynamo.testing import (
     reset_rng_state,
     same,
 )
-from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 
 try:
     from torch._dynamo.utils import clone_inputs, graph_break_reasons

@@ -6,11 +6,8 @@ from ._compatibility import compatibility
 
 import copy
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Union, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Union
 import torch
-
-if TYPE_CHECKING:
-    from .passes.utils.matcher_with_name_node_map_utils import InternalMatch
 
 __all__ = ['Match', 'replace_pattern', 'replace_pattern_with_filters', "ReplacedPatterns"]
 
@@ -205,7 +202,7 @@ def replace_pattern_with_filters(
     gm: GraphModule,
     pattern: Union[Callable, Graph, GraphModule],
     replacement: Union[Callable, Graph, GraphModule],
-    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,
+    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,  # type: ignore[name-defined]
     ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
     """
@@ -225,7 +222,7 @@ def _replace_pattern(
     gm: GraphModule,
     pattern: Union[Callable, Graph, GraphModule],
     replacement: Union[Callable, Graph, GraphModule],
-    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,
+    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,  # type: ignore[name-defined]
     ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
 

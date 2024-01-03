@@ -33,7 +33,6 @@ AOTInductorModelRunner = load_test_module(
     "inductor.test_aot_inductor"
 ).AOTInductorModelRunner
 
-import sys
 
 if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)

@@ -799,7 +799,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
             << "NCCL version: " << getNcclVersion() << ", size: " << size
-            << ", global rank: " << globalRank()
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
@@ -1110,17 +1109,8 @@ void ProcessGroupNCCL::abortCommsFromMap(
     // their responsibility to destroy the process group and recreate
     // it to recover from errors.
 
-    c10::StreamId streamId = -1;
-    if (ncclStreams_.find(devName) != ncclStreams_.end()) {
-      auto streams = ncclStreams_.at(devName);
-      if (streams.size() > 0) {
-        streamId = streams[0].id();
-      }
-    }
-
     LOG(INFO) << logPrefix() << "] Destroyed " << ncclComms.size()
-              << "communicators on CUDA device: " << devName
-              << " with stream: " << streamId;
+              << "communicators on CUDA device " << devName;
   }
 }
 
@@ -1212,7 +1202,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
     if (debugInfoWriter_ == nullptr) {
       // Dump the trace blob into local disk as a fallback.
       std::unique_ptr<DebugInfoWriter> debugInfoWriterPtr =
-          std::make_unique<DebugInfoWriter>(globalRank());
+          std::make_unique<DebugInfoWriter>(rank_);
       registerDebugInfoWriter(std::move(debugInfoWriterPtr));
     }
     debugInfoWriter_->write(ncclTrace);
@@ -1441,11 +1431,6 @@ const std::string& ProcessGroupNCCL::logPrefix() const {
   return prefix;
 }
 
-const int& ProcessGroupNCCL::globalRank() const {
-  static int globalRank = rank_;
-  return globalRank;
-}
-
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
@@ -1472,12 +1457,10 @@ void ProcessGroupNCCL::watchdogHandler() {
     // Bump up heart beat by one.
     heartbeat_++;
 
-    // Assuming that we always init a process group containing all ranks,
-    // we only use the watchdog thread to listen for the global signal to dump
-    // and abort. We poll store to see if some ranks have flagged a timeout when
+    // poll store to see if some ranks have flagged a timeout when
     // we haven't polled for `heartbeat_timeout` seconds and there haven't
     // any work added or removed for `watchdog_timeout` seconds.
-    if (dumpOnTimeout_ && uid_ == 0) {
+    if (dumpOnTimeout_) {
       auto currentTime = std::chrono::steady_clock::now();
       auto timeSinceLastWorkListUpdate =
           std::chrono::duration_cast<std::chrono::milliseconds>(

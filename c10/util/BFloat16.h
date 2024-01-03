@@ -5,7 +5,6 @@
 
 #include <c10/macros/Macros.h>
 #include <cmath>
-#include <cstdint>
 #include <cstring>
 
 #if defined(__CUDACC__) && !defined(USE_ROCM)

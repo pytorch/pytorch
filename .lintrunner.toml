@@ -243,9 +243,6 @@ include_patterns = [
     'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
     'c10/core/**/*.h',
-    'c10/util/**/*.h',
-    # Enable coverage of headers in torch/csrc and excluding sub-directories for now.
-    'torch/csrc/*.h',
     'torch/csrc/**/*.cpp',
 ]
 exclude_patterns = [
@@ -256,16 +253,6 @@ exclude_patterns = [
     '**/*pb.h',
     '**/*CUDA*',
     '**/cuda/*pp',
-    'c10/util/complex_math.h',
-    'c10/util/complex_utils.h',
-    'c10/util/flat_hash_map.h',
-    'c10/util/Float8*.h',
-    'c10/util/logging*.h',
-    'c10/util/hash.h',
-    'c10/util/strong_type.h',
-    'c10/util/SmallVector.h',
-    'c10/util/win32-headers.h',
-    'c10/util/*inl.h',
     'aten/src/ATen/core/TensorImpl_test.cpp',
     'third_party/**/*',
     'torch/csrc/api/**',
@@ -2596,7 +2583,7 @@ init_command = [
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
     '--no-black-binary',
-    'black==23.12.1',
+    'black==23.3.0',
     'ufmt==2.1.0',
     'usort==1.0.6',
 ]

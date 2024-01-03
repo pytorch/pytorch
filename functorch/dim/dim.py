@@ -3,14 +3,6 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
-import dis
-import inspect
-
-from dataclasses import dataclass
-from typing import Union
-
-from . import DimList
-
 _vmap_levels = []
 
 
@@ -30,12 +22,11 @@ class Dim:
 
     def __del__(self):
         if self._vmap_level is not None:
-            _vmap_active_levels[self._vmap_stack].alive = False  # noqa: F821
+            _vmap_active_levels[self._vmap_stack].alive = False
             while (
-                not _vmap_levels[-1].alive
-                and current_level() == _vmap_levels[-1].level  # noqa: F821
+                not _vmap_levels[-1].alive and current_level() == _vmap_levels[-1].level
             ):
-                _vmap_decrement_nesting()  # noqa: F821
+                _vmap_decrement_nesting()
                 _vmap_levels.pop()
 
     @property
@@ -45,11 +36,9 @@ class Dim:
 
     @size.setter
     def size(self, size: int):
-        from . import DimensionBindError
-
         if self._size is None:
             self._size = size
-            self._vmap_level = _vmap_increment_nesting(size, "same")  # noqa: F821
+            self._vmap_level = _vmap_increment_nesting(size, "same")
             self._vmap_stack = len(_vmap_levels)
             _vmap_levels.append(LevelInfo(self._vmap_level))
 
