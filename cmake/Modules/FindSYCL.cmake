@@ -8,7 +8,7 @@
 # to be defined before calling ``SYCL_ADD_EXECUTABLE`` or ``SYCL_ADD_LIBRARY``::
 #
 #  SYCL_COMPILER
-#  -- SYCL compiler's excutable.
+#  -- SYCL compiler's executable.
 #
 #  SYCL_FLAGS
 #  -- SYCL compiler's compilation command line arguments.
@@ -23,19 +23,12 @@
 #  -- Include directory for SYCL compiler/runtime libraries.
 
 # Helpers::
+# Introduce SYCL compiler to build .cpp containing SYCL kernel.
 #
 #  SYCL_ADD_EXECUTABLE
-#  -- See the macro's comments for details.
 #
 #  SYCL_ADD_LIBRARY
-#  -- See the macro's comments for details.
 
-
-###############################################################################
-# Helpers of SYCL_ADD_LIBRARY and SYCL_ADD_EXECUTABLE.
-# Use SYCL compiler to build .cpp containing SYCL kernels.
-
-# This macro helps us find the location of helper files we will need the full path to
 macro(SYCL_FIND_HELPER_FILE _name _extension)
   set(_full_name "${_name}.${_extension}")
   # CMAKE_CURRENT_LIST_FILE contains the full path to the file currently being
@@ -57,7 +50,7 @@ set(SYCL_HOST_COMPILER "${CMAKE_CXX_COMPILER}"
 
 # SYCL_EXECUTABLE
 if(SYCL_COMPILER)
-  set(SYCL_EXECUTABLE ${SYCL_COMPILER} CACHE FILEPATH "The Intel SYCL compiler")
+  set(SYCL_EXECUTABLE ${SYCL_COMPILER} CACHE FILEPATH "SYCL compiler")
 else()
   find_program(SYCL_EXECUTABLE
     NAMES icpx
@@ -74,19 +67,6 @@ list(APPEND SYCL_LIBRARIES ${SYCL_RUNTIME_LIBRARY})
 # SYCL_VERBOSE_BUILD
 option(SYCL_VERBOSE_BUILD "Print out the commands run while compiling the SYCL source file.  With the Makefile generator this defaults to VERBOSE variable specified on the command line, but can be forced on with this option." OFF)
 
-#####################################################################
-## SYCL_INCLUDE_DEPENDENCIES
-##
-
-# So we want to try and include the dependency file if it exists.  If
-# it doesn't exist then we need to create an empty one, so we can
-# include it.
-
-# If it does exist, then we need to check to see if all the files it
-# depends on exist.  If they don't then we should clear the dependency
-# file and regenerate it later.  This covers the case where a header
-# file has disappeared or moved.
-
 macro(SYCL_INCLUDE_DEPENDENCIES dependency_file)
   # Make the output depend on the dependency file itself, which should cause the
   # rule to re-run.
@@ -100,16 +80,8 @@ macro(SYCL_INCLUDE_DEPENDENCIES dependency_file)
   include(${dependency_file})
 endmacro()
 
-###############################################################################
-# Macros
-###############################################################################
-
-###############################################################################
 sycl_find_helper_file(run_sycl cmake)
 
-##############################################################################
-# Separate the OPTIONS out from the sources
-##############################################################################
 macro(SYCL_GET_SOURCES_AND_OPTIONS _sycl_sources _cxx_sources _cmake_options)
   set( ${_cmake_options} )
   set( ${_sycl_sources} )
@@ -149,13 +121,6 @@ macro(SYCL_GET_SOURCES_AND_OPTIONS _sycl_sources _cxx_sources _cmake_options)
   endforeach()
 endmacro()
 
-##############################################################################
-# Helper to avoid clashes of files with the same basename but different paths.
-# This doesn't attempt to do exactly what CMake internals do, which is to only
-# add this path when there is a conflict, since by the time a second collision
-# in names is detected it's already too late to fix the first one.  For
-# consistency sake the relative path will be added to all files.
-##############################################################################
 function(SYCL_COMPUTE_BUILD_PATH path build_path)
   # Only deal with CMake style paths from here on out
   file(TO_CMAKE_PATH "${path}" bpath)
@@ -192,15 +157,6 @@ function(SYCL_COMPUTE_BUILD_PATH path build_path)
   #message("${build_path} = ${bpath}")
 endfunction()
 
-##############################################################################
-# This helper macro populates the following variables and setups up custom
-# commands and targets to invoke the Intel SYCL compiler to generate C++ source.
-# INPUT:
-#   sycl_target         - Target name
-#   FILE1 .. FILEN      - The remaining arguments are the sources to be wrapped.
-# OUTPUT:
-#   generated_files     - List of generated files
-##############################################################################
 macro(SYCL_WRAP_SRCS sycl_target generated_files)
   # Optional arguments
   set(SYCL_flags "")
@@ -347,7 +303,6 @@ endfunction()
 
 ###############################################################################
 # Custom Intermediate Link
-###############################################################################
 
 # Compute the filename to be used by SYCL_LINK_DEVICE_OBJECTS
 function(SYCL_COMPUTE_DEVICE_OBJECT_FILE_NAME output_file_var sycl_target)
@@ -402,9 +357,6 @@ endmacro()
 
 ###############################################################################
 # ADD LIBRARY
-# ``target_compile_options`` in subsequent is not supported.
-# Keyword, ``STATIC``(static achivie library), is not supported.
-###############################################################################
 macro(SYCL_ADD_LIBRARY sycl_target)
 
   # Separate the sources from the options
@@ -449,8 +401,6 @@ endmacro()
 
 ###############################################################################
 # ADD EXECUTABLE
-# ``target_compile_options`` in subsequent is not supported.
-###############################################################################
 macro(SYCL_ADD_EXECUTABLE sycl_target)
 
   # Separate the sources from the options
