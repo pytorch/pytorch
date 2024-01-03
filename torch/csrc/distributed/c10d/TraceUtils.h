@@ -269,12 +269,6 @@ inline std::string retrieveDesyncReport(
 
 #ifdef USE_C10D_NCCL
 
-DebugInfoWriter::DebugInfoWriter(int rank) {
-  std::string fileName = getCvarString(
-      {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
-  filename_ = c10::str(fileName, rank);
-}
-
 DebugInfoWriter::~DebugInfoWriter() = default;
 
 void DebugInfoWriter::write(const std::string& ncclTrace) {
@@ -292,6 +286,31 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
   file.write(ncclTrace.data(), ncclTrace.size());
   LOG(INFO) << "Finished writing NCCLPG debug info to " << filename_;
 }
+
+DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
+  if (writer_ == nullptr) {
+    std::string fileNamePrefix = getCvarString(
+        {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
+    // Using std::unique_ptr here to auto-delete the writer object
+    // when the pointer itself is destroyed.
+    std::unique_ptr<DebugInfoWriter> writerPtr(
+        new DebugInfoWriter(fileNamePrefix, rank));
+    DebugInfoWriter::registerWriter(std::move(writerPtr));
+  }
+  return *writer_;
+}
+
+void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      hasWriterRegistered_.load() == false,
+      "debugInfoWriter already registered");
+  hasWriterRegistered_.store(true);
+  writer_ = std::move(writer);
+}
+
+std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
+std::atomic<bool> DebugInfoWriter::hasWriterRegistered_(false);
 
 inline std::string pickle_str(const c10::IValue& v) {
   std::vector<char> result;
