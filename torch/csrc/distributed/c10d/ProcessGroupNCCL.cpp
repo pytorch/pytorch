@@ -727,6 +727,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
+  logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
@@ -1188,15 +1189,6 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 #endif
 }
 
-void ProcessGroupNCCL::registerDebugInfoWriter(
-    std::unique_ptr<DebugInfoWriter> writer) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      debugInfoWriter_ == nullptr,
-      "ProcessGroupNCCL debugInfoWriter already registered");
-  debugInfoWriter_ = std::move(writer);
-}
-
 bool ProcessGroupNCCL::dumpDebuggingInfo() {
   // Serialize all calls to this function to avoid corrupting data, but allow
   // multiple calls in one runtime. User is responsible for preserving the
@@ -1209,13 +1201,8 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
     auto ncclTrace = dump_nccl_trace();
-    if (debugInfoWriter_ == nullptr) {
-      // Dump the trace blob into local disk as a fallback.
-      std::unique_ptr<DebugInfoWriter> debugInfoWriterPtr =
-          std::make_unique<DebugInfoWriter>(globalRank());
-      registerDebugInfoWriter(std::move(debugInfoWriterPtr));
-    }
-    debugInfoWriter_->write(ncclTrace);
+    DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
+    writer.write(ncclTrace);
     return true;
   }
   return false;
@@ -1436,9 +1423,12 @@ struct DumpPipe {
 };
 #endif
 
+std::string ProcessGroupNCCL::createLogPrefix() const {
+  return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
+}
+
 const std::string& ProcessGroupNCCL::logPrefix() const {
-  static std::string prefix = c10::str("[PG ", uid_, " Rank ", rank_, "] ");
-  return prefix;
+  return logPrefix_;
 }
 
 const int& ProcessGroupNCCL::globalRank() const {
