@@ -1,0 +1,89 @@
+ir_version: 8
+producer_name: "pytorch"
+producer_version: "CURRENT_VERSION"
+graph {
+  node {
+    input: "onnx::AveragePool_0"
+    output: "1"
+    name: "AveragePool_0"
+    op_type: "AveragePool"
+    attribute {
+      name: "ceil_mode"
+      i: 0
+      type: INT
+    }
+    attribute {
+      name: "count_include_pad"
+      i: 1
+      type: INT
+    }
+    attribute {
+      name: "kernel_shape"
+      ints: 3
+      ints: 3
+      type: INTS
+    }
+    attribute {
+      name: "pads"
+      ints: 0
+      ints: 0
+      ints: 0
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "strides"
+      ints: 2
+      ints: 2
+      type: INTS
+    }
+  }
+  name: "main_graph"
+  input {
+    name: "onnx::AveragePool_0"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 20
+          }
+          dim {
+            dim_value: 16
+          }
+          dim {
+            dim_value: 50
+          }
+          dim {
+            dim_value: 32
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "1"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 20
+          }
+          dim {
+            dim_value: 16
+          }
+          dim {
+            dim_value: 24
+          }
+          dim {
+            dim_value: 15
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 17
+}
