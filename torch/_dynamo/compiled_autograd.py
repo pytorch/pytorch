@@ -116,6 +116,7 @@ class AutogradCompilerInstance:
             grad_ins = []
             for output_metadata in output_metadatas:
                 if output_metadata is None:
+                    grad_ins.append(None)
                     continue
 
                 layout, device, dtype, size = output_metadata

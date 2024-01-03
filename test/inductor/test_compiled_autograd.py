@@ -513,6 +513,30 @@ class TestCompiledAutograd(TestCase):
 
         self.check_output_and_recompiles(fn, 2)
 
+    def test_custom_fn_non_variable_input(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x, y, z):
+                    return x*2, y*3, z*4
+
+                @staticmethod
+                def backward(ctx, gO_1, gO_2, gO_3):
+                    return gO_1, gO_2, gO_3
+
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                y = 1
+                z = torch.arange(0.0, i, requires_grad=True)
+                out1, out2, out3 = MyFn.apply(x, y, z)
+                loss = (out1 + out2 + out3).sum()
+                loss.backward()
+                yield x
+                yield y
+                yield z
+
+        self.check_output_and_recompiles(fn, 2)
+
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_custom_fn_output_metadata(self):
         def fn():
