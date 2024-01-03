@@ -106,6 +106,16 @@ class TestUnflatten(TestCase):
         for name, value in orig_state_dict.items():
             self.assertTrue(torch.allclose(value, exported_state_dict[name]))
 
+        def check_meta(gm):
+            for n in gm.graph.nodes:
+                if n.op == "output":
+                    continue
+                self.assertTrue(node.meta.get("val") is not None)
+
+        for m in unflattened.modules():
+            if isinstance(m, torch.fx.GraphModule):
+                check_meta(m)
+
     def test_unflatten_buffer_mutation(self):
         class Child(torch.nn.Module):
             def __init__(self):
@@ -419,6 +429,39 @@ class TestUnflatten(TestCase):
 
         inputs = (torch.rand(2, 3),)
         self.compare_outputs(orig_eager, unflattened, inputs)
+
+    def test_multiple_return(self):
+        class SubMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + x, x * x
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = SubMod()
+
+            def forward(self, x):
+                return x + sum(self.submod(x))
+
+        orig_eager = MyModule()
+        export_module = torch.export.export(orig_eager, (torch.rand(2, 3),), {})
+        unflattened = unflatten(export_module)
+
+        inputs = (torch.rand(2, 3),)
+        self.compare_outputs(orig_eager, unflattened, inputs)
+
+        def check_meta(gm):
+            for n in gm.graph.nodes:
+                if n.op == "output":
+                    continue
+                self.assertTrue(node.meta.get("val") is not None)
+
+        for m in unflattened.modules():
+            if isinstance(m, torch.fx.GraphModule):
+                check_meta(m)
 
 if __name__ == "__main__":
     run_tests()
