@@ -6,6 +6,8 @@ import inspect
 import sys
 from typing import Any, Dict, List, Optional
 
+import torch
+
 from torch._subclasses.fake_tensor import is_fake
 
 from .. import variables
@@ -18,7 +20,6 @@ from ..source import AttrSource, GetItemSource
 from ..utils import istype, iter_contains, specialize_symnode
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
-import torch
 
 # Note: [Adding a new supported class the keys of ConstDictVarialble]
 # You'll need to add it to:
