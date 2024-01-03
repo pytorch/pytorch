@@ -1142,11 +1142,12 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     alpha_val = kwargs.get('alpha', 2 + 3j if dtype.is_complex else 0.6)
     beta_val = kwargs.get('beta', 1 + 2j if dtype.is_complex else 0.2)
     tests_list = [
-        ((2, 3), (2, 2), (2, 3), False)
+        ((2, 3), (2, 2), (2, 3), False),
+        ((3, 3), (3, 3), (3, 3), False),
     ]
     tests_with_lhs_broadcasting = [
         ((1,), (2, 2), (2, 3), True),
-        ((), (2, 2), (2, 3), True)
+        ((), (2, 2), (2, 3), True),
     ]
     test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore[operator]
 
@@ -17066,8 +17067,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('eye',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_eye,
            error_inputs_func=error_inputs_eye,
            supports_out=True,
