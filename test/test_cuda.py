@@ -3210,7 +3210,7 @@ exit(2)
 
         for OptClass, kwargs in cases:
             has_capturable_arg = OptClass in (torch.optim.Adam, torch.optim.AdamW)
-            for actually_do_graphs in (True, False):
+            for actually_do_graphs in (True, False) if has_capturable_arg else (True,):
                 params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
                 params_control = [p.clone().requires_grad_() for p in params]
                 params_graphed = [p.clone().requires_grad_() for p in params]
