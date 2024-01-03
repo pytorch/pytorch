@@ -55,15 +55,6 @@ class _PrefetchMode(Enum):
 
 
 def fsdp_state_has_default_pg(state: _FSDPState) -> bool:
-    """Indicates whether FlatParamHandle has the default process group.
-
-    Args:
-        handle (_FSDPState): FSDP State object
-
-    Returns:
-        bool: True if the ProcessGroup of the _FSDPState object is the default process group. False
-            otherwise.
-    """
     if state.process_group is None:
         # If no process group is attached to the _FSDPState, assume it uses default process group.
         return True
@@ -71,14 +62,6 @@ def fsdp_state_has_default_pg(state: _FSDPState) -> bool:
 
 
 def fsdp_state_pg_ranks(state: _FSDPState) -> Tuple[int, ...]:
-    """Gets the ranks included in the ProcessGroup of an _FSDPState.
-
-    Args:
-        state (_FSDPState): FSDP State object
-
-    Returns:
-        Tuple[int, ...]: Ranks for the FSDP State's process group.
-    """
     if state.process_group is None:
         return tuple(range(dist.get_world_size()))
     else:
@@ -259,7 +242,11 @@ def _share_state_and_init_handle_attrs(
             torch._C._log_api_usage_once("fsdp.optimizer_in_backward")
     # Keep track of any new unshard streams we may have to add for specific process groups.
     fsdp_pg_unshard_streams = {}
-    unshard_priority = root_state._unshard_stream.priority
+    try:
+        unshard_priority = root_state._unshard_stream.priority
+    except AttributeError:
+        # Use the default priority of 0 if the stream has no assigned priority.
+        unshard_priority = 0
     for fsdp_state in root_state._all_fsdp_states:
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             _p_assert(
@@ -306,6 +293,13 @@ def _share_state_and_init_handle_attrs(
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
+    # Ensure that all unshard streams wait on the default computation stream
+    for _, pg_unshard_stream in fsdp_pg_unshard_streams.items():
+        _wait_for_computation_stream(
+            root_state._device_handle.current_stream(),
+            pg_unshard_stream,
+            root_state._pre_unshard_stream,
+        )
     for attr_name, attr_values in attr_name_to_values.items():
         if len(attr_values) != 1:
             raise ValueError(
@@ -648,6 +642,7 @@ def _root_pre_forward(
             for handle in handles:
                 handle._needs_pre_forward_unshard = True
                 handle._prefetched = False
+        
         _wait_for_computation_stream(
             state._device_handle.current_stream(),
             state._unshard_stream,
