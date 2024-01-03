@@ -304,7 +304,6 @@ FIXME_default_non_strict = {
     "torch_np/numpy_tests/lib/test_index_tricks",
     "torch_np/numpy_tests/lib/test_shape_base_",
     "torch_np/numpy_tests/lib/test_twodim_base",
-    "torch_np/numpy_tests/lib/test_type_check",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -1385,4 +1384,10 @@ dynamo_skips = {
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmax",
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmax",
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmin",
+    "TestIsreal.test_fail",  # known py311 fail
+    "TestIscomplexobj.test_basic",  # known py311 fail
+    "TestIsrealobj.test_basic",  # known py311 fail
+    "TestIsreal.test_pass",  # known py311 fail
+    "TestIscomplex.test_pass",  # known py311 fail
+    "TestIscomplexobj.test_list",  # known py311 fail
 }
