@@ -28,7 +28,6 @@ from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .schema import (  # type: ignore[attr-defined]
-    _Union,
     Argument,
     BufferMutationSpec,
     CustomObjArgument,
@@ -68,6 +67,7 @@ from .schema import (  # type: ignore[attr-defined]
     UserInputSpec,
     UserOutputSpec,
 )
+from .union import _Union
 
 
 __all__ = [
@@ -1105,10 +1105,12 @@ class GraphModuleDeserializer:
             )
 
     def deserialize_graph_output(self, output) -> torch.fx.Node:
-        if isinstance(output.value, TensorArgument):
-            return self.serialized_name_to_node[output.value.name]
-        elif isinstance(output.value, (SymIntArgument, SymBoolArgument)):
-            return self.serialized_name_to_node[output.value.as_name]
+        if output.type == "as_tensor":
+            return self.serialized_name_to_node[output.as_tensor.name]
+        elif output.type == "as_sym_int":
+            return self.serialized_name_to_node[output.as_sym_int.as_name]
+        elif output.type == "as_sym_bool":
+            return self.serialized_name_to_node[output.as_sym_bool.as_name]
         else:
             raise SerializeError(f"Unable to deserialize output node {output}")
 
@@ -1193,7 +1195,7 @@ class GraphModuleDeserializer:
             # newly-created node after it. This ensures that these tensor values
             # have names that are consistent with serialized.
             name = (
-                serialized_node.outputs[0].value.name
+                serialized_node.outputs[0].as_tensor.name
                 if _is_single_tensor_return(target)
                 else None  # FX will generate a name for us.
             )
@@ -1206,25 +1208,25 @@ class GraphModuleDeserializer:
         fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
 
     def deserialize_input_spec(self, i: InputSpec) -> ep.InputSpec:
-        if i.user_input is not None:
+        if i.type == "user_input":
             return ep.InputSpec(
                 kind=ep.InputKind.USER_INPUT,
                 arg=self.deserialize_argument_spec(i.user_input.arg),
                 target=None
             )
-        elif i.parameter is not None:
+        elif i.type == "parameter":
             return ep.InputSpec(
                 kind=ep.InputKind.PARAMETER,
                 arg=PyTensorArgument(name=i.parameter.arg.name),
                 target=i.parameter.parameter_name,
             )
-        elif i.buffer is not None:
+        elif i.type == "buffer":
             return ep.InputSpec(
                 kind=ep.InputKind.BUFFER,
                 arg=PyTensorArgument(name=i.buffer.arg.name),
                 target=i.buffer.buffer_name,
             )
-        elif i.tensor_constant is not None:
+        elif i.type == "tensor_constant":
             return ep.InputSpec(
                 kind=ep.InputKind.CONSTANT_TENSOR,
                 arg=PyTensorArgument(name=i.tensor_constant.arg.name),
@@ -1234,31 +1236,31 @@ class GraphModuleDeserializer:
             raise AssertionError(f"Unkown input spec {i}")
 
     def deserialize_output_spec(self, o: OutputSpec) -> ep.OutputSpec:
-        if o.user_output is not None:
+        if o.type == "user_output":
             return ep.OutputSpec(
                 kind=ep.OutputKind.USER_OUTPUT,
                 arg=self.deserialize_argument_spec(o.user_output.arg),
                 target=None,
             )
-        elif o.loss_output is not None:
+        elif o.type == "loss_output":
             return ep.OutputSpec(
                 kind=ep.OutputKind.LOSS_OUTPUT,
                 arg=PyTensorArgument(name=o.loss_output.arg.name),
                 target=None,
             )
-        elif o.buffer_mutation is not None:
+        elif o.type == "buffer_mutation":
             return ep.OutputSpec(
                 kind=ep.OutputKind.BUFFER_MUTATION,
                 arg=PyTensorArgument(name=o.buffer_mutation.arg.name),
                 target=o.buffer_mutation.buffer_name
             )
-        elif o.gradient_to_parameter is not None:
+        elif o.type == "gradient_to_parameter":
             return ep.OutputSpec(
                 kind=ep.OutputKind.GRADIENT_TO_PARAMETER,
                 arg=PyTensorArgument(name=o.gradient_to_parameter.arg.name),
                 target=o.gradient_to_parameter.parameter_name
             )
-        elif o.gradient_to_user_input is not None:
+        elif o.type == "gradient_to_user_input":
             return ep.OutputSpec(
                 kind=ep.OutputKind.GRADIENT_TO_USER_INPUT,
                 arg=PyTensorArgument(name=o.gradient_to_user_input.arg.name),
@@ -1333,12 +1335,14 @@ class GraphModuleDeserializer:
             # None should converted as None, but is encoded as bool in serialized
             # Convert serialized object to torch equivalent
             return None
+        elif typ_ == "as_tensor":
+            return self.serialized_name_to_node[inp.as_tensor.name]
         elif typ_ == "as_scalar_type":
-            return _SERIALIZE_TO_TORCH_DTYPE[value]
+            return _SERIALIZE_TO_TORCH_DTYPE[inp.as_scalar_type]
         elif typ_ == "as_memory_format":
-            return _SERIALIZE_TO_TORCH_MEMORY_FORMAT[value]
+            return _SERIALIZE_TO_TORCH_MEMORY_FORMAT[inp.as_memory_format]
         elif typ_ == "as_layout":
-            return _SERIALIZE_TO_TORCH_LAYOUT[value]
+            return _SERIALIZE_TO_TORCH_LAYOUT[inp.as_layout]
         elif typ_ == "as_graph":
             assert isinstance(value, GraphArgument)
             with self.save_graph_module():
@@ -1350,16 +1354,20 @@ class GraphModuleDeserializer:
                 value.name,
                 name=value.name,
             )
-        elif isinstance(value, Device):
-            return deserialize_device(value)
-        elif isinstance(value, TensorArgument):
-            return self.serialized_name_to_node[value.name]
-        elif isinstance(value, (int, float, bool)):
-            return value
-        elif isinstance(value, str):
-            return str(value)
-        elif isinstance(value, (SymIntArgument, SymBoolArgument)):
-            return self.deserialize_sym_argument(value)
+        elif typ_ == "as_device":
+            return deserialize_device(inp.as_device)
+        elif typ_ == "as_int":
+            return inp.as_int
+        elif typ_ == "as_float":
+            return inp.as_float
+        elif typ_ == "as_bool":
+            return inp.as_bool
+        elif typ_ == "as_string":
+            return inp.as_string
+        elif typ_ == "as_sym_int":
+            return self.deserialize_sym_argument(inp.as_sym_int)
+        elif typ_ == "as_sym_bool":
+            return self.deserialize_sym_argument(inp.as_sym_bool)
         elif isinstance(value, list):
             if len(value) == 0:
                 return []
@@ -1384,17 +1392,23 @@ class GraphModuleDeserializer:
                 return list(map(deserialize_optional_tensor_args, value))
             else:
                 raise SerializeError(f"Unhandled argument {inp}")
-        elif isinstance(value, CustomObjArgument):
-            return self.constants[value.name]
+        elif typ_ == "as_custom_obj":
+            return self.constants[inp.as_custom_obj.name]
         else:
             raise SerializeError(f"Unhandled argument {inp}")
 
-    def deserialize_sym_argument(self, sym_int_arg):
-        if sym_int_arg.type == "as_int":
-            return sym_int_arg.as_int
-        else:
-            assert sym_int_arg.type == "as_name"
-            return self.serialized_name_to_node[sym_int_arg.as_name]
+    def deserialize_sym_argument(self, sym_arg):
+        if isinstance(sym_arg, SymIntArgument):
+            if sym_arg.type == "as_int":
+                return sym_arg.as_int
+            elif sym_arg.type == "as_name":
+                return self.serialized_name_to_node[sym_arg.as_name]
+        elif isinstance(sym_arg, SymBoolArgument):
+            if sym_arg.type == "as_bool":
+                return sym_arg.as_bool
+            elif sym_arg.type == "as_name":
+                return self.serialized_name_to_node[sym_arg.as_name]
+        raise SerializeError(f"Unknown symbolic argument type: {sym_arg}")
 
     def deserialize_sym_op_outputs(self, serialized_node: Node, fx_node: torch.fx.Node):
         self.sync_fx_node(serialized_node.outputs[0].value.as_name, fx_node)
@@ -1514,9 +1528,9 @@ class GraphModuleDeserializer:
         return ret
 
     def deserialize_argument_spec(self, x: Argument) -> ep.ArgumentSpec:
-        if x.as_tensor is not None:
+        if x.type == "as_tensor":
             return PyTensorArgument(name=x.as_tensor.name)
-        elif x.as_sym_int is not None:
+        elif x.type == "as_sym_int":
             return PySymIntArgument(name=x.as_sym_int.as_name)
         else:
             return PyConstantArgument(value=self.deserialize_input(x))
@@ -1671,8 +1685,25 @@ def serialize(
         ExportedProgramSerializer(opset_version).serialize(exported_program)
     )
     assert isinstance(serialized_artifact.exported_program, ExportedProgram)
+
+    def _dataclass_to_dict(obj):
+        if isinstance(obj, _Union):
+            return {"$type": obj.type, "$value": _dataclass_to_dict(obj.value)}
+        elif dataclasses.is_dataclass(obj):
+            return {
+                f.name: _dataclass_to_dict(getattr(obj, f.name)) for f in dataclasses.fields(obj)
+            }
+        elif isinstance(obj, list):
+            return [_dataclass_to_dict(x) for x in obj]
+        elif isinstance(obj, tuple):
+            return tuple(_dataclass_to_dict(x) for x in obj)
+        elif isinstance(obj, dict):
+            return {k: _dataclass_to_dict(v) for k, v in obj.items()}
+        else:
+            return obj
+
     json_program = json.dumps(
-        dataclasses.asdict(serialized_artifact.exported_program), cls=EnumEncoder
+        _dataclass_to_dict(serialized_artifact.exported_program), cls=EnumEncoder
     )
     json_bytes = json_program.encode('utf-8')
     artifact = SerializedArtifact(
@@ -1692,10 +1723,12 @@ def _dict_to_dataclass(cls, data):
         assert len(ty_args) == 2
         return _dict_to_dataclass(ty_args[0], data)
     elif isinstance(cls, type) and issubclass(cls, _Union):
-        obj = cls(**data)
-        field_type = cls.__annotations__[obj.type]
-        setattr(obj, obj.type, _dict_to_dataclass(field_type, obj.value))
-        return obj
+        assert isinstance(data, dict)
+        _type = data["$type"]
+        _value = data["$value"]
+        assert isinstance(_type, str)
+        field_type = cls.__annotations__[_type]
+        return cls.create(**{_type: _dict_to_dataclass(field_type, _value)})
     elif dataclasses.is_dataclass(cls):
         obj = cls(**data)  # type: ignore[assignment]
         type_hints = typing.get_type_hints(cls)
@@ -1743,49 +1776,49 @@ def deserialize(
 
 def _canonicalize_graph(sorted_inputs, sorted_outputs, graph) -> Graph:
     def _get_argument(a: Argument):
-        if a.as_none is not None:
+        if a.type == "as_none":
             return None
-        elif a.as_tensor is not None:
+        elif a.type == "as_tensor":
             return a.as_tensor
-        elif a.as_tensors is not None:
+        elif a.type == "as_tensors":
             return a.as_tensors
-        elif a.as_int is not None:
+        elif a.type == "as_int":
             return None
-        elif a.as_ints is not None:
+        elif a.type == "as_ints":
             return None
-        elif a.as_float is not None:
+        elif a.type == "as_float":
             return None
-        elif a.as_floats is not None:
+        elif a.type == "as_floats":
             return None
-        elif a.as_string is not None:
+        elif a.type == "as_string":
             return None
-        elif a.as_strings is not None:
+        elif a.type == "as_strings":
             return None
-        elif a.as_sym_int is not None:
+        elif a.type == "as_sym_int":
             return a.as_sym_int
-        elif a.as_sym_ints is not None:
+        elif a.type == "as_sym_ints":
             return a.as_sym_ints
-        elif a.as_scalar_type is not None:
+        elif a.type == "as_scalar_type":
             return None
-        elif a.as_memory_format is not None:
+        elif a.type == "as_memory_format":
             return None
-        elif a.as_layout is not None:
+        elif a.type == "as_layout":
             return None
-        elif a.as_device is not None:
+        elif a.type == "as_device":
             return None
-        elif a.as_bool is not None:
+        elif a.type == "as_bool":
             return None
-        elif a.as_bools is not None:
+        elif a.type == "as_bools":
             return None
-        elif a.as_sym_bool is not None:
+        elif a.type == "as_sym_bool":
             return a.as_sym_bool
-        elif a.as_sym_bools is not None:
+        elif a.type == "as_sym_bools":
             return a.as_sym_bools
-        elif a.as_graph is not None:
+        elif a.type == "as_graph":
             return None
-        elif a.as_optional_tensors is not None:
+        elif a.type == "as_optional_tensors":
             return a.as_optional_tensors
-        elif a.as_custom_obj is not None:
+        elif a.type == "as_custom_obj":
             return None
         else:
             raise AssertionError(f"Unknown argument type: {a}")
@@ -1814,11 +1847,20 @@ def _canonicalize_graph(sorted_inputs, sorted_outputs, graph) -> Graph:
             if isinstance(a, TensorArgument):
                 return a.name
             elif isinstance(a, (SymIntArgument, SymBoolArgument)):
-                return a.as_name
+                if a.type == "as_name":
+                    return a.as_name
+                elif a.type in ("as_int", "as_bool"):
+                    return None
+                else:
+                    raise AssertionError(f"Unknown argument type: {a}")
             elif isinstance(a, OptionalTensorArgument):
-                if a.as_tensor is not None:
+                if a.type == "as_tensor":
                     assert isinstance(a.as_tensor, str)
                     return a.as_tensor
+                elif a.type == "as_none":
+                    return None
+                else:
+                    raise AssertionError(f"Unknown optional tensor type: {a}")
             else:
                 raise AssertionError(f"Unknown argument type: {a}")
 
@@ -1914,10 +1956,10 @@ def _canonicalize_graph(sorted_inputs, sorted_outputs, graph) -> Graph:
         if isinstance(a, TensorArgument):
             a.name = _rename(a.name, graph.tensor_values)
         elif isinstance(a, SymIntArgument):
-            if a.as_name is not None:
+            if a.type == "as_name":
                 a.as_name = _rename(a.as_name, graph.sym_int_values)
         elif isinstance(a, SymBoolArgument):
-            if a.as_name is not None:
+            if a.type == "as_name":
                 a.as_name = _rename(a.as_name, graph.sym_bool_values)
         else:
             raise AssertionError(f"Unknown argument type: {a}")
@@ -1928,13 +1970,13 @@ def _canonicalize_graph(sorted_inputs, sorted_outputs, graph) -> Graph:
         if isinstance(a, TensorArgument):
             a.name = name_table.get(a.name, a.name)
         elif isinstance(a, SymIntArgument):
-            if a.as_name is not None:
+            if a.type == "as_name":
                 a.as_name = name_table.get(a.as_name, a.as_name)
         elif isinstance(a, SymBoolArgument):
-            if a.as_name is not None:
+            if a.type == "as_name":
                 a.as_name = name_table.get(a.as_name, a.as_name)
         elif isinstance(a, OptionalTensorArgument):
-            if a.as_tensor is not None:
+            if a.type == "as_tensor":
                 assert isinstance(a.as_tensor, str)
                 a.as_tensor = name_table.get(a.as_tensor, a.as_tensor)
         else:
@@ -1968,7 +2010,7 @@ def _canonicalize_graph(sorted_inputs, sorted_outputs, graph) -> Graph:
     for node in sorted_nodes:
         for i in node.inputs:
             a = i.arg
-            if a.as_graph is not None:
+            if a.type == "as_graph":
                 a.as_graph.graph = _canonicalize_graph(
                     a.as_graph.graph.inputs,
                     a.as_graph.graph.outputs,
@@ -2000,37 +2042,35 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
     assert len(graph.inputs) == len(signature.input_specs)
     assert len(graph.outputs) == len(signature.output_specs)
 
-    def rank_input(inp):
+    def rank_input(inp) -> Tuple[int, Optional[str], int]:
         idx, (arg, spec) = inp
         assert isinstance(spec, InputSpec)
-        if spec.user_input is not None:
-            rank = 4, None, idx
-        elif spec.parameter is not None:
-            rank = 1, spec.parameter.parameter_name, idx
-        elif spec.buffer is not None:
-            rank = 2, spec.buffer.buffer_name, idx
-        elif spec.tensor_constant is not None:
-            rank = 3, spec.tensor_constant.tensor_constant_name, idx
+        if spec.type == "user_input":
+            return 4, None, idx
+        elif spec.type == "parameter":
+            return 1, spec.parameter.parameter_name, idx
+        elif spec.type == "buffer":
+            return 2, spec.buffer.buffer_name, idx
+        elif spec.type == "tensor_constant":
+            return 3, spec.tensor_constant.tensor_constant_name, idx
         else:
             raise AssertionError(f"Unknown input type: {spec}")
-        return rank
 
-    def rank_output(out):
+    def rank_output(out) -> Tuple[int, Optional[str], int]:
         idx, (arg, spec) = out
         assert isinstance(spec, OutputSpec)
-        if spec.user_output is not None:
-            rank = 2, None, idx
-        elif spec.loss_output is not None:
-            rank = 2, None, idx
-        elif spec.buffer_mutation is not None:
-            rank = 1, spec.buffer_mutation.buffer_name, idx
-        elif spec.gradient_to_parameter is not None:
-            rank = 3, spec.gradient_to_parameter.parameter_name, idx
-        elif spec.gradient_to_user_input is not None:
-            rank = 4, None, idx
+        if spec.type == "user_output":
+            return 2, None, idx
+        elif spec.type == "loss_output":
+            return 2, None, idx
+        elif spec.type == "buffer_mutation":
+            return 1, spec.buffer_mutation.buffer_name, idx
+        elif spec.type == "gradient_to_parameter":
+            return 3, spec.gradient_to_parameter.parameter_name, idx
+        elif spec.type == "gradient_to_user_input":
+            return 4, None, idx
         else:
             raise AssertionError(f"Unknown output type: {spec}")
-        return rank
 
     sorted_ins = sorted(enumerate(zip(graph.inputs, signature.input_specs)), key=rank_input)
     sorted_inputs, signature.input_specs = zip(*(i for idx, i in sorted_ins))  # type: ignore[assignment]
