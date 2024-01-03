@@ -368,27 +368,36 @@ struct PyWarningHandler {
 };
 
 namespace detail {
+
+struct noop_gil_scoped_release {
+  noop_gil_scoped_release() {
+    // suppress `unused variable` error messages at call sites
+    (void)(this != (this + 1));
+  }
+};
+
+template <bool release_gil>
+using conditional_gil_scoped_release = std::conditional_t<
+    release_gil,
+    pybind11::gil_scoped_release,
+    noop_gil_scoped_release>;
+
 template <typename Func, size_t i>
 using Arg = typename invoke_traits<Func>::template arg<i>::type;
 
-template <typename Func, size_t... Is>
+template <typename Func, size_t... Is, bool release_gil>
 auto wrap_pybind_function_impl_(
     Func&& f,
     std::index_sequence<Is...>,
-    bool release_gil) {
+    std::bool_constant<release_gil>) {
   using result_type = typename invoke_traits<Func>::result_type;
   namespace py = pybind11;
 
   // f=f is needed to handle function references on older compilers
-  return [f = std::forward<Func>(f),
-          release_gil](Arg<Func, Is>... args) -> result_type {
+  return [f = std::forward<Func>(f)](Arg<Func, Is>... args) -> result_type {
     HANDLE_TH_ERRORS
-    if (release_gil) {
-      py::gil_scoped_release no_gil;
-      return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
-    } else {
-      return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
-    }
+    conditional_gil_scoped_release<release_gil> no_gil;
+    return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
     END_HANDLE_TH_ERRORS_PYBIND
   };
 }
@@ -400,7 +409,9 @@ template <typename Func>
 auto wrap_pybind_function(Func&& f) {
   using traits = invoke_traits<Func>;
   return torch::detail::wrap_pybind_function_impl_(
-      std::forward<Func>(f), std::make_index_sequence<traits::arity>{}, false);
+      std::forward<Func>(f),
+      std::make_index_sequence<traits::arity>{},
+      std::false_type{});
 }
 
 // Wrap a function with TH error, warning handling and releases the GIL.
@@ -409,7 +420,9 @@ template <typename Func>
 auto wrap_pybind_function_no_gil(Func&& f) {
   using traits = invoke_traits<Func>;
   return torch::detail::wrap_pybind_function_impl_(
-      std::forward<Func>(f), std::make_index_sequence<traits::arity>{}, true);
+      std::forward<Func>(f),
+      std::make_index_sequence<traits::arity>{},
+      std::true_type{});
 }
 
 } // namespace torch
