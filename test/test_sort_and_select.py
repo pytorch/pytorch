@@ -33,7 +33,7 @@ class TestSortAndSelect(TestCase):
                 # see above
                 return ((b != b) | (a <= b)).all().item()
         else:
-            error(f'unknown order "{order}", must be "ascending" or "descending"')
+            error(f'unknown order "{order}", must be "ascending" or "descending"')  # noqa: F821
 
         are_ordered = True
         for k in range(1, SIZE):
