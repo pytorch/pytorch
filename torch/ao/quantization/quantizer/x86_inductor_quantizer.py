@@ -37,7 +37,16 @@ from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
     SourcePartition,
 )
-from .utils import _generate_conv2d_pattern_matcher
+from .utils import (
+    _generate_conv2d_bn_pattern_matcher,
+    _generate_conv2d_hardtanh_pattern_matcher,
+    _generate_conv2d_inplace_hardtanh_pattern_matcher,
+    _generate_conv2d_inplace_relu6_pattern_matcher,
+    _generate_conv2d_inplace_relu_pattern_matcher,
+    _generate_conv2d_pattern_matcher,
+    _generate_conv2d_relu6_pattern_matcher,
+    _generate_conv2d_relu_pattern_matcher,
+)
 
 __all__ = [
     "X86InductorQuantizer",
@@ -593,15 +602,13 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_qat_conv2d_bn(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        fused_partitions = find_sequential_partitions(
-            gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d]
-        )
-        for fused_partition in fused_partitions:
-            conv_partition, bn_partition = fused_partition
-            conv_node, bn_output_node = self._get_output_nodes_of_partitions(
-                [conv_partition, bn_partition]
-            )
-
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        matches = _generate_conv2d_bn_pattern_matcher().match(gm.graph)
+        for match in matches:
+            name_node_map = match.name_node_map
+            conv_node = name_node_map["conv"]
+            bn_output_node = name_node_map["bn"]
             if (
                 conv_node.op != "call_function"
                 or conv_node.target != torch.ops.aten.conv2d.default
@@ -620,8 +627,7 @@ class X86InductorQuantizer(Quantizer):
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
             )
-            nodes_to_mark_annotated = list(conv_partition.nodes)
-            nodes_to_mark_annotated.extend(list(bn_partition.nodes))
+            nodes_to_mark_annotated = list(match.nodes_map.values())
             _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     def _annotate_conv2d_fusion_pattern(
@@ -725,23 +731,22 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_conv2d_unary(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        fused_partitions = []
-        unary_patterns = [
-            [torch.nn.Conv2d, torch.nn.ReLU],
-            [torch.nn.Conv2d, torch.nn.Hardtanh],
-            [torch.nn.Conv2d, torch.nn.ReLU6],
-        ]
-        for unary_pattern in unary_patterns:
-            partitions = find_sequential_partitions(gm, unary_pattern)
-            if partitions:
-                # Extend the fused_partitions if partitions is not empty
-                fused_partitions.extend(partitions)
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        matches = _generate_conv2d_relu_pattern_matcher().match(gm.graph)
+        matches.extend(_generate_conv2d_inplace_relu_pattern_matcher().match(gm.graph))
+        matches.extend(_generate_conv2d_hardtanh_pattern_matcher().match(gm.graph))
+        matches.extend(
+            _generate_conv2d_inplace_hardtanh_pattern_matcher().match(gm.graph)
+        )
+        matches.extend(_generate_conv2d_relu6_pattern_matcher().match(gm.graph))
+        matches.extend(_generate_conv2d_inplace_relu6_pattern_matcher().match(gm.graph))
 
-        for fused_partition in fused_partitions:
-            conv_partition, unary_partition = fused_partition
-            conv_node, unary_node = self._get_output_nodes_of_partitions(
-                [conv_partition, unary_partition]
-            )
+        for match in matches:
+            name_node_map = match.name_node_map
+            conv_node = name_node_map["conv"]
+            unary_node = name_node_map["unary"]
+
             if (
                 conv_node.op != "call_function"
                 or conv_node.target != torch.ops.aten.conv2d.default
@@ -758,6 +763,8 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_conv2d(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
         matches = _generate_conv2d_pattern_matcher().match(gm.graph)
 
         for match in matches:

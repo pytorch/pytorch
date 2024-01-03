@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 
 from torch.ao.quantization.pt2e.utils import (
+    _conv2d_bn_example_inputs,
     _conv2d_example_inputs,
     _is_sym_size_node,
     get_aten_graph_module,
@@ -84,14 +85,18 @@ def _get_conv_unary_pattern(
         else:
             bn = conv
         if unary_fn is not None:
-            output = unary_fn(bn)
+            unary = unary_fn(bn)
+            output = unary
         else:
-            output = bn
+            unary = bn
+            output = unary
         return output, {
             "input": x,
             "conv": conv,
             "conv_weight": conv_weight,
             "conv_bias": conv_bias,
+            "bn": bn,
+            "unary": unary,
             "output": output,
         }
 
@@ -102,6 +107,7 @@ def _generate_pattern_matcher_helper(pattern, example_inputs):
     pattern = get_aten_graph_module(pattern, example_inputs)
     pattern.graph.eliminate_dead_code()
     pattern.recompile()
+    # print("qat pattern is: {}".format(pattern.graph), flush=True)
     return SubgraphMatcherWithNameNodeMap(pattern, ignore_literals=True)
 
 
@@ -112,5 +118,73 @@ def _generate_conv2d_pattern_matcher():
     # 4c6e842496da636123f83ef868ca1974631f1f1e/torch/_dynamo/config.py#L35-L39
     return _generate_pattern_matcher_helper(
         _get_conv_unary_pattern(torch.nn.functional.conv2d),
+        _conv2d_example_inputs,
+    )
+
+
+@functools.lru_cache(None)
+def _generate_conv2d_bn_pattern_matcher():
+    return _generate_pattern_matcher_helper(
+        _get_conv_unary_pattern(torch.nn.functional.conv2d, has_bn=True),
+        _conv2d_bn_example_inputs,
+    )
+
+
+@functools.lru_cache(None)
+def _generate_conv2d_relu_pattern_matcher():
+    return _generate_pattern_matcher_helper(
+        _get_conv_unary_pattern(
+            torch.nn.functional.conv2d, unary_fn=torch.nn.functional.relu
+        ),
+        _conv2d_example_inputs,
+    )
+
+
+@functools.lru_cache(None)
+def _generate_conv2d_inplace_relu_pattern_matcher():
+    return _generate_pattern_matcher_helper(
+        _get_conv_unary_pattern(
+            torch.nn.functional.conv2d, unary_fn=torch.nn.functional.relu_
+        ),
+        _conv2d_example_inputs,
+    )
+
+
+@functools.lru_cache(None)
+def _generate_conv2d_hardtanh_pattern_matcher():
+    return _generate_pattern_matcher_helper(
+        _get_conv_unary_pattern(
+            torch.nn.functional.conv2d, unary_fn=torch.nn.functional.hardtanh
+        ),
+        _conv2d_example_inputs,
+    )
+
+
+@functools.lru_cache(None)
+def _generate_conv2d_inplace_hardtanh_pattern_matcher():
+    return _generate_pattern_matcher_helper(
+        _get_conv_unary_pattern(
+            torch.nn.functional.conv2d, unary_fn=torch.nn.functional.hardtanh_
+        ),
+        _conv2d_example_inputs,
+    )
+
+
+@functools.lru_cache(None)
+def _generate_conv2d_relu6_pattern_matcher():
+    return _generate_pattern_matcher_helper(
+        _get_conv_unary_pattern(
+            torch.nn.functional.conv2d, unary_fn=torch.nn.functional.relu6
+        ),
+        _conv2d_example_inputs,
+    )
+
+
+@functools.lru_cache(None)
+def _generate_conv2d_inplace_relu6_pattern_matcher():
+    return _generate_pattern_matcher_helper(
+        _get_conv_unary_pattern(
+            torch.nn.functional.conv2d, unary_fn=torch.nn.ReLU6(inplace=True)
+        ),
         _conv2d_example_inputs,
     )
