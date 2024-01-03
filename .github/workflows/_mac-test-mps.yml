@@ -59,7 +59,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Print runner OS/HW info
-        shell: arch -arch arm64 bash {0}
         run: |
           sysctl machdep.cpu.brand_string kern.osproductversion
 
@@ -70,7 +69,6 @@ jobs:
           quiet-checkout: true
 
       - name: Clean checkout
-        shell: arch -arch arm64 bash {0}
         run: |
           git clean -fxd
 
@@ -99,7 +97,6 @@ jobs:
           CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
           PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
           REENABLED_ISSUES: ${{ needs.filter.outputs.reenabled-issues }}
-        shell: arch -arch arm64 bash {0}
         run: |
           # shellcheck disable=SC1090
           set -ex
