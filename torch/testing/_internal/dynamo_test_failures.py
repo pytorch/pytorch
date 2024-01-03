@@ -302,7 +302,6 @@ FIXME_default_non_strict = {
     "torch_np/numpy_tests/lib/test_function_base",
     "torch_np/numpy_tests/lib/test_histograms",
     "torch_np/numpy_tests/lib/test_index_tricks",
-    "torch_np/numpy_tests/lib/test_shape_base_",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -1361,6 +1360,26 @@ dynamo_expected_failures = {
     "TestTrilIndicesFrom.test_exceptions",
     "TestHistogram2d.test_asym",
     "TestDiag.test_failure",
+    "TestVsplit.test_non_iterable",
+    "TestVsplit.test_1D_array",
+    "TestApplyAlongAxis.test_scalar_array",
+    "TestDstack.test_non_iterable",
+    "TestSplit.test_unequal_split",
+    "TestPutAlongAxis.test_broadcast",
+    "TestArraySplit.test_integer_0_split",
+    "TestDsplit.test_2D_array",
+    "TestTakeAlongAxis.test_invalid",
+    "TestHsplit.test_0D_array",
+    "TestDsplit.test_1D_array",
+    "TestDsplit.test_non_iterable",
+    "TestDsplit.test_0D_array",
+    "TestHsplit.test_non_iterable",
+    "TestColumnStack.test_non_iterable",
+    "TestApplyAlongAxis.test_axis_insertion",
+    "TestVsplit.test_0D_array",
+    "TestExpandDims.test_repeated_axis",
+    "TestExpandDims.test_axis_out_of_range",
+    "TestApplyAlongAxis.test_0d_array",
 }
 
 dynamo_skips = {
@@ -1398,4 +1417,6 @@ dynamo_skips = {
     "TestIscomplexobj.test_list",  # known py311 fail
     "TestDiag.test_matrix",  # known py311 fail
     "TestVander.test_dtypes",  # known py311 fail
+    "TestDstack.test_generator",  # known py311 fail
+    "TestColumnStack.test_generator",  # known py311 fail
 }
