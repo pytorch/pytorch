@@ -4614,6 +4614,14 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(out1, out2)
 
+    def test_cross_entropy_loss(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/116095
+        loss = nn.CrossEntropyLoss()
+        pred = torch.randn(3, 5, requires_grad=True, dtype=torch.float16, device='mps')
+        target = torch.ones(3, dtype=torch.long, device='mps')
+        output = loss(pred, target)
+        output.backward()
+
     def test_log_softmax(self):
         values = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
         cpu_x = torch.tensor(values, device='cpu', requires_grad=True)
