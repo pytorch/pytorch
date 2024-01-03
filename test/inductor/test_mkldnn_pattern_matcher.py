@@ -1120,7 +1120,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfRocm
     def test_qlinear_input_dim_exceeds_2_and_not_contiguous(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module.
         * Input dim exceeds 2
         * Input not contiguous
         """
