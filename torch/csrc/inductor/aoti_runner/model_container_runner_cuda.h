@@ -13,14 +13,19 @@ class TORCH_API AOTIModelContainerRunnerCuda : public AOTIModelContainerRunner {
       const std::string& cubin_dir = "")
       : AOTIModelContainerRunner(model_so_path, num_models, false, cubin_dir) {}
 
-  std::vector<at::Tensor> run(
-      std::vector<at::Tensor>& inputs,
-      cudaStream_t cuda_stream_handle = nullptr) {
-    if (cuda_stream_handle == nullptr) {
-      cuda_stream_handle = c10::cuda::getCurrentCUDAStream().stream();
-    }
+  std::vector<at::Tensor> run(std::vector<at::Tensor>& inputs) {
+    at::cuda::CUDAStream cuda_stream = c10::cuda::getCurrentCUDAStream();
     return AOTIModelContainerRunner::run(
-        inputs, reinterpret_cast<AOTInductorStreamHandle>(cuda_stream_handle));
+        inputs,
+        reinterpret_cast<AOTInductorStreamHandle>(cuda_stream.stream()));
+  }
+
+  std::vector<at::Tensor> run_with_cuda_stream(
+      std::vector<at::Tensor>& inputs,
+      at::cuda::CUDAStream cuda_stream) {
+    return AOTIModelContainerRunner::run(
+        inputs,
+        reinterpret_cast<AOTInductorStreamHandle>(cuda_stream.stream()));
   }
 };
 
