@@ -273,9 +273,6 @@ FIXME_default_non_strict = {
     "test_testing",
     "test_torch",
     "test_transformers",
-    "test_type_hints",
-    "test_type_info",
-    "test_type_promotion",
     "test_unary_ufuncs",
     "test_utils",
     "test_vulkan",
@@ -1614,6 +1611,9 @@ dynamo_expected_failures = {
     "TestViewOpsLAZY.test_advanced_indexing_assignment_lazy",  # test_view_ops
     "TestOldViewOpsCPU.test_crow_col_indices_cpu",  # test_view_ops
     "TestViewOpsLAZY.test_advanced_indexing_nonview_lazy",  # test_view_ops
+    "TestTypePromotionCPU.test_alpha_mismatch_cpu",  # test_type_promotion
+    "TestTypePromotionCPU.test_alternate_result_cpu",  # test_type_promotion
+    "TestTypeHints.test_doc_examples",  # test_type_hints
 }
 
 dynamo_skips = {
