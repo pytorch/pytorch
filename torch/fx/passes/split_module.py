@@ -281,7 +281,7 @@ def split_module(
 
         if assert_monotonically_increasing:
             pid = split_callback(node)
-            assert highest_partition <= pid,\
+            assert highest_partition <= pid, \
                 ("autocast or set_grad_enabled require monotonically increasing partitions:"
                  f"highest: {highest_partition}, this node's: {pid}")
             highest_partition = pid
