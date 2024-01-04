@@ -956,7 +956,7 @@ def convert(
             "in a future version. Please pass in a QConfigMapping instead.")
         qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping) if qconfig_mapping else None
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
-    assert(qconfig_mapping is None or isinstance(qconfig_mapping, QConfigMapping))
+    assert qconfig_mapping is None or isinstance(qconfig_mapping, QConfigMapping)
 
     if isinstance(backend_config, Dict):
         warnings.warn(
