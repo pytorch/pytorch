@@ -1669,6 +1669,7 @@ def main():
 
     test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
 
+    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
     with open(
         REPO_ROOT / "test" / "test-reports" / "td_heuristic_rankings.log", "w"
     ) as f:
@@ -1752,7 +1753,6 @@ def main():
     if not options.no_translation_validation:
         os.environ["PYTORCH_TEST_WITH_TV"] = "1"
 
-    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
     try:
         # Actually run the tests
