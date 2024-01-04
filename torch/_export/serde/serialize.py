@@ -9,10 +9,10 @@ import logging
 import math
 import operator
 import typing
-from collections import defaultdict
 
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from collections import defaultdict
+from dataclasses import dataclass, is_dataclass, field, fields
 from enum import Enum
 from typing import (
     Any,
@@ -1144,9 +1144,15 @@ class GraphModuleDeserializer:
             self.serialized_name_to_meta[name] = self.deserialize_sym_bool(sym_bool_value)
 
         # Inputs: convert to placeholder nodes in FX.
-        for input in serialized_graph.inputs:
-            placeholder_node = self.graph.placeholder(input.as_tensor.name)
-            self.sync_fx_node(input.as_tensor.name, placeholder_node)
+        for i, input in enumerate(serialized_graph.inputs):
+            if is_dataclass(input.value) and "name" in [field.name for field in fields(input.value)]:
+                node_name = input.value.name
+                placeholder_node = self.graph.placeholder(node_name)
+                self.sync_fx_node(node_name, placeholder_node)
+            else:
+                node_name = f"arg{i}"
+                placeholder_node = self.graph.placeholder(node_name)
+                placeholder_node.meta["val"] = self.deserialize_input(input)
 
         # Nodes: convert to call_function nodes.
         for serialized_node in serialized_graph.nodes:

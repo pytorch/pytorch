@@ -418,7 +418,6 @@ class TestExport(TestCase):
         kwargs = {"a": {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4)}, "b": [torch.ones(2, 3), torch.ones(3, 4)]}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureSerDer
     @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
     def test_export_func_with_default_kwargs(self):
@@ -476,7 +475,7 @@ class TestExport(TestCase):
                   "kw3": (torch.ones(2, 3), torch.ones(3, 4)), "kw4": torch.ones(3, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDer  # we don't serialize metadata on placeholder nodes
     @testing.expectedFailureNonStrict
     def test_linear_conv(self):
 
@@ -1284,7 +1283,6 @@ def forward(self, arg_0):
             "torch.ops.aten._assert_async.msg", 2, exactly=True
         ).run(decompose_ep.graph_module.code)
 
-    @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_mixed_input(self):
         def func(a, b, alpha: int):
@@ -1429,7 +1427,6 @@ def forward(self, arg_0):
         ):
             _ = exported(torch.ones(7, 5), 6.0)
 
-    @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_runtime_assert_for_prm_str(self):
 

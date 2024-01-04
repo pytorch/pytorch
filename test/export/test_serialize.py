@@ -499,6 +499,12 @@ class TestDeserialize(TestCase):
 
         self.check_graph(f, (torch.tensor(3), torch.randn(4, 5)))
 
+    def test_non_tensor_input(self):
+        def f(x, y):
+            return x + y
+
+        self.check_graph(f, (torch.tensor(3), 5))
+
     def test_get_attr(self) -> None:
         def f(x):
             return x + torch.tensor(3)
@@ -570,10 +576,6 @@ class TestOpVersioning(TestCase):
         with self.assertLogs(level='WARN') as log:
             deserializer._validate_model_opset_version(model_opset_version)
             self.assertIn("Compiler doesn't have a version table for op namespace", log.output[0])
-
-unittest.expectedFailure(
-    TestDeserialize.test_exportdb_supported_case_tensor_setattr
-)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
