@@ -287,9 +287,6 @@ FIXME_default_non_strict = {
     "torch_np/numpy_tests/core/test_dtype",
     "torch_np/numpy_tests/core/test_einsum",
     "torch_np/numpy_tests/core/test_getlimits",
-    "torch_np/numpy_tests/core/test_indexing",
-    "torch_np/numpy_tests/core/test_numeric",
-    "torch_np/numpy_tests/core/test_numerictypes",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -1492,6 +1489,58 @@ dynamo_expected_failures = {
     "TestArrayFromScalar.test_integers_np_byte_np_longlong",  # torch_np/numpy_tests/core/test_scalar_ctors
     "TestArrayFromScalar.test_integers_np_short_np_longlong",  # torch_np/numpy_tests/core/test_scalar_ctors
     "TestArrayFromScalar.test_integers_np_int__np_longlong",  # torch_np/numpy_tests/core/test_scalar_ctors
+    "TestScalarTypeNames.test_names_reflect_attributes_t4",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t1",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t7",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t5",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t9",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestIsSubDType.test_both_abstract",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t6",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t2",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t8",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t0",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestIsSubDType.test_nondtype_nonscalartype",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t3",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestClip.test_clip_inplace_array",  # torch_np/numpy_tests/core/test_numeric
+    "TestRequire.test_require_each",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_clip_with_out_simple_int32",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_simple_inplace_01",  # torch_np/numpy_tests/core/test_numeric
+    "TestStdVar.test_out_scalar",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_simple_int32_inout_casting_unsafe",  # torch_np/numpy_tests/core/test_numeric
+    "TestMoveaxis.test_errors",  # torch_np/numpy_tests/core/test_numeric
+    "TestNonzeroAndCountNonzero.test_count_nonzero_axis",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_clip_with_out_memory_overlap",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_clip_func_takes_out",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_noncontig_inplace",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_type_cast_12",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_simple_int64_out",  # torch_np/numpy_tests/core/test_numeric
+    "TestRollaxis.test_exceptions",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_simple_inplace_02",  # torch_np/numpy_tests/core/test_numeric
+    "TestRequire.test_C_and_F_simul",  # torch_np/numpy_tests/core/test_numeric
+    "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-1",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_simple_complex",  # torch_np/numpy_tests/core/test_numeric
+    "TestBoolArray.test_logical_not_abs",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_simple_out",  # torch_np/numpy_tests/core/test_numeric
+    "TestBroadcast.test_broadcast_single_arg",  # torch_np/numpy_tests/core/test_numeric
+    "TestRequire.test_unknown_requirement",  # torch_np/numpy_tests/core/test_numeric
+    "TestBoolArray.test_logical_and_or_xor",  # torch_np/numpy_tests/core/test_numeric
+    "TestBroadcast.test_broadcast_error_kwargs",  # torch_np/numpy_tests/core/test_numeric
+    "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-9",  # torch_np/numpy_tests/core/test_numeric
+    "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-10",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_type_cast_10",  # torch_np/numpy_tests/core/test_numeric
+    "TestOuterMisc.test_outer_out_param",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_clip_inplace_simple",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_clip_with_out_transposed",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_clip_with_out_simple",  # torch_np/numpy_tests/core/test_numeric
+    "TestCross.test_broadcasting_shapes",  # torch_np/numpy_tests/core/test_numeric
+    "TestIndexing.test_index_no_floats",  # torch_np/numpy_tests/core/test_indexing
+    "TestBooleanIndexing.test_boolean_indexing_weirdness",  # torch_np/numpy_tests/core/test_indexing
+    "TestBooleanIndexing.test_bool_as_int_argument_errors",  # torch_np/numpy_tests/core/test_indexing
+    "TestBroadcastedAssignments.test_simple_broadcasting_errors",  # torch_np/numpy_tests/core/test_indexing
+    "TestFloatNonIntegerArgument.test_non_integer_argument_errors",  # torch_np/numpy_tests/core/test_indexing
+    "TestIndexing.test_slicing_no_floats",  # torch_np/numpy_tests/core/test_indexing
+    "TestBroadcastedAssignments.test_prepend_not_one",  # torch_np/numpy_tests/core/test_indexing
+    "TestFloatNonIntegerArgument.test_reduce_axis_float_index",  # torch_np/numpy_tests/core/test_indexing
 }
 
 dynamo_skips = {
@@ -1552,4 +1601,6 @@ dynamo_skips = {
     "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_H_operation0",  # torch_np/numpy_tests/core/test_scalarmath
     "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_H_operation1",  # torch_np/numpy_tests/core/test_scalarmath
     "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_L_operation0",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestCorrelate.test_complex",  # known py311 fail
+    "TestStdVarComplex.test_basic",  # known py311 fail
 }
