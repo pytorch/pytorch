@@ -2,6 +2,8 @@
 
 #include <exception>
 #include <memory>
+#include <mutex>
+#include <queue>
 #include <string>
 #include <system_error>
 
@@ -143,7 +145,7 @@ extern PyObject *THPException_FatalError, *THPException_LinAlgError,
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
 struct python_error : public std::exception {
-  python_error() = default;
+  python_error() : type(nullptr), value(nullptr), traceback(nullptr) {}
 
   python_error(const python_error& other)
       : type(other.type),
@@ -242,9 +244,9 @@ struct python_error : public std::exception {
     PyErr_Restore(type, value, traceback);
   }
 
-  PyObject* type{nullptr};
-  PyObject* value{nullptr};
-  PyObject* traceback{nullptr};
+  PyObject* type;
+  PyObject* value;
+  PyObject* traceback;
 
   // Message to return to the user when 'what()' is invoked.
   std::string message;
@@ -371,7 +373,6 @@ using Arg = typename invoke_traits<Func>::template arg<i>::type;
 
 template <typename Func, size_t... Is>
 auto wrap_pybind_function_impl_(
-    // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
     Func&& f,
     std::index_sequence<Is...>,
     bool release_gil) {
@@ -384,11 +385,9 @@ auto wrap_pybind_function_impl_(
     HANDLE_TH_ERRORS
     if (release_gil) {
       py::gil_scoped_release no_gil;
-      return c10::guts::invoke(
-          std::move(f), std::forward<Arg<Func, Is>>(args)...);
+      return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
     } else {
-      return c10::guts::invoke(
-          std::move(f), std::forward<Arg<Func, Is>>(args)...);
+      return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
     }
     END_HANDLE_TH_ERRORS_PYBIND
   };
