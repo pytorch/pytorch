@@ -1668,7 +1668,11 @@ def main():
         aggregated_heuristics = get_test_prioritizations(selected_tests)
 
     test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
-    test_prioritizations.print_info()
+
+    with open(
+        REPO_ROOT / "test" / "test-reports" / "td_heuristic_rankings.log", "w"
+    ) as f:
+        f.write(aggregated_heuristics.get_info_str())
 
     test_file_times_dict = load_test_file_times()
     test_class_times_dict = load_test_class_times()
