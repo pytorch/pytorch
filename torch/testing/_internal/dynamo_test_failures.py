@@ -256,9 +256,6 @@ FIXME_default_non_strict = {
     "test_schema_check",
     "test_segment_reductions",
     "test_serialization",
-    "test_set_default_mobile_cpu_allocator",
-    "test_shape_ops",
-    "test_show_pickle",
     "test_sparse",
     "test_sparse_csr",
     "test_sparse_semi_structured",
@@ -2014,6 +2011,15 @@ dynamo_expected_failures = {
     "TestSortAndSelectCPU.test_isin_cpu_int16",  # test_sort_and_select
     "TestSortAndSelectCPU.test_isin_cpu_int64",  # test_sort_and_select
     "TestSortAndSelectCPU.test_isin_cpu_float32",  # test_sort_and_select
+    "TestShapeOpsCPU.test_flip_cpu_float64",  # test_shape_ops
+    "TestShapeOpsCPU.test_flip_cpu_float32",  # test_shape_ops
+    "TestShapeOpsCPU.test_flip_cpu_complex64",  # test_shape_ops
+    "TestShapeOpsCPU.test_flip_cpu_float16",  # test_shape_ops
+    "TestShapeOpsCPU.test_flip_cpu_complex128",  # test_shape_ops
+    "TestShapeOpsCPU.test_clamp_cpu_int64",  # test_shape_ops
+    "TestShapeOpsCPU.test_clamp_propagates_nans_cpu",  # test_shape_ops
+    "TestShapeOpsCPU.test_flip_cpu_bfloat16",  # test_shape_ops
+    "TestShapeOpsCPU.test_clamp_cpu_float32",  # test_shape_ops
 }
 
 dynamo_skips = {
