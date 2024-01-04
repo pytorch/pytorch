@@ -67,7 +67,7 @@ def _get_conv_unary_pattern(
     conv_fn: Callable,
     has_bn: bool = False,  # Usually need for QAT pattern
     unary_fn: Optional[Callable[[Any], Any]] = None,
-):
+) -> Callable:
     # A helper function to generate a Conv Unary pattern,
     # which serves as an input to create a SubgraphMatcherWithNameNodeMap.
     def _conv_unary(
@@ -103,7 +103,9 @@ def _get_conv_unary_pattern(
     return _conv_unary
 
 
-def _generate_pattern_matcher_helper(pattern, example_inputs):
+def _generate_pattern_matcher_helper(
+    pattern, example_inputs
+) -> SubgraphMatcherWithNameNodeMap:
     pattern = get_aten_graph_module(pattern, example_inputs)
     pattern.graph.eliminate_dead_code()
     pattern.recompile()
@@ -112,7 +114,7 @@ def _generate_pattern_matcher_helper(pattern, example_inputs):
 
 
 @functools.lru_cache(None)
-def _generate_conv2d_pattern_matcher():
+def _generate_conv2d_pattern_matcher() -> SubgraphMatcherWithNameNodeMap:
     # Ensure it's only be invoked once, due to the cache size limitation in
     # https://github.com/pytorch/pytorch/blob/
     # 4c6e842496da636123f83ef868ca1974631f1f1e/torch/_dynamo/config.py#L35-L39
