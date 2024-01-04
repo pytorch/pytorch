@@ -259,7 +259,6 @@ FIXME_default_non_strict = {
     "test_set_default_mobile_cpu_allocator",
     "test_shape_ops",
     "test_show_pickle",
-    "test_sort_and_select",
     "test_sparse",
     "test_sparse_csr",
     "test_sparse_semi_structured",
@@ -2005,6 +2004,16 @@ dynamo_expected_failures = {
     "TestStatelessFunctionalAPI.test_reparametrized_module_change_parametrization_original_stateless",  # test_stateless
     "TestStatelessFunctionalAPI.test_reparametrized_module_change_parametrization_original_torch_func",  # test_stateless
     "TestStatelessFunctionalAPI.test_reparametrize_module_fail_reset_to_original_stateless",  # test_stateless
+    "TestSortAndSelectCPU.test_isin_cpu_int32",  # test_sort_and_select
+    "TestSortAndSelectCPU.test_sort_overflow_cpu_int16",  # test_sort_and_select
+    "TestSortAndSelectCPU.test_topk_quantized_scalar_input_cpu",  # test_sort_and_select
+    "TestSortAndSelectCPU.test_isin_cpu_float64",  # test_sort_and_select
+    "TestSortAndSelectCPU.test_isin_cpu_uint8",  # test_sort_and_select
+    "TestSortAndSelectCPU.test_isin_cpu_int8",  # test_sort_and_select
+    "TestSortAndSelectCPU.test_topk_arguments_cpu",  # test_sort_and_select
+    "TestSortAndSelectCPU.test_isin_cpu_int16",  # test_sort_and_select
+    "TestSortAndSelectCPU.test_isin_cpu_int64",  # test_sort_and_select
+    "TestSortAndSelectCPU.test_isin_cpu_float32",  # test_sort_and_select
 }
 
 dynamo_skips = {
