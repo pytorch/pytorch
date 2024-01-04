@@ -1,4 +1,5 @@
 #include <c10/core/ScalarType.h>
+#include <c10/util/Array.h>
 #include <array>
 
 namespace c10 {
@@ -20,10 +21,8 @@ constexpr auto b1 = ScalarType::Bool;
 constexpr auto bf = ScalarType::BFloat16;
 constexpr auto ud = ScalarType::Undefined;
 
-constexpr int64_t NUM_PROMOTE_TYPES = 20;
-
-constexpr std::array<ScalarType, NUM_PROMOTE_TYPES> index2dtype =
-    {u1, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, b1, bf};
+constexpr auto index2dtype = array_of<
+    c10::ScalarType>(u1, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, b1, bf);
 
 constexpr std::array<int64_t, static_cast<size_t>(ScalarType::NumOptions)>
 calculate_dtype2index() {
@@ -83,7 +82,7 @@ ScalarType promoteTypes(ScalarType a, ScalarType b) {
   // This table axes must be consistent with index2dtype
   // clang-format off
   static constexpr std::
-  array<std::array<ScalarType, NUM_PROMOTE_TYPES>, NUM_PROMOTE_TYPES>
+  array<std::array<ScalarType, index2dtype.size()>, index2dtype.size()>
       _promoteTypesLookup = {{
       /*        u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1  bf*/
       /* u1 */ {u1, i2, i2, i4, i8, f2, f4, f8, c2, c4, c8, u1, bf},
