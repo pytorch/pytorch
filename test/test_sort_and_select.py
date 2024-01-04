@@ -10,7 +10,7 @@ from itertools import permutations, product
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import all_types, all_types_and, floating_types_and, integral_types
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, slowTest)
+    (TestCase, run_tests, slowTest, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyNativeDeviceTypes,
      onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
@@ -33,7 +33,7 @@ class TestSortAndSelect(TestCase):
                 # see above
                 return ((b != b) | (a <= b)).all().item()
         else:
-            error(f'unknown order "{order}", must be "ascending" or "descending"')
+            error(f'unknown order "{order}", must be "ascending" or "descending"')  # noqa: F821
 
         are_ordered = True
         for k in range(1, SIZE):
@@ -366,6 +366,7 @@ class TestSortAndSelect(TestCase):
         for shape in shapes:
             test(shape)
 
+    @skipIfTorchDynamo("Fails on python 3.11")
     @dtypes(torch.float)
     def test_sort_expanded_tensor(self, device, dtype):
         # https://github.com/pytorch/pytorch/issues/91420
@@ -436,6 +437,12 @@ class TestSortAndSelect(TestCase):
         t = torch.randn((2, 10000), device=device)
         compare(t, 2000, 1, True)
         compare(t, 2000, 1, False)
+
+    def test_topk_quantized_scalar_input(self):
+        # Calling topk on a quantized scalar input used to segfault,
+        # see https://github.com/pytorch/pytorch/issues/116324
+        x = torch.quantize_per_tensor(torch.randn(()), 0.1, 10, torch.qint8)
+        x.topk(1)
 
     def test_topk_arguments(self, device):
         q = torch.randn(10, 2, 10, device=device)

@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 
+#include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <nccl.h>
@@ -15,6 +16,11 @@
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
     (NCCL_MINOR >= 14)
 #define NCCL_HAS_COMM_NONBLOCKING
+#endif
+
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 18)
+#define NCCL_HAS_COMM_SPLIT
 #endif
 
 // ncclGetLastError() is enabled only for NCCL versions 2.13+
@@ -158,6 +164,7 @@
 
 namespace c10d {
 
+TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
 std::string getNcclVersion();
 std::string ncclGetErrorWithVersion(ncclResult_t error);
 bool nccl_use_nonblocking();
@@ -170,14 +177,29 @@ std::string getNcclErrorDetailStr(
     c10::optional<std::string> processGroupFailureReason = c10::nullopt);
 
 // Write NCCL debug info to local disk or any storage users define.
+// There are some constrains we set for the debug info writer:
+// 1. The writer should only be registered once.
+// 2. Once registered, users cannot change it including un-register.
+// 3. It is recommended to register the customized writer in the trainer setup,
+//    If users don't register before calling launchAsyncDebugDump, then users
+//    lose the chance to register (and the default writer will be
+//    auto-registered).
 class TORCH_API DebugInfoWriter {
  public:
-  DebugInfoWriter(int rank);
   virtual ~DebugInfoWriter();
   virtual void write(const std::string& ncclTrace);
+  static DebugInfoWriter& getWriter(int rank);
+  static void registerWriter(std::unique_ptr<DebugInfoWriter> writer);
 
  protected:
+  DebugInfoWriter(std::string namePrefix, int rank) {
+    filename_ = c10::str(namePrefix, rank);
+  }
   std::string filename_;
+
+ private:
+  static std::unique_ptr<DebugInfoWriter> writer_;
+  static std::atomic<bool> hasWriterRegistered_;
 };
 
 // RAII wrapper for NCCL communicator
@@ -242,6 +264,22 @@ class NCCLComm {
     }
     comm->ncclId_ = commId;
     comm->rank_ = rank;
+    return comm;
+  }
+#endif
+
+#ifdef NCCL_HAS_COMM_SPLIT
+  static std::shared_ptr<NCCLComm> split(
+      NCCLComm* source,
+      int color_id,
+      int rank,
+      ncclConfig_t& config) {
+    auto comm = std::make_shared<NCCLComm>();
+    C10D_NCCL_CHECK(
+        ncclCommSplit(
+            source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
+        c10::nullopt);
+    ++source->ncclCommSplitCounter_;
     return comm;
   }
 #endif
@@ -325,6 +363,10 @@ class NCCLComm {
     return aborted_;
   }
 
+  uint64_t getCommSplitCounter() const {
+    return ncclCommSplitCounter_;
+  }
+
   ncclResult_t checkForNcclError() {
     std::unique_lock<std::mutex> lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -401,6 +443,7 @@ class NCCLComm {
   // Unique nccl_id for this communicator.
   ncclUniqueId ncclId_;
   bool aborted_;
+  uint64_t ncclCommSplitCounter_{0};
   ncclResult_t ncclAsyncErr_;
   mutable std::mutex mutex_;
   // Rank that this communicator corresponds to.
