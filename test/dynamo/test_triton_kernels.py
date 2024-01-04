@@ -144,9 +144,7 @@ class KernelTests(torch._dynamo.test_case.TestCase):
 def forward(self, x_1, output_1):
     triton_kernel_wrapper_functional_proxy = torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional(kernel_idx = 0, grid = [(5,)], kwargs = {'in_ptr0': x_1, 'out_ptr': output_1, 'n_elements': 5, 'BLOCK_SIZE': 16}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
     getitem = triton_kernel_wrapper_functional_proxy['in_ptr0']
-    getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr']
-    getitem_2 = triton_kernel_wrapper_functional_proxy['n_elements']
-    getitem_3 = triton_kernel_wrapper_functional_proxy['BLOCK_SIZE'];  triton_kernel_wrapper_functional_proxy = None
+    getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return getitem_1""",
         )
 
@@ -382,7 +380,12 @@ def forward(self, x_1, output_1):
                 n_elements,
                 BLOCK_SIZE: "tl.constexpr",
             ):
-                pass
+                pid = tl.program_id(axis=0)
+                block_start = pid * BLOCK_SIZE
+                offsets = block_start + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < n_elements
+                x = tl.load(in_ptr0 + offsets, mask=mask)
+                tl.store(out_ptr + offsets, x, mask=mask)
 
         class D:
             @triton.jit
@@ -392,14 +395,21 @@ def forward(self, x_1, output_1):
                 n_elements,
                 BLOCK_SIZE: "tl.constexpr",
             ):
-                pass
+                pid = tl.program_id(axis=0)
+                block_start = pid * BLOCK_SIZE
+                offsets = block_start + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < n_elements
+                x = tl.load(in_ptr0 + offsets, mask=mask)
+                tl.store(out_ptr + offsets, x, mask=mask)
 
         def call_triton(x: torch.Tensor):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
+            output1 = torch.zeros_like(x)
+            output2 = torch.zeros_like(x)
+            n_elements = output1.numel()
             grid = (n_elements,)
-            C.pass_kernel[grid](x, output, n_elements, BLOCK_SIZE=16)
-            D.pass_kernel[grid](x, output, n_elements, BLOCK_SIZE=16)
+            C.pass_kernel[grid](x, output1, n_elements, BLOCK_SIZE=16)
+            D.pass_kernel[grid](x, output2, n_elements, BLOCK_SIZE=16)
+            return output1 + output2
 
         t = torch.ones(5, device="cuda")
         test, (code,) = run_and_get_code(torch.compile(call_triton), t)
@@ -814,6 +824,22 @@ def forward(self, x_1, output_1):
         eager_out = f(inp)
         compiled_out = torch.compile(f)(inp)
         self.assertEqual(compiled_out, eager_out)
+
+
+class MutationTests(torch._dynamo.test_case.TestCase):
+    @requires_cuda()
+    def test_find_mutations(self):
+        from torch._higher_order_ops.triton_kernel_wrap import filter_non_mutated
+
+        tests = [
+            [add_kernel, ["in_ptr0", "in_ptr1", "out_ptr"], ["out_ptr"]],
+            [add_kernel_2d_autotuned, ["in_ptr0", "in_ptr1", "out_ptr"], ["out_ptr"]],
+            # Cannot remove in_ptr0 since it is used in a external call
+            [indirection_kernel, ["in_ptr0", "out_ptr"], ["in_ptr0", "out_ptr"]],
+            [mul2_inplace_kernel, ["ptr"], ["ptr"]],
+        ]
+        for kernel, inputs, outputs in tests:
+            self.assertListEqual(filter_non_mutated(kernel, inputs), outputs)
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)
