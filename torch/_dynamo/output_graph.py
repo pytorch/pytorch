@@ -1707,7 +1707,9 @@ class SubgraphTracer(fx.Tracer):
 
         node = super().create_node(op, target, args, kwargs, name, type_expr)
         node.meta["creation_timestamp"] = self.output_graph.timestamp
-        # Store the corresponding nn.Module instance bound method for this node
+        # Store the corresponding nn.Module instance bound method for this node,
+        # so that we can use it later to determine whether this node comes from
+        # a specific NN method.
         if len(self.output_graph._current_tx) > 0:
             f_code = self.output_graph._current_tx[-1].f_code
             if "orig_nnmodule" in code_context.get_context(f_code):

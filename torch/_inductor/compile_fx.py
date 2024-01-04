@@ -1029,19 +1029,69 @@ def compile_fx(
         decompositions if decompositions is not None else select_decomp_table()
     )
 
-    # NOTE: There are 2 ways to do it:
-    # 1. Do subgraph splitting above AOTAutograd (Good: per-node nn method info passing is easy, Bad: unclear if it can work)
-    # 2. Do subgraph splitting below AOTAutograd, within inner_compile (Good: likely more friendly to existing extension point, Bad: per-node nn method info passing might be tricky)
-    # Let's try (1) first. With (1), here all nodes are from the same nn method.
+    """
+    NOTE: There are 3 ways to do it:
+    (1) Do subgraph splitting above AOTAutograd (Good: per-node nn method info passing is easy, Bad: unclear if it can work)
+    (2) Do subgraph splitting below AOTAutograd, within inner_compile (Good: likely more friendly to existing extension point, Bad: per-node nn method info passing might be tricky)
+    (3) Do subgraph splitting within Dynamo (similar to DDPOptimizer) (Good: has prior art, easy to understand, Bad: integration with compiled autograd might be tricky (need to be able to trigger the run of another segment in compiled autograd backward's "allow-in-graph" region))
+    With (1), here all nodes are from the same nn method.
+    Unfortunately (1) doesn't work, example:
+    ```
+    class TestNonDepSegmentModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
 
-    nn_module_method = None
-    for node in model_.graph.nodes:
-        if node.op != "placeholder" and node.op != "output":
-            if nn_module_method is None:
-                nn_module_method = node.meta.get("nn_module_method", None)
-            else:
-                # All nodes in this GraphModule should be from the same nn module method
-                assert nn_module_method == node.meta.get("nn_module_method", None), f"Expected {nn_module_method}, but got {node.meta.get('nn_module_method', None)}. {node}. {node.meta}. {node.op}"
+        def func1(self, x, y):
+            return torch.matmul(x, y)
+
+        def func2(self, x, y):
+            return torch.add(x, y)
+
+        def forward(self, x, y):
+            z1 = self.func1(x, y)
+            z2 = self.func2(x, y)
+            z = z1 * z2
+            return z
+    ```
+
+    Here, func1 and func2 are independent, and the third submodule (joint-graph) (i.e. the `z1 * z2` part) looks like:
+    ```
+    def forward(self, primals, tangents):
+        primals_1: "f32[s0, s0]"; primals_2: "f32[s0, s0]"; tangents_1: "f32[s0, s0]";
+
+        primals_1, primals_2, tangents_1, = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
+        # File: /data/users/willfeng/pytorch_yf225/test/lazy_scheduler/test_lazy_scheduler.py:330, code: z = z1 * z2
+        mul: "f32[s0, s0]" = torch.ops.aten.mul.Tensor(primals_1, primals_2)
+        mul_1: "f32[s0, s0]" = torch.ops.aten.mul.Tensor(tangents_1, primals_1);  primals_1 = None
+        mul_2: "f32[s0, s0]" = torch.ops.aten.mul.Tensor(tangents_1, primals_2);  tangents_1 = primals_2 = None
+        return pytree.tree_unflatten([mul, mul_2, mul_1], self._out_spec)
+    ```
+    Unfortunately the current system cannot resolve the source of `s0`:
+    ```
+    [2024-01-03 16:17:16,084] [0/0] torch.fx.experimental.symbolic_shapes: [INFO] create_symbol s0 = 4 for __meta_utils_unknown_tensor6.size()[0] [2, 9223372036854775806]
+    [2024-01-03 16:17:16,084] [0/0] torch.fx.experimental.symbolic_shapes: [DEBUG] create_symbol s0 duck sized __meta_utils_unknown_tensor6.size()[1]
+    [2024-01-03 16:17:16,092] [0/0] torch.fx.experimental.symbolic_shapes: [DEBUG] create_symbol s0 duck sized __meta_utils_unknown_tensor7.size()[0]
+    [2024-01-03 16:17:16,092] [0/0] torch.fx.experimental.symbolic_shapes: [DEBUG] create_symbol s0 duck sized __meta_utils_unknown_tensor7.size()[1]
+
+    AssertionError: s0 (could be from ['__meta_utils_unknown_tensor6.size()[0]', '__meta_utils_unknown_tensor6.size()[1]', '__meta_utils_unknown_tensor7.size()[0]', '__meta_utils_unknown_tensor7.size()[1]']) not in {s0: []}.
+    If this assert is failing, it could be due to the issue described in https://github.com/pytorch/pytorch/pull/90665
+    ```
+    It's unclear how to resolve unknown_tensor6 and unknown_tensor7. So we don't use approach (1).
+    (To repro, run `pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_split_module_above_aotautograd_non_dep_segments`)
+
+    Due to above reasons, only (3) is plausible now.
+    """
+
+    # nn_module_method = None
+    # for node in model_.graph.nodes:
+    #     if node.op != "placeholder" and node.op != "output":
+    #         if nn_module_method is None:
+    #             nn_module_method = node.meta["nn_module_method"]
+    #         else:
+    #             # If not all ops in the graph come from the same nn module method, then we don't set nn_module_method
+    #             if nn_module_method != node.meta["nn_module_method"]:
+    #                 nn_module_method = None
+    #                 break
 
     @dynamo_utils.dynamo_timed
     def fw_compiler_base(
@@ -1108,9 +1158,9 @@ def compile_fx(
                 if isinstance(n, torch.fx.Node)
             }
 
-        if nn_module_method is not None:
-            for node in model.graph.nodes:
-                node.meta["nn_module_method"] = nn_module_method
+        # if nn_module_method is not None:
+        #     for node in model.graph.nodes:
+        #         node.meta["nn_module_method"] = nn_module_method
 
         return inner_compile(
             model,
@@ -1148,9 +1198,9 @@ def compile_fx(
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         fixed = count_tangents(model)
 
-        if nn_module_method is not None:
-            for node in model.graph.nodes:
-                node.meta["nn_module_method"] = nn_module_method
+        # if nn_module_method is not None:
+        #     for node in model.graph.nodes:
+        #         node.meta["nn_module_method"] = nn_module_method
 
         return inner_compile(
             model,
