@@ -4910,7 +4910,7 @@ def fn():
         from functorch.experimental.control_flow import cond
 
         def true_fn(x):
-            return x
+            return x.clone()
 
         def false_fn(x):
             return x.sin()

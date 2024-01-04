@@ -1679,7 +1679,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                     return x + x
 
                 def false_fn(x):
-                    return x[:2]
+                    return x[:2].sin()
 
                 return cond(x.shape[0] <= 2, true_fn, false_fn, [x])
 
@@ -1689,7 +1689,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                     return x + x
 
                 def false_fn(x):
-                    return x[:2]
+                    return x[:2].sin()
 
                 return cond(x.shape[0] <= 2, true_fn, false_fn, (x,))
 
@@ -1726,7 +1726,8 @@ def forward(self, l_x_):
 def forward(self, l_x_):
     l_x__1 = l_x_
     getitem = l_x__1[slice(None, 2, None)];  l_x__1 = None
-    return (getitem,)""",
+    sin = getitem.sin();  getitem = None
+    return (sin,)""",
             )
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
@@ -3156,7 +3157,9 @@ def forward(self, x):
 
     def test_cond_raise_user_error_on_branch_return_multiple_tensors(self):
         def f_branch_return_multiple_tensors(pred, x, y):
-            return cond(pred, lambda x: (x, x), lambda x: (x, x), [y])
+            return cond(
+                pred, lambda x: (x + 1, x - 1), lambda x: (x.sin(), x.cos()), [y]
+            )
 
         example_inputs = (torch.tensor(True), torch.randn(4), torch.randn(2))
         gm, _ = torch._dynamo.export(
