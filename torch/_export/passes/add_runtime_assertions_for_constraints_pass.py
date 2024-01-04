@@ -8,7 +8,7 @@ import sympy
 
 import torch
 import torch.fx
-from torch._export.pass_base import _ExportPassBase, ProxyValue, PassResult
+from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse, ProxyValue, PassResult
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -40,7 +40,7 @@ def _convert_range_to_int(range: ValueRanges):
     return min_val, max_val
 
 
-class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
+class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBaseDeprecatedDoNotUse):
     def __init__(
         self,
         range_constraints: Dict[sympy.Symbol, ValueRanges],

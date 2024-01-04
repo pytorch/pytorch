@@ -1,7 +1,6 @@
 import logging
 
 import torch
-from torch._export.pass_base import _ExportPassBase
 
 from torch.ao.quantization.pt2e.utils import (
     _filter_sym_size_users,
@@ -9,7 +8,7 @@ from torch.ao.quantization.pt2e.utils import (
 )
 
 from torch.fx.node import map_arg
-from torch.fx.passes.infra.pass_base import PassResult
+from torch.fx.passes.infra.pass_base import PassBase, PassResult
 
 
 logger = logging.getLogger(__name__)
@@ -45,7 +44,7 @@ def _maybe_duplicate_dq(
         user.kwargs = new_kwargs
 
 
-class DuplicateDQPass(_ExportPassBase):
+class DuplicateDQPass(PassBase):
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
         for node in graph_module.graph.nodes:
             if node.op == "call_function" and node.target in _DEQUANTIZE_OPS:
