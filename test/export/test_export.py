@@ -2201,14 +2201,15 @@ def forward(self, l_x_):
         self.assertEqual(inputs[0][0] * 2.0, inputs_model[0][0])
         self.assertEqual(inputs[0][0] * 2.0, inputs_export[0][0])
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Not support CPU")
     def test__scaled_dot_product_flash_attention(self):
         class Module(torch.nn.Module):
             def forward(self, q, k, v):
                 res = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v)
                 return res[0]
 
-        m = Module()
-        inputs = (torch.randn(5, 4, 3, 2), torch.randn(5, 4, 3, 2), torch.randn(5, 4, 3, 2))
+        m = Module().cuda()
+        inputs = (torch.randn(5, 4, 3, 2).to("cuda"), torch.randn(5, 4, 3, 2).to("cuda"), torch.randn(5, 4, 3, 2).to("cuda"))
         ep = export(m, inputs)
         self.assertEqual(ep(*inputs), m(*inputs))
 
