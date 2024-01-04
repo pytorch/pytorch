@@ -2,7 +2,7 @@ import functools
 import inspect
 import itertools
 import types
-from typing import Dict, List
+from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
@@ -12,6 +12,9 @@ from ..exc import unimplemented, Unsupported
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import get_first_attr, make_cell
 from .base import typestr, VariableTracker
+
+if TYPE_CHECKING:
+    from torch._guards import Source
 
 
 def wrap_bound_arg(tx, val, source=None):
@@ -442,7 +445,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             tuple(make_cell(None) for _ in range(len(self.get_code().co_freevars))),
         )
         if self.kwdefaults:
-            func.__kwdefaults__ = self.kwdefaults.items
+            func.__kwdefaults__ = self.kwdefaults.keys_as_python_constant()
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         result = dict(bound.arguments.items())
@@ -501,15 +504,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
         if self.annotations:
             try:
-                if isinstance(self.annotations, variables.ConstDictVariable):
-                    annotations = {
-                        k: v.as_python_constant()
-                        for k, v in self.annotations.items.items()
-                    }
-                else:
-                    annotations = tuple(
-                        [v.as_python_constant() for v in self.annotations.items]
-                    )
+                annotations = self.annotations.as_python_constant()
                 codegen.extend_output([codegen._create_load_const(annotations)])
             except NotImplementedError:
                 codegen(self.annotations)
@@ -656,7 +651,7 @@ class TritonKernelVariable(VariableTracker):
         if isinstance(kernel, Autotuner):
             # We only support configs and keys arguments of triton.autotune
             # Make sure other arguments are defaulted
-            defaults = inspect.signature(Autotuner).parameters
+            defaults = inspect.signature(Autotuner.__init__).parameters
 
             # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
             # The call to get_first_attr is to maintain backward-compatibility.
@@ -695,7 +690,11 @@ class TritonKernelVariable(VariableTracker):
 
         # Both for grid's meta as well as for the kernel, we need combined
         # args and kwargs normalized
-        normalized_args = {**dict(zip(self.kernel.arg_names, args)), **kwargs}
+        names = (
+            variables.ConstantVariable.create(name) for name in self.kernel.arg_names
+        )
+        kwargs = {variables.ConstantVariable.create(k): v for k, v in kwargs.items()}
+        normalized_args = {**dict(zip(names, args)), **kwargs}
 
         configs = (
             [config.kwargs for config in self.kernel.configs]
@@ -710,7 +709,8 @@ class TritonKernelVariable(VariableTracker):
             if isinstance(grid, (NestedUserFunctionVariable, UserFunctionVariable)):
                 # Populate the special "meta" argument to call the grid function
                 config_args = {
-                    k: ConstantVariable.create(v) for k, v in config_args.items()
+                    ConstantVariable.create(k): ConstantVariable.create(v)
+                    for k, v in config_args.items()
                 }
                 meta = ConstDictVariable({**normalized_args, **config_args}, dict)
                 grid = grid.call_function(tx, [meta], {})

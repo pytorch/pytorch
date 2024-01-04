@@ -538,10 +538,10 @@ class TensorVariable(VariableTracker):
             assert not kwargs, f"Tensor.{name}() unhandled kwargs"
             # TODO: I think this branch is dead
             if len(args) == 1:
-                return constant_result.getitem_const(tx, args[0])
+                return constant_result.getitem_const(args[0])
             elif args:
                 return TupleVariable(
-                    [constant_result.getitem_const(tx, a) for a in args]
+                    [constant_result.getitem_const(a) for a in args]
                 )
             return constant_result
         elif name == "numpy":
@@ -820,6 +820,8 @@ class SymNodeVariable(VariableTracker):
         proxy.node.meta["example_value"] = sym_num
 
         if isinstance(sym_num, (sympy.Integer, int, bool)):
+            if isinstance(sym_num, sympy.Integer):
+                breakpoint()
             sym_num = int(sym_num) if isinstance(sym_num, sympy.Integer) else sym_num
             return ConstantVariable.create(sym_num)
 

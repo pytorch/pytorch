@@ -75,7 +75,7 @@ class BaseListVariable(VariableTracker):
         assert self.python_type() is not SizeVariable
         return self.python_type()(self._as_proxy())
 
-    def getitem_const(self, tx, arg: VariableTracker):
+    def getitem_const(self, arg: VariableTracker):
         from .tensor import SymNodeVariable
 
         if isinstance(arg, SymNodeVariable):
@@ -121,7 +121,7 @@ class BaseListVariable(VariableTracker):
                     unimplemented("__getitem__ with non-constant tensor")
             else:
                 value = args[0]
-            return self.getitem_const(tx, value)
+            return self.getitem_const(value)
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
