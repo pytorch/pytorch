@@ -732,19 +732,23 @@ if(MSVC)
   append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
 endif()
 
-include(cmake/Dependencies.cmake)
-
-# Moved this cmake set option down here because CMAKE_CUDA_COMPILER_VERSION is not avaialble until now
+# CAVEAT: do NOT check USE_ROCM here, because USE_ROCM is always True until
+#         include(cmake/Dependencies.cmake)
 cmake_dependent_option(
   USE_FLASH_ATTENTION
-  "Whether to build the flash_attention kernel for scaled dot product attention" ON
-  "USE_CUDA AND NOT ROCM AND NOT MSVC AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
+  "Whether to build the flash_attention kernel for scaled dot product attention.\
+  Will be disabled if not supported by the platform" ON
+  "USE_CUDA AND NOT MSVC" OFF)
 
+# CAVEAT: Again, do not check USE_ROCM here
 # Flash Attention2 will error while building for sm52 while Mem Eff Attention won't
 cmake_dependent_option(
   USE_MEM_EFF_ATTENTION
-  "Enable memory-efficient attention for scaled dot product attention" ON
-  "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
+  "Enable memory-efficient attention for scaled dot product attention.\
+  Will be disabled if not supported by the platform" ON
+  "USE_CUDA" OFF)
+
+include(cmake/Dependencies.cmake)
 
 if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
