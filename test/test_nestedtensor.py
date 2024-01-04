@@ -3078,7 +3078,6 @@ class TestNestedTensorSubclass(TestCase):
 
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
 
-    @xfailIfTorchDynamo
     def test_split(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -3100,7 +3099,6 @@ class TestNestedTensorSubclass(TestCase):
         ):
             torch.split(nt, 2, 1)
 
-    @xfailIfTorchDynamo
     def test_split_with_sizes(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -3168,7 +3166,6 @@ class TestNestedTensorSubclass(TestCase):
         flattened = nt.flatten(-3, -2)
         self.assertEqual(flattened.shape, nt.view(3, -1, 10, 6).shape)
 
-    @xfailIfTorchDynamo
     def test_chunk(self, device):
         # normal case
         D = 30
