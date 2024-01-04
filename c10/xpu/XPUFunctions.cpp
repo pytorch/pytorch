@@ -182,7 +182,7 @@ int exchange_device(int to_device) {
 }
 
 int maybe_exchange_device(int to_device) {
-  return c10::xpu::exchange_device(to_device);
+  return exchange_device(to_device);
 }
 
 } // namespace c10::xpu
