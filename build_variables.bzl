@@ -465,6 +465,8 @@ lazy_tensor_core_python_sources = [
 
 inductor_core_resources = [
     "torch/csrc/inductor/aoti_runner/model_container_runner.cpp",
+    "torch/csrc/inductor/aoti_runner/model_container_runner_cpu.cpp",
+    "torch/csrc/inductor/aoti_runner/model_container_runner_cuda.cpp",
     "torch/csrc/inductor/aoti_torch/shim_common.cpp",
     "torch/csrc/inductor/aoti_torch/tensor_converter.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
