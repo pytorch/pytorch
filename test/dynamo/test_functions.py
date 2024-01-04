@@ -1386,6 +1386,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             "__call__",
             "__reduce_ex__",
             "__init_subclass__",
+            "args",
+            "keywords",
+            "func",
             # False
             "__code__",
             "__kwdefaults__",
