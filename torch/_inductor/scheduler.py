@@ -3,15 +3,31 @@ import dataclasses
 import functools
 import itertools
 import logging
+import math
 import os
 import pprint
 import textwrap
-from typing import Dict, List, Optional, Set
+from typing import (
+    Any,
+    Counter,
+    DefaultDict,
+    Dict,
+    Generic,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import sympy
 
 import torch
 from torch._dynamo.utils import dynamo_timed
+from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
@@ -27,6 +43,8 @@ from .utils import (
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
+    green_text,
+    red_text,
     sympy_product,
 )
 from .virtualized import V
@@ -34,6 +52,28 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
+
+
+class WhyNoFuse:
+    # TODO when we drop support for Python < 3.10, we can use
+    # @dataclass(slots=True) instead of manually specifying __slots__.
+    __slots__ = ["node1", "node2", "reason", "args"]
+    reason: str
+    args: Tuple[Any, ...]
+
+    def __init__(self, node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
+        self.node1 = node1
+        self.node2 = node2
+
+    def __call__(self, reason, *args):
+        self.reason = reason
+        self.args = args
+        fusion_log.debug(self)
+
+    def __str__(self):
+        return f"cannot fuse {self.node1.get_name()} with {self.node2.get_name()}: " + (
+            self.reason % self.args
+        )
 
 
 def pformat(obj):
@@ -83,14 +123,16 @@ class BaseSchedulerNode:
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
         self.scheduler: Scheduler = scheduler
         self.node: ir.Buffer = node
-        self.users: Optional[List[NodeUser]] = None
+        self.users: List[NodeUser] = []
         self.inverse_users: List[BaseSchedulerNode] = []
         self.node_users: List[BaseSchedulerNode] = []
         self.set_read_writes(node.get_read_writes())
-        self.ancestors: Optional[Set[str]] = None
-        self.min_order: Optional[int] = None
-        self.max_order: Optional[int] = None
-        self.last_usage: Set[str] = None  # buffers that won't be used after this kernel
+        self.ancestors: Set[str] = set()
+        self.min_order: int
+        self.max_order: int
+        self.last_usage: Set[
+            str
+        ] = set()  # buffers that won't be used after this kernel
         self.written = False
 
     def __repr__(self):
@@ -100,7 +142,7 @@ class BaseSchedulerNode:
         """Longer form printout for trace logs"""
         name = self.get_name()
         lines = [
-            f"{name}: {type(self).__name__}({type(self.node).__name__})",
+            f"{name}: {type(self).__name__}({type(getattr(self, 'node', None)).__name__})",
             f"{name}.writes = {pformat(self.read_writes.writes)}",
             f"{name}.unmet_dependencies = {pformat(self.unmet_dependencies)}",
             f"{name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}",
@@ -205,14 +247,14 @@ class BaseSchedulerNode:
 
     def prune_redundant_deps(self, name_to_fused_node):
         """
-        Prunes stardeps intended for mutation ordering
+        Prunes weakdeps intended for mutation ordering
         on an upstream fused node if after fusion there is another dependency
-        on the fused upstream node, making the stardep redundant
+        on the fused upstream node, making the weakdep redundant
 
-        In essence this enforces an ordering on fusions. As fusions occur, prunable stardeps will
+        In essence this enforces an ordering on fusions. As fusions occur, weakdeps will
         be incrementally removed, enabling other fusions, ensuring they are fused in order.
         """
-        name_to_dep_count = collections.Counter()
+        name_to_dep_count: Counter[str] = collections.Counter()
 
         for dep in self.unmet_dependencies:
             if not isinstance(dep, WeakDep):
@@ -232,8 +274,10 @@ class BaseSchedulerNode:
                 return False
 
         deps_to_prune = {dep for dep in self.unmet_dependencies if should_prune(dep)}
-        self.unmet_dependencies = self.unmet_dependencies - deps_to_prune
-        self.set_read_writes(self.read_writes.remove_reads(deps_to_prune))
+
+        if deps_to_prune:
+            self.unmet_dependencies = self.unmet_dependencies - deps_to_prune
+            self.set_read_writes(self.read_writes.remove_reads(deps_to_prune))
 
     def get_name(self) -> str:
         return self.node.get_name()
@@ -244,7 +288,7 @@ class BaseSchedulerNode:
     def get_names(self) -> Set[str]:
         return {self.get_name()}
 
-    def get_nodes(self) -> List["BaseSchedulerNode"]:
+    def get_nodes(self) -> Sequence["BaseSchedulerNode"]:
         return [self]
 
     def get_device(self):
@@ -301,10 +345,11 @@ class BaseSchedulerNode:
             ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
 
             for read in ordered_reads:
-                input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
-                    read.name
-                )
+                input_node: Optional[
+                    BaseSchedulerNode
+                ] = self.scheduler.name_to_node.get(read.name)
                 if input_node and V.graph.wrapper_code.can_reuse(input_node, self):
+                    assert input_node.users is not None
                     remaining_uses = [
                         x
                         for x in input_node.users
@@ -327,7 +372,7 @@ class BaseSchedulerNode:
                             isinstance(
                                 input_node.node, (ir.FallbackKernel, ir.MultiOutput)
                             )
-                            and input_node.node.has_aliasing()
+                            and len(input_node.node.get_alias_names()) > 0
                         )
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
@@ -380,6 +425,9 @@ class BaseSchedulerNode:
             V.graph.wrapper_code.codegen_allocation(self.node)
 
     def can_free(self):
+        # There's no real allocated buffer, no need to free it
+        if isinstance(self.node.layout, ir.NoneLayout):
+            return False
         for use in self.users:
             if isinstance(use.node, OutputNode):
                 return False
@@ -470,22 +518,26 @@ class BaseSchedulerNode:
         reads = {dep.name for dep in self.read_writes.reads}
         writes = {dep.name for dep in self.read_writes.writes}
 
-        def is_materialized(buf):
-            buf_uses = {user.node for user in self.scheduler.name_to_node[buf].users}
-            return len(buf_uses - set(self.snodes)) > 0
+        def is_materialized(buf, snodes):
+            users = self.scheduler.name_to_node[buf].users
+            buf_uses = {user.node for user in users}
+            return len(buf_uses - set(snodes)) > 0
 
         if isinstance(self, FusedSchedulerNode):
-            removed_buffers = {dep for dep in writes if not is_materialized(dep)}
+            removed_buffers = {
+                dep for dep in writes if not is_materialized(dep, self.snodes)
+            }
             writes = writes - removed_buffers
             reads = reads - removed_buffers
         node_bytes = 0
 
-        for buf in reads | writes:
-            buf_accessed_elems = sum([node_numel for dep in buf_accesses[buf]])
-            if buf in V.graph.name_to_buffer:
-                buf = V.graph.name_to_buffer[buf]
-            elif buf in V.graph.graph_inputs:
-                buf = V.graph.graph_inputs[buf]
+        for buf_name in reads | writes:
+            buf_accessed_elems = sum([node_numel for dep in buf_accesses[buf_name]])
+            buf: Union[ir.Buffer, ir.TensorBox]
+            if buf_name in V.graph.name_to_buffer:
+                buf = V.graph.name_to_buffer[buf_name]
+            elif buf_name in V.graph.graph_inputs:
+                buf = V.graph.graph_inputs[buf_name]
             else:
                 continue
 
@@ -495,10 +547,8 @@ class BaseSchedulerNode:
             # Kind of a lazy way to get the MultiOutput nodes corresponding to
             # a MultiOutputLayout
             if isinstance(buf.layout, MultiOutputLayout):
-                buf_elems = sum(
-                    get_buf_elems(user.node.node)
-                    for user in self.scheduler.name_to_node[buf.name].users
-                )
+                users = self.scheduler.name_to_node[buf.get_name()].users
+                buf_elems = sum(get_buf_elems(user.node.node) for user in users)
             else:
                 buf_elems = get_buf_elems(buf)
 
@@ -514,7 +564,10 @@ class BaseSchedulerNode:
         """
         layout = None
         dtype = None
-        if not self.node:
+        if not hasattr(self, "node") or not self.node:
+            assert isinstance(
+                self, (FusedSchedulerNode, ForeachKernelSchedulerNode)
+            ), f"{type(self)=}"
             assert self.snodes
             if not self.snodes[0].node:
                 return 0
@@ -535,7 +588,10 @@ class BaseSchedulerNode:
             return 0
 
         if isinstance(self, ExternKernelSchedulerNode):
-            op = kernel_name_to_op.get(getattr(self.node, "kernel", ""), None)
+            assert isinstance(self.node, ir.ExternKernel), f"{type(self.node)=}"
+            op = kernel_name_to_op.get(
+                getattr(self.node, "python_kernel_name", ""), None
+            )
 
             # if there is a resolved op, dry-run using fake mode and record flop count
             if op is not None:
@@ -557,9 +613,12 @@ class BaseSchedulerNode:
                     # TODO(xmfan): find a better heuristic to model FLOPS/latency relationship
                     factor = 1.0
                     counted_flops = flop_counter_mode.get_total_flops()
+                    counted_bytes = self.get_read_write_buffers_sizes()
+                    compute_time = (factor * counted_flops / gpu_flops) * 1e9
+                    transfer_time = counted_bytes / gpu_memory_bandwidth
 
                     # Return estimated runtime in nanoseconds
-                    return (factor * counted_flops / gpu_flops) * 1e9
+                    return max(compute_time, transfer_time)
 
         elif isinstance(self, FusedSchedulerNode) or isinstance(
             self.node, ComputedBuffer
@@ -582,7 +641,7 @@ class BaseSchedulerNode:
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
     def debug_str_extra(self) -> str:
-        return f"{self.get_name()}.node.kernel = {getattr(self.node, 'kernel', None)}"
+        return f"{self.get_name()}.node.kernel = {getattr(self.node, 'python_kernel_name', None)}"
 
     def is_extern(self):
         return True
@@ -617,7 +676,12 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
 
 
 class SchedulerNode(BaseSchedulerNode):
-    def __init__(self, scheduler: "Scheduler", node: ir.ComputedBuffer, group_fn):
+    def __init__(
+        self,
+        scheduler: "Scheduler",
+        node: Union[ir.ComputedBuffer, ir.TemplateBuffer],
+        group_fn,
+    ):
         super().__init__(scheduler, node)
         (
             self._sizes,
@@ -626,7 +690,7 @@ class SchedulerNode(BaseSchedulerNode):
 
         self.group = (node.get_device(), group_fn(self._sizes))
 
-        if self.is_template():
+        if isinstance(node, ir.TemplateBuffer):
             self.set_read_writes(node.normalized_read_writes())
         else:
             self.set_read_writes(
@@ -655,6 +719,9 @@ class SchedulerNode(BaseSchedulerNode):
         return self._sizes
 
     def is_reduction(self):
+        assert isinstance(
+            self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
+        ), f"{type(self.node)=}"
         return bool(self.node.get_reduction_type())
 
     def is_template(self):
@@ -708,6 +775,7 @@ class SchedulerNode(BaseSchedulerNode):
             read_dep, dependencies.MemoryDep
         ):
             write_dep = next(iter(self.read_writes.writes))
+            assert isinstance(write_dep, dependencies.MemoryDep), f"{type(write_dep)=}"
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
 
@@ -745,18 +813,23 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @classmethod
     def fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         assert node1.scheduler is node2.scheduler
-        return cls(node1.scheduler, node1.get_nodes() + node2.get_nodes())
+        assert isinstance(node1, (SchedulerNode, FusedSchedulerNode)) and isinstance(
+            node2, (SchedulerNode, FusedSchedulerNode)
+        )
+        return cls(node1.scheduler, list(node1.get_nodes()) + list(node2.get_nodes()))  # type: ignore[arg-type]
 
     def __init__(self, scheduler: "Scheduler", snodes: List[SchedulerNode]):
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
         self.snodes = snodes
         self.scheduler = scheduler
-        self.node = None  # type: ignore[assignment]
-        self.users = None
+        self.node: ir.Buffer = None  # type: ignore[assignment]
+        self.users: List[NodeUser] = []
         self.inverse_users = []
         self.node_users = []
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
-        self.ancestors = set.union(*[x.ancestors for x in snodes])
+        self.ancestors = set.union(
+            *[x.ancestors for x in snodes if x.ancestors is not None]
+        )
 
         self.set_read_writes(
             dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
@@ -796,10 +869,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
         super().set_last_usage(future_used_buffers, mutation_real_name)
         # Set self.last_usage on the snodes
         # This will be used for optimisations within the kernel
-        future_used_buffers = set()
+        future_used_buffers: Set[str] = set()
         for node in reversed(self.snodes):
             node.set_last_usage(future_used_buffers, mutation_real_name)
-            future_used_buffers.update(node.last_usage)
+            future_used_buffers.update(node.last_usage)  # type: ignore[arg-type]
 
     @cache_on_self
     def used_buffer_names(self) -> Set[str]:
@@ -809,7 +882,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def used_or_aliased_buffer_names(self) -> Set[str]:
         return set.union(*[x.used_or_aliased_buffer_names() for x in self.snodes])
 
-    def get_nodes(self) -> List[BaseSchedulerNode]:
+    def get_nodes(self) -> List[SchedulerNode]:
         return self.snodes
 
     def __repr__(self):
@@ -823,6 +896,13 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def is_template(self):
         return any(x.is_template() for x in self.snodes)
 
+    @cache_on_self
+    def get_template_node(self):
+        for node in self.snodes:
+            if node.is_template():
+                return node
+        return None
+
     def get_device(self):
         return self.group[0]
 
@@ -832,7 +912,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     @cache_on_self
     def op_counts(self):
-        op_counts = collections.Counter()
+        op_counts: Counter[str] = collections.Counter()
         for node in self.snodes:
             op_counts.update(node.op_counts())
         return op_counts
@@ -892,12 +972,11 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     @classmethod
     def can_fuse(cls, producer, consumer):
+        why = WhyNoFuse(producer, consumer)
         if producer.is_foreach() and consumer.is_foreach():
             foreach_match = len(producer.snodes) == len(consumer.snodes)
             if not foreach_match:
-                fusion_log.debug(
-                    "cannot fuse (foreach:1): foreach do not have same length"
-                )
+                why("foreach do not have same length")
             return foreach_match and all(
                 producer.scheduler.can_fuse(l, r)
                 for l, r in zip(producer.snodes, consumer.snodes)
@@ -907,9 +986,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             if consumer_subnode is not None:
                 return consumer.scheduler.can_fuse(producer, consumer_subnode)
 
-            fusion_log.debug(
-                "cannot fuse (foreach:2): candidate producer is not dep of any foreach consumer"
-            )
+            why("candidate producer is not dep of any foreach consumer")
             return False
 
         elif producer.is_foreach():
@@ -917,9 +994,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             if producer_subnode is not None:
                 return producer.scheduler.can_fuse(producer_subnode, consumer)
 
-            fusion_log.debug(
-                "cannot fuse (foreach:3): candidate consumer has no dep in any foreach producer"
-            )
+            why("candidate consumer has no dep in any foreach producer")
             return False
 
         raise AssertionError(
@@ -987,10 +1062,8 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         else:
             self.scheduler = scheduler
             self.snodes = nodes
-            self.node = None
-
-            self.node = None
-            self.users = None
+            self.node: ir.Buffer = None  # type: ignore[assignment]
+            self.users: List[NodeUser] = []
 
             self.set_read_writes(
                 dependencies.ReadWrites.merge_list(
@@ -1019,14 +1092,15 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             for name in other_node.get_names():
                 self.name_to_node[name] = other_node
 
-        self.group = (nodes[0].get_device(), 0)
+        self.group = (nodes[0].get_device(), "foreach")
 
-        self.origins = set()
+        self.origins: Set[torch.fx.Node] = set()
 
     def mark_run(self):
         raise NotImplementedError
 
     def codegen(self):
+        assert isinstance(self.node, ir.ComputedBuffer), f"{type(self.node)=}"
         self.node.get_store_function()(self.node.make_loader()())
 
     def can_free(self):
@@ -1042,10 +1116,14 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     def get_nodes(self):
         """Returns all nodes contained in this kernel, unpacking fused nodes into their constituent scheduler nodes."""
-        return list(itertools.chain(*[x.get_nodes() for x in self.snodes]))
+        return list(itertools.chain.from_iterable(x.get_nodes() for x in self.snodes))
 
     def get_first_name(self):
         return self.snodes[0].get_first_name()
+
+    def prune_redundant_deps(self, name_to_fused_node):
+        for node in self.snodes:
+            node.prune_redundant_deps(name_to_fused_node)
 
 
 def pick_loop_order(stride_lengths, sizes, priority_idx=()):
@@ -1097,6 +1175,16 @@ class NodeUser:
     # use the result
     is_weak: bool = False
 
+    def __hash__(self):
+        return hash((self.node.get_name(), self.can_inplace, self.is_weak))
+
+    def __eq__(self, other):
+        return (
+            self.get_name() == other.get_name()
+            and self.can_inplace == other.can_inplace
+            and self.is_weak == other.is_weak
+        )
+
     def get_name(self):
         return self.node.get_name()
 
@@ -1109,12 +1197,16 @@ class NodeUser:
         )
 
 
+_post_grad_graph_counter = itertools.count()
+
+
 class Scheduler:
     @dynamo_timed
     def __init__(self, nodes):
         super().__init__()
         self.backends = {}
         self.fuse_cache = {}
+        self.post_grad_graph_id = next(_post_grad_graph_counter)
 
         self.nodes = []
         self.available_buffer_names = {
@@ -1129,15 +1221,28 @@ class Scheduler:
         for node in self.nodes:
             node.prune_deps()
 
-        self.name_to_node = {n.get_name(): n for n in self.nodes}
-        self.name_to_fused_node = None  # set in fuse_nods()
+        self.name_to_node: Dict[str, BaseSchedulerNode] = {
+            n.get_name(): n for n in self.nodes
+        }
+        self.name_to_fused_node: Dict[
+            str, BaseSchedulerNode
+        ] = dict()  # set in fuse_nods()
 
-        # we handle mutation by renaming modified versions of the same
+        # mutation_real_name: Maps back to the original name for codegen
+        # Example:
+        # If you mutate buf0 inside of buf1's kernel, then:
+        # mutation_real_name = {"buf0" : "buf1"}
+        # all subsequent uses of buf0 become buf1's usage in dependency graph
+        self.mutation_real_name = {}
+
+        # We handle mutation by renaming modified versions of the same
         # buffer in the dependency graph to prevent cycles.
         # mutation_renames: tracks the current name for a given buffer
         #                   (changed once per mutation)
-        self.mutation_real_name = {}
-        # mutation_real_name: maps back to the original name for codegen
+        # Example:
+        # If you mutate buf0 inside of buf1's kernel, then:
+        # mutation_renames = {"buf1" : "buf0"}
+        # in codegen we only use buf0, never buf1
         self.mutation_renames = {}
 
         self.compute_dependencies()
@@ -1153,6 +1258,7 @@ class Scheduler:
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
         self.topological_sort_schedule()
+        self.logged_slow_fusion = set()
         self.fuse_nodes()
         if config.reorder_for_compute_comm_overlap:
             # Refresh node_users and inverse_users to reflect fused nodes
@@ -1164,14 +1270,20 @@ class Scheduler:
         self.debug_draw_graph()
 
         # used during codegen:
-        self.current_device = None
+        self.current_device: torch.device = None  # type: ignore[assignment]
         self.buffer_names_to_free = set()
 
         # fx graph node to the position it appears in the graph
         # for debug attribution
         self.origin_to_index = {}
 
-        log.info("Number of scheduler nodes after fusion %d", len(self.nodes))
+        get_metric_table("graph_stats").add_row(
+            lambda: {
+                "graph_id": self.post_grad_graph_id,
+                "num_nodes_before_fusion": self.num_orig_nodes,
+                "num_nodes_after_fusion": len(self.nodes),
+            }
+        )
 
     def debug_draw_graph(self):
         """Generate an image of the graph for debugging"""
@@ -1219,7 +1331,7 @@ class Scheduler:
             removed_node_names.update(names)
             snodes = [self.name_to_node[name] for name in names]
 
-            fe_node = ForeachKernelSchedulerNode(self, snodes)
+            fe_node = ForeachKernelSchedulerNode(self, snodes)  # type: ignore[arg-type]
 
             fe_nodes.append(fe_node)
 
@@ -1235,7 +1347,39 @@ class Scheduler:
         Create dependency edges between nodes, handling aliasing and
         mutation properly.
         """
-        name_to_users = collections.defaultdict(list)
+
+        T = TypeVar("T")
+
+        class DedupList(Generic[T]):
+            """
+            This data structure behaves like a list except it makes sure the
+            elements remain unique.
+            Normally one could use a set/dict for this purpose however
+            the list in question gets elements appended as it is being
+            iterated over which means that we need to keep the list
+            semantics.
+            """
+
+            def __init__(self, items=None, membership=None):
+                self.items = items or list()
+                self.membership = membership or set()
+
+            def append(self, node_user: T) -> None:
+                if node_user in self.membership:
+                    return
+                self.items.append(node_user)
+                self.membership.add(node_user)
+
+            def __add__(self, other: "DedupList[T]") -> "DedupList[T]":
+                new_membership = set.union(self.membership, other.membership)
+                new_items = self.items + [
+                    x for x in other.items if x not in self.membership
+                ]
+                return DedupList(new_items, new_membership)
+
+        name_to_users: DefaultDict[str, DedupList[NodeUser]] = collections.defaultdict(
+            DedupList
+        )
 
         # handle aliasing by using python aliasing in name_to_users
         # if foo aliases bar then we will make name_to_users["foo"] point
@@ -1264,7 +1408,7 @@ class Scheduler:
         def dep_closure(node_name):
             reachable_names = {node_name}
             node = self.name_to_node[node_name]
-            write_dep = list(node.read_writes.writes)[0]
+            write_dep = next(iter(node.read_writes.writes))
             for read_dep in node.read_writes.reads:
                 if (
                     read_dep.name in self.name_to_node
@@ -1284,29 +1428,39 @@ class Scheduler:
         unbacked_symbol_to_origin_node = {}
 
         for node in self.nodes:
+            log.debug("scheduling %s", node.node)
+
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
-            for s in node.node.get_unbacked_symbol_defs():
+            unbacked_symbol_defs = sorted(
+                node.node.get_unbacked_symbol_defs(), key=lambda x: x.name
+            )
+            for s in unbacked_symbol_defs:
+                assert isinstance(s, sympy.Symbol)
                 # Pick the first definer as canonical.  There may be multiple
                 # because if a MultiOutputLayout buffer propagates an unbacked
                 # symint to multiple outputs, they will all claim to def it.
                 if s not in unbacked_symbol_to_origin_node:
                     unbacked_symbol_to_origin_node[s] = node
 
+            unbacked_symbol_uses = sorted(
+                node.node.get_unbacked_symbol_uses(), key=lambda x: x.name
+            )
             # if a kernel takes unbacked symints, register dependencies
-            for s in node.node.get_unbacked_symbol_uses():
+            for s in unbacked_symbol_uses:
                 assert (
                     s in unbacked_symbol_to_origin_node
                 ), f"{s} not in {unbacked_symbol_to_origin_node}"
                 node.add_fake_dep(StarDep(unbacked_symbol_to_origin_node[s].get_name()))
 
             # a node will mutate either 0 or 1 buffers
+            assert len(node.get_mutations()) <= 1
             for alt_name in node.get_mutations():
                 alt_name = rename(alt_name)
                 # this node must run after the prior writer
                 add_user(alt_name, node)
                 node.add_mutation_dep(StarDep(alt_name))
-                for other_node in name_to_users[alt_name]:
+                for other_node in name_to_users[alt_name].items:
                     # this node must run after all prior readers
                     other_name = rename(other_node.get_name())
                     known_dep_node_names = dep_closure(node.get_name())
@@ -1333,7 +1487,21 @@ class Scheduler:
 
         # make sure outputs aren't dead-code-eliminated
         for node_name in V.graph.get_output_names():
+            log.debug("scheduling output %s", node_name)
             add_user(node_name, OutputNode(StarDep(node_name)))
+
+        # make sure unbacked symints aren't dead-code-eliminated
+        for node in V.graph.graph_outputs:
+            if isinstance(node, ir.ShapeAsConstantBuffer):
+                for s in free_unbacked_symbols(node.shape):
+                    assert (
+                        s in unbacked_symbol_to_origin_node
+                    ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
+                    node_name = unbacked_symbol_to_origin_node[s].node.name
+                    log.debug(
+                        "scheduling output %s for unbacked symint %s", node_name, s
+                    )
+                    add_user(node_name, OutputNode(StarDep(node_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
@@ -1350,7 +1518,7 @@ class Scheduler:
 
         # copy users information onto the nodes
         for node in self.nodes:
-            node.set_users(name_to_users[node.get_name()])
+            node.set_users(name_to_users[node.get_name()].items)
 
         # populate inverse_users
         for node in self.nodes:
@@ -1383,7 +1551,7 @@ class Scheduler:
         # TODO: ideally, we should deduplicate .users and .node_users,
         # but currently .users contains extra information that's difficult to
         # extract into a standalone container.
-        node_to_users = {}
+        node_to_users: Dict[BaseSchedulerNode, List[BaseSchedulerNode]] = {}
         for node in self.nodes:
             for inverse_user in node.inverse_users:
                 node_to_users.setdefault(inverse_user, []).append(node)
@@ -1424,9 +1592,9 @@ class Scheduler:
         """
         Ensure self.nodes is in topologically sorted order
         """
-        seen = set()
-        name_to_node = dict()
-        result = []
+        seen: Set[ir.Buffer] = set()
+        name_to_node: Dict[str, ir.Buffer] = dict()
+        result: List[ir.Buffer] = []
 
         def visit(n):
             if n not in seen:
@@ -1447,7 +1615,7 @@ class Scheduler:
         Populate each node.ancestors
         """
         # note self.nodes is topologically sorted
-        name_to_ancestors = {}
+        name_to_ancestors: Dict[str, Set[str]] = {}
         for node in self.nodes:
             ancestors = set()
             for dep in node.unmet_dependencies:
@@ -1481,12 +1649,116 @@ class Scheduler:
                 fusion_log.debug("===== fusion complete (%d iterations) =====", i + 1)
                 break
 
+    def benchmark_fused_nodes(self, nodes):
+        """
+        Benchmark fused list of nodes and return the execution time
+        in milliseconds on randomly generated inputs.
+        """
+        assert len(nodes) > 0
+        device = nodes[0].get_device()
+        V.graph.scheduler = self
+        self.current_device = device
+        backend = self.get_backend(device)
+        return backend.benchmark_fused_nodes(nodes)
+
+    def speedup_by_fusion(self, node1, node2):
+        """
+        If config.benchmark_fusion is False, always return True.
+        Otherwise, return True if fusion can brings speedup.
+        """
+        if not config.benchmark_fusion:
+            return True
+
+        if node1.is_template():
+            # TODO support benchmarking epilogue fusion
+            return True
+
+        node_list_1 = node1.get_nodes()
+        device = node_list_1[0].get_device()
+
+        # don't support benchmark fusion for CPU right now.
+        if device.type == "cpu":
+            return True
+
+        node_list_2 = node2.get_nodes()
+        node_list_fused = node_list_1 + node_list_2
+
+        # We can not accurately benchmark kernel using atomic_add
+        # due to how we generate random integer inputs.
+        # Skip benchmarking them by allowing fusion.
+        if any(
+            hasattr(n.node, "data")
+            and hasattr(n.node.data, "scatter_mode")
+            and n.node.data.scatter_mode == "atomic_add"
+            for n in node_list_fused
+        ):
+            return True
+
+        from triton.compiler.errors import CompilationError
+
+        why = WhyNoFuse(node1, node2)
+
+        try:
+            ms1, path1 = self.benchmark_fused_nodes(node_list_1)
+            if math.isinf(ms1):
+                why("register spilling of the first kernel")
+                return False
+            ms2, path2 = self.benchmark_fused_nodes(node_list_2)
+            if math.isinf(ms2):
+                why("register spilling of the second kernel")
+                return False
+            ms_fused, path_fused = self.benchmark_fused_nodes(node_list_fused)
+            if math.isinf(ms_fused):
+                why("register spilling of the fused kernel")
+                return False
+        except CompilationError as e:
+            # workaround triton issue: https://github.com/openai/triton/issues/2151
+            if "Loop-carried variable" in str(e):
+                return True  # allow fusion
+            else:
+                raise
+
+        if fusion_log.isEnabledFor(logging.DEBUG):
+            if ms_fused < ms1 + ms2:
+                fusion_log.debug(
+                    "can fuse (benchmark): fusing %s with %s cause %sx speedup",
+                    node1.get_names(),
+                    node2.get_names(),
+                    green_text(f"{(ms1 + ms2) / ms_fused:.3f}"),
+                )
+            else:
+                fusion_log.debug(
+                    "cannot fuse (benchmark): fusing %s with %s cause %sx slowdown",
+                    node1.get_names(),
+                    node2.get_names(),
+                    red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
+                )
+
+        if (
+            is_metric_table_enabled("slow_fusion")
+            and ms_fused >= ms1 + ms2
+            and (path1, path2) not in self.logged_slow_fusion
+        ):
+            self.logged_slow_fusion.add((path1, path2))
+            get_metric_table("slow_fusion").add_row(
+                lambda: {
+                    "kernel1_path": path1,
+                    "kernel1_latency": ms1,
+                    "kernel2_path": path2,
+                    "kernel2_latency": ms2,
+                    "fused_kernel_path": path_fused,
+                    "fused_kernel_latency": ms_fused,
+                    "slow_down_ratio": ms_fused / (ms1 + ms2),
+                }
+            )
+        return ms_fused < ms1 + ms2
+
     def fuse_nodes_once(self):
         """
         Mutates self.nodes to combine nodes into FusedSchedulerNodes.
 
         This relies on two key functions to control the logic:
-            - self.can_fuses(): checks if a fusion is legal
+            - self.can_fuse(): checks if a fusion is legal
             - self.score_fusion(): assigns priority to a given fusion
         """
         fused_nodes = set(self.nodes)
@@ -1496,6 +1768,11 @@ class Scheduler:
             if self.can_fuse(node1, node2) and not self.will_fusion_create_cycle(
                 node1, node2
             ):
+                if not self.speedup_by_fusion(node1, node2):
+                    continue
+                fusion_log.debug(
+                    "fusing %s with %s", node1.get_name(), node2.get_name()
+                )
                 node3 = fuse(node1, node2)
                 fused_nodes.remove(node1)
                 fused_nodes.remove(node2)
@@ -1551,11 +1828,7 @@ class Scheduler:
                 check_all_pairs(node_grouping)
 
         possible_fusions.sort(key=self.score_fusion_key, reverse=True)
-        if fusion_log.isEnabledFor(logging.DEBUG):
-            fusion_log.debug("\nfound %d possible fusions:", len(possible_fusions))
-            for fusion in possible_fusions:
-                fusion_log.debug("%s", fusion)
-            fusion_log.debug("")
+        fusion_log.debug("found %d possible fusions", len(possible_fusions))
         return possible_fusions
 
     def will_fusion_create_cycle(self, node1, node2):
@@ -1592,9 +1865,7 @@ class Scheduler:
         combined_ancestors = (node1.ancestors | node2.ancestors) - combined_names
         cycle = any(found_path(self.name_to_fused_node[n]) for n in combined_ancestors)
         if cycle:
-            fusion_log.debug(
-                "cannot fuse (cycle): will create cycle - %s %s", node1, node2
-            )
+            WhyNoFuse(node1, node2)("will create cycle")
         return cycle
 
     def can_fusion_increase_peak_memory(
@@ -1632,24 +1903,27 @@ class Scheduler:
 
         if node1 is node2:
             return False
+
+        why = WhyNoFuse(node1, node2)
+
         if (
             isinstance(node1, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
             and not node1.is_template()
         ):
-            fusion_log.debug("cannot fuse (1): node1 %s is extern or nop", node1)
+            why("node1 is extern or nop")
             return False
         if (
             isinstance(node2, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
             and not node2.is_template()
         ):
-            fusion_log.debug("cannot fuse (2): node2 %s is extern or nop", node2)
+            why("node2 is extern or nop")
             return False
 
         if node1.is_foreach() or node2.is_foreach():
             return ForeachKernelSchedulerNode.can_fuse(node1, node2)
 
         if node2.get_names() & node1.ancestors:
-            fusion_log.debug("cannot fuse (3): node1 must go before node2")
+            why("node1 must go before node2")
             return False
 
         if (
@@ -1672,24 +1946,20 @@ class Scheduler:
                 return False
 
         if node2.is_template():
-            fusion_log.debug("cannot fuse (4): templates can only fuse epilogues")
+            why("templates can only fuse epilogues")
             return False
         if node1.is_template() and (
             node2.has_aliasing_or_mutation()
             or node2.is_reduction()
             or not config.epilogue_fusion
         ):
-            fusion_log.debug("cannot fuse (5): template epilogue not satisfied")
+            why("template epilogue not satisfied")
             return False
 
         device = node1.get_device()
         device2 = node2.get_device()
         if device != device2:
-            fusion_log.debug(
-                "cannot fuse (6): device mismatch (node1: %s, node2: %s)",
-                device,
-                device2,
-            )
+            why("device mismatch (%s vs %s)", device, device2)
             return False
         del device2
 
@@ -1697,7 +1967,7 @@ class Scheduler:
         if no_shared_data and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
-            fusion_log.debug("cannot fuse (7): no shared data")
+            why("no shared data")
             return False  # heuristic not needed for correctness
 
         if (
@@ -1705,7 +1975,7 @@ class Scheduler:
             and not node2.is_foreach()
             and len(node1.get_nodes()) + len(node2.get_nodes()) > config.max_fusion_size
         ):
-            fusion_log.debug("cannot fuse (8): exceeds max fusion")
+            why("exceeds max fusion")
             return False  # heuristic not needed for correctness
 
         if node1.get_names() & node2.ancestors:
@@ -1715,7 +1985,7 @@ class Scheduler:
             return self.get_backend(device).can_fuse_vertical(node1, node2)
         else:  # nodes don't depend on each other, but may have common reads
             if self.can_fusion_increase_peak_memory(node1, node2):
-                fusion_log.debug("cannot fuse (9): will increase peak memory")
+                why("will increase peak memory")
                 return False
             return self.get_backend(device).can_fuse_horizontal(node1, node2)
 
@@ -1729,6 +1999,7 @@ class Scheduler:
         """
         node1_names = node1.get_names()
         computed_deps = set()
+        why = WhyNoFuse(node1, node2)
 
         for rd in node2.unmet_dependencies:
             for cd in node1.read_writes.writes:
@@ -1753,13 +2024,11 @@ class Scheduler:
             # Examples here include:
             #   - MemoryDep("foo", x) != MemoryDep("foo", x + 1)
             #   - MemoryDep("foo", x) != StarDep("foo")
-            fusion_log.debug("cannot fuse (vert:1): memory deps did not match")
+            why("memory deps did not match")
             return False
         for name in remaining_deps:
             if node1_names & self.name_to_fused_node[name].ancestors:
-                log.debug(
-                    "cannot fuse (vert:2): intermediate nodes between node1 & node2"
-                )
+                why("intermediate nodes between node1 & node2")
                 return False
         return True
 
@@ -1830,7 +2099,7 @@ class Scheduler:
                     V.graph.wrapper_code.codegen_free(node.node)
             elif name in V.graph.graph_inputs:
                 storage = V.graph.graph_inputs[name].data
-                assert storage.is_input_buffer()
+                assert isinstance(storage, ir.StorageBox) and storage.is_input_buffer()
                 V.graph.wrapper_code.codegen_free(storage.data)
 
         self.buffer_names_to_free.clear()
@@ -1846,11 +2115,9 @@ class Scheduler:
         fused_node_names = V.kernel.store_buffer_names
         names_to_remove = []
         for out_buf in V.kernel.store_buffer_names:
-            users = {
-                user.get_name()
-                for user in self.name_to_node[out_buf].users
-                if not user.is_weak
-            }
+            users = self.name_to_node[out_buf].users
+            assert users is not None
+            users = {user.get_name() for user in users if not user.is_weak}
             if users.issubset(fused_node_names):
                 names_to_remove.append(out_buf)
 
@@ -1872,7 +2139,7 @@ class Scheduler:
                 remove = all(n in names_to_remove for n in buf.other_names)
                 if remove:
                     self.remove_inplace_buffer(name)
-                V.graph.inplaced_to_remove.add(name)
+                V.kernel.inplaced_to_remove.add(name)
             else:
                 self.remove_buffer(name)
 
@@ -1907,6 +2174,7 @@ class Scheduler:
             scheduler_node.decide_inplace_update()
             scheduler_node.allocate()
         node = scheduler_node.node
+        assert isinstance(node, ir.ExternKernel), f"{type(node)=}"
         node.codegen(V.graph.wrapper_code)
         self.free_buffers()
 
@@ -1914,8 +2182,7 @@ class Scheduler:
         assert (
             device.type != "cuda" or device.index is not None
         ), f"{device} should have been normalized in lowering"
-        V.graph.device_types.add(device.type)
-        V.graph.add_device_idx(device.index)
+        V.graph.add_device_info(device)
 
         device_scheduling = get_scheduling_for_device(device.type)
         if device_scheduling is None:
@@ -1989,12 +2256,7 @@ class Scheduler:
 
             if node.is_template():
                 node, *epilogue = node.get_nodes()
-                if isinstance(node.node, ir.CUDATemplateBuffer):
-                    from .codegen.cuda.cuda_scheduling import CUDAScheduling
-
-                    CUDAScheduling(self).codegen_template(node, epilogue)
-                else:
-                    self.get_backend(device).codegen_template(node, epilogue)
+                self.get_backend(device).codegen_template(node, epilogue)
             elif node.is_extern():
                 self.codegen_extern_call(node)
             elif node.is_foreach():
@@ -2012,6 +2274,11 @@ class Scheduler:
                 self.get_backend(device).codegen_sync()
 
             self.available_buffer_names.update(node.get_names())
+
+            if not isinstance(node, NopKernelSchedulerNode):
+                device = node.get_device()
+                if self.get_backend(device).ready_to_flush():
+                    self.flush()
 
         self.flush()
 
@@ -2047,7 +2314,7 @@ class BaseScheduling:
         raise NotImplementedError()
 
     def codegen_template(
-        self, template_node: BaseSchedulerNode, epilogue_nodes: List[BaseSchedulerNode]
+        self, template_node: SchedulerNode, epilogue_nodes: List[SchedulerNode]
     ):
         """
         Given a template node, generate a kernel.
@@ -2069,8 +2336,22 @@ class BaseScheduling:
         """
         raise NotImplementedError()
 
+    def ready_to_flush(self) -> bool:
+        """
+        Check whether the backend is requesting the scheduler to flush the generated kernel.
+        If not supported, please return False.
+        """
+        return False
+
     def flush(self):
         """
         Flush the generated kernel and python wrapper code to the source code file.
+        """
+        raise NotImplementedError()
+
+    def benchmark_fused_nodes(self, nodes):
+        """
+        Benchmark fused list of nodes and return the execution time
+        in milliseconds on randomly generated inputs.
         """
         raise NotImplementedError()

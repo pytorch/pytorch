@@ -9,7 +9,7 @@ import warnings
 from collections.abc import Iterable
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
-from typing import Callable, List, Optional, overload, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, overload, Sequence, Tuple, Union
 
 import torch
 
@@ -236,6 +236,7 @@ __all__ = [
     "atleast_3d",
     "as_strided",
     "as_strided_scatter",
+    "block_diag",
     "broadcast_shapes",
     "broadcast_tensors",
     "broadcast_to",
@@ -343,6 +344,9 @@ __all__ = [
 Tensor = torch.Tensor
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 aten = torch._ops.ops.aten
+
+# Note that the docstrings for the public methods from this file are in
+# torch/_torch_docs.py
 
 
 def is_noncontiguous_supported(device):
@@ -1071,12 +1075,15 @@ def add(
         ):
             msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
-        b = prims.mul(b, alpha)
+        if isinstance(b, TensorLike):
+            b = prims.mul(b, alpha)
+        else:
+            b = b * alpha
 
-    return prims.add(a, b)
+    output = prims.add(a, b)
+    return handle_noncontiguous_outputs([a, b], output)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
@@ -1086,7 +1093,6 @@ def atan2(a, b):
     return prims.atan2(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1094,7 +1100,6 @@ def bitwise_and(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.bitwise_and(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1102,7 +1107,6 @@ def bitwise_left_shift(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.shift_left(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1110,7 +1114,6 @@ def bitwise_or(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.bitwise_or(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1118,7 +1121,6 @@ def bitwise_right_shift(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.shift_right_arithmetic(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1126,7 +1128,6 @@ def bitwise_xor(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.bitwise_xor(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
@@ -1144,7 +1145,6 @@ def copysign(
     return where(signbit(b), neg(abs(a)), abs(a))
 
 
-# TODO: add docstring
 # complex =  _make_elementwise_binary_reference(prims.complex, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 
 
@@ -1170,7 +1170,6 @@ def div(
         raise ValueError(msg)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
@@ -1179,7 +1178,6 @@ def eq(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.eq(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
 )
@@ -1207,7 +1205,6 @@ def pow(
     return prims.pow(a, b)
 
 
-# TODO: add docstring
 # Float power has its own implementation because it has unique type promotion.
 # CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
@@ -1265,7 +1262,6 @@ def float_power(
 # https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_two_python_scalars=True,
@@ -1337,7 +1333,6 @@ def _floor_divide_float(a: Tensor, b: Tensor) -> Tensor:
     return where(ne(b, 0), floor_div, basic_div)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
@@ -1347,7 +1342,6 @@ def fmax(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.fmax(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
@@ -1357,7 +1351,6 @@ def fmin(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.fmin(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
@@ -1367,7 +1360,6 @@ def fmod(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.fmod(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
@@ -1377,7 +1369,6 @@ def gcd(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.gcd(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
@@ -1386,7 +1377,6 @@ def ge(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.ge(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
@@ -1500,7 +1490,6 @@ def isclose(
     return result
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
@@ -1522,7 +1511,6 @@ def lcm(a: TensorLikeType, b: TensorLikeType):
     return res if not promote_to_int else prims.convert_element_type(res, dtype)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
@@ -1580,7 +1568,6 @@ def logaddexp2(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return torch.where(inf_mask, a, result)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
@@ -1592,7 +1579,6 @@ def logical_and(a: TensorLikeType, b: TensorLikeType):
     return a & b
 
 
-# TODO: add docstring
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
 def logical_not(a: TensorLikeType):
     if not utils.is_boolean_dtype(a.dtype):
@@ -1600,7 +1586,6 @@ def logical_not(a: TensorLikeType):
     return ~a
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
@@ -1612,7 +1597,6 @@ def logical_or(a: TensorLikeType, b: TensorLikeType):
     return bitwise_or(a, b)
 
 
-# TODO: add docstring
 # TODO: skip unnecessary conversion of long to float
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
@@ -1625,7 +1609,6 @@ def logical_xor(a: TensorLikeType, b: TensorLikeType):
     return a ^ b
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
@@ -1634,7 +1617,6 @@ def lt(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.lt(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1642,7 +1624,6 @@ def maximum(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.maximum(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1650,7 +1631,6 @@ def minimum(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.minimum(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_two_python_scalars=True,
@@ -1659,7 +1639,6 @@ def mul(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.mul(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
@@ -1668,7 +1647,6 @@ def ne(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.ne(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
     supports_lhs_python_scalar=False,
@@ -1678,7 +1656,6 @@ def nextafter(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.nextafter(a, b)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1699,7 +1676,6 @@ def rsub(
     return sub(b, a, alpha=alpha)
 
 
-# TODO: add docstring
 # TODO: consider refactoring this with add impl
 # sub has its own implementation because it has an alpha argument
 @register_decomposition(aten.sub)
@@ -1738,7 +1714,6 @@ def sub(
     return handle_noncontiguous_outputs([a, b], output)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     name="true_divide",
@@ -1774,7 +1749,6 @@ def xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberT
     return torch.where(torch.isnan(b), float("nan"), rhs)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=None,  # CompositeImplicitAutograd
@@ -1969,7 +1943,7 @@ def item(a: TensorLikeType) -> NumberType:
 # fast path when `to` returns an alias to input. This mimics the same function in aten
 def _to_will_alias(
     a: TensorLikeType,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     dtype: Optional[torch.dtype] = None,
     copy: Optional[bool] = None,
     layout: Optional[torch.layout] = None,
@@ -2004,7 +1978,7 @@ def _to_device(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
-):
+) -> Dict[str, Any]:
     kwargs = {
         "device": device,
         "dtype": dtype,
@@ -2022,7 +1996,7 @@ def _to_device_str(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
-):
+) -> Dict[str, Any]:
     kwargs = {
         "device": torch.device(device),
         "dtype": dtype,
@@ -2039,7 +2013,7 @@ def _to_dtype(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
-):
+) -> Dict[str, Any]:
     kwargs = {
         "dtype": dtype,
         "non_blocking": non_blocking,
@@ -2055,7 +2029,7 @@ def _to_other(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
-):
+) -> Dict[str, Any]:
     device = other.device
     dtype = other.dtype
     layout = other.layout
@@ -2226,18 +2200,10 @@ py_all = all
 @out_wrapper()
 def all(
     a: TensorLikeType,
-    dim: Optional[int] = None,
+    dim: Optional[DimsType] = None,
     keepdim: bool = False,
 ) -> TensorLikeType:
-    # torch.any and torch.all both do not currently support torch.any(x, keepdim=True), thus the dim=None
-    # case must be handled separately.
-    if dim is None:
-        assert not keepdim
-        result = torch.logical_not(torch.any(torch.logical_not(a)))
-    else:
-        result = torch.logical_not(
-            torch.any(torch.logical_not(a), dim, keepdim=keepdim)
-        )
+    result = torch.logical_not(torch.any(torch.logical_not(a), dim, keepdim=keepdim))
 
     if a.dtype == torch.uint8:
         result = result.to(dtype=torch.uint8)
@@ -2257,7 +2223,10 @@ def any(
     keepdim: bool = False,
 ) -> TensorLikeType:
     a_ = _maybe_convert_to_dtype(a, torch.bool)
-    result = ne(sum(a_, dim=dim, keepdim=keepdim), False)  # type: ignore[arg-type]
+    if isinstance(dim, (list, tuple)) and len(dim) == 0:
+        result = a_.clone()
+    else:
+        result = a_.sum(dim=dim, keepdim=keepdim).ne(False)
 
     # Preserves uint8 -- probably a legacy mask thing
     if a.dtype is torch.uint8:
@@ -4309,6 +4278,53 @@ def diag_embed(
     return utils.mask_tensor(cond, t).contiguous()
 
 
+@register_decomposition(aten.block_diag)
+@out_wrapper()
+def _block_diag_iterable(tensors: List[TensorLikeType]) -> TensorLikeType:
+    """
+    Reference implementation of torch.block_diag
+    """
+    tensors_2d = [
+        tensor.view(1, -1) if tensor.dim() <= 1 else tensor for tensor in tensors
+    ]
+
+    ncols = builtins.sum(tensor.shape[1] for tensor in tensors_2d)
+    device = tensors_2d[0].device
+
+    result = []
+
+    col_start = 0
+    for i, tensor in enumerate(tensors_2d):
+        torch._check(
+            tensor.dim() == 2,
+            lambda: "Input tensors must have 2 or fewer dimensions. "
+            f"Input {i} has {tensor.dim()} dimensions",
+        )
+        torch._check(
+            tensor.device == device,
+            lambda: "Input tensors must all be on the same device. "
+            f"Input 0 is on device {device} and input {i} is on device {tensor.device}.",
+        )
+        row, col = tensor.shape
+        left = torch.zeros((row, col_start), device=device, dtype=tensor.dtype)
+        right = torch.zeros(
+            (row, ncols - col_start - col), device=device, dtype=tensor.dtype
+        )
+        result += [torch.cat((left, tensor, right), dim=1)]
+        col_start += col
+
+    return torch.cat(result, dim=0)
+
+
+def block_diag(*tensors: List[TensorLikeType]) -> TensorLikeType:
+    """
+    This is used as an input to PythonRefInfo. `torch.block_diag`
+    expects arguments splatted, but `aten.block_diag` expects only
+    one argument that is a list of Tensors.
+    """
+    return _block_diag_iterable(tensors)
+
+
 # CompositeImplicitAutograd - don't register decomp
 def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
     if a.ndim < 3:
@@ -4513,7 +4529,7 @@ def empty(
     *shape,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     requires_grad: bool = False,
     pin_memory: bool = False,
     memory_format: torch.memory_format = torch.contiguous_format,
@@ -4553,7 +4569,7 @@ def empty_permuted(
     physical_layout,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     requires_grad: bool = False,
     pin_memory: bool = False,
 ) -> TensorLikeType:
@@ -4574,7 +4590,7 @@ def new_empty(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
     dtype = a.dtype if dtype is None else dtype
@@ -4599,7 +4615,7 @@ def new_empty_strided(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
     """
@@ -4626,7 +4642,7 @@ def zeros(
     *size,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
@@ -4654,7 +4670,7 @@ def new_zeros(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
@@ -4679,7 +4695,7 @@ def ones(
     *size,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
@@ -4707,7 +4723,7 @@ def new_ones(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
@@ -4735,7 +4751,7 @@ def new_full(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
     dtype = a.dtype if dtype is None else dtype
@@ -4758,7 +4774,7 @@ def empty_like(
     a: TensorLikeType,
     *,
     dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     layout: Optional[torch.layout] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
@@ -4804,7 +4820,7 @@ def arange(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
@@ -4931,7 +4947,7 @@ def linspace(
     steps: NumberType,
     *,
     dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     layout: torch.layout = torch.strided,
     pin_memory: bool = False,
     requires_grad: bool = False,
@@ -5021,7 +5037,7 @@ def logspace(
     base: NumberType = 10,
     *,
     dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     layout: torch.layout = torch.strided,
     pin_memory: bool = False,
     requires_grad: bool = False,
@@ -5220,7 +5236,7 @@ def empty_strided(
     strides: StrideType,
     *,
     dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     layout: torch.layout = torch.strided,
     requires_grad: bool = False,
     pin_memory: bool = False,
@@ -5250,7 +5266,7 @@ def eye(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,  # TODO: unused
 ) -> TensorLikeType:
@@ -5292,7 +5308,7 @@ def full(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
@@ -5319,7 +5335,7 @@ def full_like(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
@@ -5343,7 +5359,7 @@ def zeros_like(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
@@ -5367,7 +5383,7 @@ def ones_like(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
@@ -5389,7 +5405,7 @@ def ones_like(
 def randn(
     *shape,
     dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     layout: Optional[torch.layout] = None,
     requires_grad: bool = False,
     pin_memory: bool = False,
@@ -5416,7 +5432,7 @@ def scalar_tensor(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
     utils.check_layout(layout)
@@ -5935,7 +5951,6 @@ def normal(
     device=None,
     pin_memory=None,
 ):
-    assert generator is None
     assert layout is None or layout == torch.strided
 
     if not isinstance(std, TensorLike):
@@ -5972,6 +5987,7 @@ def normal(
         dtype=dtype,
         device=device,
         requires_grad=False,
+        generator=generator,
     )
     return std * normal_samples + mean
 
@@ -6186,7 +6202,7 @@ def _compute_sizes(seq, scalar_type):
         try:
             handle = seq[0]
         except Exception:
-            raise ValueError(
+            raise ValueError(  # noqa: TRY200
                 f"could not determine the shape of object type '{type(seq).__name__}'"
             )
         seq = handle

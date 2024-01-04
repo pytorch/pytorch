@@ -14,8 +14,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wignored-qualifiers"
 
-namespace at {
-namespace vec {
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -369,6 +368,9 @@ public:
   }
   Vectorized<T> expm1() const {
     return map(Sleef_expm1f8_u10);
+  }
+  Vectorized<T> exp_u20() const {
+    return exp();
   }
   Vectorized<T> fmod(const Vectorized<T> & q) const {
     __m256 x_lo, x_hi;
@@ -1086,6 +1088,6 @@ LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16);
 LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16);
 
 #endif
-}}}
+}} // namsepace at::vec::CPU_CAPABILITY
 
 #pragma GCC diagnostic pop

@@ -64,10 +64,10 @@ Dynamo skip/inline rules & priorities are defined as follows:
     * BUILTIN_SKIPLIST contains builtin python modules, such as abc, collections, etc.
     * THIRDPARTY_SKIPLIST contains common third party libraries, such as numpy, pandas, etc.
 * Functions in these two SKIPLISTs are always skipped, except when they are explicitly
-    put into the three INLINELIST: FUNC_INLINELIST, FILE_INLINELIST and SUBMODULE_INLINELIST.
+    put into the two INLINELIST: FUNC_INLINELIST and MOD_INLINELIST.
 * PyTorch(torch) is in the BUILTIN_SKIPLIST by default, but there are many cases
     where we want inline the functions under torch namespace. We should add them
-    into one of the three *_INLINELIST to make dynamo inline those functions.
+    into one of the two *_INLINELIST to make dynamo inline those functions.
 * If you call functions under skipped modules/files, Dynamo will wrap these functions
     as SkipFilesVariable. There are a few functions(e.g, collections.OrderedDict) that
     we have special handling at SkipFilesVariable.call_function.
@@ -76,17 +76,14 @@ Overall: *_INLINELIST has precedence over *_SKIPLIST has precedence over DEFAULT
 
 To figure out what the behavior is, check the following list in order:
 * FUNC_INLINELIST (Inline if YES)
-* FILE_INLINELIST (Inline if YES)
-* SUBMODULE_INLINELIST (Inline if YES)
+* MOD_INLINELIST (Inline if YES)
 * BUILTIN_SKIPLIST & THIRDPARTY_SKIPLIST (Skip if YES)
 * Inline by default
 
 In general, if you want to force inline a function or module, please consider adding
-the function's file or python module to FILE_INLINELIST first.
-Use the FUNC_INLINELIST only when there are other functions under the same file that
-you don't want to inline.
-In the future, we will consolidate FILE_INLINELIST and SUBMODULE_INLINELIST into one list
-as we use the same logic (filename.startswith) to determine if a file or module is skipped.
+the function's python module to MOD_INLINELIST first.
+Use the FUNC_INLINELIST only when there are other functions under the same module that
+you don't want to inline them.
 """
 
 
@@ -114,7 +111,7 @@ BUILTIN_SKIPLIST = (
     tempfile,
     threading,
     tokenize,
-    torch,  # torch/* is skipped by default unless specified in FILE_INLINELIST or SUBMODULE_INLINELIST
+    torch,  # torch/* is skipped by default unless specified in FUNC_INLINELIST or MOD_INLINELIST
     traceback,
     types,
     typing,
@@ -129,7 +126,6 @@ BUILTIN_SKIPLIST = (
 THIRDPARTY_SKIPLIST = (
     "functorch",
     "fx2trt_oss",
-    "intel_extension_for_pytorch",
     "networkx",
     "numpy",
     "omegaconf",
@@ -162,72 +158,73 @@ def _module_dir(m: types.ModuleType):
 FUNC_INLINELIST = {
     "torch._constrain_as_size",
     "torch._constrain_as_value",
+    "torch._tensor._convert",
 }
 
 
-# Force inline functions in these files or directories, even they are in *_SKIPLIST.
-# We are using python module name instead of file or directory object to avoid circular dependency.
-# Please keep this sorted alphabetically.
-# TODO: Merge FILE_INLINELIST into SUBMODULE_INLINELIST.
-FILE_INLINELIST = {
-    "torch._dynamo._trace_wrapped_higher_order_op",
-    "torch._dynamo.comptime",
+# These are legacy workarounds, don't add new modules to this list.
+# Please use the MOD_INLINELIST instead to force inline functions under particular modules.
+LEGACY_MOD_INLINELIST = {
     "torch._dynamo.external_utils",
-    "torch._dynamo.polyfill",
     "torch._export.db.examples",
     "torch._export.wrappers",
     "torch._functorch.apis",
     "torch._functorch.deprecated",
     "torch._higher_order_ops.cond",
-    "torch._inductor.test_operators",
     "torch.ao.quantization.pt2e.eval_utils",
     "torch.ao.quantization.pt2e.qat_utils",
     "torch.ao.quantization.pt2e.representation.rewrite",
     "torch.ao.quantization.pt2e.utils",
     "torch.ao.quantization.quantizer.xnnpack_quantizer",
-    "torch.nn.modules.container",
-    "torch.optim._functional",
-    "torch.random",
-    "torch.utils._content_store",
-    "torch.utils._foreach_utils",
+    "torch.optim",
 }
 
-
 if torch.distributed.is_available():
-    FILE_INLINELIST |= {
+    LEGACY_MOD_INLINELIST |= {
         "torch.distributed._tensor.api",
         "torch.distributed._tensor.device_mesh",
+        "torch.distributed.device_mesh",
         "torch.distributed.algorithms._checkpoint.checkpoint_wrapper",
         "torch.distributed.tensor.parallel._data_parallel_utils",
         "torch.distributed.tensor.parallel._utils",
         "torch.distributed.tensor.parallel.style",
     }
 
-# Include optimizer code for tracing
-FILE_INLINELIST |= {
-    str(obj.__module__) for obj in torch.optim.__dict__.values() if inspect.isclass(obj)
-}
 
-# TODO: consolidate SUBMODULE_INLINELIST and FILE_INLINELIST into one list
-# Force inline functions under these modules, even the modules is in *_SKIPLIST.
-SUBMODULE_INLINELIST = {
+# Force inline functions under these modules, even they are in *_SKIPLIST.
+# We are using python module name instead of file or directory object to avoid circular dependency.
+# Please keep this sorted alphabetically.
+MOD_INLINELIST = {
     "torch._refs",
     "torch._prims",
     "torch._decomp",
+    "torch._dynamo._trace_wrapped_higher_order_op",
+    "torch._dynamo.comptime",
+    "torch._dynamo.polyfill",
+    "torch._inductor.test_operators",
+    "torch.amp.autocast_mode",
     "torch.ao.nn",
+    "torch.autograd.function",
+    "torch.cuda.amp.autocast_mode",
     "torch.distributions",
     "torch.fx._pytree",
+    "torch.fx.passes.shape_prop",
     "torch.nn",
+    "torch.random",
     "torch.sparse",
     "torch.testing",
+    "torch.utils._content_store",
     "torch.utils._contextlib",
+    "torch.utils._foreach_utils",
     "torch.utils._pytree",
+    "torch._tensor",
+    "torch._higher_order_ops.strict_mode",
 }
 
 
 if torch.distributed.is_available():
-    SUBMODULE_INLINELIST.add("torch.distributed")
-    SUBMODULE_INLINELIST.add("torch.distributed._functional_collectives")
+    MOD_INLINELIST.add("torch.distributed")
+    MOD_INLINELIST.add("torch.distributed._functional_collectives")
 
 
 # TODO: support adding bound method into this list
@@ -243,17 +240,17 @@ def get_func_inlinelist():
 
 
 @functools.lru_cache(None)
-def get_file_inlinelist():
+def get_legacy_mod_inlinelist():
     inlinelist = set()
-    for f in FILE_INLINELIST:
-        inlinelist.add(_module_dir(torch) + f[len("torch.") :].replace(".", "/"))
+    for m in LEGACY_MOD_INLINELIST:
+        inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
     return inlinelist
 
 
 @functools.lru_cache(None)
-def get_submodule_inlinelist():
+def get_mod_inlinelist():
     inlinelist = set()
-    for m in SUBMODULE_INLINELIST:
+    for m in MOD_INLINELIST:
         inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
     return inlinelist
 
@@ -264,7 +261,7 @@ SKIP_DIRS = [
     "<__array_function__ internals>",
 ] + [_module_dir(m) for m in BUILTIN_SKIPLIST]
 
-SKIP_DIRS_RE = None
+SKIP_DIRS_RE = re.compile(r"match nothing^")
 
 is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
 # Skip fbcode paths(including torch.package paths) containing
@@ -286,7 +283,9 @@ def add(import_name: str):
     if isinstance(import_name, types.ModuleType):
         return add(import_name.__name__)
     assert isinstance(import_name, str)
-    module_spec = importlib.util.find_spec(import_name)
+    from importlib.util import find_spec
+
+    module_spec = find_spec(import_name)
     if not module_spec:
         return
     origin = module_spec.origin
@@ -303,21 +302,19 @@ class SkipResult:
     reason: Optional[str]
 
 
-# TODO(ybliang): This is a temp function, we should consolidate this with check_file.
-def _check_file_inner(filename, allow_torch=False):
+def check_file(filename, is_inlined_call=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
-    if any(filename.startswith(d) for d in get_file_inlinelist()):
+    if any(filename.startswith(d) for d in get_legacy_mod_inlinelist()):
         return SkipResult(
             False,
-            "inlined according skipfiles.FILE_INLINELIST",
+            "inlined according skipfiles.LEGACY_MOD_INLINELIST",
         )
-    # TODO(ybliang): the is_torch check should be consolidate with is_torch_inline_allowed
-    if allow_torch and is_torch(filename):
+    if is_inlined_call and is_torch_inline_allowed(filename):
         return SkipResult(
             False,
-            "inlined according skipfiles.is_torch",
+            "inlined according skipfiles.MOD_INLINELIST",
         )
     if is_fbcode and bool(FBCODE_SKIP_DIRS_RE.match(filename)):
         return SkipResult(
@@ -330,15 +327,12 @@ def _check_file_inner(filename, allow_torch=False):
         return SkipResult(False, "inlined by default")
 
 
-def check_file(filename, allow_torch=False, extra_check=False):
-    result = _check_file_inner(filename, allow_torch)
-    if extra_check and result.skipped and is_torch_inline_allowed(filename):
-        return SkipResult(
-            False,
-            "inlined according skipfiles.is_torch_inline_allowed returning True",
-        )
-    else:
-        return result
+@dataclasses.dataclass
+class FunctionInfo:
+    py_obj: Optional[object]
+    name: Optional[str]
+    filename: str
+    code: Optional[types.CodeType]
 
 
 """
@@ -366,32 +360,50 @@ There are mainly three call sites of check/check_verbose:
     * If f2 is skipped by Dynamo, when evaluating the frame of f3, Dynamo need the inline/skip check again
       and the call site is in catch_errors_wrapper.catch_errors of eval_frame.py.
 * For global variables and function arguments, Dynamo needs to decide if they are wrapped as SkipFilesVariable in builder.py.
+
+`is_inlined_call` is used to indicate if the current function call is inlined (f2 is inlined call if it passes check)
+or not (f3 is not inlined call if f2 is skipped). Inside of the `check_verbose` function, there are more rules
+to be checked if this `is_inlined_call`.
+The reason to have this flag is that if the upper level function call (e.g, f2) is skipped,
+we don't want to inline the lower level function call (e.g, f3) by default.
 """
 
 
-def check_verbose(obj, allow_torch=False, extra_check=False):
+def check_verbose(obj, is_inlined_call=False):
     if isinstance(
         obj, (UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable)
     ):
-        filename = obj.get_filename()
-        obj = obj.get_code()
+        try:
+            py_obj = obj.get_function()
+        except NotImplementedError:
+            py_obj = None
+        fi = FunctionInfo(py_obj, obj.get_name(), obj.get_filename(), obj.get_code())
     elif isinstance(obj, types.CodeType):
-        filename = obj.co_filename
+        fi = FunctionInfo(None, obj.co_name, obj.co_filename, obj)
     elif isinstance(obj, (types.FunctionType, types.MethodType)):
-        filename = getfile(obj)
-        obj = obj.__code__
+        fi = FunctionInfo(
+            obj, obj.__name__, getfile(obj), obj.__code__  # type: ignore[union-attr] # FIXME Add MethodType.__code__ to typeshed
+        )
     else:
-        filename = getfile(obj)
-    if obj in get_func_inlinelist():
+        fi = FunctionInfo(obj, None, getfile(obj), None)
+    # Go through function based skip/inline rules.
+    if fi.code in get_func_inlinelist():
         return SkipResult(
             False,
             "inlined according skipfiles.FUNC_INLINELIST",
         )
-    return check_file(filename, allow_torch, extra_check)
+    if is_inlined_call:
+        if fi.name == "patched_init":
+            return SkipResult(True, "patched init cannot be inlined.")
+        elif fi.name == "__torch_function__":
+            return SkipResult(False, "allow inlining __torch_function__")
+
+    # Go through file based skip/inline rules.
+    return check_file(fi.filename, is_inlined_call)
 
 
-def check(obj, allow_torch=False, extra_check=False):
-    return check_verbose(obj, allow_torch, extra_check).skipped
+def check(obj, is_inlined_call=False):
+    return check_verbose(obj, is_inlined_call).skipped
 
 
 # skip common third party libs
@@ -402,7 +414,7 @@ _recompile_re()
 
 
 def is_torch_inline_allowed(filename):
-    return any(filename.startswith(d) for d in get_submodule_inlinelist())
+    return any(filename.startswith(d) for d in get_mod_inlinelist())
 
 
 @functools.lru_cache(None)

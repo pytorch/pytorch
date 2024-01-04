@@ -2,11 +2,10 @@ import operator
 import traceback
 import typing
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import torch
-from functorch.experimental import _map
-from functorch.experimental._map import _unstack_pytree
+from functorch.experimental.control_flow import _unstack_pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._export.pass_infra.node_metadata import NodeMetadata
@@ -21,7 +20,7 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils import _pytree as pytree
 
 
-__all__ = ["_ExportPassBase"]
+__all__ = ["_ExportPassBaseDeprecatedDoNotUse"]
 
 
 Argument = Any
@@ -30,11 +29,21 @@ Fn = Callable[..., Any]
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 
 
+_TORCH_SYM_OPS: Set[Callable] = {
+    torch.sym_int,
+    torch.sym_ite,
+    torch.sym_max,
+    torch.sym_min,
+    torch.sym_not,
+    torch.sym_sqrt,
+}
+
+
 class ExportPassBaseError(RuntimeError):
     pass
 
 
-class _ExportPassBase(PassBase):
+class _ExportPassBaseDeprecatedDoNotUse(PassBase):
     """
     Interpreter-based pass class to help users maintain the IR spec while writing
     transformations.
@@ -46,10 +55,7 @@ class _ExportPassBase(PassBase):
 
 
     class ExportTracer(PythonKeyTracer):
-        """
-        Tracer used to create nodes during the retracing part of the Expo_ExportPassBasertPassBase
-        """
-        def __init__(self, callback: "_ExportPassBase", codegen: CodeGen) -> None:
+        def __init__(self, callback: "_ExportPassBaseDeprecatedDoNotUse", codegen: CodeGen) -> None:
             super().__init__()
             self.callback = callback
             self.root = torch.nn.Module()
@@ -144,10 +150,7 @@ class _ExportPassBase(PassBase):
             node.meta["tensor_meta"] = pytree.tree_map(make_tensor_meta, value)
 
     class ExportInterpreter(fx.Interpreter):
-        """
-        Interpreter to callback on any _ExportPassBase functions
-        """
-        def __init__(self, callback: "_ExportPassBase", gm: fx.GraphModule) -> None:
+        def __init__(self, callback: "_ExportPassBaseDeprecatedDoNotUse", gm: fx.GraphModule) -> None:
             super().__init__(gm)
             self.callback = callback
             self.node: torch.fx.Node = next(iter(gm.graph.nodes))
@@ -180,7 +183,10 @@ class _ExportPassBase(PassBase):
             if target == operator.getitem:
                 value, key = args
                 return self.callback.call_getitem(value, key, meta)
-            elif getattr(target, "__module__", None) == "_operator":
+            elif getattr(target, "__module__", None) in {"_operator", "math"}:
+                assert callable(target)
+                return self.callback.call_sym(target, args, meta)
+            elif target in _TORCH_SYM_OPS:
                 assert callable(target)
                 return self.callback.call_sym(target, args, meta)
             elif isinstance(target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
@@ -193,7 +199,7 @@ class _ExportPassBase(PassBase):
             elif target == torch.ops.higher_order.cond:
                 pred, true_fn, false_fn, inputs = args
                 return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
-            elif target == _map.map_impl:
+            elif target == torch.ops.higher_order.map_impl:
                 f, num_args, *rest = args  # type: ignore[assignment]
                 return self.callback.call_map(f, num_args, list(rest), meta)
             # For other unregistered HigherOrderOps, just interpret them blindly
@@ -361,7 +367,7 @@ class _ExportPassBase(PassBase):
         assert f_branch is not None
         return self._fx(
             "call_function",
-            _map.map_impl,
+            torch.ops.higher_order.map_impl,
             (f_branch.graph_module, num_args, *args),
             {},
             meta,
@@ -428,3 +434,13 @@ class _ExportPassBase(PassBase):
             result = self.call_submodule(graph_module, tuple(inputs))
 
         return result
+
+# TODO This hack is necessary until executorch can update their pin in pytorch CI.
+import os
+
+if (
+    os.environ.get("CI", None) == "true"
+    and os.environ.get("GITHUB_ACTIONS", None) == "true"
+):
+    _ExportPassBase = _ExportPassBaseDeprecatedDoNotUse
+    __all__.append("_ExportPassBase")

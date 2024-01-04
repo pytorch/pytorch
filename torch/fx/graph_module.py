@@ -6,7 +6,7 @@ import sys
 import traceback
 import warnings
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
 
 import torch
 import torch.nn as nn
@@ -85,12 +85,20 @@ def _exec_with_source(src: str, globals: Dict[str, Any], co_fields=None):
 
 
 def _forward_from_src(src: str, globals: Dict[str, Any], co_fields=None):
+    return _method_from_src(
+        method_name="forward", src=src, globals=globals, co_fields=co_fields
+    )
+
+
+def _method_from_src(
+    method_name: str, src: str, globals: Dict[str, Any], co_fields=None
+) -> Callable:
     # avoid mutating the passed in dict
     globals_copy = globals.copy()
     _exec_with_source(src, globals_copy, co_fields)
-    forward_fn = globals_copy["forward"]
-    del globals_copy["forward"]
-    return forward_fn
+    fn = globals_copy[method_name]
+    del globals_copy[method_name]
+    return fn
 
 
 def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
@@ -149,7 +157,7 @@ class _CodeOnlyModule(torch.nn.Module):
         self.__dict__ = body
 
 
-def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
+def _deserialize_graph_module(forward, body: Dict[Any, Any], graph_module_cls=None) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the dictionary of the original module,
     using the code to reconstruct the graph. We delete the actual graph before
@@ -186,7 +194,9 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
     # Manually set Tracer class on the reconstructed Graph, to avoid
     # referencing the private local subclass KeepModules.
     graph._tracer_cls = tracer_cls
-    gm = GraphModule(com, graph, class_name=graphmodule_cls_name)
+    if graph_module_cls is None:
+        graph_module_cls = GraphModule
+    gm = graph_module_cls(com, graph, class_name=graphmodule_cls_name)
 
     # The GraphModule constructor only retains attributes referenced by the graph.
     # In this case, our goal is return a GraphModule as close to identical as the one
@@ -302,7 +312,7 @@ class _WrappedCall:
                     _WrappedCall._generate_error_message(topmost_framesummary),
                     file=sys.stderr,
                 )
-                raise e.with_traceback(None)
+                raise e.with_traceback(None)  # noqa: TRY200
             else:
                 raise e
 
@@ -661,8 +671,7 @@ class {module_name}(torch.nn.Module):
                 # modules. For example, if we have the target
                 # `foo.bar.baz`, we'll add `foo`, `foo.bar`, and
                 # `foo.bar.baz` to the list.
-                for path in itertools.accumulate(fullpath, join_fn):
-                    used.append(path)
+                used.extend(itertools.accumulate(fullpath, join_fn))
 
                 # For a `call_module` node, also register all recursive submodules
                 # as used
@@ -771,15 +780,17 @@ class {module_name}(torch.nn.Module):
         del dict_without_graph["_graph"]
         return (reduce_graph_module, (dict_without_graph, import_block))
 
+    def _deepcopy_init(self):
+        return GraphModule.__init__
+
     # because __reduce__ is defined for serialization,
     # we need to define deepcopy otherwise it will call __reduce__
     # and cause symbolic tracing to occur every time we try to copy the object
     def __deepcopy__(self, memo):
         res = type(self).__new__(type(self))
         memo[id(self)] = res
-        fake_mod = torch.nn.Module()
-        fake_mod.__dict__ = copy.deepcopy(self.__dict__, memo)
-        GraphModule.__init__(res, fake_mod, fake_mod.__dict__["_graph"])
+        fake_mod = _CodeOnlyModule(copy.deepcopy(self.__dict__, memo))
+        self._deepcopy_init()(res, fake_mod, fake_mod.__dict__["_graph"])
         # hooks are lost during `GraphModule.__init__`, so we need to copy over
         # them explicitly, note right now we are only copying state_dict related
         # hooks, to reduce bc-related issues, we can copy forward/backward related

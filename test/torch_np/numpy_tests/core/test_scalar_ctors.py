@@ -5,25 +5,33 @@ Test the scalar constructors, which also do type-coercion
 """
 import functools
 
-from unittest import expectedFailure as xfail, skipIf as skipif
+from unittest import skipIf as skipif
 
 import pytest
 
-import torch._numpy as np
-from torch._numpy.testing import assert_almost_equal, assert_equal
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     subtest,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xpassIfTorchDynamo,
 )
+
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy.testing import assert_almost_equal, assert_equal
+else:
+    import torch._numpy as np
+    from torch._numpy.testing import assert_almost_equal, assert_equal
+
 
 skip = functools.partial(skipif, True)
 
 
 class TestFromString(TestCase):
-    @xfail  # (reason="XXX: floats from strings")
+    @xpassIfTorchDynamo  # (reason="XXX: floats from strings")
     def test_floating(self):
         # Ticket #640, floats from string
         fsingle = np.single("1.234")
@@ -31,7 +39,7 @@ class TestFromString(TestCase):
         assert_almost_equal(fsingle, 1.234)
         assert_almost_equal(fdouble, 1.234)
 
-    @xfail  # (reason="XXX: floats from strings")
+    @xpassIfTorchDynamo  # (reason="XXX: floats from strings")
     def test_floating_overflow(self):
         """Strings containing an unrepresentable float overflow"""
         fhalf = np.half("1e10000")

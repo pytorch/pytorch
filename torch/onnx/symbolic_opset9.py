@@ -4400,35 +4400,34 @@ def repeat(g: jit_utils.GraphContext, self, repeats):
 def repeat_interleave(
     g: jit_utils.GraphContext, self, repeats, dim=None, output_size=None
 ):
-    input = self
+    repeats_dim = symbolic_helper._get_tensor_rank(repeats)
+    repeats_sizes = symbolic_helper._get_tensor_sizes(repeats)
+    input_sizes = symbolic_helper._get_tensor_sizes(self)
+    if repeats_dim is None:
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of repeat_interleave for unknown repeats rank.",
+            self,
+        )
+    if repeats_sizes is None:
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of repeat_interleave for unknown repeats size.",
+            self,
+        )
+    if input_sizes is None:
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of repeat_interleave for unknown input size.",
+            self,
+        )
+
     # if dim is None flatten
     # By default, use the flattened input array, and return a flat output array
     if symbolic_helper._is_none(dim):
-        input = symbolic_helper._reshape_helper(
+        self = symbolic_helper._reshape_helper(
             g, self, g.op("Constant", value_t=torch.tensor([-1]))
         )
         dim = torch.tensor(0, dtype=torch.int64)
     else:
         dim = symbolic_helper._maybe_get_scalar(dim)
-
-    repeats_dim = symbolic_helper._get_tensor_rank(repeats)
-    repeats_sizes = symbolic_helper._get_tensor_sizes(repeats)
-    input_sizes = symbolic_helper._get_tensor_sizes(input)
-    if repeats_dim is None:
-        raise errors.SymbolicValueError(
-            "Unsupported: ONNX export of repeat_interleave for unknown repeats rank.",
-            input,
-        )
-    if repeats_sizes is None:
-        raise errors.SymbolicValueError(
-            "Unsupported: ONNX export of repeat_interleave for unknown repeats size.",
-            input,
-        )
-    if input_sizes is None:
-        raise errors.SymbolicValueError(
-            "Unsupported: ONNX export of repeat_interleave for unknown input size.",
-            input,
-        )
 
     # Handle cases where dim is negative
     if dim < 0:
@@ -4480,7 +4479,7 @@ def repeat_interleave(
 
     final_splits = list()
     r_splits = symbolic_helper._repeat_interleave_split_helper(g, repeats, reps, 0)
-    i_splits = symbolic_helper._repeat_interleave_split_helper(g, input, reps, dim)
+    i_splits = symbolic_helper._repeat_interleave_split_helper(g, self, reps, dim)
     input_sizes[dim], input_sizes_temp[dim] = -1, 1
     for idx, r_split in enumerate(r_splits):
         i_split = unsqueeze(g, i_splits[idx], dim + 1)
@@ -5416,10 +5415,12 @@ def _any(g: jit_utils.GraphContext, *args):
     if len(args) == 1:
         input = args[0]
         dim, keepdim = None, 0
-    # aten::any(Tensor self, int dim, bool keepdim)
+    # aten::any(Tensor self, int[]? dim, bool keepdim)
     else:
         input, dim, keepdim = args
-        dim = [symbolic_helper._parse_arg(dim, "i")]
+        # Can be int list or single int
+        dim = symbolic_helper._parse_arg(dim, "t")
+        dim = [int(d) for d in dim.view(-1)]
         keepdim = symbolic_helper._parse_arg(keepdim, "i")
     input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT64)
     input_sum = symbolic_helper._reducesum_helper(
@@ -5435,7 +5436,7 @@ def _all(g: jit_utils.GraphContext, *args):
     # aten::all(Tensor self)
     if len(args) == 1:
         return g.op("Not", _any(g, input))
-    # aten::all(Tensor self, int dim, bool keepdim)
+    # aten::all(Tensor self, int[]? dim, bool keepdim)
     else:
         return g.op("Not", _any(g, input, args[1], args[2]))
 
@@ -5994,7 +5995,7 @@ def linalg_vector_norm(
     dtype: torch._C.Value,
 ):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
-    if dim is None:
+    if symbolic_helper._is_none(dim):
         self = symbolic_helper._reshape_helper(g, self, [-1])
         keepdim = False
 
@@ -6006,6 +6007,10 @@ def linalg_vector_norm(
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "linalg_vector_norm", 9, 11, "ord=0 not supported", self
         )
+    elif ord == 1:
+        result = _reduce_op_symbolic("ReduceL1")(g, self, dim=dim, keepdim=keepdim)
+    elif ord == 2:
+        result = _reduce_op_symbolic("ReduceL2")(g, self, dim=dim, keepdim=keepdim)
     else:
         ord_op = g.op("Constant", value_t=torch.tensor(ord, dtype=torch.float32))
         result = symbolic_helper._reducesum_helper(
@@ -6020,6 +6025,10 @@ def linalg_vector_norm(
                 ord_op,
             ),
         )
+
+    if not symbolic_helper._is_none(dtype):
+        dtype = symbolic_helper._get_const(dtype, "i", "dtype")
+        result = g.op("Cast", result, to_i=_type_utils.JitScalarType(dtype).onnx_type())  # type: ignore[arg-type]
     return result
 
 

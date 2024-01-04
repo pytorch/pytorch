@@ -83,6 +83,8 @@ using AOTITorchError = int32_t;
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
 
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e4m3fn();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bfloat16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float32();
@@ -94,6 +96,9 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bool();
 
+AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
+AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
+
 // Free the tensor object
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
@@ -103,6 +108,16 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
     AtenTensorHandle tensor,
     void** ret_data_ptr // returns borrowed reference
 );
+
+// Get the nbytes of the underlying storage
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_storage_size(AtenTensorHandle tensor, int64_t* ret_size);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_dim(AtenTensorHandle tensor, int64_t* ret_dim);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_numel(AtenTensorHandle tensor, int64_t* ret_numel);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_sizes(
     AtenTensorHandle tensor,
@@ -120,9 +135,27 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_strides(
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_stride(AtenTensorHandle tensor, int64_t d, int64_t* ret_stride);
 
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_dtype(AtenTensorHandle tensor, int32_t* ret_dtype);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_device_type(AtenTensorHandle tensor, int32_t* ret_device_type);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_device_index(AtenTensorHandle tensor, int32_t* ret_device_index);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
     int64_t* ret_storage_offset);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__alloc_from_pool(
+    AtenTensorHandle self,
+    int64_t offset_bytes,
+    int32_t dtype,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    AtenTensorHandle* ret_new_tensor);
 
 // This function will create a new tensor object and its pointer is returned
 // through *out. The caller is responsible for wrapping the tensor pointer
@@ -163,6 +196,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     AtenTensorHandle* ret // returns new reference
 );
 
+// This version is deprecated. We will remove it later
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     AtenTensorHandle query,
     AtenTensorHandle key,
@@ -182,6 +216,55 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     AtenTensorHandle* ret8 // returns new reference
 );
 
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch__scaled_dot_product_flash_attention_v2(
+    AtenTensorHandle query,
+    AtenTensorHandle key,
+    AtenTensorHandle value,
+    double dropout_p,
+    int is_causal,
+    int return_debug_mask,
+    double* scale,
+    AtenTensorHandle* ret0, // returns new reference
+    AtenTensorHandle* ret1, // returns new reference
+    AtenTensorHandle* ret2, // returns new reference
+    AtenTensorHandle* ret3, // returns new reference
+    int64_t* ret4,
+    int64_t* ret5,
+    AtenTensorHandle* ret6, // returns new reference
+    AtenTensorHandle* ret7, // returns new reference
+    AtenTensorHandle* ret8 // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm(
+    AtenTensorHandle self,
+    AtenTensorHandle mat2,
+    AtenTensorHandle bias,
+    int32_t* out_dtype,
+    AtenTensorHandle scale_a,
+    AtenTensorHandle scale_b,
+    AtenTensorHandle scale_result,
+    int8_t use_fast_accum,
+    AtenTensorHandle* ret0,
+    AtenTensorHandle* ret1);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
+    AtenTensorHandle input,
+    AtenTensorHandle weight,
+    AtenTensorHandle bias, // optional argument
+    const int64_t* stride_ptr,
+    int64_t stride_size,
+    const int64_t* padding_ptr,
+    int64_t padding_size,
+    const int64_t* dilation_ptr,
+    int64_t dilation_size,
+    int transposed,
+    const int64_t* output_padding_ptr,
+    int64_t output_padding_size,
+    int64_t groups,
+    AtenTensorHandle* ret // returns new reference
+);
+
 // This function will create a new uninitialized tensor object
 // and its pointer is returned through *ret.
 AOTI_TORCH_EXPORT AOTITorchError
@@ -195,6 +278,13 @@ aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);
 // aoti_torch_delete_tensor separately (or not) as before the call.
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_assign_tensors(AtenTensorHandle src, AtenTensorHandle dst);
+
+// This function will create a new tensor object and its pointer is returned
+// through *ret. The caller is responsible for wrapping the tensor pointer
+// with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
+// when going out of scope.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_addmm_out(
     AtenTensorHandle out,
@@ -219,11 +309,27 @@ aoti_torch_nonzero(AtenTensorHandle self, AtenTensorHandle* out);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_repeat_interleave_Tensor(
     AtenTensorHandle repeats,
-    int64_t output_size,
+    int64_t* output_size,
     AtenTensorHandle* out);
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_check_inf_and_nan(AtenTensorHandle tensor);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scatter_out(
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    int64_t dim,
+    AtenTensorHandle index,
+    AtenTensorHandle src);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scatter_reduce_out(
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    int64_t dim,
+    AtenTensorHandle index,
+    AtenTensorHandle src,
+    const char* reduce,
+    int32_t include_self);
 
 #ifdef USE_CUDA
 
@@ -251,6 +357,29 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
 
 #ifdef __cplusplus
 } // extern "C"
+
+template <typename T>
+int32_t aoti_torch_dtype();
+
+#define DEFINE_DTYPE_SPECIALIZATION(ctype, typename) \
+  template <>                                        \
+  inline int32_t aoti_torch_dtype<ctype>() {         \
+    return aoti_torch_dtype_##typename();            \
+  }
+
+// REVIEW: bfloat16 and half don't seem to actually build? Do I have
+// the wrong types?
+//  DEFINE_DTYPE_SPECIALIZATION(__bfloat16, bfloat16)
+//  DEFINE_DTYPE_SPECIALIZATION(half, float16)
+DEFINE_DTYPE_SPECIALIZATION(float, float32)
+DEFINE_DTYPE_SPECIALIZATION(double, float64)
+DEFINE_DTYPE_SPECIALIZATION(uint8_t, uint8)
+DEFINE_DTYPE_SPECIALIZATION(int8_t, int8)
+DEFINE_DTYPE_SPECIALIZATION(int16_t, int16)
+DEFINE_DTYPE_SPECIALIZATION(int32_t, int32)
+DEFINE_DTYPE_SPECIALIZATION(int64_t, int64)
+DEFINE_DTYPE_SPECIALIZATION(bool, bool)
+
 #endif
 
 #endif // AOTI_TORCH_SHIM

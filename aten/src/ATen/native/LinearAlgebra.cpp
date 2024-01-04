@@ -59,6 +59,7 @@
 #include <ATen/ops/frobenius_norm_native.h>
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/full.h>
+#include <ATen/ops/full_like.h>
 #include <ATen/ops/gelu.h>
 #include <ATen/ops/ger_native.h>
 #include <ATen/ops/index_select.h>
@@ -140,7 +141,7 @@
 #include <string>
 #include <tuple>
 #include <utility>
-#if !defined(__s390x__)
+#if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
 
@@ -625,7 +626,7 @@ Tensor linalg_matrix_power_impl(
   if (_out.has_value()) {
     checkSameDevice("matrix_power", out, self);
     checkLinalgCompatibleDtype("matrix_power", out, self);
-    at::native::resize_output(out, self.sizes());
+    at::native::resize_output_symint(out, self.sym_sizes());
   }
 
   // For n=0 we return the identity matrix of the same shape as input.
@@ -1338,7 +1339,7 @@ static inline int64_t get_mkldnn_matmul_min_dim() {
     const int64_t default_min_dim = [&] {
       // Minimum dimension requirement for MKLDNN; derived based on experiments.
       // By default, it's only enabled on Neoverse V1.
-#if !defined(__s390x__)
+#if !defined(__s390x__)  && !defined(__powerpc__)
       if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
         return 8;
       }
@@ -1357,7 +1358,7 @@ static inline int64_t get_mkldnn_matmul_min_size() {
     const int64_t default_min_size = [&] {
       // Minimum size requirement for MKLDNN; derived based on experiments.
       // By default, it's only enabled on Neoverse V1.
-#if !defined(__s390x__)
+#if !defined(__s390x__)  && !defined(__powerpc__)
       if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
         return 8 * 1024;
       }
@@ -1374,7 +1375,7 @@ static inline int64_t get_mkldnn_matmul_min_size() {
 static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
   const int64_t min_dim = get_mkldnn_matmul_min_dim();
   const int64_t min_size = get_mkldnn_matmul_min_size();
-  return m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
+  return at::globalContext().userEnabledMkldnn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
 
 
@@ -1499,10 +1500,15 @@ static void addmm_impl_cpu_(
   if (transpose_c) {
     bool apply_heur = apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
     if (apply_heur && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
+      try {
         mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
         // We have dispatched to ACL GEMM for single precision float
         // so do not need to dispatch to BLAS GEMM below
         dispatched = true;
+      } catch (const std::exception& e) {
+        TORCH_WARN("mkldnn_matmul failed, switching to BLAS gemm:", e.what());
+        at::globalContext().setUserEnabledMkldnn(false);
+      }
     }
   }
 #endif
@@ -1751,8 +1757,13 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
 
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
   if (apply_heur && use_mkldnn_lower_precision_matmul(batch1, batch2, self_or_result)) {
+    try {
       mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
       return;
+    } catch (const std::exception& e) {
+      TORCH_WARN("mkldnn_matmul failed, switching to baddbmm:", e.what());
+      at::globalContext().setUserEnabledMkldnn(false);
+    }
   }
 
   if (contraction_size * res_rows * res_cols < 400) {
@@ -2603,7 +2614,11 @@ Tensor mexp_impl(
   }
 
   if (!compute_highest_degree_approx) {
-    auto res = at::empty_like(a, {}, at::MemoryFormat::Contiguous);
+    // To prevent undefined behavior which outputs "normal" result from a matrix
+    // contains NaN values, we put NaN values in `res`, so if input has NaN values,
+    // its computation will be skipped to return the NaN contained `res` directly.
+    auto res = at::full_like(a, std::numeric_limits<double>::quiet_NaN(), {},
+                             at::MemoryFormat::Contiguous);
     // `norm_cpu` is used to decide which Tensors require which approximation
     // based on their norm. This decision takes place on CPU.
     // It requires moving data back and forth between devices when `a` is on CUDA,

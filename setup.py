@@ -8,6 +8,9 @@
 #   REL_WITH_DEB_INFO
 #     build with optimizations and -g (debug symbols)
 #
+#   USE_CUSTOM_DEBINFO="path/to/file1.cpp;path/to/file2.cpp"
+#     build with debug info only for specified files
+#
 #   MAX_JOBS
 #     maximum number of compile jobs we should use to compile your code
 #
@@ -156,6 +159,9 @@
 #
 #   USE_ZSTD
 #     Enables use of ZSTD, if the libraries are found
+#
+#   USE_ROCM_KERNEL_ASSERT=1
+#     Enable kernel assert in ROCm platform
 #
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
@@ -573,6 +579,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report("-- Detected CUDA at " + cmake_cache_vars["CUDA_TOOLKIT_ROOT_DIR"])
         else:
             report("-- Not using CUDA")
+        if cmake_cache_vars["USE_XPU"]:
+            report("-- Detected XPU runtime at " + cmake_cache_vars["SYCL_LIBRARY_DIR"])
+        else:
+            report("-- Not using XPU")
         if cmake_cache_vars["USE_MKLDNN"]:
             report("-- Using MKLDNN")
             if cmake_cache_vars["USE_MKLDNN_ACL"]:
@@ -902,16 +912,10 @@ def configure_extension_build():
             "-Wno-unused-parameter",
             "-Wno-missing-field-initializers",
             "-Wno-unknown-pragmas",
-            # This is required for Python 2 declarations that are deprecated in 3.
-            "-Wno-deprecated-declarations",
             # Python 2.6 requires -fno-strict-aliasing, see
             # http://legacy.python.org/dev/peps/pep-3123/
             # We also depend on it in our code (even Python 3).
             "-fno-strict-aliasing",
-            # Clang has an unfixed bug leading to spurious missing
-            # braces warnings, see
-            # https://bugs.llvm.org/show_bug.cgi?id=21629
-            "-Wno-missing-braces",
         ]
 
     library_dirs.append(lib_path)
@@ -1043,50 +1047,6 @@ def configure_extension_build():
     return extensions, cmdclass, packages, entry_points, extra_install_requires
 
 
-def add_triton(install_requires, extras_require) -> None:
-    """
-    Add triton package as a dependency when it's needed
-    """
-    # NB: If the installation requirments list already includes triton dependency,
-    # there is no need to add it one more time as an extra dependency. In nightly
-    # or when release PyTorch, that is done by setting PYTORCH_EXTRA_INSTALL_REQUIREMENTS
-    # environment variable on pytorch/builder
-    has_triton = any("triton" in pkg for pkg in install_requires)
-    if has_triton:
-        return
-
-    cmake_cache_vars = get_cmake_cache_vars()
-    use_rocm = cmake_cache_vars["USE_ROCM"]
-    use_cuda = cmake_cache_vars["USE_CUDA"]
-
-    # Triton is only needed for CUDA or ROCm
-    if not use_rocm and not use_cuda:
-        return
-
-    if use_rocm:
-        triton_text_file = "triton-rocm.txt"
-        triton_package_name = "pytorch-triton-rocm"
-    else:
-        triton_text_file = "triton.txt"
-        triton_package_name = "pytorch-triton"
-    triton_pin_file = os.path.join(
-        cwd, ".ci", "docker", "ci_commit_pins", triton_text_file
-    )
-    triton_version_file = os.path.join(cwd, ".ci", "docker", "triton_version.txt")
-
-    if os.path.exists(triton_pin_file) and os.path.exists(triton_version_file):
-        with open(triton_pin_file) as f:
-            triton_pin = f.read().strip()
-        with open(triton_version_file) as f:
-            triton_version = f.read().strip()
-
-        if "dynamo" not in extras_require:
-            extras_require["dynamo"] = []
-        extras_require["dynamo"].append(
-            triton_package_name + "==" + triton_version + "+" + triton_pin[:10]
-        )
-
-
 # post run, warnings, printed at the end to make them more visible
 build_update_message = """
     It is no longer necessary to use the 'build' or 'rebuild' targets
@@ -1113,7 +1073,7 @@ def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
         "filelock",
-        "typing-extensions",
+        "typing-extensions>=4.8.0",
         "sympy",
         "networkx",
         "jinja2",
@@ -1149,10 +1109,6 @@ def main():
         "optree": ["optree>=0.9.1"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
-    # Triton is only available on Linux atm
-    if platform.system() == "Linux":
-        extras_require["dynamo"] = ["jinja2"]
-        add_triton(install_requires=install_requires, extras_require=extras_require)
 
     # Read in README.md for our long_description
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
@@ -1186,6 +1142,7 @@ def main():
         "include/ATen/cpu/*.h",
         "include/ATen/cpu/vec/vec256/*.h",
         "include/ATen/cpu/vec/vec256/vsx/*.h",
+        "include/ATen/cpu/vec/vec256/zarch/*.h",
         "include/ATen/cpu/vec/vec512/*.h",
         "include/ATen/cpu/vec/*.h",
         "include/ATen/core/*.h",
@@ -1230,6 +1187,7 @@ def main():
         "include/c10/cuda/impl/*.h",
         "include/c10/hip/*.h",
         "include/c10/hip/impl/*.h",
+        "include/c10/xpu/*.h",
         "include/torch/*.h",
         "include/torch/csrc/*.h",
         "include/torch/csrc/api/include/torch/*.h",
@@ -1264,6 +1222,7 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
         "include/torch/csrc/inductor/aoti_torch/*.h",
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
@@ -1288,6 +1247,7 @@ def main():
         "include/torch/csrc/profiler/*.h",
         "include/torch/csrc/profiler/orchestration/*.h",
         "include/torch/csrc/profiler/stubs/*.h",
+        "include/torch/csrc/profiler/unwind/*.h",
         "include/torch/csrc/utils/*.h",
         "include/torch/csrc/tensor/*.h",
         "include/torch/csrc/lazy/backend/*.h",
@@ -1298,6 +1258,7 @@ def main():
         "include/torch/csrc/lazy/ts_backend/*.h",
         "include/pybind11/*.h",
         "include/pybind11/detail/*.h",
+        "include/pybind11/eigen/*.h",
         "include/TH/*.h*",
         "include/TH/generic/*.h*",
         "include/THC/*.cuh",

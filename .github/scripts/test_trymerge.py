@@ -20,6 +20,7 @@ from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 
 from trymerge import (
     categorize_checks,
+    DRCI_CHECKRUN_NAME,
     find_matching_merge_rule,
     get_classifications,
     get_drci_classifications,
@@ -27,10 +28,10 @@ from trymerge import (
     gh_get_team_members,
     gh_graphql,
     GitHubPR,
+    JobCheckState,
     main as trymerge_main,
     MandatoryChecksMissingError,
     MergeRule,
-    PostCommentError,
     RE_GHSTACK_DESC,
     read_merge_rules,
     remove_job_name_suffix,
@@ -220,6 +221,31 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
     ]
 
 
+def mocked_read_merge_rules_approvers(
+    repo: Any, org: str, project: str
+) -> List[MergeRule]:
+    return [
+        MergeRule(
+            name="Core Reviewers",
+            patterns=["*"],
+            approved_by=["1", "2", "3", "4", "5", "6"],
+            mandatory_checks_name=[
+                "Lint",
+                "pull",
+            ],
+        ),
+        MergeRule(
+            name="Core Maintainers",
+            patterns=["*"],
+            approved_by=["1", "2", "malfet"],
+            mandatory_checks_name=[
+                "Lint",
+                "pull",
+            ],
+        ),
+    ]
+
+
 def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> List[MergeRule]:
     raise RuntimeError("testing")
 
@@ -284,6 +310,27 @@ class TestTryMerge(TestCase):
         self.assertRaisesRegex(
             RuntimeError, "testing", lambda: find_matching_merge_rule(pr, repo)
         )
+
+    @mock.patch(
+        "trymerge.read_merge_rules", side_effect=mocked_read_merge_rules_approvers
+    )
+    def test_match_rules_approvers(self, *args: Any) -> None:
+        "Tests that PR has the necessary approvers"
+        repo = DummyGitRepo()
+
+        pr = GitHubPR("pytorch", "pytorch", 115329)
+        # Test that all potential approvers across all rules are listed if the
+        # PR doesn't have one of them
+        for mock_rule in ["Core Reviewers", "Core Maintainers"]:
+            self.assertRaisesRegex(
+                RuntimeError,
+                mock_rule,
+                lambda: find_matching_merge_rule(pr, repo),
+            )
+
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        # Test that PR with the correct approvers doesn't raise any exception
+        self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
 
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
     def test_lint_fails(self, *args: Any) -> None:
@@ -395,7 +442,7 @@ class TestTryMerge(TestCase):
 
     def test_cancelled_gets_ignored(self, *args: Any) -> None:
         """Tests that cancelled workflow does not override existing successfull status"""
-        pr = GitHubPR("pytorch", "pytorch", 82169)
+        pr = GitHubPR("pytorch", "pytorch", 110367)
         conclusions = pr.get_checkrun_conclusions()
         lint_checks = [name for name in conclusions.keys() if "Lint" in name]
         self.assertTrue(len(lint_checks) > 0)
@@ -467,20 +514,6 @@ class TestTryMerge(TestCase):
             self.fail(f"get_changed_files throws an exception: {error}")
 
         self.assertEqual(len(changed_files), pr.get_changed_files_count())
-
-    def test_revert_codev_fails(self, *args: Any) -> None:
-        pr = GitHubPR("pytorch", "pytorch", 91340)
-
-        class GitRepoCoDev(DummyGitRepo):
-            def commit_message(self, ref: str) -> str:
-                return pr.get_body()
-
-        repo = GitRepoCoDev()
-        self.assertRaisesRegex(
-            PostCommentError,
-            "landed via phabricator",
-            lambda: validate_revert(repo, pr, comment_id=1372496233),
-        )
 
     def test_revert_codev_abandoned_diff_succeeds(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 100652)
@@ -809,10 +842,89 @@ class TestBypassFailures(TestCase):
 @mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 @mock.patch("trymerge.gh_fetch_merge_base", return_value="")
+@mock.patch("trymerge.get_drci_classifications", return_value={})
+class TestBypassFailuresOnSandCastle(TestCase):
+    def test_get_classifications(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 111467)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
+
+    def test_get_classifications_drci_checkrun_not_found(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 111467)
+
+        # No summary
+        checks = pr.get_checkrun_conclusions()
+        checks[DRCI_CHECKRUN_NAME] = JobCheckState(
+            DRCI_CHECKRUN_NAME,
+            "",
+            "NEUTRAL",
+            None,
+            1,
+            "",
+            None,
+        )
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 2)
+
+        # Empty summary
+        checks = pr.get_checkrun_conclusions()
+        checks[DRCI_CHECKRUN_NAME] = JobCheckState(
+            DRCI_CHECKRUN_NAME,
+            "",
+            "NEUTRAL",
+            None,
+            1,
+            "",
+            "",
+        )
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 2)
+
+        # No Dr.CI checkrun
+        checks = pr.get_checkrun_conclusions()
+        del checks[DRCI_CHECKRUN_NAME]
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 2)
+
+
+@mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
+@mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+@mock.patch("trymerge.gh_fetch_merge_base", return_value="")
 @mock.patch(
     "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
 )
-class TestGitHubPRGhstackDependencies2(TestCase):
+class TestGitHubPRGhstackDependencies(TestCase):
     def test_pr_dependencies(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 106068)
         msg = pr.gen_commit_message(filter_ghstack=True)

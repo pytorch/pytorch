@@ -4,8 +4,10 @@ import functools
 import inspect
 import json
 import os
+import re
 import tempfile
 import threading
+import unittest
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -41,9 +43,14 @@ def is_abstract(tensor: torch.Tensor) -> bool:
 
 
 def safe_schema_check(
-    op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    op: torch._ops.OpOverload,
+    args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
+    *,
+    copy_inputs: bool = True,
 ) -> Any:
-    args, kwargs = deepcopy_tensors((args, kwargs))
+    if copy_inputs:
+        args, kwargs = deepcopy_tensors((args, kwargs))
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
     with SchemaCheckMode():
@@ -52,25 +59,35 @@ def safe_schema_check(
 
 
 def safe_autograd_registration_check(
-    op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    op: torch._ops.OpOverload,
+    args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
+    *,
+    copy_inputs: bool = True,
 ) -> None:
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return
+    if copy_inputs:
+        args, kwargs = deepcopy_tensors((args, kwargs))
     # Don't perform autograd_registration_check if none of the inputs require grad.
     if not pytree.tree_any_only(
         torch.Tensor, lambda x: x.requires_grad, (args, kwargs)
     ):
         return
-    args, kwargs = deepcopy_tensors((args, kwargs))
     return autograd_registration_check(op, args, kwargs)
 
 
 def safe_fake_check(
-    op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    op: torch._ops.OpOverload,
+    args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
+    *,
+    copy_inputs: bool = True,
 ) -> None:
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
-    args, kwargs = deepcopy_tensors((args, kwargs))
+    if copy_inputs:
+        args, kwargs = deepcopy_tensors((args, kwargs))
     return fake_check(op, args, kwargs)
 
 
@@ -79,7 +96,11 @@ def safe_aot_autograd_check(
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
     dynamic: bool,
+    *,
+    copy_inputs: bool = True,
 ) -> Any:
+    # NB: copy_inputs does nothing for aot_autograd_check: it always needs to copy
+    # inputs.
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
 
@@ -252,6 +273,62 @@ def generate_opcheck_tests(
         for prefix, tester in test_utils.items():
             construct_method(attr, prefix, tester)
 
+    generate_tag_tests(testcase, failures_dict, additional_decorators)
+
+
+def generate_tag_tests(testcase, failures_dict, additional_decorators):
+    def generate_test(qualname, definitely_not_pt2_compliant, xfailed_tests):
+        def inner(self):
+            try:
+                op = torch._library.utils.lookup_op(qualname)
+            except AttributeError as e:
+                # Operator not importable in this test file
+                raise unittest.SkipTest(f"Can't import operator {qualname}") from e
+            op_marked_as_compliant = torch.Tag.pt2_compliant_tag in op.tags
+            if not op_marked_as_compliant:
+                return
+            if not definitely_not_pt2_compliant:
+                return
+            raise AssertionError(
+                f"op '{qualname}' was tagged with torch.Tag.pt2_compliant_tag "
+                f"but it failed some of the generated opcheck tests "
+                f"({xfailed_tests}). This may lead to silent correctness issues, "
+                f"please fix this."
+            )
+
+        return inner
+
+    for qualname, test_dict in failures_dict.data.items():
+        xfailed_tests = [
+            test
+            for test, status_dict in test_dict.items()
+            # We're about to delete the following test after Ed's PR
+            # to specialize on C++ .size() calls
+            if "test_aot_dispatch_static" not in test
+            and status_dict["status"] == "xfail"
+        ]
+        definitely_not_pt2_compliant = len(xfailed_tests) > 0
+        generated = generate_test(qualname, definitely_not_pt2_compliant, xfailed_tests)
+
+        # Could result in collisions, but unlikely. We'll raise if we see one below.
+        mangled_qualname = qualname.replace("::", "_").replace(".", "_")
+        test_name = "test_pt2_compliant_tag_" + mangled_qualname
+
+        # You can skip this test via the additional_decorators argument
+        # in generate_opcheck_tests
+        if test_name in additional_decorators:
+            for decorator in additional_decorators[test_name]:
+                generated = decorator(generated)
+
+        if hasattr(testcase, test_name):
+            raise RuntimeError(
+                f"Tried to generate a test named {test_name}, but it exists "
+                f"already. This could be because of a name collision (where "
+                f"we generated two tests with the same name), or where we "
+                f"generated a test with the same name as an existing test."
+            )
+        setattr(testcase, test_name, generated)
+
 
 TEST_OPTIONS = ("xfail", "skip", "xsuccess")
 
@@ -333,6 +410,8 @@ def validate_failures_dict_structure(
                 if not actual_test_name.startswith(test):
                     continue
                 base_test_name = actual_test_name[len(test) + 2 :]
+                # remove potential pytest parametrization suffix
+                base_test_name = re.sub(r"\[.*\]", "", base_test_name)
                 if testcase.__name__ != test_class:
                     continue
                 if hasattr(testcase, base_test_name):
@@ -449,11 +528,14 @@ class OpCheckMode(TorchFunctionMode):
 
     def __enter__(self, *args, **kwargs):
         self.prev_is_opcheck_mode = _is_inside_opcheck_mode.value
+        self.prev_dynamo_disable = os.environ.get("TORCHDYNAMO_DISABLE", "")
         _is_inside_opcheck_mode.value = True
+        os.environ["TORCHDYNAMO_DISABLE"] = "1"
         return super().__enter__(*args, **kwargs)
 
     def __exit__(self, *args, **kwargs):
         _is_inside_opcheck_mode.value = self.prev_is_opcheck_mode
+        os.environ["TORCHDYNAMO_DISABLE"] = self.prev_dynamo_disable
         try:
             self.maybe_raise_errors_on_exit()
             if should_update_failures_dict():
@@ -464,7 +546,7 @@ class OpCheckMode(TorchFunctionMode):
 
     def run_test_util(self, op, args, kwargs):
         try:
-            self.test_util(op, args, kwargs)
+            self.test_util(op, args, kwargs, copy_inputs=False)
         except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
             # We might get here if the input is already a FakeTensor
             # or if we're in a torch.compile block. Just ignore these
@@ -495,7 +577,6 @@ class OpCheckMode(TorchFunctionMode):
             return func(*args, **kwargs)
 
         args_c, kwargs_c = deepcopy_tensors((args, kwargs))
-        # Only call test_util(op, *args, **kwargs) if this succeeds.
         result = func(*args, **kwargs)
 
         option = self.failures_dict.get_status(qualname, self.test_name)
@@ -630,8 +711,7 @@ def generate_repro(
         unix_timestamp = datetime.datetime.timestamp(now) * 100000
         filepath = os.path.join(path, f"repro_{unix_timestamp}.pt")
         if not dry_run:
-            if not os.path.exists(path):
-                os.makedirs(path)
+            os.makedirs(path, exist_ok=True)
             torch.save((args, kwargs), filepath)
         args_kwargs = f'args, kwargs = torch.load("{filepath}")'
     else:
@@ -688,6 +768,14 @@ DUMP_OPTIONS = {"indent": 2, "sort_keys": True}
 FailuresDictData = Dict[str, Dict[str, Dict[str, str]]]
 
 
+VERSION = 1
+DESCRIPTION = (
+    f"This is a dict containing failures for tests autogenerated by "
+    f"generate_opcheck_tests. "
+    f"For more details, please see {GDOC}"
+)
+
+
 class FailuresDict:
     def __init__(self, path: str, data: FailuresDictData):
         self.path = path
@@ -700,20 +788,24 @@ class FailuresDict:
             FailuresDict.save()
             return result
         with open(path) as fp:
-            dct = json.load(fp)
-        assert "data" in dct
-        assert "_version" in dct and dct["_version"] == 1
+            contents = fp.read()
+            if contents.strip() == "":
+                dct = {
+                    "_description": DESCRIPTION,
+                    "data": {},
+                    "_version": VERSION,
+                }
+            else:
+                dct = json.loads(contents)
+                assert "data" in dct
+                assert "_version" in dct and dct["_version"] == VERSION
         return FailuresDict(path, dct["data"])
 
     def _save(self, to_str=False) -> Optional[str]:
         to_dump = {
-            "_description": (
-                f"This is a dict containing failures for tests autogenerated by "
-                f"generate_opcheck_tests. "
-                f"For more details, please see {GDOC}"
-            ),
+            "_description": DESCRIPTION,
             "data": self.data,
-            "_version": 1,
+            "_version": VERSION,
         }
         # json.dumps doesn't end with a newline. Let's add one because files
         # should end in newlines.

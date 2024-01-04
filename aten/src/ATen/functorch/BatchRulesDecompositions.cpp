@@ -5,8 +5,8 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
-#include <ATen/Operators.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/Operators.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/BatchedFallback.h>
@@ -46,6 +46,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(absolute);
   OP_DECOMPOSE(absolute_);
   OP_DECOMPOSE(arctan2);
+  OP_DECOMPOSE(arctan2_);
   OP_DECOMPOSE(argsort);
   OP_DECOMPOSE(avg_pool1d);
   OP_DECOMPOSE(adaptive_max_pool1d);
@@ -121,6 +122,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(fix);
   OP_DECOMPOSE(fliplr);
   OP_DECOMPOSE(flipud);
+  OP_DECOMPOSE2(flatten, using_ints);
   OP_DECOMPOSE2(float_power, Tensor_Tensor);
   OP_DECOMPOSE2(float_power, Tensor_Scalar);
   OP_DECOMPOSE2(float_power, Scalar);
@@ -155,12 +157,14 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(ldexp, Tensor);
   OP_DECOMPOSE2(less_equal, Tensor );
   OP_DECOMPOSE2(less, Tensor );
+  OP_DECOMPOSE(linear);
   OP_DECOMPOSE(linalg_cond);
   OP_DECOMPOSE(linalg_cholesky);
   OP_DECOMPOSE(linalg_det);
   OP_DECOMPOSE(linalg_eigvalsh);
   OP_DECOMPOSE(linalg_eigvals);
   OP_DECOMPOSE(linalg_inv);
+  OP_DECOMPOSE(linalg_lu_factor);
   OP_DECOMPOSE(linalg_matmul);
   OP_DECOMPOSE(linalg_matrix_norm);
   OP_DECOMPOSE2(linalg_matrix_norm, str_ord);
@@ -172,12 +176,16 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(linalg_solve_ex);
   OP_DECOMPOSE(linalg_svd);
   OP_DECOMPOSE(linalg_svdvals);
+  OP_DECOMPOSE(linalg_pinv);
   OP_DECOMPOSE(linalg_tensorinv);
+  OP_DECOMPOSE2(linalg_pinv, atol_rtol_float);
   m.impl("linalg_vander", native::linalg_vander_symint);
   OP_DECOMPOSE(cumprod_backward);
   OP_DECOMPOSE(linalg_matrix_power);
   OP_DECOMPOSE(linalg_vecdot);
   OP_DECOMPOSE(log_sigmoid);
+  OP_DECOMPOSE(logdet);
+  OP_DECOMPOSE2(log_softmax, int);
   OP_DECOMPOSE(_lu_with_info);
   OP_DECOMPOSE(matmul);
   OP_DECOMPOSE(matrix_H);
@@ -193,6 +201,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(min, other );
   OP_DECOMPOSE2(moveaxis, intlist);
   OP_DECOMPOSE2(movedim, int);
+  OP_DECOMPOSE2(movedim, intlist);
   OP_DECOMPOSE(msort);
   OP_DECOMPOSE(mT);
   OP_DECOMPOSE(nanmean);
@@ -247,6 +256,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(special_psi);
   OP_DECOMPOSE(special_round);
   OP_DECOMPOSE(special_sinc);
+  OP_DECOMPOSE(special_xlogy);
+  OP_DECOMPOSE2(special_xlogy, other_scalar);
+  OP_DECOMPOSE2(special_xlogy, self_scalar);
 
 
   m.impl("split.sizes", native::split_symint);
@@ -275,12 +287,15 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(swapdims);
   OP_DECOMPOSE(take_along_dim);
   OP_DECOMPOSE(tensordot);
+  m.impl("tensor_split.indices", native::tensor_split_indices_symint);
+  m.impl("tensor_split.sections", native::tensor_split_sections_symint);
   OP_DECOMPOSE(_test_check_tensor);
   m.impl("tile", native::tile_symint);
   OP_DECOMPOSE2(trapezoid, x);
   OP_DECOMPOSE2(trapezoid, dx);
   OP_DECOMPOSE2(trapz, x);
   OP_DECOMPOSE2(trapz, dx);
+  OP_DECOMPOSE(unsafe_chunk);
   m.impl("value_selecting_reduction_backward", native::value_selecting_reduction_backward_symint);
   OP_DECOMPOSE(var);
   OP_DECOMPOSE2(var, dim);
@@ -301,10 +316,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("conv1d", native::conv1d_symint);
   m.impl("conv2d", native::conv2d_symint);
   m.impl("conv3d", native::conv3d_symint);
-  OP_DECOMPOSE2(conv1d, padding);
-  OP_DECOMPOSE2(conv2d, padding);
-  OP_DECOMPOSE2(conv3d, padding);
-  OP_DECOMPOSE(_convolution_mode);
+  m.impl("conv1d.padding", native::conv1d_padding_symint);
+  m.impl("conv2d.padding", native::conv2d_padding_symint);
+  m.impl("conv3d.padding", native::conv3d_padding_symint);
+  m.impl("_convolution_mode", native::_convolution_mode_symint);
   OP_DECOMPOSE(type_as);
   OP_DECOMPOSE(linalg_diagonal);
   OP_DECOMPOSE(diagonal_copy);
@@ -360,6 +375,12 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(less, Scalar);
   OP_DECOMPOSE2(not_equal, Scalar);
   m.impl("_has_compatible_shallow_copy_type", torch::CppFunction::makeFromBoxedFunction<&unsupportedData>());
+
+  // to.*
+  OP_DECOMPOSE2(to, device);
+  OP_DECOMPOSE2(to, dtype);
+  OP_DECOMPOSE2(to, dtype_layout);
+  OP_DECOMPOSE2(to, other);
 }
 
 }}

@@ -5,8 +5,7 @@ from multiprocessing.reduction import ForkingPickler
 
 
 class ConnectionWrapper:
-    """Proxy class for _multiprocessing.Connection which uses ForkingPickler to
-    serialize objects"""
+    """Proxy class for _multiprocessing.Connection which uses ForkingPickler for object serialization."""
 
     def __init__(self, conn):
         self.conn = conn

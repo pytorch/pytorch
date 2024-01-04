@@ -55,7 +55,7 @@ class OutDtypeOperator(HigherOrderOperator):
             raise ValueError("out_dtype's first argument must be an OpOverload")
         if op._schema.is_mutable:
             raise ValueError("out_dtype's first argument needs to be a functional operator")
-        if not(
+        if not (
             len(op._schema.returns) == 1 and
             isinstance(op._schema.returns[0].type, torch.TensorType)
         ):
@@ -127,7 +127,7 @@ def is_int_mm(op, output_dtype, args):
 
 
 def out_dtype_fallback(op, output_dtype, *args):
-    flat_inputs = pytree.tree_flatten(args)[0] + [torch.ones(1, dtype=output_dtype)]
+    flat_inputs = pytree.arg_tree_leaves(*args) + [torch.ones(1, dtype=output_dtype)]
     promote_dtype: torch.dtype = elementwise_dtypes(
         *flat_inputs,
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,

@@ -8,7 +8,7 @@ import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
 
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate
+from torch.distributed._tensor import DeviceMesh, DTensor
 
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
@@ -25,7 +25,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
 )
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils import _pytree as pytree
+from torch.utils._pytree import tree_map
 
 # rewrite common size variables to sth can be sharded evenly
 # we can enable uneven shards later, but need to adjust more on
@@ -130,7 +131,6 @@ dtensor_fails = {
     xfail("constant_pad_nd"),
     xfail("corrcoef"),
     xfail("count_nonzero"),
-    xfail("cov"),
     xfail("cross"),
     xfail("cummax"),
     xfail("cummin"),
@@ -146,9 +146,11 @@ dtensor_fails = {
     xfail("dot"),
     xfail("einsum"),
     xfail("empty"),
+    xfail("empty_strided"),
     xfail("empty_like"),
     xfail("empty_permuted"),
     xfail("exponential"),
+    xfail("equal"),
     xfail("eye"),
     xfail("fft.fft2"),
     xfail("fft.fft"),
@@ -240,10 +242,12 @@ dtensor_fails = {
     xfail("linalg.vecdot"),
     xfail("linalg.vector_norm"),
     xfail("linspace"),
+    xfail("linspace", "tensor_overload"),
     xfail("log_normal"),
     xfail("logcumsumexp"),
     xfail("logdet"),
     xfail("logspace"),
+    xfail("logspace", "tensor_overload"),
     xfail("logsumexp"),
     xfail("lu"),
     xfail("lu_solve"),
@@ -260,15 +264,12 @@ dtensor_fails = {
     xfail("masked.logsumexp"),
     xfail("masked.median"),
     xfail("masked.norm"),
-    xfail("masked.prod"),
     xfail("matrix_exp"),
     xfail("max", "binary"),
-    xfail("max", "reduction_no_dim"),
     xfail("max", "reduction_with_dim"),
     xfail("maximum"),
     xfail("median"),
     xfail("min", "binary"),
-    xfail("min", "reduction_no_dim"),
     xfail("min", "reduction_with_dim"),
     xfail("minimum"),
     xfail("mode"),
@@ -281,7 +282,7 @@ dtensor_fails = {
     xfail("nanquantile"),
     xfail("nansum"),
     xfail("native_batch_norm"),
-    xfail("native_layer_norm"),
+    xfail("native_dropout_backward"),
     xfail("narrow_copy"),
     xfail("ne"),
     xfail("new_empty"),
@@ -305,6 +306,7 @@ dtensor_fails = {
     xfail("nn.functional.celu"),
     xfail("nn.functional.conv1d"),
     xfail("nn.functional.conv2d"),
+    xfail("nn.functional.conv3d"),
     xfail("nn.functional.conv_transpose1d"),
     xfail("nn.functional.conv_transpose2d"),
     xfail("nn.functional.conv_transpose3d"),
@@ -332,8 +334,8 @@ dtensor_fails = {
     xfail("nn.functional.interpolate", "bilinear"),
     xfail("nn.functional.interpolate", "linear"),
     xfail("nn.functional.interpolate", "nearest"),
+    xfail("nn.functional.interpolate", "nearest-exact"),
     xfail("nn.functional.interpolate", "trilinear"),
-    xfail("nn.functional.layer_norm"),
     xfail("nn.functional.leaky_relu"),
     xfail("nn.functional.linear"),
     xfail("nn.functional.local_response_norm"),
@@ -351,6 +353,7 @@ dtensor_fails = {
     xfail("nn.functional.mish"),
     xfail("nn.functional.mse_loss"),
     xfail("nn.functional.multi_margin_loss"),
+    xfail("nn.functional.multi_head_attention_forward"),
     xfail("nn.functional.multilabel_margin_loss"),
     xfail("nn.functional.multilabel_soft_margin_loss"),
     xfail("nn.functional.nll_loss"),
@@ -358,6 +361,7 @@ dtensor_fails = {
     xfail("nn.functional.pad", "constant"),
     xfail("nn.functional.pad", "reflect"),
     xfail("nn.functional.pad", "replicate"),
+    xfail("nn.functional.pad", "replicate_negative"),
     xfail("nn.functional.pairwise_distance"),
     xfail("nn.functional.pdist"),
     xfail("nn.functional.pixel_shuffle"),
@@ -486,6 +490,7 @@ dtensor_fails = {
     xfail("unique_consecutive"),
     xfail("unique"),
     xfail("unsafe_split"),
+    xfail("unsafe_chunk"),
     xfail("var_mean"),
     xfail("var_mean", "unbiased"),
     xfail("vdot"),
@@ -494,7 +499,7 @@ dtensor_fails = {
     xfail("zeros"),
     # ops inside this might even fail without dtensor
     # tests, as we rescale op db common test size factor (i.e. L, M, S)
-    # which triggered the orignal function run failures with input
+    # which triggered the original function run failures with input
     # generation becomes wrong, we skip them for now but should enable later.
     # TODO: need to clean this list and remove all cases
     skip("argwhere"),
@@ -580,8 +585,8 @@ class TestDTensorOps(DTensorOpTestBase):
         self.check_dtensor_func(test, op)
 
     def assert_ref_dtensor_equal(self, dtensor_rs, rs):
-        flat_dtensor_rs, _ = tree_flatten(dtensor_rs)
-        flat_rs, _ = tree_flatten(rs)
+        flat_dtensor_rs = pytree.tree_leaves(dtensor_rs)
+        flat_rs = pytree.tree_leaves(rs)
         self.assertEqual(len(flat_dtensor_rs), len(flat_rs))
         for dtensor_r, r in zip(flat_dtensor_rs, flat_rs):
             if not isinstance(r, torch.Tensor):
@@ -601,7 +606,7 @@ class TestDTensorOps(DTensorOpTestBase):
                 f"dtensor requires_grad: {dtensor_r.requires_grad}",
             )
 
-            self.assertEqualOnRank(dtensor_r.to_local(), r)
+            self.assertEqualOnRank(dtensor_r, r)
 
     def run_dtensor_crossref(self, func, args, kwargs):
         to_dtensor = DTensorConverter(self.mesh, args, kwargs)
@@ -620,11 +625,7 @@ class TestDTensorOps(DTensorOpTestBase):
         rs = concat_res_if_necessary(func, rs)
 
         def to_replicate(e: object) -> object:
-            return (
-                e.redistribute(self.mesh, self.mesh.ndim * [Replicate()])
-                if isinstance(e, DTensor)
-                else e
-            )
+            return e.full_tensor() if isinstance(e, DTensor) else e
 
         try:
             # Suppress warnings, this doesn't matter for test_meta.py
@@ -646,10 +647,10 @@ class TestDTensorOps(DTensorOpTestBase):
                         # errors
                         dtensor_rs = func(*dtensor_args, **dtensor_kwargs)
 
-                        # we need to skip tests containing tensors of zero elmeents for now.
+                        # we need to skip tests containing tensors of zero elements for now.
                         # see issue: https://github.com/pytorch/tau/issues/470
                         # TODO remove this once issue above fixed.
-                        flat_args, _ = tree_flatten(dtensor_rs)
+                        flat_args = pytree.tree_leaves(dtensor_rs)
                         if any(
                             isinstance(e, torch.Tensor) and e.numel() == 0
                             for e in flat_args

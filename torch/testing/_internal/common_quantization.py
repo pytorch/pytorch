@@ -206,7 +206,7 @@ def run_ddp(rank, world_size, prepared):
     prepared.to(rank)
     model_with_ddp = prepared
     optimizer = torch.optim.SGD(model_with_ddp.parameters(), lr=0.0001)
-    train_one_epoch(model_with_ddp, criterion, optimizer, dataset, rank, 1)
+    train_one_epoch(model_with_ddp, criterion, optimizer, dataset, rank, 1)  # noqa: F821
     ddp_cleanup()
 
 
@@ -351,6 +351,22 @@ def skipIfNoONEDNN(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if 'onednn' not in torch.backends.quantized.supported_engines:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+def skipIfNoONEDNNBF16(fn):
+    reason = 'Quantized operations require BF16 support.'
+    if isinstance(fn, type):
+        if not torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torch.ops.mkldnn._is_mkldnn_bf16_supported():
             raise unittest.SkipTest(reason)
         else:
             fn(*args, **kwargs)
@@ -2547,7 +2563,7 @@ class TestHelperModules:
             x = self.bn(x)
             return self.relu(x)
 
-    class Conv1dWithConv2d(torch.nn.Module):
+    class Conv2dThenConv1d(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.conv1d = torch.nn.Conv1d(3, 3, 3)
@@ -2558,6 +2574,9 @@ class TestHelperModules:
             x = x.squeeze(0)
             x = self.conv1d(x)
             return x
+
+        def example_inputs(self):
+            return (torch.randn(1, 3, 5, 5),)
 
     class Conv2dWithCat(torch.nn.Module):
         def __init__(self):
@@ -2570,6 +2589,27 @@ class TestHelperModules:
             y = self.conv2(y)
             z = torch.cat([x, y], dim=1)
             return z
+
+    class Conv2dWithTwoCat(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv1 = torch.nn.Conv2d(3, 3, 3)
+            self.conv2 = torch.nn.Conv2d(3, 3, 3)
+
+        def forward(self, x1, x2, x3, x4):
+            x1 = self.conv1(x1)
+            x2 = self.conv2(x2)
+            y = torch.cat([x1, x2], dim=1)
+            z = x3 + x4
+            w = torch.cat([z, y])
+            return w
+
+    class ThreeAdd(torch.nn.Module):
+        def forward(self, x1, x2, x3, x4):
+            y = x1 + x2
+            z = x3 + x4
+            w = y + z
+            return w
 
     class EmbeddingModule(torch.nn.Module):
         def __init__(self):
@@ -2607,6 +2647,14 @@ class TestHelperModules:
             x *= y
             return x
 
+    class AddMulScalar(torch.nn.Module):
+        def forward(self, x):
+            x = x + 3
+            x = x * 3
+            x += 3
+            x *= 3
+            return x
+
     class ConvBnReLU2dAndLinearReLU(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -2619,3 +2667,14 @@ class TestHelperModules:
             permute_out = torch.permute(x, (0, 2, 3, 1))
             linear_out = self.linear(permute_out)
             return linear_out
+
+    class GroupwiseConv2d(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(4, 4, 3, groups=2)
+
+        def forward(self, x):
+            return self.conv(x)
+
+        def example_inputs(self):
+            return (torch.randn(2, 4, 10, 10),)

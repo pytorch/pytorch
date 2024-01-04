@@ -10,7 +10,7 @@ namespace caffe2 {
 class CAFFE2_OBSERVER_API NetObserverReporterPrint : public NetObserverReporter {
  public:
   static const std::string IDENTIFIER;
-  void report(NetBase* net, std::map<std::string, PerformanceInformation>&);
+  void report(NetBase* net, std::map<std::string, PerformanceInformation>&) override;
 };
 
 } // namespace caffe2

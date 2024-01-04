@@ -279,11 +279,94 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         ):
             opt_model(x)
 
+    def test_enum_arg(self):
+        from enum import Enum
+
+        class SomeEnum(Enum):
+            A = 0
+            B = 1
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, e):
+                if e is SomeEnum.A:
+                    return x.sin()
+                else:
+                    return x.cos()
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x, enum):
+            output = Foo.apply(
+                x,
+                enum,
+            )
+            return output
+
+        x = torch.tensor([[1.0, 2, 3], [4, 5, 6]], requires_grad=True)
+        y = f(x, SomeEnum.A)
+        self.assertEqual(y, x.sin())
+
     def test_save_for_bwd(self):
         model = SaveForBwdModule()
         opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         opt_model(x)
+
+    def test_allow_in_graph(self):
+        torch._dynamo.utils.counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.allow_in_graph
+        class AllowInGraphFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                torch._dynamo.graph_break()
+                ctx.x0 = x.size(0)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out * ctx.x0
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return AllowInGraphFunc.apply(x)
+
+        x = torch.rand(2, 3, requires_grad=True)
+        result = fn(x)
+
+        self.assertEqual(result, AllowInGraphFunc.apply(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_once_differentiable(self):
+        from torch.autograd.function import once_differentiable
+
+        torch._dynamo.utils.counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        class ScaleGradient(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, grad):
+                return grad * 0.5
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return ScaleGradient.apply(x)
+
+        x = torch.randn(3, requires_grad=True)
+        result = fn(x)
+
+        self.assertEqual(result, ScaleGradient.apply(x))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_classmethod(self):
         class Shake(torch.autograd.Function):
@@ -330,6 +413,59 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             @staticmethod
             def forward(ctx, x):
                 return x.clone(), x.clone()
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad1 + grad2
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f(x):
+            return Foo.apply(x)
+
+        x = torch.randn(3, requires_grad=True)
+        result = f(x)
+
+        self.assertEqual(result, Foo.apply(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_amp_custom_fwd_bwd(self):
+        torch._dynamo.utils.counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        class MyMM(torch.autograd.Function):
+            @staticmethod
+            @torch.cuda.amp.custom_fwd
+            def forward(ctx, a, b):
+                ctx.save_for_backward(a, b)
+                return a.mm(b)
+
+            @staticmethod
+            @torch.cuda.amp.custom_bwd
+            def backward(ctx, grad):
+                a, b = ctx.saved_tensors
+                return grad.mm(b.t()), a.t().mm(grad)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            return MyMM.apply(a, b)
+
+        a = torch.randn([64, 64], dtype=torch.float32, requires_grad=True)
+        grad = a.clone()
+        res = fn(a, a)
+        res.backward(grad)
+
+        self.assertEqual(res, MyMM.apply(a, a))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_graph_break_if_lifted_free_variable(self):
+        torch._dynamo.utils.counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+        delta = torch.randn(3)
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone(), (x + delta).clone()
 
             @staticmethod
             def backward(ctx, grad1, grad2):
@@ -489,7 +625,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
             @staticmethod
             def jvp(ctx, x_t):
-                if jvp_err:
+                if jvp_err:  # noqa: F821
                     return x_t
                 else:
                     return x_t.mul_(2)
@@ -505,7 +641,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
             @staticmethod
             def jvp(ctx, x_t, y_t):
-                return x_t + y_t, fn(x_t)
+                return x_t + y_t, fn(x_t)  # noqa: F821
 
         class MyFn3(torch.autograd.Function):
             @staticmethod
@@ -591,7 +727,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                 )
 
             @staticmethod
-            def __tensor_unflatten__(tensors, metadatas):
+            def __tensor_unflatten__(tensors, metadatas, outer_size, outer_stride):
                 return FooTensor(tensors["_data"], metadatas[0], metadatas[1])
 
             @classmethod
@@ -651,6 +787,54 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(y, y_ref)
         self.assertEqual(x.grad, x_ref.grad)
+
+    def test_smuggle_symint_issue_111031(self):
+        from torch.autograd import Function
+
+        class Foo(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.x0 = x.size(0)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out * ctx.x0
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True, dynamic=True)
+        def foo(x):
+            return Foo.apply(x)
+
+        foo(torch.randn(2, requires_grad=True))
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_smuggle_tensor_and_complex_structures(self):
+        from torch.autograd import Function
+
+        class Foo(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.x0 = x
+                ctx.x1 = [1, 2, 3]
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                x0mul = grad_out * ctx.x0
+                for i in ctx.x1:
+                    x0mul = (x0mul * i) + x0mul
+                return x0mul
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True, dynamic=True)
+        def foo(x):
+            return Foo.apply(x)
+
+        foo(torch.randn(2, requires_grad=True))
+        self.assertEqual(cnts.frame_count, 1)
 
 
 if __name__ == "__main__":

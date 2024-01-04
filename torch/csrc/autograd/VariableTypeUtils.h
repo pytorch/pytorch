@@ -263,7 +263,8 @@ inline std::vector<at::Tensor> as_view(
   if (base.is_inference())
     return tensors;
 
-  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
+  const auto diff_view_meta =
+      torch::autograd::impl::get_view_autograd_meta(base);
 
   // Special case when view info can be shared for forward and backward
   // differentiable views
@@ -309,7 +310,6 @@ inline std::vector<at::Tensor> as_view(
   c10::optional<ViewInfo> new_fw_info = c10::nullopt;
 
   if (is_bw_differentiable) {
-    auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
     if (diff_view_meta && diff_view_meta->has_bw_view()) {
       const auto& base_bw_info = diff_view_meta->get_backward_view();
       // TODO: fix fb internal use-case so that it doesn't trigger this internal
@@ -333,7 +333,6 @@ inline std::vector<at::Tensor> as_view(
   }
   if (is_fw_differentiable) {
     // Check if base is a forward differentiable view
-    auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
     if (diff_view_meta && diff_view_meta->has_fw_view()) {
       const auto& base_fw_info = diff_view_meta->get_forward_view();
       TORCH_INTERNAL_ASSERT(
@@ -351,7 +350,6 @@ inline std::vector<at::Tensor> as_view(
 
   if ((is_fw_differentiable || is_bw_differentiable) && base.is_view()) {
     // is_view() => diff_view_meta
-    auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
     creation_meta = propagate_creation_meta(
         diff_view_meta->get_creation_meta(), creation_meta);
   }
