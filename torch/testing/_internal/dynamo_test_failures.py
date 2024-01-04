@@ -283,10 +283,6 @@ FIXME_default_non_strict = {
     "test_vulkan",
     "test_weak",
     "test_xnnpack_integration",
-    "torch_np/numpy_tests/core/test_dlpack",
-    "torch_np/numpy_tests/core/test_dtype",
-    "torch_np/numpy_tests/core/test_einsum",
-    "torch_np/numpy_tests/core/test_getlimits",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -1541,6 +1537,81 @@ dynamo_expected_failures = {
     "TestIndexing.test_slicing_no_floats",  # torch_np/numpy_tests/core/test_indexing
     "TestBroadcastedAssignments.test_prepend_not_one",  # torch_np/numpy_tests/core/test_indexing
     "TestFloatNonIntegerArgument.test_reduce_axis_float_index",  # torch_np/numpy_tests/core/test_indexing
+    "TestEinsum.test_different_paths_dtype_f",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_D",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_e",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_fixed_collapsingbug",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_combined_views_mapping",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_B",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_sums_cfloat64",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_broadcast",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_sums_int32",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_b",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_fixedstridebug",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_out_is_res",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_subscript_range",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_sums_float64",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_sums_float32",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_sums_cfloat128",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_small_boolean_arrays",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_i",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_d",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_l",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_h",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_misc",  # torch_np/numpy_tests/core/test_einsum
+    "TestMisc.test_overlap",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_sums_int64",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_failed_on_p9_and_s390x",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_F",  # torch_np/numpy_tests/core/test_einsum
+    "TestDLPack.test_dtype_passthrough_dtype4",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_23",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_12",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_27",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_32",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_from_dlpack_refcount",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype2",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_2",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_ndim0",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_1",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_17",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_13",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_14",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype7",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype9",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_29",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dunder_dlpack_refcount",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_15",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_non_contiguous",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype3",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_30",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_6",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_7",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype6",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype5",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_4",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_31",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_from_torch",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_24",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_21",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype8",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_28",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_3",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_10",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_0",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_16",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_18",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_20",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_11",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_25",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_5",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_22",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dlpack_device",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_9",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype0",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype1",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_19",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_26",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_8",  # torch_np/numpy_tests/core/test_dlpack
 }
 
 dynamo_skips = {
@@ -1603,4 +1674,5 @@ dynamo_skips = {
     "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_L_operation0",  # torch_np/numpy_tests/core/test_scalarmath
     "TestCorrelate.test_complex",  # known py311 fail
     "TestStdVarComplex.test_basic",  # known py311 fail
+    "TestEinsum.test_broadcasting_dot_cases",  # known py311 fail
 }
