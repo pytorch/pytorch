@@ -4,6 +4,8 @@ import inspect
 import re
 import unittest
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
+from dataclasses import dataclass
+from typing import Any, NamedTuple
 
 import torch
 import torch.utils._cxx_pytree as cxx_pytree
@@ -1005,6 +1007,92 @@ TreeSpec(tuple, None, [*,
         )
         self.assertEqual(serialized_spec, saved_spec)
         self.assertEqual(complicated_spec, py_pytree.treespec_loads(saved_spec))
+
+    def test_tree_map_with_path(self):
+        tree = [{i: i for i in range(10)}]
+        all_zeros = py_pytree.tree_map_with_path(
+            lambda kp, val: val - kp[1].key + kp[0].idx, tree
+        )
+        self.assertEqual(all_zeros, [{i: 0 for i in range(10)}])
+
+    def test_tree_map_with_path_multiple_trees(self):
+        @dataclass
+        class ACustomPytree:
+            x: Any
+            y: Any
+            z: Any
+
+        tree1 = [ACustomPytree(x=12, y={"cin": [1, 4, 10], "bar": 18}, z="leaf"), 5]
+        tree2 = [
+            ACustomPytree(
+                x=2,
+                y={"cin": [2, 2, 2], "bar": 2},
+                z="leaf",
+            ),
+            2,
+        ]
+
+        py_pytree.register_pytree_node(
+            ACustomPytree,
+            flatten_fn=lambda f: ([f.x, f.y], f.z),
+            unflatten_fn=lambda xy, z: ACustomPytree(xy[0], xy[1], z),
+            flatten_with_keys_fn=lambda f: ((("x", f.x), ("y", f.y)), f.z),
+        )
+        from_two_trees = py_pytree.tree_map_with_path(
+            lambda kp, a, b: a + b, tree1, tree2
+        )
+        from_one_tree = py_pytree.tree_map(lambda a: a + 2, tree1)
+        self.assertEqual(from_two_trees, from_one_tree)
+
+    def test_tree_flatten_with_path_roundtrip(self):
+        class ANamedTuple(NamedTuple):
+            x: torch.Tensor
+            y: int
+            z: str
+
+        @dataclass
+        class ACustomPytree:
+            x: Any
+            y: Any
+            z: Any
+
+        py_pytree.register_pytree_node(
+            ACustomPytree,
+            flatten_fn=lambda f: ([f.x, f.y], f.z),
+            unflatten_fn=lambda xy, z: ACustomPytree(xy[0], xy[1], z),
+            flatten_with_keys_fn=lambda f: ((("x", f.x), ("y", f.y)), f.z),
+        )
+
+        SOME_PYTREES = [
+            (None,),
+            ["hello", [1, 2], {"foo": [(3)]}],
+            [ANamedTuple(x=torch.rand(2, 3), y=1, z="foo")],
+            [ACustomPytree(x=12, y={"cin": [1, 4, 10], "bar": 18}, z="leaf"), 5],
+        ]
+        for pytree in SOME_PYTREES:
+            key_leaves, spec = py_pytree.tree_flatten_with_path(pytree)
+            actual = py_pytree.tree_unflatten([leaf for _, leaf in key_leaves], spec)
+            self.assertEqual(actual, pytree)
+
+    def test_key_str(self):
+        class ANamedTuple(NamedTuple):
+            x: str
+            y: int
+
+        tree = (["hello", [1, 2], {"foo": [(3)], "bar": [ANamedTuple(x="baz", y=10)]}],)
+        flat, _ = py_pytree.tree_flatten_with_path(tree)
+        paths = [f"{py_pytree.keystr(kp)}: {val}" for kp, val in flat]
+        self.assertEqual(
+            paths,
+            [
+                "[0][0]: hello",
+                "[0][1][0]: 1",
+                "[0][1][1]: 2",
+                "[0][2]['foo'][0]: 3",
+                "[0][2]['bar'][0].x: baz",
+                "[0][2]['bar'][0].y: 10",
+            ],
+        )
 
 
 class TestCxxPytree(TestCase):
