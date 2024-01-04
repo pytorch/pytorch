@@ -702,7 +702,8 @@ def mps_ops_modifier(ops):
         'nn.functional.interpolatelinear': None,
         'nn.functional.interpolatetrilinear': None,
         # TODO: max_pool2d for integral types fails the numerical test
-        'nn.functional.max_pool2d': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'nn.functional.max_pool2d': (integral_types() if product_version < 14.0 else
+                                     [torch.int64, torch.int32, torch.int16, torch.int8]),
         'nn.functional.max_unpool1dgrad': None,
         'nn.functional.max_unpool2dgrad': None,
         'nn.functional.max_unpool3dgrad': None,
