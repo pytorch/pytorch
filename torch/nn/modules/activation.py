@@ -1155,8 +1155,11 @@ class MultiheadAttention(Module):
             check_other=False,
         )
 
+        is_fastpath_enabled = torch.backends.mha.get_fastpath_enabled()
 
-        if not is_batched:
+        if not is_fastpath_enabled:
+            why_not_fast_path = "torch.backends.mha.get_fastpath_enabled() was not True"
+        elif not is_batched:
             why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
         elif query is not key or key is not value:
             # When lifting this restriction, don't forget to either
