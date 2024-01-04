@@ -24,8 +24,8 @@ namespace {
  * created and only initialized once, ensuring thread-local safety. Each device
  * within the device pool shares the same default context.
  */
-static c10::once_flag init_flag;
-static thread_local DeviceIndex curDeviceIndex = 0;
+c10::once_flag init_flag;
+thread_local DeviceIndex curDeviceIndex = 0;
 
 struct DevicePool {
   std::vector<std::unique_ptr<sycl::device>> devices;
@@ -54,7 +54,7 @@ inline unsigned deviceCountImpl(
   return static_cast<int>(devices.size());
 }
 
-static inline void initGlobalDevicePoolState() {
+inline void initGlobalDevicePoolState() {
   // Get device count and record the all GPU devices.
   auto device_count = deviceCountImpl(gDevicePool.devices);
   if (device_count <= 0) {
@@ -68,11 +68,11 @@ static inline void initGlobalDevicePoolState() {
       gDevicePool.devices[0]->get_platform().ext_oneapi_get_default_context());
 }
 
-static inline void initDevicePoolCallOnce() {
+inline void initDevicePoolCallOnce() {
   c10::call_once(init_flag, initGlobalDevicePoolState);
 }
 
-static void initDeviceProperties(DeviceProp* device_prop, int device) {
+void initDeviceProperties(DeviceProp* device_prop, int device) {
   using namespace sycl::info;
   using namespace sycl::ext;
   // Get raw sycl device associated with device index.
@@ -96,7 +96,7 @@ static void initDeviceProperties(DeviceProp* device_prop, int device) {
   return;
 }
 
-static inline void check_device(int device) {
+inline void check_device(int device) {
   int total = static_cast<int>(gDevicePool.devices.size());
   TORCH_CHECK(
       device >= 0 && device < total,
