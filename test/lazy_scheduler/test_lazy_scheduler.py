@@ -799,3 +799,10 @@ TODO:
 if __name__ == "__main__":
   from torch._dynamo.test_case import run_tests
   run_tests()
+
+
+"""
+FAQ
+Q1: What happens if we have a user-defined segment deep down in a submodule?
+Answer: everything before the defined segment will be in their own segment. Everything after is in another segment.
+"""
