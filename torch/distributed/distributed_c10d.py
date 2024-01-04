@@ -1161,6 +1161,13 @@ def init_process_group(
             backend, ``is_high_priority_stream`` can be specified so that
             the nccl backend can pick up high priority cuda streams when
             there're compute kernels waiting.
+        device_id (torch.device, optional): a single, specific device
+            to "bind" this process to, allowing for backend-specific
+            optimizations.  Currently this has two effects, only under
+            NCCL: the communicator is immediately formed (calling
+            ``ncclCommInit*`` immediately rather than the normal lazy
+            call) and sub-groups will use ``ncclCommSplit`` when
+            possible to avoid unnecessary overhead of group creation.
 
     .. note:: To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
         on a system that supports MPI.
