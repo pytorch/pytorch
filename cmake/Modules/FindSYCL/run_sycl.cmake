@@ -1,8 +1,8 @@
 ##########################################################################
-# This file runs the dpcpp commands to produce the desired output file along with
-# the dependency file needed by CMake to compute dependencies.  In addition the
-# file checks the output of each command and if the command fails it deletes the
-# output files.
+# This file runs the SYCL compiler commands to produce the desired output file
+# along with the dependency file needed by CMake to compute dependencies.
+# In addition the file checks the output of each command and if the command fails
+# it deletes the output files.
 
 # Input variables
 #
