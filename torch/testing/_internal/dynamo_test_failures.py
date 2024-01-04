@@ -276,12 +276,9 @@ FIXME_default_non_strict = {
     "test_type_hints",
     "test_type_info",
     "test_type_promotion",
-    "test_typing",
     "test_unary_ufuncs",
     "test_utils",
-    "test_view_ops",
     "test_vulkan",
-    "test_weak",
     "test_xnnpack_integration",
 }
 
@@ -1612,6 +1609,11 @@ dynamo_expected_failures = {
     "TestDLPack.test_higher_dims_ndim_19",  # torch_np/numpy_tests/core/test_dlpack
     "TestDLPack.test_higher_dims_ndim_26",  # torch_np/numpy_tests/core/test_dlpack
     "TestDLPack.test_higher_dims_ndim_8",  # torch_np/numpy_tests/core/test_dlpack
+    "WeakTest.test_make_weak_keyed_dict_from_weak_keyed_dict",  # test_weak
+    "WeakKeyDictionaryTestCase.test_update",  # test_weak
+    "TestViewOpsLAZY.test_advanced_indexing_assignment_lazy",  # test_view_ops
+    "TestOldViewOpsCPU.test_crow_col_indices_cpu",  # test_view_ops
+    "TestViewOpsLAZY.test_advanced_indexing_nonview_lazy",  # test_view_ops
 }
 
 dynamo_skips = {
@@ -1675,4 +1677,7 @@ dynamo_skips = {
     "TestCorrelate.test_complex",  # known py311 fail
     "TestStdVarComplex.test_basic",  # known py311 fail
     "TestEinsum.test_broadcasting_dot_cases",  # known py311 fail
+    "WeakTest.test_make_weak_keyed_dict_from_dict",  # known py311 fail
+    "TestViewOpsCPU.test_as_strided_gradients_cpu",  # known py311 fail
+    "TestViewOpsLAZY.test_as_strided_gradients_lazy",  # known py311 fail
 }
