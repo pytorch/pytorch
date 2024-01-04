@@ -39,10 +39,26 @@ C10_DIAGNOSTIC_POP()
 #include <dlfcn.h>
 #endif
 
+#include <cudnn_frontend.h>
+
 namespace at { namespace native {
 
 void raw_cudnn_layernorm_forward_out(const Tensor& X, const Tensor& scale, const Tensor& bias, float epsilon) {
   TORCH_WARN("called");
+  namespace fe = cudnn_frontend;
+  auto dtype = X.scalar_type();
+  auto fe_dtype = fe::DataType_t::FLOAT;
+  if (dtype == at::ScalarType::Half) {
+    fe_dtype = fe::DataType_t::HALF;
+  } else if (dtype == at::ScalarType::BFloat16) {
+    fe_dtype = fe::DataType_t::BFLOAT16;
+  } else {
+    TORCH_INTERNAL_ASSERT("cuDNN layernorm got unsupported dtype", dtype);
+  }
+  fe::graph::Graph graph;
+  graph.set_io_data_type(fe::DataType_t::HALF)
+      .set_intermediate_data_type(fe::DataType_t::FLOAT)
+      .set_compute_data_type(fe::DataType_t::FLOAT);
 }
 
 
