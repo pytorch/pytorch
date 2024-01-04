@@ -16,7 +16,6 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xfailIfTorchDynamo,
     xpassIfTorchDynamo,
 )
 
