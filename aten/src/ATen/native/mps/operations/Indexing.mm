@@ -651,6 +651,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
               " and ",
               output.size(dim),
               ".");
+  TORCH_CHECK(!self.is_complex(), "index_select(): Yet not supported for complex");
 
   for (const auto i : irange(self.dim())) {
     if (i == dim)
