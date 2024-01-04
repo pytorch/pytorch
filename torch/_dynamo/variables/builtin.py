@@ -1577,6 +1577,9 @@ class BuiltinVariable(VariableTracker):
                     # not broadcastable, can't be compared
                     _unimplemented()
             tensor_cls = left if isinstance(left, TensorVariable) else right
+            proxy = tx.output.create_proxy(
+                "call_function", op, (left.as_proxy(), right.as_proxy()), {}
+            )
             return wrap_fx_proxy_cls(
                 type(tensor_cls),  # handle Ndarrays and Tensors
                 tx,
