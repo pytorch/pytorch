@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from tools.testing.target_determination.heuristics import (
     AggregatedHeuristics as AggregatedHeuristics,
@@ -7,24 +7,26 @@ from tools.testing.target_determination.heuristics import (
 )
 
 
-def get_test_prioritizations(tests: List[str]) -> AggregatedHeuristics:
+def get_test_prioritizations(
+    tests: List[str], print_fn: Any = print
+) -> AggregatedHeuristics:
     aggregated_results = AggregatedHeuristics(unranked_tests=tests)
-    print(f"Received {len(tests)} tests to prioritize")
+    print_fn(f"Received {len(tests)} tests to prioritize")
     for test in tests:
-        print(f"  {test}")
+        print_fn(f"  {test}")
 
     for heuristic in HEURISTICS:
         new_rankings: TestPrioritizations = heuristic.get_test_priorities(tests)
         aggregated_results.add_heuristic_results(heuristic, new_rankings)
 
         num_tests_found = len(new_rankings.get_prioritized_tests())
-        print(
+        print_fn(
             f"Heuristic {heuristic} identified {num_tests_found} tests "
             + f"to prioritize ({(num_tests_found / len(tests)):.2%}%)"
         )
 
         if num_tests_found:
-            new_rankings.print_info()
+            print_fn(new_rankings.get_info_str())
 
     return aggregated_results
 

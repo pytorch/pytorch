@@ -260,6 +260,8 @@ class TestPrioritizations:
             return s
 
         for relevance_group, tests in self._traverse_priorities():
+            if relevance_group == Relevance.UNRANKED:
+                continue
             info += _test_info(
                 f"{Relevance(relevance_group).name.title()} Relevance", tests
             )
