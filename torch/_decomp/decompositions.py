@@ -3358,7 +3358,7 @@ def upsample_bilinear2d(
     yscale = (y_f32 - y).clamp(0.0, 1.0).to(dtype)
     xscale = (x_f32 - x).clamp(0.0, 1.0).to(dtype)
 
-    dtype = torch.int64 if not input.is_floating_point else input.dtype
+    dtype = torch.int64 if not input.is_floating_point() else input.dtype
     if not input.is_floating_point():
         v1 = v1.to(dtype)
         v2 = v2.to(dtype)
@@ -3373,7 +3373,7 @@ def upsample_bilinear2d(
         else:
             COEF_PREC = 16
             int_a = (0.5 + a * (1 << COEF_PREC)).to(dtype)
-            return  ((int_a * b) + (1 << (COEF_PREC - 1))) >> COEF_PREC
+            return ((int_a * b) + (1 << (COEF_PREC - 1))) >> COEF_PREC
 
     # x1 * (1 - alpha) + x2 * alpha == x1 + (x2 - x1) * alpha
     q1 = v1 + mul(v2 - v1, xscale)
