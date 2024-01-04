@@ -975,6 +975,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
 TORCH_API std::string dump_nccl_trace();
 
+// Gets a mutable reference to a global optional function.  Heartbeat Monitor
+// will query this function and if available, call it to dump traces. Inside
+// fbcode, we store a function here that uses an internal tool for process
+// tracing
+TORCH_API c10::optional<std::function<std::string()>>& get_cpp_trace_dumper();
+
 } // namespace c10d
 
 #endif // USE_C10D_NCCL
