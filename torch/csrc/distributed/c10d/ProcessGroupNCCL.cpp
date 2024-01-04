@@ -727,6 +727,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
+  logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
@@ -799,6 +800,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
             << "NCCL version: " << getNcclVersion() << ", size: " << size
+            << ", global rank: " << globalRank()
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
@@ -1109,8 +1111,17 @@ void ProcessGroupNCCL::abortCommsFromMap(
     // their responsibility to destroy the process group and recreate
     // it to recover from errors.
 
+    c10::StreamId streamId = -1;
+    if (ncclStreams_.find(devName) != ncclStreams_.end()) {
+      auto streams = ncclStreams_.at(devName);
+      if (streams.size() > 0) {
+        streamId = streams[0].id();
+      }
+    }
+
     LOG(INFO) << logPrefix() << "] Destroyed " << ncclComms.size()
-              << "communicators on CUDA device " << devName;
+              << "communicators on CUDA device: " << devName
+              << " with stream: " << streamId;
   }
 }
 
@@ -1178,15 +1189,6 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 #endif
 }
 
-void ProcessGroupNCCL::registerDebugInfoWriter(
-    std::unique_ptr<DebugInfoWriter> writer) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      debugInfoWriter_ == nullptr,
-      "ProcessGroupNCCL debugInfoWriter already registered");
-  debugInfoWriter_ = std::move(writer);
-}
-
 bool ProcessGroupNCCL::dumpDebuggingInfo() {
   // Serialize all calls to this function to avoid corrupting data, but allow
   // multiple calls in one runtime. User is responsible for preserving the
@@ -1199,13 +1201,8 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
     auto ncclTrace = dump_nccl_trace();
-    if (debugInfoWriter_ == nullptr) {
-      // Dump the trace blob into local disk as a fallback.
-      std::unique_ptr<DebugInfoWriter> debugInfoWriterPtr =
-          std::make_unique<DebugInfoWriter>(rank_);
-      registerDebugInfoWriter(std::move(debugInfoWriterPtr));
-    }
-    debugInfoWriter_->write(ncclTrace);
+    DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
+    writer.write(ncclTrace);
     return true;
   }
   return false;
@@ -1234,7 +1231,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     }
 
     // Check the heart beat of watchdog thread.
-    auto heartbeat = heartbeat_;
+    auto heartbeat = heartbeat_.load();
     if (heartbeat != heartBeatCounter) {
       heartBeatCounter = heartbeat;
     } else {
@@ -1243,27 +1240,16 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     }
   }
 
+  const auto logMsg = c10::str(
+      logPrefix(),
+      "Heartbeat monitor timed out! Process will be terminated after dumping debug info.",
+      " workMetaList_.size()=",
+      workMetaList_.size());
+  LOG(ERROR) << logMsg;
+
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)
   std::future<bool> asyncDebugDump = launchAsyncDebugDump();
-
-  // Create a error message reported from MonitorThread, so
-  // we throw exception and make the whole process to be killed.
-  // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
-  // url here.
-  const auto exitMsg = c10::str(
-      logPrefix(),
-      "ProcessGroupNCCL's watchdog got stuck for ",
-      heartbeatTimeoutInSec_,
-      "seconds without making progress in monitoring enqueued collectives. ",
-      "This typically indicates a NCCL/CUDA API hang blocking the watchdog, ",
-      "and could be triggered by another thread holding the GIL inside a ",
-      "CUDA api, or other deadlock-prone behaviors.",
-      "If you suspect the watchdog is not actually stuck and a longer timeout would help, ",
-      "you can either increase the timeout (TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC) to a larger value "
-      "or disable the heartbeat monitor (TORCH_NCCL_ENABLE_MONITORING=0)."
-      "If either of aforementioned helps, feel free to file an issue to PyTorch about the short timeout "
-      "or false positive abort; otherwise, please attempt to debug the hang.");
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
@@ -1292,14 +1278,23 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   waitForDumpOrTimeout(asyncDebugDump);
 
   if (!terminateHeartbeatMonitorThread_.load()) {
-    const auto logMsg = c10::str(
+    // Create a error message reported from MonitorThread, so
+    // we throw exception and make the whole process to be killed.
+    // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
+    // url here.
+    const auto exitMsg = c10::str(
         logPrefix(),
-        "monitoring thread detects no heartbeat and will finally kill the process!",
-        " terminateProcessGroup_",
-        terminateProcessGroup_,
-        " collectiveDebugInfoMode_",
-        collectiveDebugInfoMode_);
-    LOG(ERROR) << logMsg;
+        "ProcessGroupNCCL's watchdog got stuck for ",
+        heartbeatTimeoutInSec_,
+        "seconds without making progress in monitoring enqueued collectives. ",
+        "This typically indicates a NCCL/CUDA API hang blocking the watchdog, ",
+        "and could be triggered by another thread holding the GIL inside a ",
+        "CUDA api, or other deadlock-prone behaviors.",
+        "If you suspect the watchdog is not actually stuck and a longer timeout would help, ",
+        "you can either increase the timeout (TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC) to a larger value "
+        "or disable the heartbeat monitor (TORCH_NCCL_ENABLE_MONITORING=0)."
+        "If either of aforementioned helps, feel free to file an issue to PyTorch about the short timeout "
+        "or false positive abort; otherwise, please attempt to debug the hang.");
     terminateProcess(exitMsg);
   }
 }
@@ -1426,9 +1421,17 @@ struct DumpPipe {
 };
 #endif
 
+std::string ProcessGroupNCCL::createLogPrefix() const {
+  return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
+}
+
 const std::string& ProcessGroupNCCL::logPrefix() const {
-  static std::string prefix = c10::str("[PG ", uid_, " Rank ", rank_, "] ");
-  return prefix;
+  return logPrefix_;
+}
+
+const int& ProcessGroupNCCL::globalRank() const {
+  static int globalRank = rank_;
+  return globalRank;
 }
 
 void ProcessGroupNCCL::watchdogHandler() {
@@ -1457,10 +1460,12 @@ void ProcessGroupNCCL::watchdogHandler() {
     // Bump up heart beat by one.
     heartbeat_++;
 
-    // poll store to see if some ranks have flagged a timeout when
+    // Assuming that we always init a process group containing all ranks,
+    // we only use the watchdog thread to listen for the global signal to dump
+    // and abort. We poll store to see if some ranks have flagged a timeout when
     // we haven't polled for `heartbeat_timeout` seconds and there haven't
     // any work added or removed for `watchdog_timeout` seconds.
-    if (dumpOnTimeout_) {
+    if (dumpOnTimeout_ && uid_ == 0) {
       auto currentTime = std::chrono::steady_clock::now();
       auto timeSinceLastWorkListUpdate =
           std::chrono::duration_cast<std::chrono::milliseconds>(
