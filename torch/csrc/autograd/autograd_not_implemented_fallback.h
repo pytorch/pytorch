@@ -2,7 +2,8 @@
 
 #include <torch/library.h>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 // Default DispatchKey::Autograd fallback for built-in operators.
 // Can be registered for custom operators.
@@ -29,4 +30,5 @@ enum class AutogradFallbackMode {
 TORCH_API void setAutogradFallbackMode(AutogradFallbackMode mode);
 TORCH_API AutogradFallbackMode getAutogradFallbackMode();
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

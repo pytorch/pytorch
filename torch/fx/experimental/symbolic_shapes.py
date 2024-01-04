@@ -1359,7 +1359,7 @@ class DimConstraints:
         self.raise_inconsistencies()
         # as long as there are symbols with equalities, solve for them
         # NOTE(avik): this is guaranteed to terminate (#iterations <= #symbols)
-        while(self._symbols_with_equalities):
+        while self._symbols_with_equalities:
             s = self._symbols_with_equalities.pop()
             exprs = self._univariate_inequalities.pop(s)
             solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
