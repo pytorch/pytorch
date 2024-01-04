@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import sys
 from enum import Enum
 
@@ -32,7 +33,11 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 class Model(nn.Module):
     def __init__(
-        self, with_fsdp, freeze_after_wrap_fsdp, no_grad_ctx=False, fsdp_kwargs=None
+        self,
+        with_fsdp,
+        freeze_after_wrap_fsdp,
+        disable_autograd=False,
+        fsdp_kwargs=None,
     ):
         super().__init__()
         self.trunk = nn.Sequential(
@@ -45,7 +50,9 @@ class Model(nn.Module):
         self.head = nn.Linear(64, 10)
         if with_fsdp and freeze_after_wrap_fsdp:
             self.fsdp_wrap(fsdp_kwargs)
-        self.no_grad_ctx = no_grad_ctx
+        self.autograd_ctx = (
+            torch.no_grad if disable_autograd else contextlib.nullcontext
+        )
 
     def fsdp_wrap(self, fsdp_kwargs):
         self.trunk = FSDP(self.trunk, **fsdp_kwargs)
@@ -56,16 +63,18 @@ class Model(nn.Module):
         return self.trunk(x)
 
     def forward(self, x):
-        if self.no_grad_ctx:
-            x = self.trunk_forward_no_grad(x)
-        else:
+        with self.autograd_ctx():
             x = self.trunk(x)
         return self.head(x)
 
 
 class NestedTrunkModel(nn.Module):
     def __init__(
-        self, with_fsdp, freeze_after_wrap_fsdp, no_grad_ctx=False, fsdp_kwargs=None
+        self,
+        with_fsdp,
+        freeze_after_wrap_fsdp,
+        disable_autograd=False,
+        fsdp_kwargs=None,
     ):
         super().__init__()
         self.trunk = nn.Sequential(
@@ -79,7 +88,9 @@ class NestedTrunkModel(nn.Module):
         )
         if with_fsdp and freeze_after_wrap_fsdp:
             self.fsdp_wrap(fsdp_kwargs)
-        self.no_grad_ctx = no_grad_ctx
+        self.autograd_ctx = (
+            torch.no_grad if disable_autograd else contextlib.nullcontext
+        )
 
     def fsdp_wrap(self, fsdp_kwargs):
         for name, child in self.trunk.named_children():
@@ -88,14 +99,8 @@ class NestedTrunkModel(nn.Module):
         self.trunk = FSDP(self.trunk, **fsdp_kwargs)
         self.head = FSDP(self.head, **fsdp_kwargs)
 
-    @torch.no_grad()
-    def trunk_forward_no_grad(self, x):
-        return self.trunk(x)
-
     def forward(self, x):
-        if self.no_grad_ctx:
-            x = self.trunk_forward_no_grad(x)
-        else:
+        with self.autograd_ctx():
             x = self.trunk(x)
         return self.head(x)
 
@@ -109,18 +114,6 @@ class NestedTrunkModel(nn.Module):
         return block
 
 
-class ModelNoGrad(Model):
-    @torch.no_grad()
-    def forward(self, x):
-        return super().forward(x)
-
-
-class NestedTrunkModelNoGrad(NestedTrunkModel):
-    @torch.no_grad()
-    def forward(self, x):
-        return super().forward(x)
-
-
 class FreezingMethod(str, Enum):
     GradToNone = "grad_to_none"
     RequiresGrad = "requires_grad"
@@ -132,15 +125,17 @@ class TestFreezingWeights(FSDPTest):
         with_fsdp,
         with_nested_trunk,
         freeze_after_wrap_fsdp,
-        no_grad_ctx=False,
+        disable_autograd=False,
         fsdp_kwargs=None,
     ):
         if with_nested_trunk:
             model = NestedTrunkModel(
-                with_fsdp, freeze_after_wrap_fsdp, no_grad_ctx, fsdp_kwargs
+                with_fsdp, freeze_after_wrap_fsdp, disable_autograd, fsdp_kwargs
             )
         else:
-            model = Model(with_fsdp, freeze_after_wrap_fsdp, no_grad_ctx, fsdp_kwargs)
+            model = Model(
+                with_fsdp, freeze_after_wrap_fsdp, disable_autograd, fsdp_kwargs
+            )
         return model
 
     def _dist_train(
@@ -149,7 +144,7 @@ class TestFreezingWeights(FSDPTest):
         freezing_method,
         freeze_after_wrap_fsdp,
         with_fsdp,
-        no_grad_ctx=False,
+        disable_autograd=False,
         forward_prefetch=False,
     ):
         torch.manual_seed(0)
@@ -160,11 +155,16 @@ class TestFreezingWeights(FSDPTest):
             "forward_prefetch": forward_prefetch,
         }
 
+        ddp_kwargs = {
+            "device_ids": [self.rank],
+            "find_unused_parameters": True if disable_autograd else False,
+        }
+
         model = self._create_model(
             with_fsdp,
             with_nested_trunk,
             freeze_after_wrap_fsdp,
-            no_grad_ctx,
+            disable_autograd,
             fsdp_kwargs,
         )
         model = model.cuda()
@@ -179,7 +179,7 @@ class TestFreezingWeights(FSDPTest):
                 model.fsdp_wrap(fsdp_kwargs)
             model = FSDP(model, **fsdp_kwargs)
         else:
-            model = DistributedDataParallel(model, device_ids=[self.rank])
+            model = DistributedDataParallel(model, **ddp_kwargs)
 
         target = torch.tensor([0, 1], dtype=torch.long).cuda()
         criterion = nn.CrossEntropyLoss()
@@ -203,19 +203,17 @@ class TestFreezingWeights(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("with_nested_trunk", [True, False])
     @parametrize(
-        # "freezing_method", [FreezingMethod.RequiresGrad, FreezingMethod.GradToNone]
-        "freezing_method",
-        [FreezingMethod.RequiresGrad],
+        "freezing_method", [FreezingMethod.RequiresGrad, FreezingMethod.GradToNone]
     )
     @parametrize("freeze_after_wrap_fsdp", [True, False])
-    @parametrize("no_grad_ctx", [True, False])
+    @parametrize("disable_autograd", [True, False])
     @parametrize("forward_prefetch", [True, False])
     def test_freezing_weights(
         self,
         with_nested_trunk,
         freezing_method,
         freeze_after_wrap_fsdp,
-        no_grad_ctx,
+        disable_autograd,
         forward_prefetch,
     ):
         # DDP
@@ -224,7 +222,7 @@ class TestFreezingWeights(FSDPTest):
             freezing_method,
             freeze_after_wrap_fsdp,
             with_fsdp=False,
-            no_grad_ctx=no_grad_ctx,
+            disable_autograd=disable_autograd,
         )
 
         # FSDP
@@ -233,7 +231,7 @@ class TestFreezingWeights(FSDPTest):
             freezing_method,
             freeze_after_wrap_fsdp,
             with_fsdp=True,
-            no_grad_ctx=no_grad_ctx,
+            disable_autograd=disable_autograd,
             forward_prefetch=forward_prefetch,
         )
 
