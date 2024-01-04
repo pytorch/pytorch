@@ -271,7 +271,6 @@ FIXME_default_non_strict = {
     "test_tensorboard",
     "test_tensorexpr",
     "test_tensorexpr_pybind",
-    "test_testing",
     "test_torch",
     "test_unary_ufuncs",
     "test_utils",
@@ -1827,6 +1826,33 @@ dynamo_expected_failures = {
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_seq_len_1030_n_head_3_head_dim_16_causal_False_train_True_cpu_bfloat16",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float64_batch_size_2_seq_len_267_n_head_3_head_dim_16_causal_True_train_True_cpu_float64",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float32_batch_size_12_seq_len_267_n_head_3_head_dim_16_causal_True_train_True_cpu_float32",
+    "TestAssertCloseSparseCOO.test_matching_coalesced",  # test_testing
+    "TestImports.test_circular_dependencies",  # test_testing
+    "TestAssertCloseSparseCSR.test_mismatching_crow_indices_msg",  # test_testing
+    "TestAssertCloseSparseBSC.test_mismatching_row_indices_msg",  # test_testing
+    "TestAssertCloseSparseCOO.test_mismatching_values_msg",  # test_testing
+    "TestAssertCloseQuantized.test_matching_per_channel",  # test_testing
+    "TestTestParametrizationDeviceTypeCPU.test_ops_decorator_applies_op_and_param_specific_decorators_cpu",  # test_testing
+    "TestAssertCloseSparseCOO.test_matching_uncoalesced",  # test_testing
+    "TestAssertCloseSparseCSR.test_matching",  # test_testing
+    "TestAssertCloseSparseBSR.test_mismatching_crow_indices_msg",  # test_testing
+    "TestAssertCloseSparseBSR.test_matching",  # test_testing
+    "TestAssertCloseQuantized.test_mismatching_is_quantized",  # test_testing
+    "TestAssertCloseSparseCOO.test_mismatching_indices_msg",  # test_testing
+    "TestAssertCloseSparseBSC.test_mismatching_ccol_indices_msg",  # test_testing
+    "TestAssertCloseSparseBSC.test_mismatching_values_msg",  # test_testing
+    "TestAssertCloseSparseCSC.test_mismatching_row_indices_msg",  # test_testing
+    "TestAssertCloseSparseBSC.test_matching",  # test_testing
+    "TestAssertCloseSparseCSC.test_matching",  # test_testing
+    "TestAssertCloseSparseCSR.test_mismatching_values_msg",  # test_testing
+    "TestAssertCloseSparseBSR.test_mismatching_values_msg",  # test_testing
+    "TestAssertCloseSparseCSC.test_mismatching_values_msg",  # test_testing
+    "TestAssertCloseSparseBSR.test_mismatching_col_indices_msg",  # test_testing
+    "TestAssertCloseSparseCOO.test_mismatching_nnz",  # test_testing
+    "TestAssertCloseSparseCSR.test_mismatching_col_indices_msg",  # test_testing
+    "TestAssertCloseQuantized.test_mismatching_qscheme",  # test_testing
+    "TestAssertCloseQuantized.test_matching_per_tensor",  # test_testing
+    "TestAssertCloseSparseCSC.test_mismatching_ccol_indices_msg",  # test_testing
 }
 
 dynamo_skips = {
@@ -1910,4 +1936,5 @@ dynamo_skips = {
     "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape2_cpu",  # known py311 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape1_cpu",  # known py311 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_2_shape1_cpu",  # known py311 fail
+    "TestFrameworkUtils.test_filtering_env_var",  # known py38 fail
 }
