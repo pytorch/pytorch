@@ -26,6 +26,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
     ShapeEnv,
 )
+from torch._higher_order_ops.strict_mode import strict_mode
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError
 
@@ -563,6 +564,26 @@ def _export(
             fake_mode, src_equalities, original_signature, ep_non_strict.gm
         )
         assert out_spec is not None
+
+        print("PRINT", ep_non_strict.gm.graph)
+
+        for node in ep_non_strict.gm.graph.nodes:
+            if node.op == "call_function" and node.target == strict_mode:
+                submodule = node.args[0]
+                actual_inps = node.args[1]
+                with ep_non_strict.gm.graph.inserting_after(node):
+                    inputs_to_be_used = {}
+                    placeholders = []
+                    placeholder_count = 0
+                    for inner_node in submodule.graph.nodes:
+                        if node.op == "placeholder":
+                            inputs_to_be_used[inner_node] =
+
+
+
+                print(submodule)
+
+                #with gm.graph.inserting_after(node):
         return ExportedProgram(
             ep_non_strict.gm,
             ep_non_strict.gm.graph,
