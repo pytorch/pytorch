@@ -1562,7 +1562,8 @@ class BuiltinVariable(VariableTracker):
 
             if op is operator.is_ and isinstance(right, TensorVariable):
                 return ConstantVariable.create(
-                    id(extract_fake_example_value(left.as_proxy().node))
+                    isinstance(left, TensorVariable)
+                    and id(extract_fake_example_value(left.as_proxy().node))
                     == id(extract_fake_example_value(right.as_proxy().node))
                 )
 
