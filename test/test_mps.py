@@ -239,7 +239,6 @@ def mps_ops_modifier(ops):
         'broadcast_tensors',
         'broadcast_to',
         'cfloat',
-        'chalf',
         'chunk',
         'clone',
         'contiguous',
@@ -335,6 +334,7 @@ def mps_ops_modifier(ops):
             'bool',
             'cartesian_prod',
             'cat',
+            'chalf',
             'char',
             'column_stack',
             'combinations',
@@ -391,10 +391,10 @@ def mps_ops_modifier(ops):
             'tan',
             'tanh',
             'trace',
-            "tril",
-            "triu",
-            "vstack",
-            "where",
+            'tril',
+            'triu',
+            'vstack',
+            'where',
         })
     # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
     MACOS_12_3_XFAILLIST = {
