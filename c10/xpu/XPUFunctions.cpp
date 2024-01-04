@@ -130,7 +130,7 @@ void get_device_properties(DeviceProp* device_prop, int device) {
   initDeviceProperties(device_prop, device);
 }
 
-int get_device_from_pointer(void* ptr) {
+unsigned get_device_idx_from_pointer(void* ptr) {
   initDevicePoolCallOnce();
   TORCH_CHECK(ptr, "ptr is an invalid pointer.");
   auto type = sycl::get_pointer_type(ptr, get_device_context());
