@@ -225,7 +225,7 @@ def save(
             serialized_field = getattr(artifact, field_name)
             zipf.writestr(f"serialized_{field_name}.json", serialized_field)
 
-        zipf.writestr('version', str(SCHEMA_VERSION))
+        zipf.writestr('version', ".".join(map(str, SCHEMA_VERSION)))
 
         # Add extra files if provided
         if extra_files:
@@ -245,10 +245,11 @@ def load(
 
     with zipfile.ZipFile(f, 'r') as zipf:
         # Check the version
-        version = int(zipf.read('version'))
+        version = zipf.read('version').decode().split('.')
         from .serde.schema import SCHEMA_VERSION
 
-        if version != SCHEMA_VERSION:
+        assert len(version) == len(SCHEMA_VERSION)
+        if version[0] != str(SCHEMA_VERSION[0]):
             raise RuntimeError(
                 f"Serialized version {version} does not match our current "
                 f"schema version {SCHEMA_VERSION}."
