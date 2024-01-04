@@ -105,19 +105,12 @@ ViewInfo ViewInfo::chain(
               root_base_size, root_base_stride, root_base_storage_offset);
         };
       } else {
-        // When base is a view but doesn't carry a view_fn in
-        // DifferentiableViewMeta, it's a view that doesn't support inplace
-        // update, e.g. unbind. In this case we should throw an error when
-        // inplace update happens in **forward**. One would naturally think the
-        // following function will be first called in backward pass. But the
-        // first call site is indeed in **forward** pass when we refresh
-        // `grad_fn` triggered by inplace update. Search Note [View + Inplace
-        // update for view tensor] to for the call site.
-        // TODO: Test for this case!
+        // This case should be relatively rare: parent view doesn't have a
+        // view_func() AND as_strided() isn't supported; there's no obvious way
+        // to chain the two views.
         auto error_msg =
-            ("This view is the output of a function that returns multiple views."
-             "Such functions do not allow the output views to be modified inplace."
-             "You should replace the inplace operation by an out-of-place one");
+            ("Attempted to chain views when the parent view has no view_func() and "
+             "does not support as_strided(). This is not supported.");
 
         view_func = [=](const at::Tensor& root_base) {
           TORCH_CHECK(false, error_msg);
