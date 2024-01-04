@@ -743,7 +743,7 @@ class TestLazyScheduler(TestCase):
         return x
 
     sdd_m = SDDModule()
-    register_segment(sdd_m.forward, is_backward=False, call=0, name="sdd_0_fwd")
+    register_segment(sdd_m.forward, is_backward=False, nth_call=0, name="sdd_fwd")
 
 
     class OverArchModule(nn.Module):
@@ -759,20 +759,22 @@ class TestLazyScheduler(TestCase):
         return x
 
     overarch_m = OverArchModule()
-    register_segment(overarch_m.func1, is_backward=False, call=0, name="overarch_0_fwd")
-    register_segment(overarch_m.func1, is_backward=True, call=0, name="overarch_0_bwd")
-    register_segment_forward_pre_hook("overarch_0", ...)
-    # Run "sdd_0_fwd" right before "overarch_0_bwd"
-    register_segment_backward_pre_hook("overarch_0_bwd", "sdd_0_fwd")
+    register_segment(overarch_m.func1, is_backward=True, nth_call=0, name="overarch_func2_bwd")
+    # Run "sdd_fwd" right before "overarch_func2_bwd"
+    register_segment_backward_pre_hook("overarch_func2_bwd", "sdd_fwd")
+
+    # We also have `register_segment_forward_pre_hook` that can run another segment before a specific fwd segment.
     """
     pass
 
 """
 TODO:
 0. Draw the workflow in a flowchart, show to Boyuan
-1. Support graph break within segment
-2. Support calling a segment multiple times
+1. Support calling a segment multiple times (i.e. make `nth_call=X` work)
+2. Support graph break within segment
+3. Unit test: in-place op in named segment
 3. Support using together with DDPOptimizer
+4. For named segments, show its segment ID in profiler annotation in GPU trace
 """
 
 if __name__ == "__main__":
