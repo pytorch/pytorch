@@ -290,9 +290,6 @@ FIXME_default_non_strict = {
     "torch_np/numpy_tests/core/test_indexing",
     "torch_np/numpy_tests/core/test_numeric",
     "torch_np/numpy_tests/core/test_numerictypes",
-    "torch_np/numpy_tests/core/test_scalar_ctors",
-    "torch_np/numpy_tests/core/test_scalar_methods",
-    "torch_np/numpy_tests/core/test_scalarinherit",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -1488,6 +1485,13 @@ dynamo_expected_failures = {
     "TestNegative.test_exceptions",  # torch_np/numpy_tests/core/test_scalarmath
     "TestPower.test_modular_power",  # torch_np/numpy_tests/core/test_scalarmath
     "TestBaseMath.test_lower_align",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestArrayFromScalar.test_integers_np_longlong_t26",  # torch_np/numpy_tests/core/test_scalar_ctors
+    "TestArrayFromScalar.test_integers_np_intc_np_longlong",  # torch_np/numpy_tests/core/test_scalar_ctors
+    "TestArrayFromScalar.test_integers_t15_np_longlong",  # torch_np/numpy_tests/core/test_scalar_ctors
+    "TestArrayFromScalar.test_integers_np_longlong_np_longlong",  # torch_np/numpy_tests/core/test_scalar_ctors
+    "TestArrayFromScalar.test_integers_np_byte_np_longlong",  # torch_np/numpy_tests/core/test_scalar_ctors
+    "TestArrayFromScalar.test_integers_np_short_np_longlong",  # torch_np/numpy_tests/core/test_scalar_ctors
+    "TestArrayFromScalar.test_integers_np_int__np_longlong",  # torch_np/numpy_tests/core/test_scalar_ctors
 }
 
 dynamo_skips = {
