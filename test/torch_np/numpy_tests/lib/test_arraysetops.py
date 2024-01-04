@@ -167,7 +167,6 @@ class TestSetOps(TestCase):
                     None,
                     "to_begin",
                 ),
-                decorators=[xfailIfTorchDynamo],
             ),
             # should fail because attempting to cast
             # two special floating point values
