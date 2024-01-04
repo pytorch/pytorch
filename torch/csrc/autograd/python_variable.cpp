@@ -728,6 +728,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
         /*resizable=*/true};
     auto data_ptr = r.toSymIntOptional(14);
     if (data_ptr.value_or(0) != 0) {
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
       void* p = reinterpret_cast<void*>(
           static_cast<uintptr_t>(data_ptr->expect_int()));
       storage.set_data_ptr_noswap(at::DataPtr{p, r.device(7)});
