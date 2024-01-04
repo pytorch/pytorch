@@ -1082,22 +1082,22 @@ class TestPatternMatcher(TestCase):
             return a + b
 
         graph = torch.fx.Graph()
-        a = graph.placeholder('x')
-        b = graph.placeholder('y')
+        a = graph.placeholder("x")
+        b = graph.placeholder("y")
         c = graph.call_function(fn1, (a, b))
         stable_topological_sort(graph)
         self.assertEqual(list(graph.nodes), [a, b, c])
 
         graph = torch.fx.Graph()
-        b = graph.placeholder('y')
-        a = graph.placeholder('x')
+        b = graph.placeholder("y")
+        a = graph.placeholder("x")
         c = graph.call_function(fn1, (a, b))
         stable_topological_sort(graph)
         self.assertEqual(list(graph.nodes), [b, a, c])
 
         graph = torch.fx.Graph()
-        a = graph.placeholder('x')
-        b = graph.placeholder('y')
+        a = graph.placeholder("x")
+        b = graph.placeholder("y")
         c = graph.call_function(fn1, (b, a))
         c.append(a)
         stable_topological_sort(graph)
