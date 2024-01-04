@@ -274,46 +274,10 @@ FIXME_default_non_strict = {
     "test_testing",
     "test_torch",
     "test_transformers",
-    "test_type_hints",
-    "test_type_info",
-    "test_type_promotion",
-    "test_typing",
     "test_unary_ufuncs",
     "test_utils",
-    "test_view_ops",
     "test_vulkan",
-    "test_weak",
     "test_xnnpack_integration",
-    "torch_np/numpy_tests/core/test_dlpack",
-    "torch_np/numpy_tests/core/test_dtype",
-    "torch_np/numpy_tests/core/test_einsum",
-    "torch_np/numpy_tests/core/test_getlimits",
-    "torch_np/numpy_tests/core/test_indexing",
-    "torch_np/numpy_tests/core/test_multiarray",
-    "torch_np/numpy_tests/core/test_numeric",
-    "torch_np/numpy_tests/core/test_numerictypes",
-    "torch_np/numpy_tests/core/test_scalar_ctors",
-    "torch_np/numpy_tests/core/test_scalar_methods",
-    "torch_np/numpy_tests/core/test_scalarinherit",
-    "torch_np/numpy_tests/core/test_scalarmath",
-    "torch_np/numpy_tests/core/test_shape_base",
-    "torch_np/numpy_tests/fft/test_helper",
-    "torch_np/numpy_tests/fft/test_pocketfft",
-    "torch_np/numpy_tests/lib/test_arraypad",
-    "torch_np/numpy_tests/lib/test_arraysetops",
-    "torch_np/numpy_tests/lib/test_function_base",
-    "torch_np/numpy_tests/lib/test_histograms",
-    "torch_np/numpy_tests/lib/test_index_tricks",
-    "torch_np/numpy_tests/lib/test_shape_base_",
-    "torch_np/numpy_tests/lib/test_twodim_base",
-    "torch_np/numpy_tests/lib/test_type_check",
-    "torch_np/numpy_tests/linalg/test_linalg",
-    "torch_np/test_basic",
-    "torch_np/test_binary_ufuncs",
-    "torch_np/test_dtype",
-    "torch_np/test_function_base",
-    "torch_np/test_ndarray_methods",
-    "torch_np/test_nep50_examples",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -845,6 +809,876 @@ dynamo_expected_failures = {
     "TestShuffle.test_1d_use_numpy_False",
     "TestShuffle.test_2d_use_numpy_True",
     "TestShuffle.test_2d_use_numpy_False",
+    "TestArrayCreationCopyArgument.test_buffer_interface",
+    "TestWritebackIfCopy.test_take_mode_raise",
+    "TestArange.test_infinite",
+    "TestArrayConstruction.test_array_empty",
+    "TestAttributes.test_fill_readonly",
+    "TestArrayAttributeDeletion.test_multiarray_writable_attributes_deletion",
+    "TestMatmul.test_out_contiguous",
+    "TestMinMax.test_scalar",
+    "TestFromBuffer.test_basic_little_dtype2",
+    "TestArrayCreationCopyArgument.test_striding_not_ok",
+    "TestArange.test_require_range",
+    "TestStats.test_dtype_from_input",
+    "TestArange.test_nan_step",
+    "TestWritebackIfCopy.test_argmin_with_out",
+    "TestArrayAttributeDeletion.test_multiarray_not_writable_attributes_deletion",
+    "TestLexsort.test_datetime",
+    "TestMinMax.test_axis",
+    "TestLexsort.test_mixed",
+    "TestWritebackIfCopy.test_dot_out",
+    "TestAttributes.test_fill_struct_array",
+    "TestFromBuffer.test_empty",
+    "TestAssignment.test_assignment_broadcasting",
+    "TestMatmul.test_out_arg",
+    "TestAttributes.test_set_stridesattr",
+    "TestStats.test_out",
+    "TestScalarIndexing.test_invalid_subscript",
+    "TestWhere.test_error",
+    "TestWritebackIfCopy.test_argmax_with_out",
+    "TestBool.test_sum_2",
+    "TestScalarIndexing.test_invalid_newaxis",
+    "TestTake.test_out_overlap",
+    "TestScalarIndexing.test_invalid_subscript_assignment",
+    "TestFromBuffer.test_basic_little_dtype1",
+    "TestWritebackIfCopy.test_choose_mod_raise",
+    "TestAttributes.test_fill_max_uint64",
+    "TestPutmask.test_byteorder_dtype_<i4",
+    "TestPutmask.test_byteorder_dtype_>i4",
+    "TestAttributes.test_stridesattr",
+    "TestArange.test_zero_step",
+    "TestStats.test_dtype_from_dtype",
+    "TestArrayCreationCopyArgument.test_scalars",
+    "TestConversion.test_to_int_scalar",
+    "TestPutmask.test_record_array",
+    "TestTake.test_raise",
+    "TestFromBuffer.test_basic_little_dtype0",
+    "TestMatmul.test_exceptions",
+    "TestFlag.test_writeable_from_readonly",
+    "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmax_np_method0",
+    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmin",
+    "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmax_np_method0",
+    "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmin_np_method1",
+    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmax",
+    "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmin_np_method1",
+    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmax",
+    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmin",
+    "TestConvertDType.test_convert_np_dtypes_'int64'",
+    "TestConvertDType.test_convert_np_dtypes_'uint8'",
+    "TestConvertDType.test_convert_np_dtypes_bool",
+    "TestConvertDType.test_convert_np_dtypes_'complex128'",
+    "TestConvertDType.test_convert_np_dtypes_'float16'",
+    "TestConvertDType.test_convert_np_dtypes_'int16'",
+    "TestConvertDType.test_convert_np_dtypes_'int32'",
+    "TestConvertDType.test_convert_np_dtypes_'int8'",
+    "TestConvertDType.test_convert_np_dtypes_'float64'",
+    "TestConvertDType.test_convert_np_dtypes_'float32'",
+    "TestConvertDType.test_convert_np_dtypes_'complex64'",
+    "TestConvertDType.test_convert_np_dtypes_'bool_'",
+    "TestOneArr.test_asarray_list_func55",
+    "TestOneArr.test_asarray_tensor_func65",
+    "TestOneArr.test_asarray_tensor_func44",
+    "TestOneArr.test_asarray_array_func59",
+    "TestOneArr.test_asarray_array_func45",
+    "TestOneArr.test_asarray_list_func70",
+    "TestOneArrAndAxis.test_andaxis_list_func7_axis_0",
+    "TestSequenceOfArrays.test_single_array_func1",
+    "TestOneArrAndAxis.test_andaxis_array_func1_axis_1",
+    "TestSequenceOfArraysToSingle.test_several_func6",
+    "TestOneArr.test_asarray_list_func0",
+    "TestOneArrAndAxis.test_andaxis_list_func9_axis_1",
+    "TestOneArrAndAxis.test_andaxis_list_func8_axis_0",
+    "TestOneArr.test_asarray_list_func36",
+    "TestOneArrAndAxis.test_andaxis_array_func3_axis_0",
+    "TestOneArr.test_asarray_tensor_func15",
+    "TestOneArr.test_asarray_array_func51",
+    "TestOneArr.test_asarray_list_func16",
+    "TestOneArrAndAxis.test_andaxis_tensor_func5_axis_0",
+    "TestOneArrAndAxis.test_andaxis_tensor_func1_axis_1",
+    "TestOneArr.test_asarray_tensor_func1",
+    "TestOneArrAndAxesTuple.test_andtuple_list_func0_axes2",
+    "TestOneArrAndAxis.test_andaxis_list_func6_axis_1",
+    "TestOneArrAndAxis.test_andaxis_tensor_func10_axis_-1",
+    "TestSequenceOfArraysToSingle.test_several_func2",
+    "TestOneArrAndAxis.test_andaxis_array_func5_axis_1",
+    "TestOneArrAndAxis.test_andaxis_list_func10_axis_1",
+    "TestOneArr.test_asarray_array_func72",
+    "TestOneArrAndShape.test_andshape_list_func0",
+    "TestCtorNested.test_arrays_in_lists",
+    "TestOneArr.test_asarray_tensor_func51",
+    "TestOneArr.test_asarray_array_func0",
+    "TestOneArr.test_asarray_array_func10",
+    "TestOneArr.test_asarray_array_func43",
+    "TestOneArrToScalar.test_toscalar_array_func2_np_func2",
+    "TestOneArr.test_asarray_list_func3",
+    "TestOneArr.test_asarray_array_func56",
+    "TestArrayToSequence.test_asarray_array_func1",
+    "TestOneArrAndShape.test_andshape_tensor_func4",
+    "TestOneArr.test_asarray_list_func60",
+    "TestDivmod.test_divmod_out",
+    "TestOneArrAndAxis.test_andaxis_list_func7_axis3",
+    "TestOneArrAndAxis.test_andaxis_array_func6_axis_0",
+    "TestOneArrAndAxis.test_andaxis_list_func5_axis_0",
+    "TestOneArr.test_asarray_tensor_func53",
+    "TestOneArrAndAxis.test_andaxis_array_func6_axis3",
+    "TestOneArr.test_asarray_tensor_func73",
+    "TestDivmod.test_divmod_no_out",
+    "TestOneArrAndAxis.test_andaxis_array_func9_axis_1",
+    "TestOneArr.test_asarray_list_func58",
+    "TestOneArrAndAxis.test_andaxis_tensor_func8_axis_0",
+    "TestOneArr.test_asarray_array_func49",
+    "TestOneArr.test_asarray_array_func60",
+    "TestOneArr.test_asarray_tensor_func62",
+    "TestOneArrAndAxesTuple.test_andtuple_tensor_func0_axes0",
+    "TestOneArr.test_asarray_array_func22",
+    "TestOneArr.test_asarray_list_func24",
+    "TestOneArr.test_asarray_list_func15",
+    "TestSequenceOfArrays.test_several_func2",
+    "TestOneArr.test_asarray_tensor_func66",
+    "TestOneArrAndAxis.test_andaxis_tensor_func7_axis3",
+    "TestOneArrAndAxis.test_andaxis_tensor_func10_axis_0",
+    "TestOneArrAndAxis.test_andaxis_list_func1_axis_-1",
+    "TestOneArr.test_asarray_list_func32",
+    "TestOneArr.test_asarray_list_func48",
+    "TestOneArrToScalar.test_toscalar_array_func1_np_func1",
+    "TestOneArr.test_asarray_list_func23",
+    "TestOneArr.test_asarray_list_func65",
+    "TestOneArr.test_asarray_tensor_func34",
+    "TestOneArr.test_asarray_array_func57",
+    "TestOneArr.test_asarray_list_func31",
+    "TestOneArrAndAxis.test_andaxis_array_func9_axis_0",
+    "TestOneArr.test_asarray_array_func63",
+    "TestOneArrAndAxis.test_andaxis_tensor_func9_axis_1",
+    "TestOneArr.test_asarray_tensor_func0",
+    "TestOneArr.test_asarray_list_func43",
+    "TestOneArr.test_asarray_list_func62",
+    "TestOneArrAndShape.test_andshape_array_func0",
+    "TestSequenceOfArrays.test_several_func0",
+    "TestOneArrAndAxis.test_andaxis_array_func8_axis_-1",
+    "TestOneArr.test_asarray_tensor_func29",
+    "TestArrayToSequence.test_asarray_array_func0",
+    "TestOneArrAndAxis.test_andaxis_array_func5_axis3",
+    "TestOneArr.test_asarray_array_func16",
+    "TestOneArr.test_asarray_array_func68",
+    "TestOneArr.test_asarray_list_func21",
+    "TestOneArrAndAxis.test_andaxis_list_func7_axis_1",
+    "TestOneArr.test_asarray_array_func33",
+    "TestOneArr.test_asarray_list_func13",
+    "TestOneArr.test_asarray_list_func40",
+    "TestOneArrAndAxis.test_andaxis_array_func1_axis_0",
+    "TestOneArrAndAxesTuple.test_andtuple_list_func0_axes0",
+    "TestOneArr.test_asarray_list_func52",
+    "TestOneArr.test_asarray_array_func42",
+    "TestOneArr.test_asarray_list_func73",
+    "TestOneArr.test_asarray_array_func24",
+    "TestOneArr.test_asarray_list_func45",
+    "TestOneArr.test_asarray_array_func38",
+    "TestOneArr.test_asarray_array_func20",
+    "TestOneArr.test_asarray_tensor_func45",
+    "TestOneArr.test_asarray_array_func66",
+    "TestOneArrAndAxis.test_andaxis_list_func2_axis_0",
+    "TestOneArr.test_asarray_array_func11",
+    "TestOneArrAndAxis.test_andaxis_array_func9_axis3",
+    "TestOneArrAndAxis.test_andaxis_list_func5_axis_-1",
+    "TestOneArrAndShape.test_andshape_list_func1",
+    "TestPythonArgsToArray.test_argstoarray_simple_func4_args4",
+    "TestOneArr.test_asarray_tensor_func14",
+    "TestOneArr.test_asarray_array_func48",
+    "TestOneArr.test_asarray_list_func53",
+    "TestOneArr.test_asarray_tensor_func24",
+    "TestOneArr.test_asarray_list_func54",
+    "TestOneArr.test_asarray_tensor_func33",
+    "TestPythonArgsToArray.test_argstoarray_simple_func7_args7",
+    "TestOneArrAndAxesTuple.test_andtuple_array_func0_axes1",
+    "TestOneArrAndAxis.test_andaxis_list_func2_axis_1",
+    "TestSequenceOfArrays.test_single_array_func0",
+    "TestOneArr.test_asarray_tensor_func69",
+    "TestSequenceOfArraysToSingle.test_several_func3",
+    "TestOneArr.test_asarray_array_func36",
+    "TestOneArr.test_asarray_list_func11",
+    "TestCopyTo.test_copyto_typecast",
+    "TestOneArrAndShape.test_andshape_tensor_func1",
+    "TestOneArr.test_asarray_array_func71",
+    "TestOneArrAndAxis.test_andaxis_list_func6_axis_0",
+    "TestOneArrAndAxis.test_andaxis_tensor_func9_axis_0",
+    "TestOneArrAndAxis.test_andaxis_array_func2_axis_0",
+    "TestOneArr.test_asarray_list_func72",
+    "TestSequenceOfArraysToSingle.test_several_func4",
+    "TestOneArrAndAxis.test_andaxis_tensor_func2_axis_0",
+    "TestOneArrAndAxis.test_andaxis_list_func2_axis_-1",
+    "TestOneArr.test_asarray_array_func34",
+    "TestOneArr.test_asarray_array_func23",
+    "TestOneArr.test_asarray_list_func20",
+    "TestOneArrAndAxis.test_andaxis_array_func6_axis_1",
+    "TestOneArr.test_asarray_array_func41",
+    "TestOneArr.test_asarray_list_func38",
+    "TestOneArrAndAxis.test_andaxis_list_func5_axis_1",
+    "TestOneArrAndAxis.test_andaxis_array_func3_axis_-1",
+    "TestOneArrAndAxis.test_andaxis_array_func3_axis3",
+    "TestOneArrToScalar.test_toscalar_array_func0_np_func0",
+    "TestOneArr.test_asarray_tensor_func37",
+    "TestOneArr.test_asarray_tensor_func20",
+    "TestOneArr.test_asarray_tensor_func42",
+    "TestOneArr.test_asarray_list_func67",
+    "TestOneArr.test_asarray_list_func30",
+    "TestOneArrAndAxis.test_andaxis_list_func4_axis_1",
+    "TestSequenceOfArrays.test_several_func3",
+    "TestOneArr.test_asarray_array_func54",
+    "TestOneArrAndShape.test_andshape_list_func4",
+    "TestOneArr.test_asarray_tensor_func2",
+    "TestOneArr.test_asarray_tensor_func57",
+    "TestOneArrAndAxis.test_andaxis_list_func9_axis_-1",
+    "TestOneArrAndAxis.test_andaxis_array_func0_axis_1",
+    "TestOneArrAndAxis.test_andaxis_list_func4_axis_-1",
+    "TestOneArr.test_asarray_array_func55",
+    "TestOneArrAndAxis.test_andaxis_tensor_func3_axis_-1",
+    "TestOneArrAndAxis.test_andaxis_tensor_func5_axis_-1",
+    "TestOneArr.test_asarray_list_func14",
+    "TestOneArr.test_asarray_list_func29",
+    "TestOneArrAndAxis.test_andaxis_array_func7_axis_1",
+    "TestOneArrAndShape.test_andshape_list_func3",
+    "TestOneArr.test_asarray_tensor_func5",
+    "TestOneArr.test_asarray_list_func68",
+    "TestOneArr.test_asarray_tensor_func61",
+    "TestSequenceOfArrays.test_single_list_func3",
+    "TestOneArr.test_asarray_array_func21",
+    "TestOneArr.test_asarray_list_func61",
+    "TestOneArr.test_asarray_tensor_func55",
+    "TestOneArr.test_asarray_tensor_func18",
+    "TestOneArr.test_asarray_list_func50",
+    "TestOneArrAndAxis.test_andaxis_array_func7_axis_0",
+    "TestOneArr.test_asarray_array_func62",
+    "TestOneArr.test_asarray_tensor_func50",
+    "TestOneArr.test_asarray_array_func6",
+    "TestOneArr.test_asarray_list_func66",
+    "TestOneArr.test_asarray_list_func59",
+    "TestOneArr.test_asarray_tensor_func28",
+    "TestShapeLikeToArray.test_shape_func3",
+    "TestOneArr.test_asarray_array_func9",
+    "TestOneArrAndAxis.test_andaxis_array_func0_axis_0",
+    "TestOneArrAndShape.test_andshape_array_func2",
+    "TestPythonArgsToArray.test_argstoarray_simple_func2_args2",
+    "TestOneArrAndShape.test_andshape_tensor_func0",
+    "TestPythonArgsToArray.test_argstoarray_simple_func0_args0",
+    "TestOneArr.test_asarray_array_func19",
+    "TestOneArr.test_asarray_tensor_func39",
+    "TestOneArr.test_asarray_array_func65",
+    "TestSequenceOfArrays.test_single_list_func2",
+    "TestOneArr.test_asarray_array_func31",
+    "TestOneArrAndAxis.test_andaxis_list_func10_axis_0",
+    "TestOneArr.test_asarray_list_func2",
+    "TestOneArrAndAxis.test_andaxis_array_func10_axis3",
+    "TestOneArrAndAxis.test_andaxis_array_func4_axis_1",
+    "TestDivmod.test_divmod_out_list",
+    "TestOneArr.test_asarray_list_func19",
+    "TestOneArrAndAxesTuple.test_andtuple_array_func0_axes2",
+    "TestOneArr.test_asarray_array_func1",
+    "TestOneArrAndAxis.test_andaxis_tensor_func4_axis_1",
+    "TestOneArr.test_asarray_tensor_func43",
+    "TestOneArrAndAxis.test_andaxis_array_func5_axis_0",
+    "TestOneArrAndAxesTuple.test_andtuple_tensor_func0_axes2",
+    "TestOneArr.test_asarray_list_func10",
+    "TestSequenceOfArrays.test_single_array_func3",
+    "TestOneArr.test_asarray_tensor_func40",
+    "TestSequenceOfArraysToSingle.test_several_func0",
+    "TestOneArrAndAxis.test_andaxis_array_func7_axis3",
+    "TestOneArrAndAxis.test_andaxis_array_func6_axis_-1",
+    "TestOneArr.test_asarray_tensor_func35",
+    "TestOneArr.test_asarray_tensor_func72",
+    "TestOneArr.test_asarray_list_func18",
+    "TestOneArr.test_asarray_tensor_func60",
+    "TestOneArrAndAxis.test_andaxis_list_func3_axis_0",
+    "TestOneArr.test_asarray_array_func37",
+    "TestOneArr.test_asarray_array_func74",
+    "TestNormalizations.test_unknown_args",
+    "TestOneArr.test_asarray_array_func4",
+    "TestOneArr.test_asarray_array_func58",
+    "TestOneArrAndAxis.test_andaxis_list_func9_axis_0",
+    "TestOneArr.test_asarray_tensor_func22",
+    "TestOneArr.test_asarray_list_func56",
+    "TestOneArrAndAxis.test_andaxis_list_func3_axis_1",
+    "TestOneArrAndAxis.test_andaxis_array_func0_axis_-1",
+    "TestOneArr.test_asarray_tensor_func4",
+    "TestPythonArgsToArray.test_argstoarray_simple_func6_args6",
+    "TestOneArrAndAxis.test_andaxis_tensor_func9_axis_-1",
+    "TestOneArr.test_asarray_tensor_func68",
+    "TestOneArr.test_asarray_list_func27",
+    "TestOneArrAndAxis.test_andaxis_array_func4_axis_-1",
+    "TestOneArr.test_asarray_array_func13",
+    "TestOneArr.test_asarray_list_func6",
+    "TestOneArr.test_asarray_array_func39",
+    "TestOneArr.test_asarray_array_func73",
+    "TestOneArr.test_asarray_tensor_func12",
+    "TestOneArrAndAxis.test_andaxis_array_func7_axis_-1",
+    "TestOneArr.test_asarray_list_func17",
+    "TestShapeLikeToArray.test_shape_func2",
+    "TestOneArrAndAxis.test_andaxis_list_func4_axis_0",
+    "TestOneArrAndAxis.test_andaxis_array_func3_axis_1",
+    "TestOneArrAndAxis.test_andaxis_tensor_func10_axis_1",
+    "TestOneArrAndAxis.test_andaxis_list_func8_axis_1",
+    "TestOneArr.test_asarray_list_func33",
+    "TestOneArrAndAxis.test_andaxis_tensor_func1_axis_-1",
+    "TestOneArr.test_asarray_array_func18",
+    "TestOneArr.test_asarray_tensor_func3",
+    "TestOneArrAndShape.test_andshape_tensor_func2",
+    "TestOneArr.test_asarray_list_func35",
+    "TestOneArrAndAxis.test_andaxis_tensor_func3_axis_0",
+    "TestOneArr.test_asarray_array_func70",
+    "TestOneArrAndAxesTuple.test_andtuple_list_func0_axes1",
+    "TestOneArrAndAxis.test_andaxis_list_func8_axis_-1",
+    "TestOneArr.test_asarray_tensor_func59",
+    "TestOneArr.test_asarray_array_func15",
+    "TestOneArrAndAxis.test_andaxis_tensor_func6_axis_1",
+    "TestOneArr.test_asarray_tensor_func38",
+    "TestPythonArgsToArray.test_argstoarray_simple_func8_args8",
+    "TestPythonArgsToArray.test_argstoarray_simple_func3_args3",
+    "TestOneArr.test_asarray_array_func14",
+    "TestPythonArgsToArray.test_argstoarray_simple_func5_args5",
+    "TestOneArr.test_asarray_list_func26",
+    "TestOneArr.test_asarray_list_func34",
+    "TestOneArr.test_asarray_list_func4",
+    "TestOneArr.test_asarray_tensor_func67",
+    "TestOneArr.test_asarray_array_func3",
+    "TestOneArr.test_asarray_array_func5",
+    "TestOneArr.test_asarray_array_func52",
+    "TestOneArr.test_asarray_tensor_func58",
+    "TestOneArr.test_asarray_tensor_func48",
+    "TestOneArr.test_asarray_array_func50",
+    "TestOneArr.test_asarray_tensor_func47",
+    "TestOneArrAndAxis.test_andaxis_array_func4_axis3",
+    "TestOneArrAndAxis.test_andaxis_tensor_func2_axis_1",
+    "TestOneArrAndAxis.test_andaxis_array_func0_axis3",
+    "TestShapeLikeToArray.test_shape_func1",
+    "TestOneArrAndAxis.test_andaxis_tensor_func4_axis_-1",
+    "TestOneArrAndAxis.test_andaxis_tensor_func8_axis_-1",
+    "TestDefaultDtype.test_defaultdtype_defaults",
+    "TestOneArr.test_asarray_list_func63",
+    "TestOneArrAndShape.test_andshape_list_func2",
+    "TestOneArr.test_asarray_array_func27",
+    "TestOneArrAndAxis.test_andaxis_array_func4_axis_0",
+    "TestOneArr.test_asarray_list_func41",
+    "TestSequenceOfArrays.test_single_tensor_func2",
+    "TestOneArr.test_asarray_list_func39",
+    "TestOneArr.test_asarray_tensor_func6",
+    "TestOneArr.test_asarray_tensor_func25",
+    "TestOneArr.test_asarray_array_func2",
+    "TestOneArrAndAxis.test_andaxis_array_func8_axis_1",
+    "TestOneArr.test_asarray_tensor_func56",
+    "TestOneArr.test_asarray_array_func69",
+    "TestOneArr.test_asarray_list_func28",
+    "TestOneArr.test_asarray_tensor_func26",
+    "TestArrayToSequence.test_asarray_tensor_func1",
+    "TestOneArr.test_asarray_array_func28",
+    "TestPythonArgsToArray.test_argstoarray_simple_func1_args1",
+    "TestOneArrAndAxis.test_andaxis_list_func10_axis3",
+    "TestOneArr.test_asarray_list_func44",
+    "TestOneArr.test_asarray_array_func46",
+    "TestOneArrAndAxis.test_andaxis_array_func10_axis_1",
+    "TestOneArr.test_asarray_tensor_func30",
+    "TestOneArr.test_asarray_tensor_func16",
+    "TestOneArrAndAxis.test_andaxis_array_func1_axis3",
+    "TestOneArr.test_asarray_tensor_func46",
+    "TestOneArr.test_asarray_tensor_func10",
+    "TestOneArrAndAxis.test_andaxis_array_func2_axis_-1",
+    "TestOneArr.test_asarray_list_func47",
+    "TestSequenceOfArrays.test_single_tensor_func0",
+    "TestOneArrAndAxesTuple.test_andtuple_array_func0_axes0",
+    "TestOneArr.test_asarray_list_func12",
+    "TestOneArrAndAxis.test_andaxis_array_func8_axis3",
+    "TestShapeLikeToArray.test_shape_func0",
+    "TestOneArr.test_asarray_array_func61",
+    "TestOneArrAndAxis.test_andaxis_tensor_func7_axis_-1",
+    "TestOneArrAndAxis.test_andaxis_list_func0_axis_0",
+    "TestOneArr.test_asarray_tensor_func31",
+    "TestOneArr.test_asarray_array_func67",
+    "TestOneArr.test_asarray_list_func64",
+    "TestOneArrAndAxis.test_andaxis_array_func5_axis_-1",
+    "TestOneArrAndAxis.test_andaxis_array_func2_axis_1",
+    "TestOneArr.test_asarray_array_func32",
+    "TestOneArr.test_asarray_array_func8",
+    "TestOneArr.test_asarray_list_func5",
+    "TestOneArr.test_asarray_array_func17",
+    "TestOneArrAndAxis.test_andaxis_list_func7_axis_-1",
+    "TestOneArrAndAxis.test_andaxis_tensor_func5_axis_1",
+    "TestOneArrAndAxis.test_andaxis_list_func0_axis_-1",
+    "TestOneArrAndAxis.test_andaxis_array_func8_axis_0",
+    "TestOneArr.test_asarray_array_func64",
+    "TestArrayToSequence.test_asarray_tensor_func0",
+    "TestSequenceOfArrays.test_single_array_func2",
+    "TestOneArrAndAxis.test_andaxis_list_func10_axis_-1",
+    "TestOneArr.test_asarray_list_func71",
+    "TestOneArrAndAxesTuple.test_andtuple_tensor_func0_axes1",
+    "TestOneArrAndAxis.test_andaxis_tensor_func1_axis_0",
+    "TestOneArr.test_asarray_array_func44",
+    "TestCopyTo.test_copyto_basic",
+    "TestSequenceOfArrays.test_single_tensor_func1",
+    "TestOneArr.test_asarray_tensor_func11",
+    "TestSequenceOfArrays.test_several_func1",
+    "TestOneArr.test_asarray_tensor_func74",
+    "TestOneArr.test_asarray_tensor_func36",
+    "TestOneArr.test_asarray_array_func53",
+    "TestOneArr.test_asarray_tensor_func63",
+    "TestOneArrAndShape.test_andshape_array_func3",
+    "TestOneArr.test_asarray_list_func74",
+    "TestOneArr.test_asarray_tensor_func49",
+    "TestOneArrAndAxis.test_andaxis_tensor_func3_axis_1",
+    "TestOneArr.test_asarray_tensor_func32",
+    "TestOneArrAndAxis.test_andaxis_list_func1_axis_1",
+    "TestOneArrAndAxis.test_andaxis_tensor_func4_axis_0",
+    "TestOneArrAndShape.test_andshape_tensor_func3",
+    "TestOneArr.test_asarray_tensor_func27",
+    "TestOneArr.test_asarray_list_func22",
+    "TestOneArr.test_asarray_list_func69",
+    "TestOneArr.test_asarray_array_func26",
+    "TestOneArrAndAxis.test_andaxis_array_func9_axis_-1",
+    "TestOneArrAndAxis.test_andaxis_tensor_func6_axis_-1",
+    "TestSequenceOfArrays.test_single_tensor_func3",
+    "TestOneArrAndShape.test_andshape_array_func1",
+    "TestOneArr.test_asarray_array_func25",
+    "TestOneArrAndAxis.test_andaxis_tensor_func2_axis_-1",
+    "TestOneArrAndAxis.test_andaxis_array_func2_axis3",
+    "TestOneArr.test_asarray_tensor_func41",
+    "TestOneArrAndAxis.test_andaxis_tensor_func0_axis_1",
+    "TestOneArr.test_asarray_list_func49",
+    "TestOneArr.test_asarray_list_func57",
+    "TestOneArrAndAxis.test_andaxis_tensor_func8_axis_1",
+    "TestOneArr.test_asarray_tensor_func71",
+    "TestSequenceOfArrays.test_single_list_func1",
+    "TestPythonArgsToArray.test_argstoarray_simple_func9_args9",
+    "TestOneArr.test_asarray_list_func37",
+    "TestOneArrAndAxis.test_andaxis_tensor_func0_axis_0",
+    "TestOneArr.test_asarray_array_func30",
+    "TestOneArr.test_asarray_tensor_func21",
+    "TestOneArr.test_asarray_array_func35",
+    "TestOneArr.test_asarray_tensor_func64",
+    "TestOneArr.test_asarray_list_func51",
+    "TestOneArr.test_asarray_array_func47",
+    "TestOneArrAndAxis.test_andaxis_tensor_func7_axis_1",
+    "TestOneArr.test_asarray_array_func29",
+    "TestOneArrAndAxis.test_andaxis_array_func1_axis_-1",
+    "TestOneArr.test_asarray_tensor_func19",
+    "TestOneArrAndAxis.test_andaxis_list_func1_axis_0",
+    "TestOneArr.test_asarray_tensor_func17",
+    "TestOneArrAndAxis.test_andaxis_list_func0_axis_1",
+    "TestOneArr.test_asarray_tensor_func70",
+    "TestOneArr.test_asarray_tensor_func54",
+    "TestOneArr.test_asarray_tensor_func23",
+    "TestOneArr.test_asarray_array_func7",
+    "TestOneArr.test_asarray_array_func12",
+    "TestOneArrAndAxis.test_andaxis_list_func3_axis_-1",
+    "TestOneArrAndAxis.test_andaxis_array_func10_axis_0",
+    "TestOneArr.test_asarray_tensor_func13",
+    "TestOneArrAndAxis.test_andaxis_tensor_func6_axis_0",
+    "TestOneArrAndShape.test_andshape_array_func4",
+    "TestOneArrAndAxis.test_andaxis_tensor_func10_axis3",
+    "TestOneArr.test_asarray_array_func40",
+    "TestOneArrAndAxis.test_andaxis_tensor_func7_axis_0",
+    "TestOneArr.test_asarray_list_func42",
+    "TestOneArrAndAxis.test_andaxis_tensor_func0_axis_-1",
+    "TestOneArr.test_asarray_list_func25",
+    "TestOneArr.test_asarray_tensor_func52",
+    "TestOneArrAndAxis.test_andaxis_list_func6_axis_-1",
+    "TestSequenceOfArraysToSingle.test_several_func1",
+    "TestCopyTo.test_copytobcast",
+    "TestOneArrAndAxis.test_andaxis_array_func10_axis_-1",
+    "TestSequenceOfArraysToSingle.test_several_func5",
+    "TestOneArr.test_asarray_list_func1",
+    "TestOneArr.test_asarray_list_func46",
+    "TestSequenceOfArrays.test_single_list_func0",
+    "TestCholesky.test_basic_property_shape3_dtype1",
+    "TestCond.test_sq_cases",
+    "TestNormInt64.test_bad_args",
+    "TestQR.test_qr_empty_m_0_n_3",
+    "TestMultiDot.test_dynamic_programming_optimization_and_out",
+    "TestNormDouble.test_bad_args",
+    "TestCholesky.test_basic_property_shape4_dtype1",
+    "TestCholesky.test_basic_property_shape3_dtype2",
+    "TestCholesky.test_basic_property_shape4_dtype0",
+    "TestCholesky.test_basic_property_shape3_dtype0",
+    "TestCond.test_empty_sq_cases",
+    "TestCholesky.test_basic_property_shape1_dtype3",
+    "TestQR.test_qr_empty_m_0_n_0",
+    "TestQR.test_mode_raw",
+    "TestMultiDot.test_two_arguments_and_out",
+    "TestCholesky.test_basic_property_shape1_dtype2",
+    "TestMultiDot.test_three_arguments_and_out",
+    "TestNormDouble.test_axis",
+    "TestCholesky.test_basic_property_shape1_dtype1",
+    "TestCholesky.test_basic_property_shape2_dtype1",
+    "TestMisc.test_generalized_raise_multiloop",
+    "TestEigvalsh.test_invalid",
+    "TestNormDouble.test_matrix_2x2",
+    "TestCholesky.test_basic_property_shape0_dtype0",
+    "TestMisc.test_byteorder_check",
+    "TestCholesky.test_basic_property_shape4_dtype3",
+    "TestCholesky.test_basic_property_shape2_dtype2",
+    "TestCholesky.test_basic_property_shape3_dtype3",
+    "TestNormInt64.test_axis",
+    "TestCholesky.test_basic_property_shape2_dtype0",
+    "TestCholesky.test_basic_property_shape0_dtype3",
+    "TestQR.test_qr_empty_m_3_n_0",
+    "TestEigh.test_invalid",
+    "TestNormSingle.test_bad_args",
+    "TestNormSingle.test_matrix_2x2",
+    "TestNormSingle.test_axis",
+    "TestCholesky.test_basic_property_shape1_dtype0",
+    "TestCholesky.test_basic_property_shape4_dtype2",
+    "TestMultiDot.test_too_few_input_arrays",
+    "TestCholesky.test_basic_property_shape0_dtype2",
+    "TestCholesky.test_basic_property_shape0_dtype1",
+    "TestNormInt64.test_matrix_2x2",
+    "TestCholesky.test_basic_property_shape2_dtype3",
+    "TestFliplr.test_basic",
+    "TestHistogram2d.test_binparameter_combination",
+    "TestHistogram2d.test_all_outliers",
+    "TestTriuIndicesFrom.test_exceptions",
+    "TestTrilIndicesFrom.test_exceptions",
+    "TestHistogram2d.test_asym",
+    "TestDiag.test_failure",
+    "TestVsplit.test_non_iterable",
+    "TestVsplit.test_1D_array",
+    "TestApplyAlongAxis.test_scalar_array",
+    "TestDstack.test_non_iterable",
+    "TestSplit.test_unequal_split",
+    "TestPutAlongAxis.test_broadcast",
+    "TestArraySplit.test_integer_0_split",
+    "TestDsplit.test_2D_array",
+    "TestTakeAlongAxis.test_invalid",
+    "TestHsplit.test_0D_array",
+    "TestDsplit.test_1D_array",
+    "TestDsplit.test_non_iterable",
+    "TestDsplit.test_0D_array",
+    "TestHsplit.test_non_iterable",
+    "TestColumnStack.test_non_iterable",
+    "TestApplyAlongAxis.test_axis_insertion",
+    "TestVsplit.test_0D_array",
+    "TestExpandDims.test_repeated_axis",
+    "TestExpandDims.test_axis_out_of_range",
+    "TestApplyAlongAxis.test_0d_array",
+    "TestHistogramdd.test_bins_errors",
+    "TestHistogramdd.test_equal_edges",
+    "TestHistogram.test_precision",
+    "TestHistogramdd.test_finite_range",
+    "TestHistogramdd.test_weights",
+    "TestHistogram.test_error_binnum_type",
+    "TestHistogram.test_finite_range",
+    "TestHistogramdd.test_inf_edges",
+    "TestHistogramdd.test_bins_error_2",
+    "TestHistogramdd.test_simple",
+    "TestHistogram.test_one_bin",
+    "TestHistogram.test_unsigned_monotonicity_check",
+    "TestQuantile.test_quantile_monotonic_method_weibull",
+    "TestGradient.test_badargs",
+    "TestRot90.test_basic",
+    "TestDiff.test_axis",
+    "TestQuantile.test_quantile_monotonic_method_median_unbiased",
+    "TestGradient.test_values",
+    "TestCov.test_aweights",
+    "TestQuantile.test_quantile_monotonic_method_interpolated_inverted_cdf",
+    "TestQuantile.test_quantile_monotonic_method_inverted_cdf",
+    "TestPercentile.test_keepdims_out_q1_axis_1",
+    "TestSortComplex.test_sort_real_type_in_g_type_out_G",
+    "TestMedian.test_keepdims_out_axis2",
+    "TestMeshgrid.test_invalid_arguments",
+    "TestGradient.test_specific_axes",
+    "TestPercentile.test_keepdims_out_q_7_axis4",
+    "TestPercentile.test_keepdims_out_q1_axis4",
+    "TestDelete.test_slices",
+    "TestPercentile.test_extended_axis_invalid",
+    "TestGradient.test_second_order_accurate",
+    "TestMedian.test_keepdims_out_axis0",
+    "TestDiff.test_prepend",
+    "TestMedian.test_keepdims_out_axis_1",
+    "TestPercentile.test_keepdims_out_q1_axis0",
+    "TestQuantile.test_quantile_monotonic_method_averaged_inverted_cdf",
+    "TestMedian.test_keepdims_out_axis4",
+    "TestBincount.test_with_incorrect_minlength",
+    "TestSortComplex.test_sort_real_type_in_H_type_out_F",
+    "TestDiff.test_n",
+    "TestMeshgrid.test_indexing",
+    "TestQuantile.test_quantile_monotonic_method_closest_observation",
+    "TestFlip.test_axes",
+    "TestPercentile.test_keepdims_out_q1_axis3",
+    "TestPercentile.test_keepdims_out_q_7_axis0",
+    "TestMedian.test_keepdims_out_axis3",
+    "TestCov.test_fweights",
+    "TestDiff.test_append",
+    "TestPercentile.test_scalar_q",
+    "TestMedian.test_extended_axis_invalid",
+    "TestMedian.test_out",
+    "TestPercentile.test_keepdims_out_q_7_axis2",
+    "TestPercentile.test_keepdims_out_q1_axis2",
+    "TestQuantile.test_quantile_monotonic_method_hazen",
+    "TestPercentile.test_keepdims_out_q_7_axis3",
+    "TestPercentile.test_keepdims_out_q_7_axis_1",
+    "TestPercentile.test_api",
+    "TestQuantile.test_quantile_monotonic_method_normal_unbiased",
+    "TestSetOps.test_in1d_mixed_dtype_dtype11_dtype21_kind_table",
+    "TestSetOps.test_in1d_mixed_dtype_dtype10_dtype20_kind0",
+    "TestSetOps.test_in1d_mixed_dtype_dtype10_dtype20_kind_table",
+    "TestSetOps.test_ediff1d_forbidden_type_casts_ary1_prepend1_append1_expected_to_begin",
+    "TestSetOps.test_in1d_mixed_dtype_dtype11_dtype21_kind0",
+    "TestSetOps.test_in1d_mixed_dtype_dtype11_dtype21_kind_sort",
+    "TestSetOps.test_in1d_table_timedelta_fails",
+    "TestUnique.test_unique_axis_errors",
+    "TestSetOps.test_setdiff1d",
+    "TestSetOps.test_in1d_mixed_dtype_dtype10_dtype20_kind_sort",
+    "TestSetOps.test_in1d_timedelta_kind_sort",
+    "TestSetOps.test_in1d_timedelta_kind0",
+    "TestUnique.test_unique_axis",
+    "TestConstant.test_check_constant_float3",
+    "TestConstant.test_check_constant_pad_2d",
+    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f8_casting_safe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_c8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
+    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_f8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_no",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_exceptions",  # torch_np/numpy_tests/core/test_shape_base
+    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_c8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
+    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_i8_casting_equiv",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_large_concatenate_axis_None",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_concatenate",  # torch_np/numpy_tests/core/test_shape_base
+    "TestVstack.test_empty_input",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_i8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_i8_casting_no",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f8_casting_no",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f4_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_f8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestVstack.test_non_iterable",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_i8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f4_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
+    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_f8_casting_safe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f4_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
+    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_i8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_c8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_safe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_c8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_f4_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f4_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestStackMisc.test_stack",  # torch_np/numpy_tests/core/test_shape_base
+    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_c8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_i8_casting_safe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_bad_out_shape",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_f8_casting_equiv",  # torch_np/numpy_tests/core/test_shape_base
+    "TestHstack.test_non_iterable",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis0_out_dtype_c8_casting_same_kind",  # torch_np/numpy_tests/core/test_shape_base
+    "TestHstack.test_empty_input",  # torch_np/numpy_tests/core/test_shape_base
+    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_f4_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_equiv",  # torch_np/numpy_tests/core/test_shape_base
+    "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_i8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestNegative.test_exceptions",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestPower.test_modular_power",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestBaseMath.test_lower_align",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestArrayFromScalar.test_integers_np_longlong_t26",  # torch_np/numpy_tests/core/test_scalar_ctors
+    "TestArrayFromScalar.test_integers_np_intc_np_longlong",  # torch_np/numpy_tests/core/test_scalar_ctors
+    "TestArrayFromScalar.test_integers_t15_np_longlong",  # torch_np/numpy_tests/core/test_scalar_ctors
+    "TestArrayFromScalar.test_integers_np_longlong_np_longlong",  # torch_np/numpy_tests/core/test_scalar_ctors
+    "TestArrayFromScalar.test_integers_np_byte_np_longlong",  # torch_np/numpy_tests/core/test_scalar_ctors
+    "TestArrayFromScalar.test_integers_np_short_np_longlong",  # torch_np/numpy_tests/core/test_scalar_ctors
+    "TestArrayFromScalar.test_integers_np_int__np_longlong",  # torch_np/numpy_tests/core/test_scalar_ctors
+    "TestScalarTypeNames.test_names_reflect_attributes_t4",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t1",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t7",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t5",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t9",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestIsSubDType.test_both_abstract",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t6",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t2",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t8",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t0",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestIsSubDType.test_nondtype_nonscalartype",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestScalarTypeNames.test_names_reflect_attributes_t3",  # torch_np/numpy_tests/core/test_numerictypes
+    "TestClip.test_clip_inplace_array",  # torch_np/numpy_tests/core/test_numeric
+    "TestRequire.test_require_each",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_clip_with_out_simple_int32",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_simple_inplace_01",  # torch_np/numpy_tests/core/test_numeric
+    "TestStdVar.test_out_scalar",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_simple_int32_inout_casting_unsafe",  # torch_np/numpy_tests/core/test_numeric
+    "TestMoveaxis.test_errors",  # torch_np/numpy_tests/core/test_numeric
+    "TestNonzeroAndCountNonzero.test_count_nonzero_axis",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_clip_with_out_memory_overlap",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_clip_func_takes_out",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_noncontig_inplace",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_type_cast_12",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_simple_int64_out",  # torch_np/numpy_tests/core/test_numeric
+    "TestRollaxis.test_exceptions",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_simple_inplace_02",  # torch_np/numpy_tests/core/test_numeric
+    "TestRequire.test_C_and_F_simul",  # torch_np/numpy_tests/core/test_numeric
+    "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-1",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_simple_complex",  # torch_np/numpy_tests/core/test_numeric
+    "TestBoolArray.test_logical_not_abs",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_simple_out",  # torch_np/numpy_tests/core/test_numeric
+    "TestBroadcast.test_broadcast_single_arg",  # torch_np/numpy_tests/core/test_numeric
+    "TestRequire.test_unknown_requirement",  # torch_np/numpy_tests/core/test_numeric
+    "TestBoolArray.test_logical_and_or_xor",  # torch_np/numpy_tests/core/test_numeric
+    "TestBroadcast.test_broadcast_error_kwargs",  # torch_np/numpy_tests/core/test_numeric
+    "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-9",  # torch_np/numpy_tests/core/test_numeric
+    "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-10",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_type_cast_10",  # torch_np/numpy_tests/core/test_numeric
+    "TestOuterMisc.test_outer_out_param",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_clip_inplace_simple",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_clip_with_out_transposed",  # torch_np/numpy_tests/core/test_numeric
+    "TestClip.test_clip_with_out_simple",  # torch_np/numpy_tests/core/test_numeric
+    "TestCross.test_broadcasting_shapes",  # torch_np/numpy_tests/core/test_numeric
+    "TestIndexing.test_index_no_floats",  # torch_np/numpy_tests/core/test_indexing
+    "TestBooleanIndexing.test_boolean_indexing_weirdness",  # torch_np/numpy_tests/core/test_indexing
+    "TestBooleanIndexing.test_bool_as_int_argument_errors",  # torch_np/numpy_tests/core/test_indexing
+    "TestBroadcastedAssignments.test_simple_broadcasting_errors",  # torch_np/numpy_tests/core/test_indexing
+    "TestFloatNonIntegerArgument.test_non_integer_argument_errors",  # torch_np/numpy_tests/core/test_indexing
+    "TestIndexing.test_slicing_no_floats",  # torch_np/numpy_tests/core/test_indexing
+    "TestBroadcastedAssignments.test_prepend_not_one",  # torch_np/numpy_tests/core/test_indexing
+    "TestFloatNonIntegerArgument.test_reduce_axis_float_index",  # torch_np/numpy_tests/core/test_indexing
+    "TestEinsum.test_different_paths_dtype_f",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_D",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_e",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_fixed_collapsingbug",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_combined_views_mapping",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_B",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_sums_cfloat64",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_broadcast",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_sums_int32",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_b",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_fixedstridebug",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_out_is_res",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_subscript_range",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_sums_float64",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_sums_float32",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_sums_cfloat128",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_small_boolean_arrays",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_i",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_d",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_l",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_h",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_misc",  # torch_np/numpy_tests/core/test_einsum
+    "TestMisc.test_overlap",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_sums_int64",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_einsum_failed_on_p9_and_s390x",  # torch_np/numpy_tests/core/test_einsum
+    "TestEinsum.test_different_paths_dtype_F",  # torch_np/numpy_tests/core/test_einsum
+    "TestDLPack.test_dtype_passthrough_dtype4",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_23",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_12",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_27",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_32",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_from_dlpack_refcount",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype2",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_2",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_ndim0",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_1",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_17",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_13",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_14",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype7",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype9",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_29",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dunder_dlpack_refcount",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_15",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_non_contiguous",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype3",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_30",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_6",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_7",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype6",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype5",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_4",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_31",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_from_torch",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_24",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_21",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype8",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_28",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_3",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_10",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_0",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_16",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_18",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_20",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_11",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_25",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_5",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_22",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dlpack_device",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_9",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype0",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_dtype_passthrough_dtype1",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_19",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_26",  # torch_np/numpy_tests/core/test_dlpack
+    "TestDLPack.test_higher_dims_ndim_8",  # torch_np/numpy_tests/core/test_dlpack
+    "WeakTest.test_make_weak_keyed_dict_from_weak_keyed_dict",  # test_weak
+    "WeakKeyDictionaryTestCase.test_update",  # test_weak
+    "TestViewOpsLAZY.test_advanced_indexing_assignment_lazy",  # test_view_ops
+    "TestOldViewOpsCPU.test_crow_col_indices_cpu",  # test_view_ops
+    "TestViewOpsLAZY.test_advanced_indexing_nonview_lazy",  # test_view_ops
+    "TestTypePromotionCPU.test_alpha_mismatch_cpu",  # test_type_promotion
+    "TestTypePromotionCPU.test_alternate_result_cpu",  # test_type_promotion
+    "TestTypeHints.test_doc_examples",  # test_type_hints
 }
 
-dynamo_skips = {}
+dynamo_skips = {
+    "TestMatmulOperator.test_matmul_raises",
+    "TestMatmulOperator.test_exceptions",
+    "TestMatmulOperator.test_matmul_inplace",
+    "TestMethods.test_diagonal",
+    "TestMethods.test_searchsorted_complex",
+    "TestMethods.test_round",
+    "TestMethods.test_searchsorted_type_specific_2",
+    "TestMethods.test_dot",
+    "TestMethods.test_dot_out_mem_overlap",
+    "TestMethods.test_partition_iterative",
+    "TestMethods.test_trace",
+    "TestMethods.test_matmul_out",
+    "TestMethods.test_transpose",
+    "TestMethods.test_conjugate",
+    "TestMethods.test_choose_2",
+    "TestMethods.test_size_zero_memleak",
+    "TestMethods.test_searchsorted_with_invalid_sorter",
+    "TestMethods.test_choose",
+    "TestMethods.test_conjugate_out",
+    "TestMethods.test_compress",
+    "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmax_np_method0",
+    "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmin_np_method1",
+    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmin",
+    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmax",
+    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmax",
+    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmin",
+    "TestIsreal.test_fail",  # known py311 fail
+    "TestIscomplexobj.test_basic",  # known py311 fail
+    "TestIsrealobj.test_basic",  # known py311 fail
+    "TestIsreal.test_pass",  # known py311 fail
+    "TestIscomplex.test_pass",  # known py311 fail
+    "TestIscomplexobj.test_list",  # known py311 fail
+    "TestDiag.test_matrix",  # known py311 fail
+    "TestVander.test_dtypes",  # known py311 fail
+    "TestDstack.test_generator",  # known py311 fail
+    "TestColumnStack.test_generator",  # known py311 fail
+    "TestCov.test_complex",  # known py311 fail
+    "TestSortComplex.test_sort_complex",  # known py311 fail
+    "TestCorrCoef.test_xy",  # known py311 fail
+    "TestCov.test_xy",  # known py311 fail
+    "TestCorrCoef.test_complex",  # known py311 fail
+    "TestUnique.test_simple_complex",  # known py311 fail
+    "TestDigitize.test_casting_error",  # known py311 fail
+    "TestConstant.test_check_constant",  # known py311 fail
+    "TestFFTShift.test_fft_n",  # known py311 fail
+    "TestHstack.test_generator",  # known py311 fail
+    "TestVstack.test_generator",  # known py311 fail
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_I_operation0",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_I_operation1",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_L_operation1",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_Q_operation1",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_Q_operation0",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_P_operation0",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_P_operation1",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_H_operation0",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_H_operation1",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_L_operation0",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestCorrelate.test_complex",  # known py311 fail
+    "TestStdVarComplex.test_basic",  # known py311 fail
+    "TestEinsum.test_broadcasting_dot_cases",  # known py311 fail
+    "WeakTest.test_make_weak_keyed_dict_from_dict",  # known py311 fail
+    "TestViewOpsCPU.test_as_strided_gradients_cpu",  # known py311 fail
+    "TestViewOpsLAZY.test_as_strided_gradients_lazy",  # known py311 fail
+}

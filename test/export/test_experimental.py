@@ -1,15 +1,18 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa
+import unittest
+
 import torch
 import torch._dynamo
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._export.wrappers import _mark_strict_DO_NOT_USE
 
 from torch._functorch.aot_autograd import aot_export_module
 
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, TestCase
 
 
+@unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestExperiment(TestCase):
     def test_with_buffer_as_submodule(self):
         @_mark_strict_DO_NOT_USE

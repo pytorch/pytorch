@@ -358,11 +358,26 @@
   - torch/ao/quantization/quantizer/x86_inductor_quantizer.py
   - torch/_inductor/fx_passes/quantization.py
   - test/quantization/core/test_quantized_op.py
-  - test/inductor/test_mkldnn_pattern_matcher.py
   - test/quantization/pt2e/test_x86inductor_quantizer.py
   approved_by:
   - leslie-fang-intel
   - jgong5
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: CPU inductor
+  patterns:
+  - torch/_inductor/fx_passes/mkldnn_fusion.py
+  - torch/_inductor/codegen/cpp.py
+  - test/inductor/test_mkldnn_pattern_matcher.py
+  - test/inductor/test_cpu_repo.py
+  - test/inductor/test_cpu_cpp_wrapper.py
+  approved_by:
+  - leslie-fang-intel
+  - jgong5
+  - EikanWang
   mandatory_checks_name:
   - EasyCLA
   - Lint
