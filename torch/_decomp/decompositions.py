@@ -3358,7 +3358,7 @@ def upsample_bilinear2d(
     yscale = (y_f32 - y).clamp(0.0, 1.0).to(dtype)
     xscale = (x_f32 - x).clamp(0.0, 1.0).to(dtype)
 
-    dtype = torch.int64 if not input.is_floating_point() else input.dtype
+    dtype = torch.int32 if input.dtype == torch.uint8 else input.dtype
     if not input.is_floating_point():
         v1 = v1.to(dtype)
         v2 = v2.to(dtype)
@@ -3367,7 +3367,7 @@ def upsample_bilinear2d(
 
     def mul(b, a):
         # Weights computation for uint8_t and multiplication trick
-        # Ported _compute_indices_int16_weights_aa from aten/src/ATen/native/cpu/UpSampleKernel.cpp
+        # Port of https://github.com/pytorch/pytorch/blob/faea6f2c7a4d6e6e7ebe21752eaa7b0ad05afa79/aten/src/ATen/native/cpu/UpSampleKernel.cpp#L872-L912
         if input.dtype != torch.uint8:
             return torch.mul(b, a)
         else:
