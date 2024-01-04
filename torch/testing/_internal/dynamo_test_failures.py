@@ -53,6 +53,7 @@ FIXME_default_non_strict = {
     "dynamo/test_unspec",
     "dynamo/test_verify_correctness",
     "export/test_db",
+    "export/test_experimental",
     "export/test_export",
     "export/test_export_nonstrict",
     "export/test_functionalized_assertions",
