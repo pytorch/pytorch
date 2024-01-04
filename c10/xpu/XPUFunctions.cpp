@@ -48,7 +48,7 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
   }
 }
 
-static inline int deviceCountImpl(
+inline unsigned deviceCountImpl(
     std::vector<std::unique_ptr<sycl::device>>& devices) {
   enumDevices(devices);
   return static_cast<int>(devices.size());
