@@ -4617,17 +4617,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([3, 3, 6, 12]),))
 
-    def test_upsample_bilinear2d_uint8(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest(
-                "upsample_bilinear2d not implemented for byte on cuda"
-            )
-
-        def fn(a):
-            return aten.upsample_bilinear2d(a, (6, 6), False, None)
-
-        self.common(fn, (torch.randint(0, 255, size=[1, 1, 5, 5], dtype=torch.uint8),))
-
     @skip_if_x86_mac()
     def test_upsample_bilinear2d_a(self):
         def fn(a):

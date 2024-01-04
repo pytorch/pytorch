@@ -67,6 +67,12 @@ _decomp_test_ops_core_autograd = [
     and op.supports_autograd
 ]
 
+# decomposition names which have py_impl decorators
+py_impl_decomposition_names = {
+    "interpolate",  # because of bilinear2d,
+    "upsample_bilinear",
+}
+
 
 def diff_arg(arg, requires_grad=True):
     def is_differentiable_arg(arg):
@@ -781,7 +787,14 @@ class TestDecomp(TestCase):
                 kwargs = sample_input.kwargs
                 with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
                      as mode, enable_python_dispatcher():
-                    func(*args, **kwargs)
+                    decomposed = func(*args, **kwargs)
+
+                if aten_name in py_impl_decomposition_names:
+                    # without this check, incorrect decomps at the python dispatcher level can still pass because
+                    # they're checking aten decomps at the torch_dispatch level
+                    non_decomposed = func(*args, **kwargs)
+                    op_assert_equal(self, func, dtype, non_decomposed, decomposed, args, kwargs)
+
                 if not run_all:
                     self.check_decomposed(aten_name, mode)
             else:

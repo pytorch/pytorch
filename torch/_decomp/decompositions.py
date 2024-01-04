@@ -3389,9 +3389,6 @@ def upsample_bilinear2d(
 
     result = result.contiguous(memory_format=memory_format)
 
-    if not input.is_floating_point():
-        result = result.round()
-
     return result
 
 
