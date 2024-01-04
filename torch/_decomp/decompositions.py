@@ -3355,20 +3355,30 @@ def upsample_bilinear2d(
     v3 = aten._unsafe_index(input, [None, None, yp1, x])
     v4 = aten._unsafe_index(input, [None, None, yp1, xp1])
 
-    dtype = torch.float32 if not input.is_floating_point() else input.dtype
+    yscale = (y_f32 - y).clamp(0.0, 1.0).to(dtype)
+    xscale = (x_f32 - x).clamp(0.0, 1.0).to(dtype)
+
+    dtype = torch.int64 if not input.is_floating_point else input.dtype
     if not input.is_floating_point():
         v1 = v1.to(dtype)
         v2 = v2.to(dtype)
         v3 = v3.to(dtype)
         v4 = v4.to(dtype)
 
-    yscale = (y_f32 - y).clamp(0.0, 1.0).to(dtype)
-    xscale = (x_f32 - x).clamp(0.0, 1.0).to(dtype)
+    def mul(b, a):
+        # Weights computation for uint8_t and multiplication trick
+        # Ported _compute_indices_int16_weights_aa from aten/src/ATen/native/cpu/UpSampleKernel.cpp
+        if input.dtype != torch.uint8:
+            return torch.mul(b, a)
+        else:
+            COEF_PREC = 16
+            int_a = (0.5 + a * (1 << COEF_PREC)).to(dtype)
+            return  ((int_a * b) + (1 << (COEF_PREC - 1))) >> COEF_PREC
 
     # x1 * (1 - alpha) + x2 * alpha == x1 + (x2 - x1) * alpha
-    q1 = v1 + torch.mul(v2 - v1, xscale)
-    q2 = v3 + torch.mul(v4 - v3, xscale)
-    result = q1 + torch.mul(q2 - q1, yscale)
+    q1 = v1 + mul(v2 - v1, xscale)
+    q2 = v3 + mul(v4 - v3, xscale)
+    result = q1 + mul(q2 - q1, yscale)
 
     # convert output to correct memory format, if necessary
     memory_format = utils.suggest_memory_format(input)
