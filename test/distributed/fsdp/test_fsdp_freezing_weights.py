@@ -36,8 +36,8 @@ class Model(nn.Module):
         self,
         with_fsdp,
         freeze_after_wrap_fsdp,
-        disable_autograd=False,
-        fsdp_kwargs=None,
+        disable_autograd,
+        fsdp_kwargs,
     ):
         super().__init__()
         self.trunk = nn.Sequential(
@@ -58,10 +58,6 @@ class Model(nn.Module):
         self.trunk = FSDP(self.trunk, **fsdp_kwargs)
         self.head = FSDP(self.head, **fsdp_kwargs)
 
-    @torch.no_grad()
-    def trunk_forward_no_grad(self, x):
-        return self.trunk(x)
-
     def forward(self, x):
         with self.autograd_ctx():
             x = self.trunk(x)
@@ -73,8 +69,8 @@ class NestedTrunkModel(nn.Module):
         self,
         with_fsdp,
         freeze_after_wrap_fsdp,
-        disable_autograd=False,
-        fsdp_kwargs=None,
+        disable_autograd,
+        fsdp_kwargs,
     ):
         super().__init__()
         self.trunk = nn.Sequential(
@@ -125,8 +121,8 @@ class TestFreezingWeights(FSDPTest):
         with_fsdp,
         with_nested_trunk,
         freeze_after_wrap_fsdp,
-        disable_autograd=False,
-        fsdp_kwargs=None,
+        disable_autograd,
+        fsdp_kwargs,
     ):
         if with_nested_trunk:
             model = NestedTrunkModel(
@@ -144,8 +140,8 @@ class TestFreezingWeights(FSDPTest):
         freezing_method,
         freeze_after_wrap_fsdp,
         with_fsdp,
-        disable_autograd=False,
-        forward_prefetch=False,
+        disable_autograd,
+        forward_prefetch,
     ):
         torch.manual_seed(0)
         batch = torch.randn(size=(2, 3, 224, 224)).cuda()
@@ -223,6 +219,7 @@ class TestFreezingWeights(FSDPTest):
             freeze_after_wrap_fsdp,
             with_fsdp=False,
             disable_autograd=disable_autograd,
+            forward_prefetch=False,  # does not apply to DDP
         )
 
         # FSDP
