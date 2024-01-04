@@ -3685,10 +3685,7 @@ def constant_boundary_condition(
 
         mask = functools.reduce(
             ops.and_,
-            [
-                range_mask(inp[i], h[i] + padding_h[i], -padding_h[i])
-                for i in range(dim)
-            ],
+            [range_mask(ih[i], h[i] + padding_h[i], -padding_h[i]) for i in range(dim)],
         )
         return (
             ops.masked(
@@ -3699,7 +3696,7 @@ def constant_boundary_condition(
                 fill_value,
             )
             if padding
-            else ops.masked(mask, lambda: x_loader([*prefix, *inp]), fill_value)
+            else ops.masked(mask, lambda: x_loader([*prefix, *ih]), fill_value)
         )
 
     return load
