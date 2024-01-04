@@ -192,11 +192,15 @@ class UnflattenedModule(torch.nn.Module):
         self.check_input_constraints = True
 
     def forward(self, *args, **kwargs):
-        if is_fx_tracing():
-            return torch.fx.Interpreter(self, graph=self.graph).run(
-                *args, enable_io_processing=False
-            )
         flat_args, in_spec = pytree.tree_flatten((args, kwargs))
+        if is_fx_tracing():
+            return_val = torch.fx.Interpreter(self, graph=self.graph).run(
+                *flat_args, enable_io_processing=False
+            )
+            # For scalar return value, fx.Graph wraps in a tuple
+            if isinstance(return_val, tuple) and len(return_val) == 1:
+                return return_val[0]
+            return return_val
 
         assert self.module_call_graph[0].fqn == ""
         signature = self.module_call_graph[0].signature
