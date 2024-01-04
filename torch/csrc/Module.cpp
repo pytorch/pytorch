@@ -802,7 +802,7 @@ PyObject* THPModule_setUserEnabledNNPACK(PyObject* _unused, PyObject* arg) {
   TORCH_CHECK(
       PyBool_Check(arg),
       "set_enabled_NNPACK expects a bool, "
-      "but got %s",
+      "but got ",
       THPUtils_typename(arg));
   at::globalContext().setUserEnabledNNPACK(arg == Py_True);
   Py_RETURN_NONE;
