@@ -89,6 +89,7 @@ def torch_vital_set(value):
 # FIXME: document or deprecate whatever this is
 class TestBasicVitalSigns(TestCase):
     def test_basic_vitals(self):
+        assert(0)
         with torch_vital_set(''):
             self.assertFalse(torch.vitals_enabled())
         with torch_vital_set('ON'):

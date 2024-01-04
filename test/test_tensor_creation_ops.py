@@ -32,6 +32,7 @@ from torch.utils.dlpack import to_dlpack
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
+    assert False
     if shape == ():
         x = torch.tensor((), dtype=dtype, device=device)
     else:

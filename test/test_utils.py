@@ -64,6 +64,7 @@ class TestCheckpoint(TestCase):
         input,
         use_reentrant,
     ):
+        assert False
         # not checkpointed
         out = model(input)
         out_not_checkpointed = out.detach().clone()
