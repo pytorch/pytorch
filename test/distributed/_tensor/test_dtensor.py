@@ -115,6 +115,8 @@ class DTensorTest(DTensorTestBase):
         local_tensor = torch.randn(4, 8)
         dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard0_spec)
         self.assertEqual(dist_tensor.data_ptr(), dist_tensor._local_tensor.data_ptr())
+        local_tensor = dist_tensor.to_local()
+        self.assertEqual(dist_tensor.data_ptr(), local_tensor.data_ptr())
 
     @with_comms
     def test_modules_w_meta_dtensor(self):
