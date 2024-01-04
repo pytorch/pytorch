@@ -1,9 +1,11 @@
 """
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_single_unnamed_segment
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_dynamo_entry_point
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_split_module_above_aotautograd_dep_segments
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_split_module_above_aotautograd_non_dep_segments
+pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_split_module_dep_segments
+pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_split_module_non_dep_segments
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_segment_tagging
+pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_multiple_segments
+pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_explicit_schedule
+pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_register_segment_hook
 """
 
 import torch
@@ -12,7 +14,7 @@ from torch.testing._internal.common_utils import TestCase as TorchTestCase
 from torch._dynamo import disable
 import functools
 import itertools
-from typing import Optional, Dict, Callable, List
+from typing import Any, Optional, Dict, Callable, List
 from torch._subclasses.async_tensor import AsyncTensor, fake_mode
 from collections import defaultdict, OrderedDict
 import weakref
@@ -21,6 +23,8 @@ from torch.utils._python_dispatch import return_and_correct_aliasing
 from torch._dynamo.backends.common import aot_autograd
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.compile_fx import compile_fx_inner as inductor_compile_fx_inner
+from torch._dynamo.output_graph import GraphCompileReason
+import traceback
 
 
 def get_segment_name_from_gm(gm):
@@ -60,12 +64,7 @@ class AsyncFuncHandle:
     gm = self._scheduler()._handle_to_gm_map[self]
     AsyncTensor.wait_until_materialized(self.args)
     args_materialized = pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor, pytree.tree_map(lambda x: x.detach(), self.args))
-    try:
-      self._scheduler().add_to_recorded_execution_order(self.segment)
-    except:
-      # TODO: problem is that segment info is not propagated through decomposition / fusion. We should just pass this info out of band.
-      print(f"gm: {gm}")
-      raise
+    self._scheduler().add_to_recorded_execution_order(self.segment)
     self.outs = self.compiled_fn(list(args_materialized))
     self.cuda_event.record()
 
@@ -183,22 +182,21 @@ class LazyScheduler:
     and wraps the output compiled_fn in a LazySchedulerGraphModule to be called later.
     """
     assert isinstance(gm, torch.fx.GraphModule)
+
     assert "segment" in kwargs
     segment = kwargs["segment"]
     del kwargs["segment"]
-    nn_module_method = None
-    if "nn_module_method" in kwargs:
-      nn_module_method = kwargs["nn_module_method"]
-      del kwargs["nn_module_method"]
     # NOTE: `gm` in this function is the post-AOTAutograd fwd or bwd GraphModule,
-    # each node in `gm` originally does not have `nn_module_module` or `segment` info,
-    # and we need to re-populate them here.
+    # each node in `gm` originally does not have segment info, and we need to re-populate it here.
     for node in gm.graph.nodes:
       node.meta["segment"] = segment
-      if nn_module_method is not None:
-        for node in gm.graph.nodes:
-          node.meta["nn_module_method"] = nn_module_method
-    compiled_fn = inductor_compile_fx_inner(gm, *args, **kwargs)
+
+    assert "inner_compile_orig" in kwargs
+    inner_compile_orig = kwargs["inner_compile_orig"]
+    del kwargs["inner_compile_orig"]
+    # Call the user-specified original compiler
+    compiled_fn = inner_compile_orig(gm, *args, **kwargs)
+
     lazy_gm = LazySchedulerGraphModule(
       self,
       segment,
@@ -207,53 +205,35 @@ class LazyScheduler:
     )
     return lazy_gm
 
-  def _compile_fx_with_segment_info(
+  def _compile_fx(
     self,
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
-    segment_assignment_fn=None,
     **kwargs,
   ):
-    # Segment assignment is done before AOTAutograd.
-    # In pre-AOTAutograd graph module (`gm`), each node contains both `nn_module_module` and `segment` info.
-    if segment_assignment_fn is not None:
-      segment_assignment_fn(gm)
-    # Assumes `gm` already has segment info in each of its nodes
-    gm_after_split = split_module_based_on_segment_info(gm)
+    segment = get_segment_name_from_gm(gm)
+    # `inner_compile` can be passed in via `torch.compile(m, functools.partial(inductor_compile_fx, inner_compile=...))`.
+    # It's the custom compiler for each fwd or bwd GraphModule.
+    inner_compile_orig = kwargs.get("inner_compile", inductor_compile_fx_inner)
 
-    print(f"gm_after_split: {gm_after_split}")
+    kwargs.update({
+      "inner_compile": functools.partial(self._compile_fx_inner, segment=segment, inner_compile_orig=inner_compile_orig)
+    })
+    return inductor_compile_fx(gm, example_inputs, **kwargs)
 
-    for name, sub_gm in gm_after_split.named_children():
-      # If it's a named segment, extract nn_module_method from it
-      segment = None
-      nn_module_method = None
-      for node in sub_gm.graph.nodes:
-        if node.op != "placeholder" and node.op != "output":
-          segment = node.meta["segment"]
-          if not node.meta["segment"].startswith("unnamed_"):
-            nn_module_method = node.meta["nn_module_method"]
-            break
+  def _compile_fn(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor], backend_compile_fn, segment_assignment_fn):
+    # Do segment assignment, and then split the graph module based on segment info.
+    for node in gm.graph.nodes:
+      assert "nn_module_method" in node.meta
 
-      kwargs.update({"inner_compile": functools.partial(self._compile_fx_inner, segment=segment, nn_module_method=nn_module_method)})
-      lazy_sub_gm = _LazilyCompiledModule(
-        sub_gm,
-        # NOTE: inductor_compile_fx runs both AOTAutograd and Inductor compilation
-        functools.partial(inductor_compile_fx, **kwargs)
-      )
-      setattr(gm_after_split, name, lazy_sub_gm)
-    # Trigger compile_fx in all submodules
-    gm_after_split(*example_inputs)
-    return gm_after_split
+    segment_assignment_fn(gm)
+    split_gm = split_module_based_on_segment_info(gm)
 
-  def compile_fx(
-    self,
-    # NOTE: matches positional args in compile_fx signature
-    gm: torch.fx.GraphModule,
-    example_inputs: List[torch.Tensor],
-    segment_assignment_fn=None,
-    **kwargs,
-  ):
-    return self._compile_fx_with_segment_info(gm, example_inputs, segment_assignment_fn, **kwargs)
+    submod_compiler = SubmoduleReplacer(split_gm, backend_compile_fn)
+    submod_compiler.run(*example_inputs)
+    split_gm.recompile()
+
+    return split_gm
 
   def maybe_run(self, gm, compiled_fn, segment, *args):
     """
@@ -286,6 +266,88 @@ class LazyScheduler:
     # cur_handle.schedule()
     # cur_handle.wait_for_completion()
     return cur_handle.outs_async
+
+
+class SubmoduleReplacer(torch.fx.interpreter.Interpreter):
+  def __init__(self, module, compiler):
+    super().__init__(module)
+    self.compiler = compiler
+
+  def lazily_compiled_submod(self, input_mod):
+    """
+    Create a wrapper around submodules which:
+    - lazily compiles each of the partitioned submodules using the user-provided compiler
+    - unpacks singleton tuples/lists into flat arg
+    """
+
+    class LazilyCompiledModule(torch.nn.Module):
+      def __init__(self, submod, compiler, unwrap_singleton_tuple):
+        super().__init__()
+        self.submod = submod
+        self.compiler = compiler
+        self.compiled = False
+        self.unwrap_singleton_tuple = unwrap_singleton_tuple
+
+      def forward(self, *args):
+        if not self.compiled:
+          # First compile with args as example_inputs
+          # These args will be fakeified if using Inductor/AOTAutograd
+          new_submod = self.compiler(self.submod, args)
+          del self.submod
+          self.submod = new_submod
+          self.compiled = True
+          self.compiler = None
+
+        x = self.submod(*args)
+        # we must let 'input_mod' return a tuple, to make AOT happy.
+        # (aot_autograd compile_fn literally requires that the output of a graph it compiles is a tuple).
+        # however, we don't acutally want this tuple to be returned, since the fx logic that calls the submod
+        # will again wrap outputs from the submod in a tuple.  So we unwrap it, and count on it being re-wrapped
+        if self.unwrap_singleton_tuple and isinstance(x, (tuple, list)):
+          return x[0]
+        return x
+
+    unwrap_singleton_tuple = False
+    for sn in input_mod.graph.nodes:
+      if sn.op == "output":
+        if not isinstance(sn.args[0], tuple):
+          unwrap_singleton_tuple = True
+          sn.args = (sn.args,)
+
+    input_mod.recompile()
+    input_mod.compile_subgraph_reason = GraphCompileReason(
+      "LazyScheduler intentional graph-break (See Note [LazyScheduler])."
+      " Set `torch._dynamo.config.lazy_scheduler_compile_fn = None` to disable.",
+      [
+        # it's close to useless to get a real stacktrace here, and quite verbose.
+        traceback.FrameSummary(__file__, 0, SubmoduleReplacer),
+      ],
+    )
+
+    wrapper = LazilyCompiledModule(
+      input_mod,
+      self.compiler,
+      unwrap_singleton_tuple,
+    )
+    return wrapper
+
+  # We replace the submodules with lazy submodules which compile
+  # the corresponding submodules when they are run with real values
+  # Always returns `None` - we do not need to propagate values in order
+  # to replace submodules.
+  def run_node(self, n: torch.fx.Node) -> Any:
+    if n.op == "call_module":
+      real_mod = self.fetch_attr(n.target)
+
+      assert len(n.kwargs) == 0, "We assume only args for these modules"
+
+      lazily_compiled_submod = self.lazily_compiled_submod(real_mod)
+
+      # We update the original (outer) graph with a call into the compiled module
+      # instead of the uncompiled one.
+      self.module.delete_submodule(n.target)
+      n.target = "compiled_" + n.target
+      self.module.add_submodule(n.target, lazily_compiled_submod)
 
 
 class TestCase(TorchTestCase):
@@ -387,52 +449,22 @@ class TestLazyScheduler(TestCase):
       for node in gm.graph.nodes:
         node.meta["segment"] = "unnamed_seg1"
 
-    self._validate(
-      m,
-      functools.partial(
-        lazy_scheduler.compile_fx,
-        segment_assignment_fn=segment_assignment_fn
-      ),
-      x,
-      y,
+    # TODO: how do we interact with DDPOptimizer?
+    torch._dynamo.config.lazy_scheduler_compile_fn = functools.partial(
+      lazy_scheduler._compile_fn,
+      segment_assignment_fn=segment_assignment_fn
     )
 
-  def test_dynamo_entry_point(self):
-    # TODO: how do we interact with DDPOptimizer?
-    def _compile_fn(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor], backend_compile_fn):
-      # TODO: apply splitting logic here
-      for node in gm.graph.nodes:
-        assert "nn_module_method" in node.meta
-      return backend_compile_fn(gm, example_inputs)
-
-    torch._dynamo.config.lazy_scheduler_compile_fn = _compile_fn
-
-    # Check that output and gradients are correct when there is only one segment in the model.
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    m = TestDepSegmentModule()
-    m = m.to(device)
-    x = torch.randn(4, 4, requires_grad=True, device=device)
-    y = torch.randn(4, 4, requires_grad=True, device=device)
-    lazy_scheduler = LazyScheduler([])
-
-    def segment_assignment_fn(gm):
-      for node in gm.graph.nodes:
-        node.meta["segment"] = "unnamed_seg1"
-
     self._validate(
       m,
-      functools.partial(
-        lazy_scheduler.compile_fx,
-        segment_assignment_fn=segment_assignment_fn
-      ),
+      lazy_scheduler._compile_fx,
       x,
       y,
     )
 
   def test_split_module_dep_segments(self):
     # Check that GraphModule produced by Dynamo is correctly split
-    # (each submodule only contains one NN method from original module, which maps to one segment)
-    # TODO: change to split graph within Dynamo (similar to DDPOptimizer)
+    # (each submodule only contains one segment)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     m = TestDepSegmentModule()
     m = m.to(device)
@@ -446,33 +478,39 @@ class TestLazyScheduler(TestCase):
         # One NN module method maps to one named segment
         node.meta["segment"] = str(node.meta["nn_module_method"])
 
-    def compile_fx_count_submods(
+    recorded_segments = set()
+
+    def compile_fx_inner_record_segments(
       gm: torch.fx.GraphModule,
       example_inputs: List[torch.Tensor],
-      segment_assignment_fn=None,
       **kwargs,
     ):
-      gm_after_split = lazy_scheduler.compile_fx(gm, example_inputs, segment_assignment_fn, **kwargs)
-      # Test that one submodule is created for each NN module method: forward, func1, func2.
-      self.assertEqual(len(list(gm_after_split.named_children())), 3)
-      for _, submod in gm_after_split.named_children():
-        self.assertTrue(isinstance(submod, _LazilyCompiledModule))
-      return gm_after_split
+      nonlocal recorded_segments
+      segment = get_segment_name_from_gm(gm)
+      if segment is not None:
+        recorded_segments.add(segment)
+      return inductor_compile_fx_inner(gm, example_inputs, **kwargs)
+
+    # TODO: how do we interact with DDPOptimizer?
+    torch._dynamo.config.lazy_scheduler_compile_fn = functools.partial(
+      lazy_scheduler._compile_fn,
+      segment_assignment_fn=segment_assignment_fn
+    )
 
     self._validate(
       m,
       functools.partial(
-        compile_fx_count_submods,
-        segment_assignment_fn=segment_assignment_fn
+        lazy_scheduler._compile_fx,
+        inner_compile=compile_fx_inner_record_segments,
       ),
       x,
       y,
     )
+    self.assertEqual(len(recorded_segments), 3)
 
-  def test_split_module_above_aotautograd_non_dep_segments(self):
+  def test_split_module_non_dep_segments(self):
     # Check that GraphModule produced by Dynamo is correctly split
-    # (each submodule only contains one NN method from original module, which maps to one segment)
-    # TODO: change to split graph within Dynamo (similar to DDPOptimizer)
+    # (each submodule only contains one segment)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     m = TestNonDepSegmentModule()
     m = m.to(device)
@@ -486,89 +524,105 @@ class TestLazyScheduler(TestCase):
         # One NN module method maps to one named segment
         node.meta["segment"] = str(node.meta["nn_module_method"])
 
-    def compile_fx_count_submods(
+    recorded_segments = set()
+
+    def compile_fx_inner_record_segments(
       gm: torch.fx.GraphModule,
       example_inputs: List[torch.Tensor],
-      segment_assignment_fn=None,
       **kwargs,
     ):
-      gm_after_split = lazy_scheduler.compile_fx(gm, example_inputs, segment_assignment_fn, **kwargs)
-      # Test that one submodule is created for each NN module method: forward, func1, func2.
-      self.assertEqual(len(list(gm_after_split.named_children())), 3)
-      for _, submod in gm_after_split.named_children():
-        self.assertTrue(isinstance(submod, _LazilyCompiledModule))
-      return gm_after_split
+      nonlocal recorded_segments
+      segment = get_segment_name_from_gm(gm)
+      if segment is not None:
+        recorded_segments.add(segment)
+      return inductor_compile_fx_inner(gm, example_inputs, **kwargs)
+
+    # TODO: how do we interact with DDPOptimizer?
+    torch._dynamo.config.lazy_scheduler_compile_fn = functools.partial(
+      lazy_scheduler._compile_fn,
+      segment_assignment_fn=segment_assignment_fn
+    )
 
     self._validate(
       m,
       functools.partial(
-        compile_fx_count_submods,
-        segment_assignment_fn=segment_assignment_fn
+        lazy_scheduler._compile_fx,
+        inner_compile=compile_fx_inner_record_segments,
       ),
       x,
       y,
     )
+    self.assertEqual(len(recorded_segments), 3)
 
   def test_segment_tagging(self):
-    # TODO: change to split graph within Dynamo (similar to DDPOptimizer)
+    def _run_test(m, x, y, lazy_scheduler, segment_dict, recorded_segments):
+      def segment_assignment_fn(gm):
+        next_unnamed_segment_id = 0
+        in_unnamed_segment = False
+        for _, node in enumerate(gm.graph.nodes):
+          assert "nn_module_method" in node.meta
+          if node.meta["nn_module_method"] in segment_dict:
+            if in_unnamed_segment:
+              in_unnamed_segment = False
+              next_unnamed_segment_id += 1
+            node.meta["segment"] = segment_dict[node.meta["nn_module_method"]]
+          else:
+            if not in_unnamed_segment:
+              in_unnamed_segment = True
+            node.meta["segment"] = str(next_unnamed_segment_id)
+
+      def compile_fx_inner_record_segments(
+        gm: torch.fx.GraphModule,
+        example_inputs: List[torch.Tensor],
+        **kwargs,
+      ):
+        segment = get_segment_name_from_gm(gm)
+        if segment is not None:
+          recorded_segments.add(segment)
+        return inductor_compile_fx_inner(gm, example_inputs, **kwargs)
+
+      # TODO: how do we interact with DDPOptimizer?
+      torch._dynamo.config.lazy_scheduler_compile_fn = functools.partial(
+        lazy_scheduler._compile_fn,
+        segment_assignment_fn=segment_assignment_fn
+      )
+
+      self._validate(
+        m,
+        functools.partial(
+          lazy_scheduler._compile_fx,
+          inner_compile=compile_fx_inner_record_segments,
+        ),
+        x,
+        y,
+      )
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     m = TestNonDepSegmentModule()
     m = m.to(device)
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
-    lazy_scheduler = LazyScheduler()
+    lazy_scheduler = LazyScheduler([])
+    segment_dict = {m.func2: "func2"}
+    recorded_segments = set()
+    _run_test(m, x, y, lazy_scheduler, segment_dict, recorded_segments)
+    self.assertEqual(len(recorded_segments), 3)
+    self.assertTrue("func2" in recorded_segments)
 
-    segment_dict = {}
-
-    # This is roughly how the official register_segment function will look like
-    def register_segment(method, name):
-      nonlocal segment_dict
-      segment_dict[method] = name
-
-    register_segment(m.func2, "func2")
-
-    def segment_assignment_fn(gm):
-      nonlocal segment_dict
-      next_unnamed_segment_id = 0
-      in_unnamed_segment = False
-      for _, node in enumerate(gm.graph.nodes):
-        assert "nn_module_method" in node.meta
-        if node.meta["nn_module_method"] in segment_dict:
-          if in_unnamed_segment:
-            in_unnamed_segment = False
-            next_unnamed_segment_id += 1
-          node.meta["segment"] = str(node.meta["nn_module_method"])
-        else:
-          if not in_unnamed_segment:
-            in_unnamed_segment = True
-          node.meta["segment"] = str(next_unnamed_segment_id)
-
-    def compile_fx_count_submods(
-      gm: torch.fx.GraphModule,
-      example_inputs: List[torch.Tensor],
-      segment_assignment_fn=None,
-      **kwargs,
-    ):
-      gm_after_split = lazy_scheduler.compile_fx(gm, example_inputs, segment_assignment_fn, **kwargs)
-      # func2 is the middle function in TestNonDepSegmentModule, so the segment should cut the module into 3 submodules
-      self.assertEqual(len(list(gm_after_split.named_children())), 3)
-      for name, submod in gm_after_split.named_children():
-        self.assertTrue(isinstance(submod, _LazilyCompiledModule))
-      return gm_after_split
-
-    self._validate(
-      m,
-      functools.partial(
-        compile_fx_count_submods,
-        segment_assignment_fn=segment_assignment_fn
-      ),
-      x,
-      y,
-    )
-
-  def test_multiple_segments(self):
-    # TODO: change to split graph within Dynamo (similar to DDPOptimizer)
-    raise NotImplementedError("TODO")
+    m = TestNonDepSegmentModule()
+    m = m.to(device)
+    x = torch.randn(4, 4, requires_grad=True, device=device)
+    y = torch.randn(4, 4, requires_grad=True, device=device)
+    lazy_scheduler = LazyScheduler([])
+    segment_dict = {
+      m.func1: "func1",
+      m.func2: "func2",
+    }
+    recorded_segments = set()
+    _run_test(m, x, y, lazy_scheduler, segment_dict, recorded_segments)
+    self.assertEqual(len(recorded_segments), 3)
+    self.assertTrue("func1" in recorded_segments)
+    self.assertTrue("func2" in recorded_segments)
 
   def test_explicit_schedule(self):
     # TODO: change to split graph within Dynamo (similar to DDPOptimizer)
