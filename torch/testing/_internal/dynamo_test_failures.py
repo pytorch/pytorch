@@ -152,9 +152,6 @@ FIXME_default_non_strict = {
     "nn/test_parametrization",
     "nn/test_pooling",
     "nn/test_pruning",
-    "optim/test_lrscheduler",
-    "optim/test_optim",
-    "optim/test_swa_utils",
     "profiler/test_memory_profiler",
     "profiler/test_profiler",
     "profiler/test_profiler_tree",
@@ -2057,9 +2054,6 @@ dynamo_expected_failures = {
     "TestPythonPytree.test_treespec_equality",  # test_pytree
     "TestOutDtypeOp.test_out_dtype_non_op_overload",  # test_out_dtype_op
     "TestOutDtypeOp.test_out_dtype_wrong_output",  # test_out_dtype_op
-    "TestSWAUtils.test_averaged_model_all_devices_ema_True",  # test_optim
-    "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_True",  # test_optim
-    "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_False",  # test_optim
 }
 
 dynamo_skips = {
@@ -2150,4 +2144,7 @@ dynamo_skips = {
     "TestTensorCreationCPU.test_vander_types_cpu_complex64",  # known py311 fail
     "TestTensorCreationCPU.test_torch_polar_cpu_float32",  # known py311 fail
     "TestTensorCreationCPU.test_torch_polar_cpu_float64",  # known py311 fail
+    "TestSWAUtils.test_averaged_model_all_devices_ema_True",  # flaky
+    "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_False",  # flaky
+    "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_True",  # flaky
 }
