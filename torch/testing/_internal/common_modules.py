@@ -2540,7 +2540,6 @@ def module_inputs_torch_nn_Transformer(module_info, device, dtype, requires_grad
                     src, tgt, tgt_mask=tgt_mask, src_mask=src_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, src_key_padding_mask=src_key_padding_mask
                 ),
-                desc=f'mask_{mask is None}_kp_mask_{key_padding_mask is None}_norm_first_{norm_first}'
             ))
     return samples
 
