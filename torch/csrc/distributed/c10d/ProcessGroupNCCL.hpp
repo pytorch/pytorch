@@ -2,6 +2,7 @@
 
 #ifdef USE_C10D_NCCL
 
+#include <atomic>
 #include <chrono>
 #include <future>
 #include <iostream>
@@ -816,7 +817,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::mutex mutex_;
 
   // Heartbeat of watchdog thread.
-  uint64_t heartbeat_;
+  std::atomic_uint64_t heartbeat_;
 
   // The time interval used for deciding whether there is no watchdog heartbeat.
   int heartbeatTimeoutInSec_;
