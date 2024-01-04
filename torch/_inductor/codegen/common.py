@@ -17,6 +17,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -39,6 +40,9 @@ from ..utils import (
     unique,
 )
 from ..virtualized import ops, OpsValue, V
+
+if TYPE_CHECKING:
+    from ..ir import TensorBox
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
@@ -1288,7 +1292,7 @@ class ChoiceCaller:
     def hash_key(self) -> str:
         raise NotImplementedError()
 
-    def output_node(self) -> "TensorBox":  # type: ignore[name-defined]
+    def output_node(self) -> "TensorBox":
         raise NotImplementedError()
 
 
