@@ -1,4 +1,5 @@
 import logging
+import operator
 
 import torch
 from torch._export.pass_base import _ExportPassBase
@@ -10,7 +11,6 @@ from torch.ao.quantization.pt2e.utils import (
 
 from torch.fx.node import map_arg
 from torch.fx.passes.infra.pass_base import PassResult
-import operator
 
 
 logger = logging.getLogger(__name__)
@@ -64,14 +64,18 @@ class DuplicateDQPass(_ExportPassBase):
                 q_node = node.args[0]
                 if q_node.op == "call_function" and q_node.target in _QUANTIZE_OPS:
                     getitem_node = q_node.args[1]
-                    if isinstance(getitem_node, torch.fx.node.Node) and \
-                            getitem_node.op == "call_function" and \
-                            getitem_node.target == operator.getitem:
+                    if (
+                        isinstance(getitem_node, torch.fx.node.Node)
+                        and getitem_node.op == "call_function"
+                        and getitem_node.target == operator.getitem
+                    ):
                         choose_qparam_node = getitem_node.args[0]
-                        if isinstance(choose_qparam_node, torch.fx.node.Node) and \
-                                choose_qparam_node.op == "call_function" and \
-                                choose_qparam_node.target == \
-                                    torch.ops.quantized_decomposed.choose_qparams.tensor:
+                        if (
+                            isinstance(choose_qparam_node, torch.fx.node.Node)
+                            and choose_qparam_node.op == "call_function"
+                            and choose_qparam_node.target
+                            == torch.ops.quantized_decomposed.choose_qparams.tensor
+                        ):
                             continue
                 for user in dq_users:
                     _maybe_duplicate_dq(graph_module, node, user)
