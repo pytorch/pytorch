@@ -179,9 +179,6 @@ def mps_ops_grad_modifier(ops):
         'nn.functional.conv_transpose1d': [torch.float16],
         'nn.functional.conv_transpose2d': [torch.float16],
         'nn.functional.conv_transpose3d': [torch.float16],
-        # Segfaults
-        'all': [torch.float16, torch.float32],
-        'any': [torch.float16, torch.float32],
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
@@ -862,8 +859,6 @@ def mps_ops_modifier(ops):
     }
 
     SKIPLIST = {
-        'all': None,
-        'any': None,
         # Unsupported
         # input types 'tensor<1x3x9x9xf16>' and 'tensor<1xf32>' are not broadcast compatible
         'nn.functional.avg_pool2d': [torch.float16],
