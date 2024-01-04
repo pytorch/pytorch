@@ -2772,8 +2772,6 @@ Load string represented torch objects.
 
 
 def load_object(name):
-    if not torch.distributed.is_available() and name.startswith("torch.distributed."):
-        return None
     try:
         x = name.split("#")
         if len(x) == 2:
@@ -2784,7 +2782,7 @@ def load_object(name):
             val = _load_obj_from_str(x[0])
         if hasattr(val, "__wrapped__"):
             val = val.__wrapped__
-    except (AttributeError, ModuleNotFoundError):
+    except (AttributeError, ImportError, ModuleNotFoundError):
         val = None
     return val
 
