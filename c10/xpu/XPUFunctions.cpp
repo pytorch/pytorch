@@ -123,7 +123,7 @@ sycl::context& get_device_context() {
   return *gDevicePool.context;
 }
 
-void get_device_properties(DeviceProp* device_prop, int device) {
+void get_device_properties(DeviceProp* device_prop, unsigned device) {
   initDevicePoolCallOnce();
   TORCH_CHECK(device_prop, "device_prop is an invalid pointer.");
   check_device(device);
