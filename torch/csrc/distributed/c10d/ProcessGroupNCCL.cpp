@@ -1231,7 +1231,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     }
 
     // Check the heart beat of watchdog thread.
-    auto heartbeat = heartbeat_;
+    auto heartbeat = heartbeat_.load();
     if (heartbeat != heartBeatCounter) {
       heartBeatCounter = heartbeat;
     } else {
