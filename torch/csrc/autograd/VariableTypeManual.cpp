@@ -476,7 +476,10 @@ static Tensor _fw_primal(
       return input_base.view(size_vec);
     };
     rev_func = [=](const at::Tensor& input_view) {
-      return input_view.view(size_vec);
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Reverse view_func for _fw_primal() is not currently supported");
+      return Tensor();
     };
   }
   auto result = as_view(
@@ -509,7 +512,10 @@ static Tensor _make_dual(
       return input_base.view(size_vec);
     };
     rev_func = [=](const at::Tensor& input_view) {
-      return input_view.view(size_vec);
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Reverse view_func for _make_dual() is not currently supported");
+      return Tensor();
     };
   }
   auto result = as_view(
