@@ -2131,12 +2131,12 @@ make_fallback(
     warn=False,
 )
 make_fallback(
-    aten._sdpa_flash_cpu.default,
+    aten._scaled_dot_product_flash_attention_for_cpu.default,
     sdpa_constraint,
     warn=False,
 )
 make_fallback(
-    aten._sdpa_flash_cpu_backward.default,
+    aten._scaled_dot_product_flash_attention_for_cpu_backward.default,
     sdpa_constraint,
     warn=False,
 )

@@ -292,10 +292,6 @@ inline bool check_attn_mask_shape(sdp_params const& params, bool debug) {
   }
   if (attn_mask.value().dim() == 2) {
     return true;
-  } else if (attn_mask.value().dim() == 3) {
-    if ((attn_mask.value().sym_size(0) == batchSize * num_head || attn_mask.value().sym_size(0) == 1)) {
-      return true;
-    };
   } else if (attn_mask.value().dim() == 4) {
     if ((attn_mask.value().sym_size(0) == 1 || attn_mask.value().sym_size(0) == batchSize)
         && (attn_mask.value().sym_size(1) == 1 || attn_mask.value().sym_size(1) == num_head)) {
@@ -303,7 +299,9 @@ inline bool check_attn_mask_shape(sdp_params const& params, bool debug) {
     }
   }
   if (debug) {
-    TORCH_WARN("Unsupported attn mask shape.");
+    TORCH_WARN("Please use the following attn mask shapes: ",
+        "2d - ({Q_seq_len, 1}  x {KV_seq_len, 1}); ",
+        "4d - ({Batch, 1} x {Num_heads, 1} x {Q_seq_len, 1}  x {KV_seq_len, 1})");
   }
   return false;
 }

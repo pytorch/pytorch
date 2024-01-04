@@ -146,16 +146,11 @@ void reshape_attn_mask_to_4d(
     int64_t kvSize) {
   // Support mask shapes:
   // 2d: ({Q_seq_len, 1}  x {KV_seq_len, 1})
-  // 3d: ({Batch * Num_heads, 1} x {Q_seq_len, 1}  x {KV_seq_len, 1})
   // 4d: ({Batch, 1} x {Num_heads, 1} x {Q_seq_len, 1}  x {KV_seq_len, 1})
   // Guaranteed in check_attn_mask_shape
   int64_t attn_mask_size_0 = 1;
   int64_t attn_mask_size_1 = 1;
-  if (attn_mask.dim() == 3
-      && attn_mask.size(0) == batchSize * num_head) {
-    attn_mask_size_0 = batchSize;
-    attn_mask_size_1 = num_head;
-  } else if (attn_mask.dim() == 4) {
+  if (attn_mask.dim() == 4) {
     if (attn_mask.size(0) == batchSize) {
       attn_mask_size_0 = batchSize;
     }

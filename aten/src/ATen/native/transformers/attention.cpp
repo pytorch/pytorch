@@ -37,10 +37,10 @@
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_backward_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_native.h>
-#include <ATen/ops/_sdpa_flash_cpu.h>
-#include <ATen/ops/_sdpa_flash_cpu_native.h>
-#include <ATen/ops/_sdpa_flash_cpu_backward.h>
-#include <ATen/ops/_sdpa_flash_cpu_backward_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_backward.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_backward_native.h>
 #include <ATen/ops/_softmax.h>
 #include <ATen/ops/_transform_bias_rescale_qkv.h>
 #include <ATen/ops/_transform_bias_rescale_qkv_native.h>
@@ -658,12 +658,8 @@ Tensor scaled_dot_product_attention(
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
       }
       // For the CPU case we do not need to pad the last dim
-      if (query_.device().type() == DeviceType::CPU) {
-        return std::get<0>(at::_sdpa_flash_cpu(
+      return std::get<0>(at::_scaled_dot_product_flash_attention_for_cpu(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
-      }
-      return std::get<0>(at::_scaled_dot_product_flash_attention(
-          query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, scale));
     }
     case sdp::SDPBackend::efficient_attention: {
       bool compute_logsumexp =
@@ -750,7 +746,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
 }
 
 std::tuple<at::Tensor, at::Tensor>
-sdpa_flash_cpu(
+_scaled_dot_product_flash_attention_cpu(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -776,8 +772,8 @@ sdpa_flash_cpu(
           dtype == attn_mask.value().scalar_type(),
     "scaled_dot_product_attention_flash_attention: Attention mask is the same data type as query");
   TORCH_CHECK(!attn_mask.has_value() ||
-          (attn_mask.value().dim() >= 2 && attn_mask.value().dim() <= 4),
-    "scaled_dot_product_attention_flash_attention: Attention mask dim in {2, 3, 4}");
+          (attn_mask.value().dim() == 2 || attn_mask.value().dim() == 4),
+    "scaled_dot_product_attention_flash_attention: Attention mask dim in {2, 4}");
 
   at::Tensor output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
   const auto accumulate_dtype = toOpMathType(dtype);
@@ -794,7 +790,7 @@ sdpa_flash_cpu(
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor>
-sdpa_flash_cpu_backward(
+_scaled_dot_product_flash_attention_cpu_backward(
     const Tensor& grad_out,
     const Tensor& query,
     const Tensor& key,

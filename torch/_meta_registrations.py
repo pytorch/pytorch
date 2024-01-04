@@ -5142,10 +5142,10 @@ def meta__scaled_dot_product_flash_backward(
 
 @register_meta(
     [
-        aten._sdpa_flash_cpu,
+        aten._scaled_dot_product_flash_attention_for_cpu,
     ]
 )
-def meta__sdpa_flash_cpu(
+def meta__scaled_dot_product_flash_attention_for_cpu(
     query: Tensor,
     key: Tensor,
     value: Tensor,
@@ -5181,10 +5181,10 @@ def meta__sdpa_flash_cpu(
 
 @register_meta(
     [
-        aten._sdpa_flash_cpu_backward,
+        aten._scaled_dot_product_flash_attention_for_cpu_backward,
     ]
 )
-def meta__sdpa_flash_cpu_backward(
+def meta__scaled_dot_product_flash_attention_for_cpu_backward(
     grad_out: Tensor,
     query: Tensor,
     key: Tensor,
