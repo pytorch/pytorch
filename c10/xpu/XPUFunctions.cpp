@@ -48,16 +48,10 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
   }
 }
 
-inline unsigned deviceCountImpl(
-    std::vector<std::unique_ptr<sycl::device>>& devices) {
-  enumDevices(devices);
-  return static_cast<int>(devices.size());
-}
-
 inline void initGlobalDevicePoolState() {
-  // Get device count and record the all GPU devices.
-  auto device_count = deviceCountImpl(gDevicePool.devices);
-  if (device_count <= 0) {
+  // Enumerate all GPU devices and record them.
+  enumDevices(gDevicePool.devices);
+  if (gDevicePool.devices.empty()) {
     TORCH_WARN("XPU device count is zero!");
     return;
   }
@@ -123,14 +117,14 @@ sycl::context& get_device_context() {
   return *gDevicePool.context;
 }
 
-void get_device_properties(DeviceProp* device_prop, unsigned device) {
+void get_device_properties(DeviceProp* device_prop, int device) {
   initDevicePoolCallOnce();
   TORCH_CHECK(device_prop, "device_prop is an invalid pointer.");
   check_device(device);
   initDeviceProperties(device_prop, device);
 }
 
-unsigned get_device_idx_from_pointer(void* ptr) {
+int get_device_idx_from_pointer(void* ptr) {
   initDevicePoolCallOnce();
   TORCH_CHECK(ptr, "ptr is an invalid pointer.");
   auto type = sycl::get_pointer_type(ptr, get_device_context());

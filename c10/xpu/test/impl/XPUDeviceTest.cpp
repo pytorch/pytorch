@@ -51,9 +51,9 @@ TEST(XPUDeviceTest, PointerGetDevice) {
   void* ptr =
       sycl::malloc_device(8, raw_device, c10::xpu::get_device_context());
 
-  ASSERT_EQ_XPU(c10::xpu::get_device_from_pointer(ptr), 0);
+  ASSERT_EQ_XPU(c10::xpu::get_device_idx_from_pointer(ptr), 0);
   sycl::free(ptr, c10::xpu::get_device_context());
 
   int dummy = 0;
-  ASSERT_THROW(c10::xpu::get_device_from_pointer(&dummy), c10::Error);
+  ASSERT_THROW(c10::xpu::get_device_idx_from_pointer(&dummy), c10::Error);
 }
