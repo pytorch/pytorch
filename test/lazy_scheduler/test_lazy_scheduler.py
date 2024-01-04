@@ -85,25 +85,6 @@ class AsyncFuncHandle:
     return scheduler
 
 
-# NOTE: this is only for threading outputs through multiple submodules when doing module splitting above AOTAutograd (but after Dynamo).
-class _LazilyCompiledModule(torch.nn.Module):
-  def __init__(self, submod, compiler):
-    super().__init__()
-    self.submod = submod
-    self.compiler = compiler
-    self.compiled = False
-
-  def __call__(self, *args):
-    if not self.compiled:
-      new_submod = self.compiler(self.submod, args)
-      del self.submod
-      self.submod = new_submod
-      self.compiled = True
-      self.compiler = None
-    x = self.submod(*args)
-    return x
-
-
 def split_module_based_on_segment_info(gm: torch.fx.GraphModule):
   known_segments = []
   for node in gm.graph.nodes:
@@ -274,9 +255,6 @@ class LazyScheduler:
     for out_async in outs_async:
       out_async.set_handle(cur_handle)
 
-    # # NOTE: add more complex logic here (e.g. check against the schedule, etc.)
-    # return cur_handle.outs_async
-
     # First, try to schedule all graphs from all segments that are before the incoming graph in the schedule.
     # The incoming graph can be scheduled only if:
     # 1. All preceding graphs have their handles created.
@@ -319,6 +297,7 @@ class LazyScheduler:
       return cur_handle.outs_async
 
 class SubmoduleReplacer(torch.fx.interpreter.Interpreter):
+  # This is a copy of DDPOptimizer `SubmoduleReplacer` class.
   def __init__(self, module, compiler):
     super().__init__(module)
     self.compiler = compiler
@@ -366,7 +345,7 @@ class SubmoduleReplacer(torch.fx.interpreter.Interpreter):
 
     input_mod.recompile()
     input_mod.compile_subgraph_reason = GraphCompileReason(
-      "LazyScheduler intentional graph-break (See Note [LazyScheduler])."
+      "LazyScheduler intentional graph-break (See Note [LazyScheduler] TODO)."
       " Set `torch._dynamo.config.lazy_scheduler_compile_fn = None` to disable.",
       [
         # it's close to useless to get a real stacktrace here, and quite verbose.
@@ -766,12 +745,17 @@ class TestLazyScheduler(TestCase):
 
 """
 TODO:
-0. Draw the workflow in a flowchart, show to Boyuan
-1. Support calling a segment multiple times (i.e. make `nth_call=X` work)
+1. Support user calling a method multiple times and only tag a specific call as segment (i.e. make `nth_call=X` work)
 2. Support graph break within segment
 3. Unit test: in-place op in named segment
-3. Support using together with DDPOptimizer
-4. For named segments, show its segment ID in profiler annotation in GPU trace
+4. Integration with DDPOptimizer
+5. Integration with compiled autograd
+6. For named segments, show its segment ID (prefix + fwd/bwd + nth_call) in profiler annotation in GPU trace
+
+AsyncTensor specific:
+1. Support kwargs in AsyncTensor ops
+2. Support tuple / list / etc. in AsyncTensor op args
+3. Support all factory functions in AsyncTensor dispatch
 """
 
 if __name__ == "__main__":
