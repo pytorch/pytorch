@@ -2782,7 +2782,6 @@ class ShapeEnv:
                     record_constraint_violation(constraint.warn_only, self.debug_name(source), msg)
 
         for t, source, context in zip(placeholders, sources, input_contexts):
-            print(f"here2: t: {t}")
             if isinstance(source, str):
                 from torch._dynamo.source import LocalSource
                 source = LocalSource(source)
