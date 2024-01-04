@@ -109,6 +109,14 @@ class DTensorTest(DTensorTestBase):
             self.assertEqual(meta_dtensor.to_local(), value_tensor)
 
     @with_comms
+    def test_dtensor_local_tensor_storage(self):
+        device_mesh = self.build_device_mesh()
+        shard0_spec = [Shard(0)]
+        local_tensor = torch.randn(4, 8)
+        dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard0_spec)
+        self.assertEqual(dist_tensor.data_ptr(), dist_tensor._local_tensor.data_ptr())
+
+    @with_comms
     def test_modules_w_meta_dtensor(self):
         model = DummyMLP("meta")
         device_mesh = self.build_device_mesh()
