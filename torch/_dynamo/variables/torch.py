@@ -108,7 +108,7 @@ def should_decompose_torch_op(fn):
         fn.name(), torch._C.DispatchKey.CompositeImplicitAutograd
     )
 
-    # only do decompoization for backward
+    # only decompoization torch ops for forward
     in_compiled_backward = compiled_autograd.compiled_autograd_enabled
     return (
         config.use_single_step_graph
