@@ -726,7 +726,6 @@ static PyObject* THPVariable_make_wrapper_subclass(
         size_bytes,
         /*allocator=*/c10::GetAllocator(c10::kMeta),
         /*resizable=*/true};
-    // TODO: constructor should probably accept data pointer
     auto data_ptr = r.toSymIntOptional(14);
     if (data_ptr.value_or(0) != 0) {
       void* p = reinterpret_cast<void*>(
