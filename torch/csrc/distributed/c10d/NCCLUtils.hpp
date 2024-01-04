@@ -177,14 +177,29 @@ std::string getNcclErrorDetailStr(
     c10::optional<std::string> processGroupFailureReason = c10::nullopt);
 
 // Write NCCL debug info to local disk or any storage users define.
+// There are some constrains we set for the debug info writer:
+// 1. The writer should only be registered once.
+// 2. Once registered, users cannot change it including un-register.
+// 3. It is recommended to register the customized writer in the trainer setup,
+//    If users don't register before calling launchAsyncDebugDump, then users
+//    lose the chance to register (and the default writer will be
+//    auto-registered).
 class TORCH_API DebugInfoWriter {
  public:
-  DebugInfoWriter(int rank);
   virtual ~DebugInfoWriter();
   virtual void write(const std::string& ncclTrace);
+  static DebugInfoWriter& getWriter(int rank);
+  static void registerWriter(std::unique_ptr<DebugInfoWriter> writer);
 
  protected:
+  DebugInfoWriter(std::string namePrefix, int rank) {
+    filename_ = c10::str(namePrefix, rank);
+  }
   std::string filename_;
+
+ private:
+  static std::unique_ptr<DebugInfoWriter> writer_;
+  static std::atomic<bool> hasWriterRegistered_;
 };
 
 // RAII wrapper for NCCL communicator

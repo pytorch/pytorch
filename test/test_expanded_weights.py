@@ -696,7 +696,7 @@ for test_param in supported_tests:
     if hasattr(TestExpandedWeightModule, test_name_multi_input):
         raise RuntimeError('Found two tests with the same name: ' + test_name)
     if decorator is not None:
-        fn = decorator(fn)
+        fn = decorator(fn)  # noqa: F821
     if test.test_cpu:
         setattr(TestExpandedWeightModule, test_name, lambda self, test=test: test.test_context_manager(self, 'cpu'))
         setattr(TestExpandedWeightModule, test_name_multi_input,

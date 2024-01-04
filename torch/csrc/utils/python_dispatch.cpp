@@ -110,7 +110,7 @@ class PythonKernelHolder : public c10::OperatorKernel {
   c10::DispatchKey dispatch_key_;
 
  public:
-  PythonKernelHolder( py::object func, c10::DispatchKey dispatch_key)
+  PythonKernelHolder(  py::object func, c10::DispatchKey dispatch_key)
       : func_(func.release().ptr(), getPyInterpreter()),
         dispatch_key_(dispatch_key) {}
 
