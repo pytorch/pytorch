@@ -265,7 +265,6 @@ FIXME_default_non_strict = {
     "test_spectral_ops",
     "test_stateless",
     "test_subclass",
-    "test_sympy_utils",
     "test_torch",
     "test_unary_ufuncs",
     "test_utils",
