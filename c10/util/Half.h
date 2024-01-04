@@ -343,7 +343,7 @@ struct alignas(2) Half {
   Half() = default;
 #endif
 
-  constexpr C10_HOST_DEVICE Half(unsigned short bits, from_bits_t) : x(bits){};
+  constexpr C10_HOST_DEVICE Half(unsigned short bits, from_bits_t) : x(bits) {}
   inline C10_HOST_DEVICE Half(float value);
   inline C10_HOST_DEVICE operator float() const;
 
