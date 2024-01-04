@@ -32,7 +32,7 @@ struct DevicePool {
   std::unique_ptr<sycl::context> context;
 } gDevicePool;
 
-static void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
+void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
   auto platform_list = sycl::platform::get_platforms();
   // Enumerated GPU devices from the specific platform.
   for (const auto& platform : platform_list) {
