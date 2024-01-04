@@ -267,7 +267,6 @@ FIXME_default_non_strict = {
     "test_stateless",
     "test_subclass",
     "test_sympy_utils",
-    "test_tensor_creation_ops",
     "test_tensorexpr",
     "test_tensorexpr_pybind",
     "test_torch",
@@ -1871,6 +1870,123 @@ dynamo_expected_failures = {
     "TestTensorBoardSummary.test_hparams_string",  # test_tensorboard
     "TestTensorBoardSummary.test_hparams_bool",  # test_tensorboard
     "TestTensorBoardSummary.test_uint8_image",  # test_tensorboard
+    "TestBufferProtocolCPU.test_shared_buffer_cpu_uint8",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_complex128",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_same_type_cpu_complex128",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_float16",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_requires_grad_cpu_int32",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_uint8",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_cpu_complex128",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_requires_grad_cpu_uint8",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_cpu_uint8",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_cpu_float64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_shared_buffer_cpu_complex128",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_list_cpu_float64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_cpu_float32",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_list_cpu_int64",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_alias_from_buffer_cpu_float16",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_offset_cpu_int64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_same_type_cpu_int16",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_offset_cpu_float64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_float64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_same_type_cpu_float32",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_uint8",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_bool",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_same_type_cpu_int32",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_alias_from_buffer_cpu_int16",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_alias_from_buffer_cpu_float32",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_list_cpu_int32",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_requires_grad_cpu_int8",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_from_buffer_cpu_int16",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_int8",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_from_buffer_cpu_int8",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_requires_grad_cpu_float16",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_int64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_same_type_cpu_int64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_float16",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_from_buffer_cpu_complex64",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_alias_from_buffer_cpu_uint8",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_int64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_complex128",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_complex64",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_from_buffer_cpu_uint8",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_bool",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_cpu_int32",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_int16",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_from_buffer_cpu_complex128",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_from_buffer_cpu_float32",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_offset_cpu_int16",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_list_cpu_float32",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_float64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_requires_grad_cpu_float32",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_same_type_cpu_uint8",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_int16",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_shared_buffer_cpu_int8",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_from_buffer_cpu_float64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_cpu_int8",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_int8",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_float32",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_alias_from_buffer_cpu_complex64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_same_type_cpu_float16",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_same_type_cpu_bool",  # test_tensor_creation_ops
+    "TestTensorCreationCPU.test_tensor_factory_type_inference_cpu",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_from_buffer_cpu_float16",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_cpu_bool",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_byte_to_int_cpu",  # test_tensor_creation_ops
+    "TestTensorCreationCPU.test_block_diag_cpu",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_offset_cpu_complex64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_offset_cpu_uint8",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_cpu_int64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_requires_grad_cpu_int16",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_requires_grad_cpu_complex128",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_list_cpu_int8",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_alias_from_buffer_cpu_complex128",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_list_cpu_float16",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_offset_cpu_complex128",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_offset_cpu_float32",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_offset_cpu_int32",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_from_buffer_cpu_int32",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_from_buffer_cpu_int64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_offset_cpu_bool",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_list_cpu_complex64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_int32",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_shared_buffer_cpu_int64",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_list_cpu_uint8",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_offset_cpu_float16",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_offset_cpu_int8",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_list_cpu_bfloat16",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_int32",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_list_cpu_bool",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_shared_buffer_cpu_bool",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_same_type_cpu_float64",  # test_tensor_creation_ops
+    "TestTensorCreationCPU.test_constructor_dtypes_cpu",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_alias_from_buffer_cpu_int64",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_alias_from_buffer_cpu_bool",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_same_type_cpu_complex64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_requires_grad_cpu_float64",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_list_cpu_complex128",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_same_type_cpu_int8",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_float32",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_shared_buffer_cpu_int16",  # test_tensor_creation_ops
+    "TestTensorCreationCPU.test_tensor_factory_copy_var_cpu",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_list_cpu_int16",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_requires_grad_cpu_int64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_requires_grad_cpu_bool",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_shared_buffer_cpu_int32",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_alias_from_buffer_cpu_int32",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_copy_from_buffer_cpu_bool",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_cpu_complex64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_shared_buffer_cpu_float64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_requires_grad_cpu_complex64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_cpu_int16",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_alias_from_buffer_cpu_float64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_with_count_cpu_float16",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_complex64",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_shared_buffer_cpu_complex64",  # test_tensor_creation_ops
+    "TestAsArrayCPU.test_alias_from_buffer_cpu_int8",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_shared_buffer_cpu_float32",  # test_tensor_creation_ops
+    "TestBufferProtocolCPU.test_shared_buffer_cpu_float16",  # test_tensor_creation_ops
+    "TestTensorCreationCPU.test_cartesian_prod_cpu",  # test_tensor_creation_ops
 }
 
 dynamo_skips = {
@@ -1955,4 +2071,10 @@ dynamo_skips = {
     "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape1_cpu",  # known py311 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_2_shape1_cpu",  # known py311 fail
     "TestFrameworkUtils.test_filtering_env_var",  # known py38 fail
+    "TestAsArrayCPU.test_default_device_cpu",  # known py38 fail
+    "TestAsArrayCPU.test_astensor_consistency_cpu",  # known py311 fail
+    "TestTensorCreationCPU.test_vander_types_cpu_complex128",  # known py311 fail
+    "TestTensorCreationCPU.test_vander_types_cpu_complex64",  # known py311 fail
+    "TestTensorCreationCPU.test_torch_polar_cpu_float32",  # known py311 fail
+    "TestTensorCreationCPU.test_torch_polar_cpu_float64",  # known py311 fail
 }
