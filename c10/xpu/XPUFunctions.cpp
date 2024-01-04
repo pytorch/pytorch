@@ -173,7 +173,7 @@ void set_device(DeviceIndex device) {
 }
 
 int exchange_device(int to_device) {
-  int cur_device = static_cast<int>(current_device());
+  auto cur_device = static_cast<int>(current_device());
   if (to_device == cur_device) {
     return cur_device;
   }
