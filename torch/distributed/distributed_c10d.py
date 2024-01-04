@@ -247,6 +247,7 @@ class Backend(str):
         )
 
         setattr(Backend, name.upper(), name.lower())
+        setattr(torch.distributed, 'is_{}_available'.format(name.lower()), lambda: True)
         Backend.backend_list.append(name.lower())
         if devices is not None:
             for device in devices:
