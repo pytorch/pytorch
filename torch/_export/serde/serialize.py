@@ -9,17 +9,29 @@ import logging
 import math
 import operator
 import typing
+from collections import defaultdict
 
 from contextlib import contextmanager
-from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import sympy
 
 import torch
 import torch.export.exported_program as ep
+from torch._export.serde.schema import SchemaVersion
 from torch._export.verifier import load_verifier
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
@@ -859,7 +871,9 @@ class GraphModuleSerializer:
         output_arguments = []
         for idx, (meta, return_schema) in enumerate(zip(meta_val, returns)):
             if meta is None:
-                assert isinstance(return_schema.real_type, torch.OptionalType)
+                assert isinstance(return_schema.real_type, (torch.OptionalType, torch.TensorType))
+                # When the return type is annoated as Tensor type, the op can also return an
+                # undefined Tensor which will be implicitly converted to None in Python.
                 output_arguments.append(Argument.create(as_none=()))
             elif isinstance(meta, torch._subclasses.fake_tensor.FakeTensor):
                 assert isinstance(return_schema.real_type, torch.TensorType)
@@ -982,7 +996,10 @@ class ExportedProgramSerializer:
             graph_module=serialized_graph_module,
             opset_version=self.opset_version,
             range_constraints=serialized_range_constraints,
-            schema_version=SCHEMA_VERSION,
+            schema_version=SchemaVersion(
+                major=SCHEMA_VERSION[0],
+                minor=SCHEMA_VERSION[1],
+            ),
             dialect=exported_program.dialect,
         )
 
@@ -1578,7 +1595,7 @@ class ExportedProgramDeserializer:
     ) -> ep.ExportedProgram:
         assert isinstance(serialized_artifact.exported_program, ExportedProgram)
 
-        if serialized_artifact.exported_program.schema_version != SCHEMA_VERSION:
+        if serialized_artifact.exported_program.schema_version.major != SCHEMA_VERSION[0]:
             raise SerializeError(
                 f"Serialized schema version {serialized_artifact.exported_program.schema_version} "
                 f"does not match our current schema version {SCHEMA_VERSION}."
