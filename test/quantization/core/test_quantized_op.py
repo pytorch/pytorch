@@ -2127,7 +2127,7 @@ class TestQuantizedOps(TestCase):
 
             quantized_out = torch.topk(qX, k, dim=dim, largest=larg, sorted=sort)
 
-            assert(len(unquantized_out) == len(quantized_out))
+            assert len(unquantized_out) == len(quantized_out)
             torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
             torch.testing.assert_close(quantized_out[1], unquantized_out[1])
 
@@ -3813,7 +3813,7 @@ class TestQuantizedLinear(TestCase):
         post_op = 'none'
         cases = itertools.product(batch_size_list, input_channels_list, output_channels_list,
                                   use_bias_list, use_multi_dim_input_list, use_channelwise_list)
-        for batch_size, input_channels, output_channels, use_bias,\
+        for batch_size, input_channels, output_channels, use_bias, \
                 use_multi_dim_input, use_channelwise in cases:
             self._test_qlinear_impl(batch_size, input_channels, output_channels,
                                     use_bias, post_op, use_multi_dim_input, use_channelwise)
@@ -3830,7 +3830,7 @@ class TestQuantizedLinear(TestCase):
         post_op = 'relu'
         cases = itertools.product(batch_size_list, input_channels_list, output_channels_list,
                                   use_bias_list, use_multi_dim_input_list, use_channelwise_list)
-        for batch_size, input_channels, output_channels, use_bias,\
+        for batch_size, input_channels, output_channels, use_bias, \
                 use_multi_dim_input, use_channelwise in cases:
             self._test_qlinear_impl(batch_size, input_channels, output_channels,
                                     use_bias, post_op, use_multi_dim_input, use_channelwise)
@@ -4101,7 +4101,7 @@ class TestQuantizedLinear(TestCase):
                        qparams=hu.qparams(dtypes=torch.qint8)))
     @override_qengines
     def test_qlinear_qnnpack_free_memory_and_unpack(self, W):
-        assert(qengine_is_qnnpack)
+        assert qengine_is_qnnpack
         W, (W_scale, W_zp, torch_type) = W
         qlinear_prepack = torch.ops.quantized.linear_prepack
         qlinear_unpack = torch.ops.quantized.linear_unpack
@@ -4140,7 +4140,7 @@ class TestQuantizedLinear(TestCase):
             cases = itertools.product(batch_size_list, input_channels_list, output_channels_list,
                                       use_bias_list, use_multi_dim_input_list,
                                       use_channelwise_list, negative_slopes_list)
-            for batch_size, input_channels, output_channels, use_bias,\
+            for batch_size, input_channels, output_channels, use_bias, \
                     use_multi_dim_input, use_channelwise, neg_slope in cases:
                 self._test_qlinear_impl(batch_size, input_channels, output_channels,
                                         use_bias, post_op, use_multi_dim_input,
@@ -4159,7 +4159,7 @@ class TestQuantizedLinear(TestCase):
             cases = itertools.product(batch_size_list, input_channels_list,
                                       output_channels_list, use_bias_list,
                                       use_multi_dim_input_list, use_channelwise_list)
-            for batch_size, input_channels, output_channels, use_bias,\
+            for batch_size, input_channels, output_channels, use_bias, \
                     use_multi_dim_input, use_channelwise in cases:
                 self._test_qlinear_impl(batch_size, input_channels, output_channels,
                                         use_bias, post_op, use_multi_dim_input,
