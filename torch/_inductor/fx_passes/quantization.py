@@ -1803,6 +1803,40 @@ def _register_qconv_weight_prepack():
 
 
 def _register_qlinear_weight_prepack():
+    # 6 Linear related patterns will be matched based on the dtype, input dimension size and input contiguous.
+    # Then convert the pattern into a QLinear node with int8_fp32/bf16.
+    # Case 1: int8-mixed-fp32, input dim size is 2
+    # Case 2: int8-mixed-fp32, input dim size exceeds 2 and contiguous
+    # Case 3: int8-mixed-bf16, input dim size is 2
+    # Case 4: int8-mixed-bf16, input dim size exceeds 2 and contiguous
+
+    #   + - - - - | - - - - - - | - - - - - +
+    #   |    dq_per_tensor  dq_per_channel  |
+    #   |         |              |          |
+    #   |    OPT(to_bf16)    OPT(to_bf16)   |
+    #   |         |              |          |
+    #   |     OPT(reshape)   permute        |
+    #   |            \        /             |
+    #   |             addmm/mm              |
+    #   |                |                  |
+    #   |           OPT(reshape)            |
+
+    # Case 5: int8-mixed-fp32, input dim size exceeds 2 and not contiguous
+    # Case 6: int8-mixed-bf16, input dim size exceeds 2 and not contiguous
+
+    #   + - - - - | - - - - - - | - - - - - +
+    #   |    dq_per_tensor  dq_per_channel  |
+    #   |         |              |          |
+    #   |    OPT(to_bf16)    OPT(to_bf16)   |
+    #   |         |              |          |
+    #   |       expand       permute        |
+    #   |          \             |          |
+    #   |                    expand         |
+    #   |                    /              |
+    #   |               bmm                 |
+    #   |                |                  |
+    #   |            OPT(add)               |
+
     linear_weight_prepack_cases = itertools.product(
         [torch.float32, torch.bfloat16], [True, False]
     )
