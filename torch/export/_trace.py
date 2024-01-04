@@ -794,7 +794,7 @@ def _export(
     )
 
     if len(range_constraints) > 0 or len(equality_constraints) > 0:
-        exported_program = exported_program._transform(
+        exported_program = exported_program._transform_do_not_use(
             _AddRuntimeAssertionsForInlineConstraintsPass(
                 range_constraints, equality_constraints
             )
