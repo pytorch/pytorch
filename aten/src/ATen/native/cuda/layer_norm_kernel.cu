@@ -24,6 +24,8 @@
 #include <ATen/ops/zeros_like_native.h>
 #endif
 
+#include <ATen/native/cudnn/LayerNorm_v8.h>
+
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/env.h>
 
@@ -1025,6 +1027,7 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
+  at::native::raw_cudnn_layernorm_forward_out(X, gamma, beta, eps);
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
