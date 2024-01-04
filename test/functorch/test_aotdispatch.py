@@ -35,6 +35,7 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import parametrize, instantiate_parametrized_tests
 from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
 from torch.testing._internal.optests import _test_aot_autograd_forwards_backwards_helper, aot_autograd_check
+from torch._higher_order_ops.out_dtype import out_dtype
 from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
@@ -1249,7 +1250,8 @@ def forward(self, primals_1):
     select = torch.ops.aten.select.int(mul, 0, 0)
     detach = torch.ops.aten.detach.default(select);  select = None
     detach_1 = torch.ops.aten.detach.default(detach);  detach = None
-    return [view, mul, detach_1]""")
+    detach_2 = torch.ops.aten.detach.default(detach_1);  detach_1 = None
+    return [view, mul, detach_2]""")
 
     def test_output_aliases_intermediate_inplace_view(self):
         def f(a):
@@ -2734,6 +2736,268 @@ class TestMod(torch.nn.Module):
 
 class TestAOTExport(AOTTestCase):
 
+    def test_aot_export_predispatch_func_simple(self):
+        def fn(p, x):
+            y = x + 2
+            with torch.no_grad():
+                y.add_(2)
+            return (x * 2 + y,)
+
+        mod = TestMod(fn)
+        inp = torch.randn(2, 2)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    add = torch.ops.aten.add.Tensor(arg1_1, 2)
+    _set_grad_enabled = torch._C._set_grad_enabled(False)
+    add_1 = torch.ops.aten.add.Tensor(add, 2);  add = None
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    mul = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+    add_2 = torch.ops.aten.add.Tensor(mul, add_1);  mul = add_1 = None
+    return (add_2,)""")
+
+    def test_aot_export_predispatch_func_composite_implicit(self):
+        def fn(p, x):
+            with torch.enable_grad():
+                y = x @ x
+            y.add_(2)
+            return (x.sum() + y.sum(),)
+
+        mod = TestMod(fn)
+        inp = torch.randn(2, 2)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    _set_grad_enabled = torch._C._set_grad_enabled(True)
+    matmul = torch.ops.aten.matmul.default(arg1_1, arg1_1)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    add = torch.ops.aten.add.Tensor(matmul, 2);  matmul = None
+    sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
+    sum_2 = torch.ops.aten.sum.default(add);  add = None
+    add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    return (add_1,)""")
+
+    def test_aot_export_predispatch_composite_implicit_inplace(self):
+        def fn(x, p):
+            return (torch.ops.aten.absolute_.default(x.clone()),)
+
+        mod = TestMod(fn)
+        inp = torch.randn(2, 2)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    abs_1 = torch.ops.aten.abs.default(clone);  clone = None
+    return (abs_1,)""")
+
+    def test_aot_export_predispatch_composite_implicit_linear(self):
+        class MM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return (self.linear(x),)
+
+        mod = MM()
+        inp = torch.randn(2, 2)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    linear = torch.ops.aten.linear.default(arg2_1, arg0_1, arg1_1);  arg2_1 = arg0_1 = arg1_1 = None
+    return (linear,)""")
+
+    @unittest.expectedFailure
+    def test_aot_export_predispatch_outdtype(self):
+        class M(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = weight
+
+            def forward(self, x):
+                y = x + 2
+                y.add_(5)
+                return (out_dtype(
+                    torch.ops.aten.mm.default, torch.int32, y, self.weight
+                ),)
+
+        weight = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
+        mod = M(weight)
+        inp = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    _set_grad_enabled = torch._C._set_grad_enabled(True)
+    mm = torch.ops.aten.mm.default(arg1_1, arg1_1)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    add = torch.ops.aten.add.Tensor(mm, 2);  mm = None
+    sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
+    sum_2 = torch.ops.aten.sum.default(add);  add = None
+    add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    return (add_1,)""")
+
+    def test_aot_export_predispatch_func_view(self):
+        def fn(p, x):
+            y = x @ x
+            y.add_(2)
+            return (x.sum() + y.view(1, 4).sum(),)
+
+        mod = TestMod(fn)
+        inp = torch.randn(2, 2)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    matmul = torch.ops.aten.matmul.default(arg1_1, arg1_1)
+    add = torch.ops.aten.add.Tensor(matmul, 2);  matmul = None
+    sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
+    view_1 = torch.ops.aten.view.default(add, [1, 4]);  add = None
+    sum_2 = torch.ops.aten.sum.default(view_1);  view_1 = None
+    add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    return (add_1,)""")
+
+    def test_aot_export_predispatch_buffer_mutation_metadata(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer('foo', torch.zeros(2, 2))
+
+            def forward(self, x):
+                self.foo.add_(4)
+                return (x.sum() + self.foo.sum(),)
+
+        inp = torch.randn(2, 2)
+
+        gm, graph_sig = aot_export_module(Foo(), [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 4);  arg0_1 = None
+    sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
+    sum_2 = torch.ops.aten.sum.default(add)
+    add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    return (add, add_1)""")
+        eager_mod = Foo()
+        output_1, output_2 = gm(torch.zeros(2, 2), inp)
+        eager_output = eager_mod(inp)
+        self.assertTrue(torch.allclose(output_2, eager_output[0]))
+
+        _, output_2 = gm(output_1, inp)
+        eager_output = eager_mod(inp)
+        self.assertTrue(torch.allclose(output_2, eager_output[0]))
+        self.assertTrue("foo" in graph_sig.buffers)
+        self.assertTrue(graph_sig.inputs_to_buffers["arg0_1"] == "foo")
+
+    def test_aot_export_predispatch_with_autograd_op(self):
+        def foo(p, x):
+            with torch.enable_grad():
+                y = x + 5
+                y.add_(5)
+                y.add_(7)
+                return (x.cos() + y.sin(),)
+
+        inp = torch.randn(2, 2)
+        mod = TestMod(foo)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    _set_grad_enabled = torch._C._set_grad_enabled(True)
+    add = torch.ops.aten.add.Tensor(arg1_1, 5)
+    add_1 = torch.ops.aten.add.Tensor(add, 5);  add = None
+    add_2 = torch.ops.aten.add.Tensor(add_1, 7);  add_1 = None
+    cos = torch.ops.aten.cos.default(arg1_1);  arg1_1 = None
+    sin = torch.ops.aten.sin.default(add_2);  add_2 = None
+    add_3 = torch.ops.aten.add.Tensor(cos, sin);  cos = sin = None
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    return (add_3,)""")
+
+    # TODO(tmanlaibaatar) properly support functionalizing HOO in
+    # predispatch tracing mode
+    @unittest.expectedFailure
+    def test_aot_export_predispatch_with_cond(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.randn(4, 4))
+
+            def forward(self, x):
+                def true_fn(x):
+                    self.buffer.add_(5)
+                    return x.cos() + self.buffer.sum()
+
+                def false_fn(x):
+                    self.buffer.add_(6)
+                    return x.sin() + self.buffer.sum()
+
+                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+                return (a + 3, a + 4)
+
+        inp = torch.randn(2, 2)
+        gm, _ = aot_export_module(M(), [inp], trace_joint=False, pre_dispatch=True)
+
+    def test_aot_export_predispatch_conv_and_bn(self):
+        class ConvBatchnorm(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 3, 1, 1)
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return (x,)
+
+        mod = ConvBatchnorm()
+        mod.train()
+        inp = torch.randn(1, 1, 3, 3)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1):
+    conv2d = torch.ops.aten.conv2d.default(arg7_1, arg0_1, arg1_1);  arg7_1 = arg0_1 = arg1_1 = None
+    add = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
+    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(conv2d, arg2_1, arg3_1, arg4_1, arg5_1, True, 0.1, 1e-05);  conv2d = arg2_1 = arg3_1 = arg4_1 = arg5_1 = None
+    getitem = _native_batch_norm_legit_functional[0]
+    getitem_3 = _native_batch_norm_legit_functional[3]
+    getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+    return (getitem_3, getitem_4, add, getitem)""")  # noqa: B950
+
+    def test_aot_export_predispatch_reshape(self):
+        class Reshape(torch.nn.Module):
+            def forward(self, x):
+                y = x.reshape(4, 4)
+                return (y.sum(),)
+
+        mod = Reshape()
+        inp = torch.randn(2, 8)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1):
+    view = torch.ops.aten.view.default(arg0_1, [4, 4]);  arg0_1 = None
+    sum_1 = torch.ops.aten.sum.default(view);  view = None
+    return (sum_1,)""")  # noqa: B950
+
+    def test_aot_export_predispatch_contiguous(self):
+        class Cont(torch.nn.Module):
+            def forward(self, x):
+                y = torch.ops.aten.contiguous.default(x)
+                return (y.sum(),)
+
+        mod = Cont()
+        inp = torch.randn(2, 8)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1):
+    sum_1 = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
+    return (sum_1,)""")  # noqa: B950
+
     def test_aot_export_module_joint(self):
         class ConvBatchnormRelu(torch.nn.Module):
             def __init__(self):
@@ -2772,16 +3036,22 @@ class <lambda>(torch.nn.Module):
         detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
         detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
         detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-        sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
-        detach_3: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
+        detach_3: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
         detach_4: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_3);  detach_3 = None
-        detach_5: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_4);  detach_4 = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
+        detach_5: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
         detach_6: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_5);  detach_5 = None
+        detach_7: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_6);  detach_6 = None
+        detach_8: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_7);  detach_7 = None
+        detach_9: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_8);  detach_8 = None
+        detach_10: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_9);  detach_9 = None
         ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
         expand: "f32[1, 3, 3, 3]" = torch.ops.aten.expand.default(ones_like, [1, 3, 3, 3]);  ones_like = None
-        detach_7: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
-        detach_8: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_7);  detach_7 = None
-        threshold_backward: "f32[1, 3, 3, 3]" = torch.ops.aten.threshold_backward.default(expand, detach_8, 0);  expand = detach_8 = None
+        detach_11: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_4);  detach_4 = None
+        detach_12: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_11);  detach_11 = None
+        detach_13: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_12);  detach_12 = None
+        detach_14: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_13);  detach_13 = None
+        threshold_backward: "f32[1, 3, 3, 3]" = torch.ops.aten.threshold_backward.default(expand, detach_14, 0);  expand = detach_14 = None
         native_batch_norm_backward = torch.ops.aten.native_batch_norm_backward.default(threshold_backward, convolution, arg2_1, getitem_3, getitem_4, getitem_1, getitem_2, True, 1e-05, [True, True, True]);  threshold_backward = convolution = arg2_1 = getitem_1 = getitem_2 = None
         getitem_5: "f32[1, 3, 3, 3]" = native_batch_norm_backward[0]
         getitem_6: "f32[3]" = native_batch_norm_backward[1]
@@ -2790,7 +3060,7 @@ class <lambda>(torch.nn.Module):
         getitem_8 = convolution_backward[0]
         getitem_9: "f32[3, 1, 1, 1]" = convolution_backward[1]
         getitem_10: "f32[3]" = convolution_backward[2];  convolution_backward = None
-        return (getitem_3, getitem_4, add, sum_1, detach_6, getitem_9, getitem_10, getitem_6, getitem_7)
+        return (getitem_3, getitem_4, add, sum_1, detach_10, getitem_9, getitem_10, getitem_6, getitem_7)
         """)  # noqa: B950
 
 
@@ -2821,7 +3091,8 @@ class <lambda>(torch.nn.Module):
         sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
         detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
         detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach);  detach = None
-        return (getitem_3, getitem_4, add, sum_1, detach_1)
+        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
+        return (getitem_3, getitem_4, add, sum_1, detach_2)
         """)  # noqa: B950
         # Some important characteristics of the exported graph below:
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input

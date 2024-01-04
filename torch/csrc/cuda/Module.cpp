@@ -12,8 +12,6 @@
 
 #if AT_CUDNN_ENABLED()
 
-#include <ATen/native/cudnn/Macros.h>
-
 #endif
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
@@ -1285,8 +1283,6 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
     }
   };
 
-  set_module_attr("has_magma", at::hasMAGMA() ? Py_True : Py_False);
-
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
   for (const auto i : c10::irange(num_gpus)) {
@@ -1361,15 +1357,8 @@ PyObject* THCPModule_setBenchmarkLimitCuDNN(PyObject* _unused, PyObject* arg) {
   TORCH_WARN_ONCE(
       "cuDNN Benchmark limit is not supported in MIOpen and will have no effect.");
 #endif
-#if AT_CUDNN_ENABLED()
-#if HAS_CUDNN_V8()
   auto benchmark_limit = static_cast<int>(THPUtils_unpackLong(arg));
   at::globalContext().setBenchmarkLimitCuDNN(benchmark_limit);
-#else
-  TORCH_WARN_ONCE(
-      "cuDNN Benchmark limit is not supported with cuDNN v7 API and will have no effect.");
-#endif
-#endif
   Py_RETURN_NONE;
 }
 

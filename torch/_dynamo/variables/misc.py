@@ -16,12 +16,12 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
 from ..utils import (
     check_constant_args,
+    check_unspec_python_args,
     identity,
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
 )
 from .base import MutableLocal, VariableTracker
-from .dicts import DefaultDictVariable
 from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
@@ -454,11 +454,11 @@ class AutogradFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ):
-        from ..allowed_functions import is_user_defined_allowed
+        from ..trace_rules import is_callable_allowed
         from .builder import wrap_fx_proxy
 
         if name == "apply":
-            if is_user_defined_allowed(self.fn_cls):
+            if is_callable_allowed(self.fn_cls):
                 trampoline_autograd_apply = produce_trampoline_autograd_apply(
                     self.fn_cls
                 )
@@ -743,26 +743,8 @@ class SkipFilesVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from .builtin import BuiltinVariable
-
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
-        # Allowlist a few popular classes(e.g, collections.OrderedDict) calls in skip files.
-        elif self.value is collections.OrderedDict:
-            return BuiltinVariable.call_custom_dict(
-                tx, collections.OrderedDict, *args, **kwargs
-            )
-        elif (
-            self.value is collections.defaultdict
-            and len(args) <= 1
-            and DefaultDictVariable.is_supported_arg(args[0])
-        ):
-            return DefaultDictVariable(
-                {},
-                collections.defaultdict,
-                args[0],
-                mutable_local=MutableLocal(),
-            )
         # Fold through the functions(e.g, collections.namedtuple)
         # that inputs & outputs are all python constants
         elif (
@@ -795,25 +777,6 @@ class SkipFilesVariable(VariableTracker):
                 unimplemented(f"functools.wraps({fn})")
 
             return variables.LambdaVariable(wraps)
-        elif self.value is collections.deque and not kwargs:
-            if len(args) == 0:
-                items = []
-            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
-                items = args[0].unpack_var_sequence(tx)
-            else:
-                unimplemented("deque() with more than 1 arg not supported")
-            return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
-        elif self.value is functools.partial:
-            if not args:
-                unimplemented("functools.partial malformed")
-            # The first arg, a callable (the ctor below will assert on types)
-            fn = args[0]
-            rest_args = args[1:]
-            # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
-            # args and keywords
-            return variables.functions.FunctoolsPartialVariable(
-                fn, args=rest_args, keywords=kwargs
-            )
         else:
             try:
                 path = inspect.getfile(self.value)
@@ -822,24 +785,6 @@ class SkipFilesVariable(VariableTracker):
             msg = f"'skip function {self.value.__qualname__} in file {path}'"
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        if (
-            self.value in {collections.OrderedDict, collections.defaultdict}
-            and name == "fromkeys"
-        ):
-            from .builtin import BuiltinVariable
-
-            return BuiltinVariable.call_custom_dict_fromkeys(
-                tx, self.value, *args, **kwargs
-            )
-        return super().call_method(tx, name, args, kwargs)
 
 
 class TypingVariable(VariableTracker):
@@ -889,9 +834,17 @@ class NumpyVariable(VariableTracker):
     Wrapper around `numpy.*`. Currently, is able to trace a small subset of numpy functions as well as numpy dtypes.
     """
 
+    constant_fold_functions = (tnp.issubdtype,)
+
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
+
+    @classmethod
+    def can_constant_fold_through(cls, fn):
+        mod = fn.__module__.split(".")
+        assert len(mod) >= 2 and mod[:2] == ["torch", "_numpy"]
+        return fn in cls.constant_fold_functions
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -924,8 +877,21 @@ class NumpyVariable(VariableTracker):
                 msg += f"confg.use_numpy_random_stream={config.use_numpy_random_stream}"
                 unimplemented(msg)
 
-            # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
-            #  wrapped by NumpyNdarrayVariable which is wrong!
+            constant_args = check_constant_args(args, kwargs)
+            unspec_python_args = check_unspec_python_args(args, kwargs)
+
+            if self.can_constant_fold_through(func) and (
+                constant_args or unspec_python_args
+            ):
+                # constant fold
+                return variables.ConstantVariable.create(
+                    self.as_python_constant()(
+                        *[x.as_python_constant() for x in args],
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    ),
+                )
+
+            # TODO Add all the functions that go from constants to constants to can_constant_fold_through
             proxy = tx.output.create_proxy(
                 "call_function",
                 numpy_to_tensor_wrapper(func),
@@ -949,18 +915,11 @@ class NumpyVariable(VariableTracker):
         return self.value
 
     def as_proxy(self):
-        # this handles numpy dtype attribute such as np.float32. TODO(larryliu0820): we should split NumpyVariable
-        #  into NumpyVariable for instances/objects and NumpyVariable for types.
         if config.trace_numpy and isinstance(self.value, type):
-            # retrieve attribute str. E.g., "float32" if given np.float32
-
-            attr = self.value.__name__
-            # get tnp equivalent
-            tnp_dtype = tnp.dtype(attr)
-            # returning a string here because we are assuming all `dtype` kwargs for numpy
-            # functions can take an equivalent string and the behavior of the function would
-            # be the same as taking a numpy dtype.
-            return tnp_dtype.name
+            # This handles numpy dtype attributes such as np.float32
+            # We return a string as we don't want to serialize non-PyTorch objects in the output FX graph
+            # In torch/_numpy we normalize strings to their dtypes when the input is a dtype, as NumPy does
+            return self.value.__name__
 
         return super().as_proxy()
 
