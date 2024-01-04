@@ -1,8 +1,17 @@
 # XPU backend stacks (compiler, runtime, libraries, tools)
+
+# output variables:
 #
-# PYTORCH_FOUND_XPU
-# PYTORCH_SYCL_LIBRARIES
-# SYCL_INCLUDE_PATHS
+#  PYTORCH_FOUND_XPU
+#  -- The flag to indicate whether XPU backend stacks are setup successfully or not.
+#
+#  PYTORCH_SYCL_LIBRARIES
+#  -- Full name of SYCL runtime libraries.
+
+# output INTERFACE target:
+#
+#  torch::syclrt
+#  -- Define it for linking usage, e.g. target_link_library(tgt torch::syclrt)
 #
 
 set(PYTORCH_FOUND_XPU FALSE)

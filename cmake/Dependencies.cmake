@@ -1348,7 +1348,8 @@ if(USE_XPU)
     # 1. We enable below flags here to be warn about NaN and Infinity,
     # which will be hidden by fast-math by default.
     # 2. The associative-math in fast-math allows floating point
-    # operations to be reassociated, which will lead to non-deterministic results.
+    # operations to be reassociated, which will lead to non-deterministic
+    # results compared with CUDA backend.
     # 3. The approx-func allows certain math function calls (such as log, sqrt, pow, etc)
     # to be replaced with an approximately equivalent set of instructions or
     # alternative math function calls, which have great errors.
@@ -1367,8 +1368,13 @@ if(USE_XPU)
       add_subdirectory(${PROJECT_SOURCE_DIR}/test/cpp/sycl ${CMAKE_BINARY_DIR}/test_sycl)
     endif()
   else()
-    message(WARNING "Not compiling with XPU. Could NOT find SYCL."
-      "Suppress this warning with -DUSE_XPU=OFF.")
+    if(NOT PYTORCH_FOUND_XPU)
+      message(WARNING "Not compiling with XPU. Could NOT find SYCL."
+        "Suppress this warning with -DUSE_XPU=OFF.")
+    else()
+      message(WARNING "Not compiling with XPU. Only support GCC compiler as CXX compiler."
+        "Suppress this warning with -DUSE_XPU=OFF.")
+    endif()
     caffe2_update_option(USE_XPU OFF)
   endif()
 endif()
