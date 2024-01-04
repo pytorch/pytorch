@@ -656,9 +656,9 @@ static PyObject* THPVariable_make_wrapper_subclass(
       "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
-      "DispatchKeySet _extra_dispatch_keys=None)",
+      "DispatchKeySet _extra_dispatch_keys=None, SymInt? data_ptr= None)",
   });
-  ParsedArgs<14> parsed_args{};
+  ParsedArgs<15> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
 
@@ -727,7 +727,14 @@ static PyObject* THPVariable_make_wrapper_subclass(
         /*allocator=*/c10::GetAllocator(c10::kMeta),
         /*resizable=*/true};
     // TODO: constructor should probably accept data pointer
-    storage.set_data_ptr_noswap(at::DataPtr{nullptr, r.device(7)});
+    auto data_ptr = r.toSymIntOptional(14);
+    if (data_ptr.value_or(0) != 0) {
+      void* p = reinterpret_cast<void*>(
+          static_cast<uintptr_t>(data_ptr->expect_int()));
+      storage.set_data_ptr_noswap(at::DataPtr{p, r.device(7)});
+    } else {
+      storage.set_data_ptr_noswap(at::DataPtr{nullptr, r.device(7)});
+    }
 
     auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
     if (auto mb_extra_keys = r.toDispatchKeySetOptional(13)) {
