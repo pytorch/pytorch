@@ -268,7 +268,6 @@ FIXME_default_non_strict = {
     "test_sympy_utils",
     "test_tensor_creation_ops",
     "test_tensorboard",
-    "test_tensorexpr",
     "test_torch",
     "test_unary_ufuncs",
     "test_utils",
