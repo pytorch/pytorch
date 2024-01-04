@@ -1137,13 +1137,13 @@ class TestTransformers(NNTestCase):
         encoder_layer(x)
 
         with self.assertWarnsRegex(UserWarning, "encoder_layer.self_attn was passed bias=False"):
-            encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=1)
+            encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=1).eval()
             encoder(x)
 
-        with self.assertWarnsRegex(UserWarning, "encoder_layer.self_attn was passed bias=False"):
+        with self.assertWarnsRegex(UserWarning, "self_attn was passed bias=False"):
             transformer = torch.nn.Transformer(
                 d_model=d_model, nhead=nhead, bias=False, batch_first=True, device=device
-            )
+            ).eval()
             transformer(x, x)
 
     def test_train_with_is_causal(self, device):
