@@ -265,7 +265,6 @@ FIXME_default_non_strict = {
     "test_sparse_semi_structured",
     "test_spectral_ops",
     "test_stateless",
-    "test_subclass",
     "test_sympy_utils",
     "test_tensorexpr",
     "test_tensorexpr_pybind",
@@ -1987,6 +1986,22 @@ dynamo_expected_failures = {
     "TestBufferProtocolCPU.test_shared_buffer_cpu_float32",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_shared_buffer_cpu_float16",  # test_tensor_creation_ops
     "TestTensorCreationCPU.test_cartesian_prod_cpu",  # test_tensor_creation_ops
+    "TestSubclass.test_parametrization_non_wrapper_tensor_leave_parametrized_True",  # test_subclass
+    "TestSubclass.test_module_optimization_non_wrapper_tensor",  # test_subclass
+    "TestSubclass.test_serialization_non_wrapper_tensor_as_param_True",  # test_subclass
+    "TestSubclass.test_module_optimization_sparse_tensor",  # test_subclass
+    "TestSubclass.test_param_invariants_non_wrapper_tensor_tensor_requires_grad_False",  # test_subclass
+    "TestSubclass.test_param_invariants_sparse_tensor_tensor_requires_grad_True",  # test_subclass
+    "TestSubclass.test_param_invariants_diag_tensor_below_tensor_requires_grad_True",  # test_subclass
+    "TestSubclass.test_param_invariants_diag_tensor_below_tensor_requires_grad_False",  # test_subclass
+    "TestSubclass.test_param_invariants_non_wrapper_tensor_tensor_requires_grad_True",  # test_subclass
+    "TestSubclass.test_parametrization_non_wrapper_tensor_leave_parametrized_False",  # test_subclass
+    "TestSubclass.test_type_propagation_non_wrapper_tensor_as_param_False",  # test_subclass
+    "TestSubclass.test_module_optimization_diag_tensor_below",  # test_subclass
+    "TestSubclass.test_parametrization_base_tensor_leave_parametrized_True",  # test_subclass
+    "TestSubclass.test_type_propagation_non_wrapper_tensor_as_param_True",  # test_subclass
+    "TestSubclass.test_parametrization_base_tensor_leave_parametrized_False",  # test_subclass
+    "TestSubclass.test_param_invariants_sparse_tensor_tensor_requires_grad_False",  # test_subclass
 }
 
 dynamo_skips = {
