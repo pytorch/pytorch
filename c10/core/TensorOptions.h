@@ -701,6 +701,8 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::SparseCsrCPU;
         case c10::DeviceType::CUDA:
           return DispatchKey::SparseCsrCUDA;
+        case c10::DeviceType::PrivateUse1:
+          return DispatchKey::SparseCsrPrivateUse1;
         default:
           AT_ERROR(
               "Unsupported device type for ",

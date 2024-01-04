@@ -40,6 +40,7 @@ inline Layout layout_from_backend(Backend backend) {
       return Layout::Mkldnn;
     case Backend::SparseCsrCPU:
     case Backend::SparseCsrCUDA:
+    case Backend::SparseCsrPrivateUse1:
       TORCH_CHECK(
           false,
           "Cannot map Backend SparseCsrCPU|SparseCsrCUDA to a unique layout.");

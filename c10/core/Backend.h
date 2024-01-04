@@ -42,6 +42,7 @@ enum class Backend {
   SparseVE,
   SparseXPU,
   SparsePrivateUse1,
+  SparseCsrPrivateUse1,
   ORT,
   XLA,
   Vulkan,
@@ -100,6 +101,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::SparseCsrCPU;
   } else if (t == DispatchKey::SparseCsrCUDA) {
     return Backend::SparseCsrCUDA;
+  } else if (t == DispatchKey::SparseCsrPrivateUse1) {
+    return Backend::SparseCsrPrivateUse1;
   } else if (t == DispatchKey::MkldnnCPU) {
     return Backend::MkldnnCPU;
   } else if (t == DispatchKey::QuantizedCPU) {
@@ -168,6 +171,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::SparseCsrCPU;
     case Backend::SparseCsrCUDA:
       return DispatchKey::SparseCsrCUDA;
+    case Backend::SparseCsrPrivateUse1:
+      return DispatchKey::SparseCsrPrivateUse1;
     case Backend::MkldnnCPU:
       return DispatchKey::MkldnnCPU;
     case Backend::Vulkan:
@@ -247,6 +252,7 @@ static inline DeviceType backendToDeviceType(Backend b) {
     case Backend::PrivateUse1:
     case Backend::SparsePrivateUse1:
     case Backend::QuantizedPrivateUse1:
+    case Backend::SparseCsrPrivateUse1:
       return DeviceType::PrivateUse1;
     case Backend::Undefined:
       TORCH_CHECK(false, "Undefined backend is not a valid device type");
@@ -296,6 +302,8 @@ static inline const char* toString(Backend b) {
       return "SparseCsrCPU";
     case Backend::SparseCsrCUDA:
       return "SparseCsrCUDA";
+    case Backend::SparseCsrPrivateUse1:
+      return "SparseCsrPrivateUse1";
     case Backend::MkldnnCPU:
       return "MkldnnCPU";
     case Backend::Vulkan:
@@ -341,6 +349,7 @@ static inline bool isSparseCsr(Backend b) {
   switch (b) {
     case Backend::SparseCsrCPU:
     case Backend::SparseCsrCUDA:
+    case Backend::SparseCsrPrivateUse1:
       return true;
     default:
       return false;

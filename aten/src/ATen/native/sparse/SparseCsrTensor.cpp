@@ -334,11 +334,13 @@ static SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
   DispatchKey dispatch_key;
 
   TORCH_CHECK_NOT_IMPLEMENTED(
-    options.device().type() == kCPU || options.device().type() == kCUDA,
+    options.device().type() == kCPU || options.device().type() == kCUDA || options.device().type() == kPrivateUse1,
      "Could not run 'new_compressed_tensor' from the '", options.device(), "' device.)");
 
   if (options.device().is_cuda()) {
     dispatch_key = DispatchKey::SparseCsrCUDA;
+  } else if (options.device().is_privateuseone()) {
+    dispatch_key = DispatchKey::SparseCsrPrivateUse1;
   } else {
     dispatch_key = DispatchKey::SparseCsrCPU;
   }

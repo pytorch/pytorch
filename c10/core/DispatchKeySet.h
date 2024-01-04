@@ -687,7 +687,7 @@ constexpr DispatchKeySet python_ks = DispatchKeySet({
 constexpr DispatchKeySet sparse_ks = DispatchKeySet(DispatchKey::Sparse);
 
 constexpr DispatchKeySet sparse_csr_ks =
-    DispatchKeySet({DispatchKey::SparseCsrCPU, DispatchKey::SparseCsrCUDA});
+    DispatchKeySet({DispatchKey::SparseCsrCPU, DispatchKey::SparseCsrCUDA, DispatchKey::SparseCsrPrivateUse1});
 
 constexpr DispatchKeySet mkldnn_ks = DispatchKeySet(DispatchKey::MkldnnCPU);
 
@@ -705,6 +705,7 @@ constexpr DispatchKeySet autogradother_backends =
          DispatchKey::Metal,
          DispatchKey::SparseCsrCPU,
          DispatchKey::SparseCsrCUDA,
+         DispatchKey::SparseCsrPrivateUse1,
          DispatchKey::CustomRNGKeyId,
          DispatchKey::MkldnnCPU,
          // Sparse and Quantized backends also live here.

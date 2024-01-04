@@ -220,6 +220,7 @@ enum class DispatchKey : uint16_t {
   // TODO: Make SparseCsr a functionality key
   SparseCsrCPU,
   SparseCsrCUDA,
+  SparseCsrPrivateUse1,
 
   NestedTensor,
 
