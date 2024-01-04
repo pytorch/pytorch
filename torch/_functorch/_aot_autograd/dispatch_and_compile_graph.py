@@ -29,7 +29,12 @@ aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
     with enable_python_dispatcher():
-        fx_g = make_fx(f, decomposition_table=aot_config.decompositions)(*args)
+        fx_g = make_fx(
+            f,
+            decomposition_table=aot_config.decompositions,
+            record_module_stack=True,
+            pre_dispatch=aot_config.pre_dispatch,
+        )(*args)
 
     return fx_g
 
@@ -82,16 +87,12 @@ def aot_dispatch_base_graph(
 
     # As long as we opted to remove input mutations, then
     # there should be *NO* mutating ops in the graph at this point.
-    copy_count = assert_functional_graph(
-        fw_module.graph, allow_input_mutations=aot_config.keep_inference_input_mutations
-    )
+    copy_count = assert_functional_graph(fw_module.graph)
 
     fw_module.graph.eliminate_dead_code()
     fw_module.recompile()
 
-    copy_count2 = assert_functional_graph(
-        fw_module.graph, allow_input_mutations=aot_config.keep_inference_input_mutations
-    )
+    copy_count2 = assert_functional_graph(fw_module.graph)
 
     assert copy_count == copy_count2
 
@@ -159,9 +160,7 @@ def aot_dispatch_autograd_graph(
     fx_g = _create_graph(joint_fn_to_trace, updated_joint_inputs, aot_config=aot_config)
 
     # There should be *NO* mutating ops in the graph at this point.
-    assert_functional_graph(
-        fx_g.graph, allow_input_mutations=aot_config.keep_inference_input_mutations
-    )
+    assert_functional_graph(fx_g.graph)
 
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.

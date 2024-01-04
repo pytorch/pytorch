@@ -68,16 +68,21 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
 
     if config.pattern_matcher:
         lazy_init()
-        gm = fuse_fx(gm, example_inputs)
-        numpy_compat_normalization(gm.graph)
-        group_batch_fusion_passes(gm.graph, pre_grad=True)
-        print_graph(gm.graph, "Before split cat in pre grad pass.")
-        for pattern_matcher_pass in pattern_matcher_passes:
-            pattern_matcher_pass.apply(gm.graph)
-            print_graph(
-                gm.graph,
-                f"Apply split cat pattern matcher {pattern_matcher_pass.__class__.__name__} in pre grad.",
-            )
+        # explicitly run with predispatch atenIR based passes
+        if config.is_predispatch:
+            group_batch_fusion_passes(gm.graph, pre_grad=True)
+        else:
+            gm = fuse_fx(gm, example_inputs)
+            numpy_compat_normalization(gm.graph)
+            print_graph(gm.graph, "Before group batch fusion in pre grad pass.")
+            group_batch_fusion_passes(gm.graph, pre_grad=True)
+            print_graph(gm.graph, "Before split cat in pre grad pass.")
+            for pattern_matcher_pass in pattern_matcher_passes:
+                pattern_matcher_pass.apply(gm.graph)
+                print_graph(
+                    gm.graph,
+                    "Apply split cat pattern matcher PatternMatcherPass in pre grad.",
+                )
 
     if config.pre_grad_custom_pass is not None:
         config.pre_grad_custom_pass(gm.graph)
@@ -85,7 +90,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     gm.graph.lint()
     gm.recompile()
 
-    print_graph(gm.graph, "Aftre recompile in pre grad pass.")
+    print_graph(gm.graph, "After recompile in pre grad pass.")
 
     return gm
 

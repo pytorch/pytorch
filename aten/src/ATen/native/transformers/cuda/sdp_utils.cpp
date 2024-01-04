@@ -236,7 +236,6 @@ bool check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90(
   }
   return true;
 }
-} // namespace
 
 
 bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug) {
@@ -257,8 +256,27 @@ bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug)
   return true;
 }
 
+bool check_all_tensors_on_device(sdp_params const& params, bool debug) {
+  // Check that all tensors are on the GPU device
+  // This should be handled by the stub dispatch, but whe call can_use_*_attention
+  // directly from python we need to ensure that the tensors are on cuda
+  if (params.query.device().type() != at::DeviceType::CUDA) {
+    if (debug) {
+      TORCH_WARN(
+          "All tensors need to be on cuda device. Got query on device: ",
+          params.query.device(),
+          ", key on device: ",
+          params.key.device(),
+          ", value on device: ",
+          params.value.device());
+    }
+    return false;
+  }
+  return true;
+}
 
-TORCH_API bool can_use_flash_attention(sdp_params const& params, bool debug) {
+} // namespace
+bool can_use_flash_attention(sdp_params const& params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
   TORCH_WARN_ONCE(!debug, "Torch was not compiled with flash attention.");
   return false;
@@ -268,6 +286,7 @@ TORCH_API bool can_use_flash_attention(sdp_params const& params, bool debug) {
   // Replace with std::to_array when we migrate to c++20
   constexpr auto general_constraints = array_of<bool (*)(sdp_params const&, bool)>(
       check_runtime_disabled_flash,
+      check_all_tensors_on_device,
       check_tensor_shapes,
       check_for_attn_mask,
       check_head_dim_size_flash,
@@ -314,20 +333,21 @@ TORCH_API bool can_use_flash_attention(sdp_params const& params, bool debug) {
   }
 }
 
-TORCH_API bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
+bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 #ifndef USE_MEM_EFF_ATTENTION
   TORCH_WARN_ONCE(!debug, "Torch was not compiled with memory efficient attention.");
   return false;
 #endif
   // Constraints specific to mem efficient attention
-  constexpr auto default_mem_efficient_dtypes =
+  constexpr auto greater_than_or_equal_sm80_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
-  constexpr auto sm50_mem_efficient_dtypes =
+  constexpr auto less_than_sm80_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat);
 
   //  Define gate functions that determine if a mem efficient kernel can be ran
   constexpr auto general_constraints = array_of<bool (*)(sdp_params const&, bool)>(
       check_runtime_disabled_mem_efficient,
+      check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
       check_head_dim_size_mem_efficient);
@@ -361,10 +381,10 @@ TORCH_API bool can_use_mem_efficient_attention(sdp_params const& params, bool de
   }
 
   auto dprop = at::cuda::getCurrentDeviceProperties();
-  if (dprop->major == 5) {
-    return check_tensor_dtype(params, sm50_mem_efficient_dtypes, debug);
+  if (dprop->major >= 8) {
+    return check_tensor_dtype(params, greater_than_or_equal_sm80_mem_efficient_dtypes, debug);
   }
-  return check_tensor_dtype(params, default_mem_efficient_dtypes, debug);
+  return check_tensor_dtype(params, less_than_sm80_mem_efficient_dtypes, debug);
 }
 
 SDPBackend select_sdp_backend(sdp_params const& kernel_params) {

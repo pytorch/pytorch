@@ -86,7 +86,7 @@
 
 constexpr int MIOPEN_DIM_MAX = 5;
 
-namespace at { namespace native {
+namespace at::native {
 
 
 static bool conv_benchmark_empty_cache = true;
@@ -539,7 +539,8 @@ struct ConvParams {
   }
   bool use_nnpack(const at::Tensor& input, const at::Tensor& weight) const  {
 #if AT_NNPACK_ENABLED()
-    return at::_nnpack_available() &&
+    return at::globalContext().userEnabledNNPACK() &&
+           at::_nnpack_available() &&
            input.device().is_cpu() &&
            input.scalar_type() == kFloat && // only on CPU Float Tensors
            !is_dilated() && // or dilation
@@ -2305,4 +2306,4 @@ bool _cudnn_get_conv_benchmark_empty_cache() {
 
 
 
-}} // at::native
+} // namespace at::native

@@ -35,6 +35,7 @@ from typing import (
     ClassVar,
     Counter,
     DefaultDict,
+    Deque,
     Dict,
     Iterator,
     List,
@@ -89,6 +90,7 @@ import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map_only
@@ -360,8 +362,7 @@ def reset_graph_break_dup_checker():
 
 def add_file_handler():
     log_path = os.path.join(get_debug_dir(), "torchdynamo")
-    if not os.path.exists(log_path):
-        os.makedirs(log_path)
+    os.makedirs(log_path, exist_ok=True)
 
     log_file_handler = logging.FileHandler(os.path.join(log_path, "debug.log"))
     logger = logging.getLogger("torch._dynamo")
@@ -512,6 +513,18 @@ def is_numpy_float_type(value):
     )
 
 
+def is_function(value):
+    return istype(
+        value,
+        (
+            types.FunctionType,
+            types.BuiltinFunctionType,
+            types.MethodDescriptorType,
+            types.WrapperDescriptorType,
+        ),
+    )
+
+
 def is_numpy_ndarray(value):
     if not np:
         return False
@@ -573,14 +586,50 @@ class CompilationMetrics:
     cache_size: int
     accumulated_cache_size: int
     guard_count: Optional[int]
+    shape_env_guard_count: Optional[int]
     graph_op_count: Optional[int]
     graph_node_count: Optional[int]
     graph_input_count: Optional[int]
     entire_frame_compile_time_s: Optional[float]
     backend_compile_time_s: Optional[float]
+    fail_type: Optional[str]
     fail_reason: Optional[str]
+    fail_user_frame_filename: Optional[str]
+    fail_user_frame_lineno: Optional[int]
     non_compliant_ops: Set[str]
     compliant_custom_ops: Set[str]
+
+
+DEFAULT_COMPILATION_METRICS_LIMIT = 64
+
+
+_compilation_metrics: Deque[CompilationMetrics] = collections.deque(
+    maxlen=DEFAULT_COMPILATION_METRICS_LIMIT
+)
+
+
+def record_compilation_metrics(compilation_metrics: CompilationMetrics):
+    global _compilation_metrics
+    _compilation_metrics.append(compilation_metrics)
+    if config.log_compilation_metrics:
+        log_compilation_event(compilation_metrics)
+
+
+def set_compilation_metrics_limit(new_size: int) -> None:
+    global _compilation_metrics
+    while len(_compilation_metrics) > new_size:
+        _compilation_metrics.popleft()
+    new_deque = collections.deque(_compilation_metrics, maxlen=new_size)
+    _compilation_metrics = new_deque
+
+
+def clear_compilation_metrics() -> None:
+    global _compilation_metrics
+    _compilation_metrics.clear()
+
+
+def get_compilation_metrics() -> List[CompilationMetrics]:
+    return list(_compilation_metrics)
 
 
 @dataclasses.dataclass
@@ -841,24 +890,27 @@ def rot_n_helper(n):
     return fn
 
 
+common_constant_types = {
+    int,
+    float,
+    bool,
+    str,
+    bytes,
+    type(None),
+    types.CodeType,
+    torch.device,
+    torch.dtype,
+    torch.memory_format,
+    torch.layout,
+}
+
+
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
     return isinstance(v, (enum.Enum, type)) or istype(
         v,
-        (
-            types.CodeType,
-            int,
-            float,
-            bool,
-            str,
-            bytes,
-            type(None),
-            slice,
-            type(type),
-            torch.device,
-            torch.dtype,
-        ),
+        common_constant_types | {slice},
     )
 
 
@@ -926,6 +978,13 @@ def product(it):
 def tuple_iterator_getitem(it, index):
     _, (obj,), start = it.__reduce__()
     return obj[start + index]
+
+
+iter_next = next
+
+
+def to_subclass(t, cls):
+    return t.as_subclass(cls)
 
 
 def enum_repr(value, local):
@@ -2266,12 +2325,33 @@ def get_static_address_type(t):
     return None
 
 
+def is_rng_state_getter_or_setter(value):
+    getters = (
+        # The following two functions are not identical, so don't remove anyone!
+        torch._C.Generator.get_state,
+        torch.default_generator.get_state,
+        torch.get_rng_state,
+        torch.cuda.get_rng_state,
+    )
+    setters = (
+        torch._C.Generator.set_state,
+        torch.default_generator.set_state,
+        torch.set_rng_state,
+        torch.cuda.set_rng_state,
+    )
+    return value in (*setters, *getters)
+
+
 def is_tensor_base_attr_getter(value):
     return (
         isinstance(value, types.MethodWrapperType)
         and value.__name__ == "__get__"
         and value.__self__.__objclass__ is torch._C._TensorBase  # type: ignore[attr-defined]
     )
+
+
+def is_torch_function_object(value):
+    return hasattr(value, "__torch_function__")
 
 
 def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
@@ -2296,3 +2376,14 @@ def to_fake_tensor(t, fake_mode):
     return fake_mode.from_tensor(
         t, static_shapes=False, symbolic_context=symbolic_context, source=source
     )
+
+
+def get_first_attr(obj, *attrs):
+    """
+    Return the first available attribute or throw an exception if none is present.
+    """
+    for attr in attrs:
+        if hasattr(obj, attr):
+            return getattr(obj, attr)
+
+    raise AssertionError(f"{obj} does not has any of the attributes: {attrs}")

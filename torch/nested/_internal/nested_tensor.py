@@ -13,12 +13,17 @@ _tensor_symint_registry = WeakTensorKeyDictionary()
 
 def get_tensor_symint(tensor, *, coeff=1):
     global _tensor_id_counter
-    if tensor not in _tensor_symint_registry:
-        _tensor_symint_registry[tensor] = torch._C._get_singleton_int(
-            _tensor_id_counter, coeff
-        )
+    tensor_symint = _tensor_symint_registry.get(tensor)
+    if tensor_symint is None:
+        tensor_symint = torch._C._get_singleton_int(_tensor_id_counter, coeff)
         _tensor_id_counter += 1
-    return _tensor_symint_registry[tensor]
+        _tensor_symint_registry[tensor] = tensor_symint
+    return tensor_symint
+
+
+# SDPA metadata; max / min seqlens are needed for e.g. flash
+def _get_sdpa_extreme_seqlen(func, tensor):
+    return int(func(tensor).item())
 
 
 class NestedTensor(torch.Tensor):
@@ -43,9 +48,7 @@ class NestedTensor(torch.Tensor):
     _stride: Tuple[int, ...]
     # Indicates that the nth dimension is ragged
     _ragged_idx: int
-    # SDPA Metadata
-    _max_seqlen: int
-    _min_seqlen: int
+    _metadata_cache: Dict[str, Any]
 
     @staticmethod
     def __new__(
@@ -109,26 +112,12 @@ class NestedTensor(torch.Tensor):
         self._offsets = offsets
         self._lengths = lengths
 
-        # SDPA metadata
-        def get_sdpa_extreme_seqlen(func, tensor):
-            return int(func(tensor).item())
+        # holds properties that are computed lazily
+        self._metadata_cache = kwargs.get("_metadata_cache", {})
 
-        # Note: Not using kwargs.get to avoid execution of get_sdpa_extreme_seqlen
-        # unless it is really needed
-        self._max_seqlen = (
-            kwargs["_max_seqlen"]
-            if "_max_seqlen" in kwargs
-            else get_sdpa_extreme_seqlen(
-                torch.max, offsets.diff() if lengths is None else lengths
-            )
-        )
-        self._min_seqlen = (
-            kwargs["_min_seqlen"]
-            if "_min_seqlen" in kwargs
-            else get_sdpa_extreme_seqlen(
-                torch.min, offsets.diff() if lengths is None else lengths
-            )
-        )
+        # collapsed ragged dim must always be dynamic
+        torch._dynamo.mark_dynamic(self, self._ragged_idx)
+        torch._dynamo.mark_dynamic(self._values, self._ragged_idx - 1)
 
     def values(self):
         return self._values
@@ -138,6 +127,26 @@ class NestedTensor(torch.Tensor):
 
     def lengths(self):
         return self._lengths
+
+    @property
+    def _max_seqlen(self):
+        if "max_seqlen" not in self._metadata_cache:
+            # compute & cache
+            self._metadata_cache["max_seqlen"] = _get_sdpa_extreme_seqlen(
+                torch.max,
+                self._offsets.diff() if self._lengths is None else self._lengths,
+            )
+        return self._metadata_cache["max_seqlen"]
+
+    @property
+    def _min_seqlen(self):
+        if "min_seqlen" not in self._metadata_cache:
+            # compute & cache
+            self._metadata_cache["min_seqlen"] = _get_sdpa_extreme_seqlen(
+                torch.min,
+                self._offsets.diff() if self._lengths is None else self._lengths,
+            )
+        return self._metadata_cache["min_seqlen"]
 
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
@@ -164,9 +173,8 @@ class NestedTensor(torch.Tensor):
     def __tensor_flatten__(self):
         ctx = {
             "requires_grad": self.requires_grad,
-            "ragged_size": self._size[self._ragged_idx],
-            "max_seqlen": self._max_seqlen,
-            "min_seqlen": self._min_seqlen,
+            # TODO: Don't guard on this!
+            "metadata_cache": self._metadata_cache,
             "ragged_idx": self._ragged_idx,
         }
         inner_tensors = ["_values", "_offsets"]
@@ -175,37 +183,13 @@ class NestedTensor(torch.Tensor):
         return inner_tensors, ctx
 
     @staticmethod
-    def __tensor_unflatten__(inner_tensors: Dict, meta):
+    def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
         assert len(inner_tensors) >= 2 and len(inner_tensors) <= 3
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
         lengths = inner_tensors.get("_lengths", None)
+        ragged_idx = meta["ragged_idx"]
 
-        # NOTE [ Storing symbolic values as plain attributes on subclasses ]
-        #
-        # When a subclass like NestedTensor stores a "size-like" value (which
-        # can either be Symintified or not) into meta, it's responsible for:
-        #
-        #   (1) Propagating that symint during torch dispatch when performing
-        #       operations, i.e. torch dispatch plays the role of a meta kernel.
-        #
-        #   (2) Facilitating the behavior around symbolic -> non-symbolic
-        #       conversions and vice versa, see below.
-        #
-        # [ non-symbolic -> symbolic (fakification in meta_utils) ]
-        #
-        # __tensor_unflatten__ is passed symbolic dense tensors and meta from
-        # non-symbolic subclasses. In this case, the subclass is responsible for
-        # intercepting meta["ragged_size"] for example and replacing it with the
-        # symintified version.
-        #
-        # [ symbolic -> non-symbolic ]
-        #
-        # __tensor_unflatten__ is passed non-symbolic dense tensors and with
-        # meta extracted from fake subclasses. In this case the subclass gets
-        # propagated the meta["ragged_size"] which is still a symint and the
-        # subclass is responsible for making sure that the symint doesn't leak.
-        #
         # Note that we cannot simply check if is_fake(values) because
         # during aot autograd, FunctionalTensors are not fake but hold
         # symbolic sizes.
@@ -213,16 +197,16 @@ class NestedTensor(torch.Tensor):
         if has_free_symbols(ragged_source) or has_free_symbols(values):
             # Associate offsets or lengths (possibly fake, possibly functionalized)
             # with the ragged_size.
-            _tensor_symint_registry[ragged_source] = meta["ragged_size"]
+            ragged_size = outer_size[ragged_idx]
+            _tensor_symint_registry[ragged_source] = ragged_size
 
         return NestedTensor(
             values,
             offsets=offsets,
             lengths=lengths,
             requires_grad=meta["requires_grad"],
-            _max_seqlen=meta["max_seqlen"],
-            _min_seqlen=meta["min_seqlen"],
-            _ragged_idx=meta["ragged_idx"],
+            _ragged_idx=ragged_idx,
+            _metadata_cache=meta["metadata_cache"],
         )
 
     @classmethod
@@ -258,9 +242,8 @@ class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: NestedTensor):  # type: ignore[override]
         ctx.save_for_backward(x.offsets())
-        ctx.max_seqlen = x._max_seqlen
-        ctx.min_seqlen = x._min_seqlen
-        ctx._ragged_idx = x._ragged_idx
+        ctx.metadata_cache = x._metadata_cache
+        ctx.ragged_idx = x._ragged_idx
         return x.values()
 
     @staticmethod
@@ -269,44 +252,39 @@ class ViewBufferFromNested(torch.autograd.Function):
         return NestedTensor(
             gO,
             offsets=offsets,
-            _max_seqlen=ctx.max_seqlen,
-            _min_seqlen=ctx.min_seqlen,
-            _ragged_idx=ctx._ragged_idx,
+            _metadata_cache=ctx.metadata_cache,
+            _ragged_idx=ctx.ragged_idx,
         )
 
 
 # Not actually a view!
 class ViewNestedFromBuffer(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, values: torch.Tensor, offsets: torch.Tensor, max_seqlen: int, min_seqlen: int):  # type: ignore[override]
+    def forward(ctx, values: torch.Tensor, offsets: torch.Tensor):  # type: ignore[override]
         return NestedTensor(
             values.detach(),
             offsets=offsets,
-            _max_seqlen=max_seqlen,
-            _min_seqlen=min_seqlen,
         )
 
     @staticmethod
     def backward(ctx, gO: NestedTensor):  # type: ignore[override]
-        return gO.values(), None, None, None
+        return gO.values(), None
 
 
 # Not actually a view!
 # NOTE: @jbschlosser is working on making it a view
 class ViewNonContiguousNestedFromBuffer(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, values: torch.Tensor, offsets: torch.Tensor, lengths: torch.Tensor, max_seqlen: int, min_seqlen: int):  # type: ignore[override]
+    def forward(ctx, values: torch.Tensor, offsets: torch.Tensor, lengths: torch.Tensor):  # type: ignore[override]
         return NestedTensor(
             values.detach(),
             offsets=offsets,
             lengths=lengths,
-            _max_seqlen=max_seqlen,
-            _min_seqlen=min_seqlen,
         )
 
     @staticmethod
     def backward(ctx, gO: NestedTensor):  # type: ignore[override]
-        return gO.values(), None, None, None, None
+        return gO.values(), None, None
 
 
 # Need to make it obvious that users should be passing in offsets
@@ -359,10 +337,13 @@ def jagged_from_list(
             ]
         )
 
-    max_seqlen = max([t.shape[0] for t in tensors])
-    min_seqlen = min([t.shape[0] for t in tensors])
-
-    return ViewNestedFromBuffer.apply(values, offsets, max_seqlen, min_seqlen), offsets  # type: ignore[call-overload]
+    ret_nt = ViewNestedFromBuffer.apply(values, offsets)
+    ret_nt._metadata_cache = {
+        # compute this now since it's easy
+        "max_seqlen": max([t.shape[0] for t in tensors]),
+        "min_seqlen": min([t.shape[0] for t in tensors]),
+    }
+    return (ret_nt, offsets)  # type: ignore[return-value]
 
 
 def jagged_from_tensor_and_lengths(
@@ -417,24 +398,20 @@ def jagged_from_tensor_and_lengths(
     min_seqlen = int(torch.min(lengths).item())
 
     if is_contiguous:
-        return (
-            ViewNestedFromBuffer.apply(
-                values[offsets[0] : offsets[-1]],
-                offsets - offsets[0],
-                actual_max_seqlen,
-                min_seqlen,
-            ),
-            offsets,
-            None,
+        ret_nt = ViewNestedFromBuffer.apply(
+            values[offsets[0] : offsets[-1]],
+            offsets - offsets[0],
         )
+    else:
+        ret_nt = ViewNonContiguousNestedFromBuffer.apply(values, offsets, length_list)
 
-    return (
-        ViewNonContiguousNestedFromBuffer.apply(
-            values, offsets, length_list, actual_max_seqlen, min_seqlen
-        ),
-        offsets,
-        length_list,
-    )  # type: ignore[call-overload]
+    # populate metadata cache with computed seqlen extremes
+    ret_nt._metadata_cache = {
+        "max_seqlen": actual_max_seqlen,
+        "min_seqlen": min_seqlen,
+    }
+
+    return (ret_nt, offsets, None if is_contiguous else length_list)
 
 
 def buffer_from_jagged(jagged):

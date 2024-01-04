@@ -563,6 +563,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split(self):
+        assert config.optimize_ddp
         """
         Just ensures that the appropriate number of splits happen (based on
         bucket size and model parameters) - verifies the number of times
@@ -644,6 +645,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor(self):
+        assert config.optimize_ddp
         """
         Same as above, but using inductor backend.
         We observed issues with inductor/fx interface in the past.
@@ -657,6 +659,81 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
+
+    @torch._inductor.config.patch({"layout_optimization": True, "keep_output_stride": False})
+    @patch.object(config, "optimize_ddp", True)
+    @patch.object(config, "optimize_ddp_lazy_compile", True)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_graph_split_inductor_layout_optimizations(self):
+        assert config.optimize_ddp
+        channel_dim = 512
+        # channel dim must be > 64 for inductor to do layout optimization and use NHWC
+
+        class ToyModelConv(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = nn.Sequential(
+                    *[nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
+                    + [nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
+                    + [nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
+                    + [nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
+                )
+
+            def forward(self, inputs):
+                return self.net(inputs)
+
+        def get_model():
+            m = ToyModelConv().to(self.device)
+            m.apply(init_weights)
+            inputs = torch.rand(2, channel_dim, channel_dim, 128).to(self.device)
+            outputs = m(inputs)
+            return m, inputs, outputs
+
+        m, inputs, correct_outputs = get_model()
+        ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
+
+        @torch._dynamo.optimize("inductor")
+        def opt_fn(inputs):
+            return ddp_m(inputs)
+
+        opt_outputs = opt_fn(inputs)
+        self.assertTrue(same(correct_outputs, opt_outputs))
+
+
+    @patch.object(config, "optimize_ddp", True)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_graph_split_inductor_transpose(self):
+        assert config.optimize_ddp
+
+        B = 100
+        N = 30
+        D = 50
+        K = 70
+
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear0 = nn.Linear(N, K)
+                self.linear1 = torch.nn.Linear(D * K, 2048)
+
+            def forward(self, x):
+                xt = x.transpose(2, 1)
+                xt = self.linear0(xt).flatten(1)
+                return self.linear1(xt)
+
+        mod = Foo().to(self.device)
+
+        compiled_mod = torch.compile(mod, backend="inductor")
+        ddp_compiled_mod = DDP(compiled_mod, device_ids=self.device_ids)
+
+        x = torch.randn((B, N, D), dtype=torch.float32, device=self.device)
+        self.assertTrue(same(mod(x), ddp_compiled_mod(x)))
+
+        x_1 = torch.randn((B * 2, N, D), dtype=torch.float32, device=self.device)
+        self.assertTrue(same(mod(x_1), ddp_compiled_mod(x_1)))
+
+        x_2 = torch.randn((B * 3, N, D), dtype=torch.float32, device=self.device)
+        self.assertTrue(same(mod(x_2), ddp_compiled_mod(x_2)))
 
     @patch.object(config, "optimize_ddp", True)
     def test_no_split(self):

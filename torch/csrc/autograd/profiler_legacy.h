@@ -15,8 +15,7 @@
 #include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 struct Node;
 
@@ -413,5 +412,4 @@ struct TORCH_API TLSLegacyProfilerGuard {
 };
 
 } // namespace profiler
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

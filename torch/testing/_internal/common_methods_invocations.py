@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import \
      skipCPUIfNoMklSparse,
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION, SM53OrLater, SM60OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION, SM53OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version, _get_torch_rocm_version,
 )
 from torch.testing._internal.common_utils import (
@@ -1142,11 +1142,12 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     alpha_val = kwargs.get('alpha', 2 + 3j if dtype.is_complex else 0.6)
     beta_val = kwargs.get('beta', 1 + 2j if dtype.is_complex else 0.2)
     tests_list = [
-        ((2, 3), (2, 2), (2, 3), False)
+        ((2, 3), (2, 2), (2, 3), False),
+        ((3, 3), (3, 3), (3, 3), False),
     ]
     tests_with_lhs_broadcasting = [
         ((1,), (2, 2), (2, 3), True),
-        ((), (2, 2), (2, 3), True)
+        ((), (2, 2), (2, 3), True),
     ]
     test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore[operator]
 
@@ -8465,6 +8466,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             cu_seqlens_q=None,
             cu_seqlens_k=None,
             max_seqlen_q=None,
+            max_seqlen_k=None,
             dropout_p=dropout_p,
             custom_mask_type=mask_type,
             compute_log_sumexp=requires_grad,
@@ -8482,6 +8484,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
         cu_seqlens_q=None,
         cu_seqlens_k=None,
         max_seqlen_q=None,
+        max_seqlen_k=None,
         dropout_p=dropout_p,
         custom_mask_type=0,  # No Mask
         compute_log_sumexp=requires_grad,
@@ -8500,6 +8503,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             cu_seqlens_q=None,
             cu_seqlens_k=None,
             max_seqlen_q=None,
+            max_seqlen_k=None,
             dropout_p=dropout_p,
             custom_mask_type=0,  # No Mask
             compute_log_sumexp=requires_grad,
@@ -12841,8 +12845,7 @@ op_db: List[OpInfo] = [
     OpInfo('native_layer_norm',
            aten_name='native_layer_norm',
            ref=reference_native_layer_norm,
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.half, torch.bfloat16),
            supports_out=False,
            assert_jit_shape_analysis=True,
            supports_fwgrad_bwgrad=True,
@@ -13028,7 +13031,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_types_and(torch.int64, torch.bfloat16),
+           dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_avg_pool1d,
@@ -13375,8 +13378,7 @@ op_db: List[OpInfo] = [
            aten_backward_name='layer_norm_backward',
            aliases=('layer_norm',),
            ref=reference_layer_norm,
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.half, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13391,7 +13393,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_layer_norm,
            supports_expanded_weight=True,),
     OpInfo('nn.functional.local_response_norm',
-           dtypes=floating_types_and(torch.int64, torch.bfloat16),
+           dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
@@ -13784,7 +13786,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_types_and(torch.int64, torch.bfloat16),
+           dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_avg_pool2d,
            sample_inputs_func=sample_inputs_avgpool2d,
@@ -14221,7 +14223,15 @@ op_db: List[OpInfo] = [
         supports_forward_ad=False,
         supports_autograd=False,
         decorators=[skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 9.0')],
-        skips=()
+        skips=(
+            # Sample inputs isn't really parametrized on dtype
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
+                         device_type='cuda'),
+            # "mul_cuda" not implemented for float8_e4m3fn
+            # https://github.com/pytorch/pytorch/issues/107256
+            DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                         dtypes=(torch.float8_e4m3fn,)),
+        )
     ),
     OpInfo(
         'nn.functional.scaled_dot_product_attention',
@@ -14270,6 +14280,12 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip('This is '), 'TestInductorOpInfo', 'test_comprehensive'),
             # skip for sm < 80
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta_outplace',
+                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_meta_outplace',
+                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
                          device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),),
     ),
     OpInfo(
@@ -15937,9 +15953,7 @@ op_db: List[OpInfo] = [
            op=lambda tensors, equation: torch.einsum(equation, tensors),
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, *[torch.bfloat16]
-                                                                if (SM60OrLater or
-                                                                    TEST_WITH_ROCM) else []),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -18206,7 +18220,7 @@ op_db: List[OpInfo] = [
             }
             """,
             num_outputs=1),
-        ref=lambda i0, i1: i0 + i1,
+        ref=operator.add,
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.bool),
         sample_inputs_func=partial(sample_inputs_jiterator, num_inputs=2, alpha=-0.42),
         supports_out=False,
@@ -20188,6 +20202,12 @@ python_ref_db = [
         torch_opinfo_name="mvlgamma",
         torch_opinfo_variant_name="mvlgamma_p_1",
         skips=skips_mvlgamma(),
+        decorators=(
+            DecorateInfo(torch.testing._internal.common_utils.markDynamoStrictTest, 'TestUnaryUfuncs',
+                         'test_reference_numerics_large'),
+            DecorateInfo(torch.testing._internal.common_utils.xfailIfTorchDynamo, 'TestUnaryUfuncs',
+                         'test_reference_numerics_large'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.multigammaln",
@@ -21521,6 +21541,10 @@ python_ref_db = [
         torch_opinfo_name="as_strided_scatter",
         # returns a view of an intermediate tensor (as_strided)
         validate_view_consistency=False,
+    ),
+    PythonRefInfo(
+        "_refs.block_diag",
+        torch_opinfo_name="block_diag",
     ),
     PythonRefInfo(
         "_refs.broadcast_shapes",

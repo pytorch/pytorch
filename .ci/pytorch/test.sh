@@ -259,6 +259,7 @@ test_dynamo_shard() {
     --exclude-jit-executor \
     --exclude-distributed-tests \
     --exclude \
+      test_ao_sparsity \
       test_autograd \
       test_jit \
       test_proxy_tensor \
@@ -500,7 +501,11 @@ test_inductor_torchbench_smoketest_perf() {
   python benchmarks/dynamo/torchbench.py --device cuda --performance --bfloat16 --inference \
     --export-aot-inductor --only nanogpt --output "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv"
   # The threshold value needs to be actively maintained to make this check useful
-  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t 5.2
+  # The perf number of nanogpt seems not very stable, e.g.
+  # https://github.com/pytorch/pytorch/actions/runs/7158691360/job/19491437314,
+  # and thus we lower its threshold to reduce flakiness. If this continues to be a problem,
+  # we switch to use some other model.
+  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t 4.9
 
   # Check memory compression ratio for a few models
   for test in hf_Albert timm_vision_transformer; do
@@ -1069,7 +1074,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
-    checkout_install_torchbench hf_Bert hf_Albert timm_vision_transformer
+    checkout_install_torchbench hf_Bert hf_Albert nanogpt timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   else
     checkout_install_torchbench
@@ -1085,13 +1090,12 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   test_inductor
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  test_without_numpy
   install_torchvision
   test_dynamo_shard 1
   test_aten
-elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *dynamo* && $SHARD_NUMBER -gt 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  test_dynamo_shard 2
+  test_dynamo_shard "${SHARD_NUMBER}"
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
@@ -1119,6 +1123,10 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
+  install_torchvision
+  test_python
+  test_aten
+elif [[ "${BUILD_ENVIRONMENT}" == *xpu* && -n "$TESTS_TO_INCLUDE" ]]; then
   install_torchvision
   test_python
   test_aten
