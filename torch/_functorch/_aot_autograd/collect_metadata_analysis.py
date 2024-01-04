@@ -353,7 +353,11 @@ def run_functionalized_fw_and_collect_metadata(
                 ]
             )
 
-            # might do lazy view rebase, so enable FunctionalTensorMode
+            # See Note [Accessing .grad_fn on FunctionalTensor]
+            # In-place operations on views will trigger a lazy rebase of the autograd graph;
+            # this runs during access to the .grad_fn. The rebase logic will invoke view ops
+            # on FunctionalTensors, so we must enable a FunctionalTensorMode here to ensure
+            # these op calls succeed.
             grad_fn = None
             if isinstance(o, Tensor):
                 with FunctionalTensorMode():
