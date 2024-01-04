@@ -48,8 +48,6 @@ class AsyncFuncHandle:
   We use this class to represent the function that needs to be scheduled.
   It also has methods for checking whether the function has been scheduled or completed.
   """
-  _gm_to_handle_mapping: Dict[torch.fx.GraphModule, "AsyncFuncHandle"] = {}
-
   def __init__(self, compiled_fn, segment, args, outs_async, scheduler):
     self.cuda_event = torch.cuda.Event()
     self.compiled_fn: Callable = compiled_fn
@@ -65,7 +63,6 @@ class AsyncFuncHandle:
     if self.is_going_to_be_scheduled:
       return
     self.is_going_to_be_scheduled = True
-    gm = self._scheduler()._handle_to_gm_map[self]
     AsyncTensor.wait_until_materialized(self.args)
     args_materialized = pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor, pytree.tree_map(lambda x: x.detach(), self.args))
     self._scheduler().add_to_recorded_execution_order(self.segment)
