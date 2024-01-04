@@ -150,12 +150,12 @@ def _find_tensors(obj):
     if isinstance(obj, torch.Tensor):
         return [obj]
     if isinstance(obj, (list, tuple)):
-        return itertools.chain(*map(_find_tensors, obj))
+        return itertools.chain.from_iterable(map(_find_tensors, obj))
     if isinstance(obj, dict):
-        return itertools.chain(*map(_find_tensors, obj.values()))
+        return itertools.chain.from_iterable(map(_find_tensors, obj.values()))
     if is_dataclass(obj):
-        return itertools.chain(
-            *map(_find_tensors, (getattr(obj, f.name) for f in fields(obj)))
+        return itertools.chain.from_iterable(
+            map(_find_tensors, (getattr(obj, f.name) for f in fields(obj)))
         )
 
     return []
@@ -172,7 +172,7 @@ def _dump_DDP_relevant_env_vars():
         "GLOO_SOCKET_IFNAME",
         "GLOO_DEVICE_TRANSPORT",
         "NCCL_SOCKET_IFNAME",
-        "NCCL_BLOCKING_WAIT",
+        "TORCH_NCCL_BLOCKING_WAIT",
         "NCCL_DEBUG",
         "NCCL_DEBUG_SUBSYS",
         "NCCL_IB_DISABLE",
@@ -210,7 +210,7 @@ def _dump_DDP_relevant_env_vars():
         "NCCL_COLLNET_ENABLE",
         "NCCL_TOPO_FILE",
         "NCCL_TOPO_DUMP_FILE",
-        "NCCL_ASYNC_ERROR_HANDLING",
+        "TORCH_NCCL_ASYNC_ERROR_HANDLING",
     ]
     formatted_output = ""
     for var in relevant_env_vars:
@@ -737,7 +737,7 @@ class DistributedDataParallel(Module, Joinable):
                     f"Only 1D device mesh is supported, but got {device_mesh}."
                 )
             self.device_mesh = device_mesh
-            self.process_group = device_mesh.get_dim_groups(mesh_dim=0)
+            self.process_group = device_mesh.get_group(mesh_dim=0)
 
         self.static_graph = False
         self.dim = dim
@@ -1453,7 +1453,7 @@ class DistributedDataParallel(Module, Joinable):
     def _post_forward(self, output):
         if self._delay_all_reduce_all_params:
             self._clear_grad_buffer()
-            return
+            return output
 
         # sync params according to location (before/after forward) user
         # specified as part of hook, if hook was specified.
@@ -2254,7 +2254,7 @@ class DistributedDataParallel(Module, Joinable):
         # re-evaluates previous assumptions of buckets given the world size might have
         # changed.
         self._has_rebuilt_buckets = False
-        self.reducer._force_bucket_rebuild()
+        self.reducer._reset_state()
 
         if not _rank_not_in_group(new_process_group):
             self.process_group = new_process_group

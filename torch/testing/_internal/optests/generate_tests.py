@@ -43,9 +43,14 @@ def is_abstract(tensor: torch.Tensor) -> bool:
 
 
 def safe_schema_check(
-    op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    op: torch._ops.OpOverload,
+    args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
+    *,
+    copy_inputs: bool = True,
 ) -> Any:
-    args, kwargs = deepcopy_tensors((args, kwargs))
+    if copy_inputs:
+        args, kwargs = deepcopy_tensors((args, kwargs))
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
     with SchemaCheckMode():
@@ -54,25 +59,35 @@ def safe_schema_check(
 
 
 def safe_autograd_registration_check(
-    op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    op: torch._ops.OpOverload,
+    args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
+    *,
+    copy_inputs: bool = True,
 ) -> None:
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return
+    if copy_inputs:
+        args, kwargs = deepcopy_tensors((args, kwargs))
     # Don't perform autograd_registration_check if none of the inputs require grad.
     if not pytree.tree_any_only(
         torch.Tensor, lambda x: x.requires_grad, (args, kwargs)
     ):
         return
-    args, kwargs = deepcopy_tensors((args, kwargs))
     return autograd_registration_check(op, args, kwargs)
 
 
 def safe_fake_check(
-    op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    op: torch._ops.OpOverload,
+    args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
+    *,
+    copy_inputs: bool = True,
 ) -> None:
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
-    args, kwargs = deepcopy_tensors((args, kwargs))
+    if copy_inputs:
+        args, kwargs = deepcopy_tensors((args, kwargs))
     return fake_check(op, args, kwargs)
 
 
@@ -81,7 +96,11 @@ def safe_aot_autograd_check(
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
     dynamic: bool,
+    *,
+    copy_inputs: bool = True,
 ) -> Any:
+    # NB: copy_inputs does nothing for aot_autograd_check: it always needs to copy
+    # inputs.
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
 
@@ -527,7 +546,7 @@ class OpCheckMode(TorchFunctionMode):
 
     def run_test_util(self, op, args, kwargs):
         try:
-            self.test_util(op, args, kwargs)
+            self.test_util(op, args, kwargs, copy_inputs=False)
         except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
             # We might get here if the input is already a FakeTensor
             # or if we're in a torch.compile block. Just ignore these
@@ -558,7 +577,6 @@ class OpCheckMode(TorchFunctionMode):
             return func(*args, **kwargs)
 
         args_c, kwargs_c = deepcopy_tensors((args, kwargs))
-        # Only call test_util(op, *args, **kwargs) if this succeeds.
         result = func(*args, **kwargs)
 
         option = self.failures_dict.get_status(qualname, self.test_name)
@@ -693,8 +711,7 @@ def generate_repro(
         unix_timestamp = datetime.datetime.timestamp(now) * 100000
         filepath = os.path.join(path, f"repro_{unix_timestamp}.pt")
         if not dry_run:
-            if not os.path.exists(path):
-                os.makedirs(path)
+            os.makedirs(path, exist_ok=True)
             torch.save((args, kwargs), filepath)
         args_kwargs = f'args, kwargs = torch.load("{filepath}")'
     else:

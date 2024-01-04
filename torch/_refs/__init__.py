@@ -236,6 +236,7 @@ __all__ = [
     "atleast_3d",
     "as_strided",
     "as_strided_scatter",
+    "block_diag",
     "broadcast_shapes",
     "broadcast_tensors",
     "broadcast_to",
@@ -1074,7 +1075,10 @@ def add(
         ):
             msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
-        b = prims.mul(b, alpha)
+        if isinstance(b, TensorLike):
+            b = prims.mul(b, alpha)
+        else:
+            b = b * alpha
 
     output = prims.add(a, b)
     return handle_noncontiguous_outputs([a, b], output)
@@ -4274,6 +4278,53 @@ def diag_embed(
     return utils.mask_tensor(cond, t).contiguous()
 
 
+@register_decomposition(aten.block_diag)
+@out_wrapper()
+def _block_diag_iterable(tensors: List[TensorLikeType]) -> TensorLikeType:
+    """
+    Reference implementation of torch.block_diag
+    """
+    tensors_2d = [
+        tensor.view(1, -1) if tensor.dim() <= 1 else tensor for tensor in tensors
+    ]
+
+    ncols = builtins.sum(tensor.shape[1] for tensor in tensors_2d)
+    device = tensors_2d[0].device
+
+    result = []
+
+    col_start = 0
+    for i, tensor in enumerate(tensors_2d):
+        torch._check(
+            tensor.dim() == 2,
+            lambda: "Input tensors must have 2 or fewer dimensions. "
+            f"Input {i} has {tensor.dim()} dimensions",
+        )
+        torch._check(
+            tensor.device == device,
+            lambda: "Input tensors must all be on the same device. "
+            f"Input 0 is on device {device} and input {i} is on device {tensor.device}.",
+        )
+        row, col = tensor.shape
+        left = torch.zeros((row, col_start), device=device, dtype=tensor.dtype)
+        right = torch.zeros(
+            (row, ncols - col_start - col), device=device, dtype=tensor.dtype
+        )
+        result += [torch.cat((left, tensor, right), dim=1)]
+        col_start += col
+
+    return torch.cat(result, dim=0)
+
+
+def block_diag(*tensors: List[TensorLikeType]) -> TensorLikeType:
+    """
+    This is used as an input to PythonRefInfo. `torch.block_diag`
+    expects arguments splatted, but `aten.block_diag` expects only
+    one argument that is a list of Tensors.
+    """
+    return _block_diag_iterable(tensors)
+
+
 # CompositeImplicitAutograd - don't register decomp
 def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
     if a.ndim < 3:
@@ -5900,7 +5951,6 @@ def normal(
     device=None,
     pin_memory=None,
 ):
-    assert generator is None
     assert layout is None or layout == torch.strided
 
     if not isinstance(std, TensorLike):
@@ -5937,6 +5987,7 @@ def normal(
         dtype=dtype,
         device=device,
         requires_grad=False,
+        generator=generator,
     )
     return std * normal_samples + mean
 

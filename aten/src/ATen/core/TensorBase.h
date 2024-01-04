@@ -996,7 +996,7 @@ inline c10::MaybeOwned<TensorBase> borrow_from_optional_tensor(
     const c10::optional<TensorBase>& opt) {
   return opt.has_value()
     ? c10::MaybeOwned<TensorBase>::borrowed(*opt)
-    : c10::MaybeOwned<TensorBase>::owned(c10::in_place);
+    : c10::MaybeOwned<TensorBase>::owned(std::in_place);
 }
 
 inline c10::MaybeOwned<TensorBase> TensorBase::expect_contiguous(MemoryFormat memory_format) const & {

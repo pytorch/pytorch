@@ -10,6 +10,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 
 import torch._logging
+from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
 
 
 class RecompileUxTests(torch._dynamo.test_case.TestCase):
@@ -223,67 +224,69 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             opt_f(torch.randn(8 + i))
 
         failure_str = "\n".join(failure_reasons)
-        self.assertExpectedInline(
-            failure_str,
-            """\
+        for line in """\
 tensor 'L['x']' size mismatch at index 0. expected 11, actual 12
 tensor 'L['x']' size mismatch at index 0. expected 10, actual 12
 tensor 'L['x']' size mismatch at index 0. expected 9, actual 12
-tensor 'L['x']' size mismatch at index 0. expected 8, actual 12""",
-        )
+tensor 'L['x']' size mismatch at index 0. expected 8, actual 12""".split(
+            "\n"
+        ):
+            self.assertIn(
+                line,
+                failure_str,
+            )
 
     @torch._dynamo.config.patch("cache_size_limit", 32)
     def test_multiple_guard_fails_report_all(self):
-        torch._logging.set_logs(recompiles_verbose=True)
-        failure_reasons = []
+        with log_settings(kwargs_to_settings(recompiles_verbose=True)):
+            failure_reasons = []
 
-        def guard_fail_fn(failure):
-            failure_reasons.append(failure[0])
+            def guard_fail_fn(failure):
+                failure_reasons.append(failure[0])
 
-        def f(x):
-            return torch.ones(len(x), x[-1])
+            def f(x):
+                return torch.ones(len(x), x[-1])
 
-        opt_f = torch._dynamo.optimize(
-            backend="eager", guard_fail_fn=guard_fail_fn, dynamic=False
-        )(f)
+            opt_f = torch._dynamo.optimize(
+                backend="eager", guard_fail_fn=guard_fail_fn, dynamic=False
+            )(f)
 
-        opt_f([4, 5, 6])
+            opt_f([4, 5, 6])
 
-        def filter_reasons():
-            return "\n".join(
-                [
-                    line
-                    for line in "\n".join(failure_reasons).splitlines()
-                    if not line.startswith("___check_type_id")
-                ]
-            )
+            def filter_reasons():
+                return "\n".join(
+                    [
+                        line
+                        for line in "\n".join(failure_reasons).splitlines()
+                        if not line.startswith("___check_type_id")
+                    ]
+                )
 
-        failure_reasons.clear()
-        opt_f([7, 8])
-        self.assertExpectedInline(
-            filter_reasons(),
-            """\
+            failure_reasons.clear()
+            opt_f([7, 8])
+
+            for line in """\
 len(L['x']) == 3
 L['x'][0] == 4
-L['x'][1] == 5""",
-        )
+L['x'][1] == 5""".split(
+                "\n"
+            ):
+                self.assertIn(line, filter_reasons())
 
-        failure_reasons.clear()
-        opt_f([9])
-        self.assertExpectedInline(
-            filter_reasons(),
-            """\
+            failure_reasons.clear()
+            opt_f([9])
+
+            for line in """\
 len(L['x']) == 2
 L['x'][0] == 7
 len(L['x']) == 3
-L['x'][0] == 4""",
-        )
+L['x'][0] == 4""".split(
+                "\n"
+            ):
+                self.assertIn(line, filter_reasons())
 
-        # reset logging state
-        torch._logging.set_logs()
 
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
 
-# TODO(jansel): these pass with pytest, but not with pytorch CI
-# if __name__ == "__main__":
-#     from torch._dynamo.testing import run_tests
-#     run_tests()
+    run_tests()

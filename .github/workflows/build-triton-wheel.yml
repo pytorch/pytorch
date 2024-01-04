@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - nightly
     tags:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
@@ -34,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.8", "3.9", "3.10", "3.11" ]
+        py_vers: [ "3.8", "3.9", "3.10", "3.11", "3.12" ]
         device: ["cuda", "rocm"]
         include:
           - device: "rocm"
@@ -94,6 +93,9 @@ jobs:
           3.11)
             PYTHON_EXECUTABLE=/opt/python/cp311-cp311/bin/python
             ;;
+          3.12)
+            PYTHON_EXECUTABLE=/opt/python/cp312-cp312/bin/python
+            ;;
           *)
             echo "Unsupported python version ${PY_VERS}"
             exit 1
@@ -131,7 +133,7 @@ jobs:
     needs: build-wheel
     container:
       image: continuumio/miniconda3:4.12.0
-    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
+    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
     steps:
       - uses: actions/checkout@v3
 
@@ -142,7 +144,7 @@ jobs:
           path: ${{ runner.temp }}/artifacts/
 
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}
         shell: bash
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
@@ -158,7 +160,7 @@ jobs:
             echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
 
-      # NB: This step is gated by DRY_RUN, which is enabled everywhere except nightly and release branches
+      # NB: This step is gated by DRY_RUN, which is enabled everywhere except main and release branches
       - name: Upload binaries
         env:
           PACKAGE_TYPE: wheel
@@ -180,7 +182,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.8", "3.9", "3.10", "3.11" ]
+        py_vers: [ "3.8", "3.9", "3.10", "3.11", "3.12" ]
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: pytorch/conda-builder:cpu
@@ -244,7 +246,7 @@ jobs:
     needs: build-conda
     container:
       image: continuumio/miniconda3:4.12.0
-    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
+    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
     steps:
       - uses: actions/checkout@v3
 
@@ -255,7 +257,7 @@ jobs:
           path: ${{ runner.temp }}/artifacts/
 
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}
         shell: bash
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"

@@ -33,7 +33,7 @@ typedef SSIZE_T ssize_t;
 
 namespace c10d {
 
-TORCH_API std::string parse_env(const char* env_var_name);
+TORCH_API size_t getTensorsNumel(const std::vector<at::Tensor>& tensors);
 
 // Retrieve tensor shapes from a given tensor.
 TORCH_API std::vector<at::Tensor> getTensorShapes(
@@ -87,50 +87,106 @@ inline std::vector<std::string> split(
   return pieces;
 }
 
-inline int parseEnvVarInt(const char* envVarName) {
-  char* stringValue = std::getenv(envVarName);
-  if (stringValue != nullptr) {
-    int val;
-    try {
-      val = std::stoi(stringValue);
-    } catch (std::exception& e) {
-      TORCH_CHECK(
-          false,
-          "Invalid value for environment variable: " + std::string(envVarName));
+inline std::string getCvarString(
+    const std::vector<std::string>& env,
+    const char* def) {
+  const char* ret = def;
+
+  if (env.empty()) {
+    TORCH_CHECK(false, "No environment variables passed");
+    return ret;
+  }
+
+  /* parse environment variable in reverse order, so the early
+   * versions of a variable get higher priority than the latter
+   * versions of the same variable */
+  for (int i = env.size() - 1; i >= 0; i--) {
+    const char* val = std::getenv(env[i].c_str());
+    if (val == nullptr) {
+      continue;
+    } else if (i) {
+      TORCH_WARN(
+          "Environment variable " + env[i] + " is deprecated; use " + env[0] +
+          " instead");
     }
-    return val;
+
+    ret = val;
   }
-  return C10D_ENV_NOT_SET;
+
+  return ret;
 }
 
-inline const char* parseEnvVarString(
-    const char* envVarName,
-    const char* default_val) {
-  const char* val = std::getenv(envVarName);
-  if (val == nullptr) {
-    val = default_val;
+inline int getCvarInt(const std::vector<std::string>& env, int def) {
+  int ret = def;
+
+  if (env.empty()) {
+    TORCH_CHECK(false, "No environment variables passed");
+    return ret;
   }
-  return val;
+
+  /* parse environment variable in reverse order, so the early
+   * versions of a variable get higher priority than the latter
+   * versions of the same variable */
+  for (int i = env.size() - 1; i >= 0; i--) {
+    char* val = std::getenv(env[i].c_str());
+    if (val == nullptr) {
+      continue;
+    } else if (i) {
+      TORCH_WARN(
+          "Environment variable " + env[i] + " is deprecated; use " + env[0] +
+          " instead");
+    }
+
+    try {
+      ret = std::stoi(val);
+    } catch (std::exception& e) {
+      TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
+    }
+  }
+
+  return ret;
 }
 
-inline int parseEnvVarIntDefault(const char* envVarName, int defaultVal) {
-  int val = parseEnvVarInt(envVarName);
-  if (val == C10D_ENV_NOT_SET)
-    return defaultVal;
-  return val;
-}
+inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
+  bool ret = def;
 
-inline bool parseEnvVarFlag(const char* envVarName) {
-  int val = parseEnvVarInt(envVarName);
-  if (val == 1) {
-    return true;
-  } else if (val == 0 || val == C10D_ENV_NOT_SET) {
-    return false;
+  if (env.empty()) {
+    TORCH_CHECK(false, "No environment variables passed");
+    return ret;
   }
-  TORCH_CHECK(
-      false,
-      "Invalid value for environment variable: " + std::string(envVarName));
-  return false;
+
+  /* parse environment variable in reverse order, so the early
+   * versions of a variable get higher priority than the latter
+   * versions of the same variable */
+  for (int i = env.size() - 1; i >= 0; i--) {
+    char* val_ = std::getenv(env[i].c_str());
+    if (val_ == nullptr) {
+      continue;
+    } else if (i) {
+      TORCH_WARN(
+          "Environment variable " + env[i] + " is deprecated; use " + env[0] +
+          " instead");
+    }
+
+    std::string val = std::string(val_);
+    for (auto& x : val) {
+      x = std::tolower(x);
+    }
+
+    if (val == "y" || val == "yes" || val == "1" || val == "t" ||
+        val == "true") {
+      ret = true;
+    } else if (
+        val == "n" || val == "no" || val == "0" || val == "f" ||
+        val == "false") {
+      ret = false;
+    } else {
+      TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
+      return ret;
+    }
+  }
+
+  return ret;
 }
 
 inline void assertSameSizes(

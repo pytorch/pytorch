@@ -142,8 +142,7 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
 
 } // namespace
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(bernoulli_tensor_stub);
 DEFINE_DISPATCH(bernoulli_scalar_stub);
@@ -655,4 +654,4 @@ Tensor multinomial(
   return result;
 }
 
-}} // namespace at::native
+} // namespace at::native

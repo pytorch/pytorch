@@ -11,12 +11,13 @@ import zipfile
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._export import export, save, load
+from torch.export import export, save, load, Dim
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
+    canonicalize,
     deserialize,
     serialize,
     SerializeError,
@@ -44,6 +45,7 @@ def get_filtered_export_db_tests():
         "dictionary",  # Graph output must be a tuple()
         "fn_with_kwargs",  # export doesn't support kwargs yet
         "scalar_output",  # Tracing through 'f' must produce a single graph
+        "user_input_mutation",  # TODO(zhxchen17) Support serializing user inputs mutation.
     }
 
     return [
@@ -183,6 +185,22 @@ class TestSerialize(TestCase):
         self.assertEqual(node.inputs[2].arg.as_bool, True)
         self.assertEqual(node.inputs[3].name, "side")
         self.assertEqual(node.inputs[3].arg.as_string, "right")
+
+    def test_canonicalize(self) -> None:
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                a = y + x
+                b = x + y
+                return b + a
+
+        ep = torch.export.export(Module(), (torch.randn(3, 2), torch.randn(3, 2)))
+        s = ExportedProgramSerializer().serialize(ep)
+        c = canonicalize(s.exported_program)
+        g = c.graph_module.graph
+        self.assertLess(
+            g.nodes[0].inputs[0].arg.as_tensor.name,
+            g.nodes[1].inputs[0].arg.as_tensor.name
+        )
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
@@ -440,6 +458,28 @@ class TestDeserialize(TestCase):
 
         self.check_graph(M(), (torch.rand(3, 2), torch.rand(3, 2)))
 
+    def test_list_of_optional_tensors(self) -> None:
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y, z):
+                indices = [None, None, torch.tensor([1, 3, 5, 7])]
+                indexed = torch.ops.aten.index.Tensor(x + y, indices)
+                return indexed + z
+
+        inputs = (torch.rand(8, 8, 8), torch.rand(8, 8, 8), torch.rand(8, 8, 4))
+        self.check_graph(MyModule(), inputs)
+
+    def test_sym_ite(self):
+        def f(x):
+            b = x.shape[0] == 5
+            ret = torch.sym_ite(b, x.shape[0], x.shape[1])
+            return ret
+
+        dynamic_shapes = {'x': {0: Dim("dim0"), 1: Dim("dim1")}}
+        self.check_graph(f, (torch.ones(4, 5),), dynamic_shapes=dynamic_shapes)
+
     @parametrize(
         "name,case",
         get_filtered_export_db_tests(),
@@ -470,6 +510,24 @@ class TestDeserialize(TestCase):
             return torch.cat([x, torch.tensor([1, 1])])
 
         self.check_graph(f, (torch.tensor([1, 1]),))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
+    def test_device(self) -> None:
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, 3, stride=1, bias=True)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                conv = self.conv(x)
+                relu = self.relu(conv)
+                mul = relu * 0.5
+                return mul
+
+        inp = torch.randn((1, 3, 224, 224), dtype=torch.float).to("cuda")
+        model = MyModule().eval().cuda()
+        self.check_graph(model, (inp,))
 
 
 instantiate_parametrized_tests(TestDeserialize)
@@ -603,7 +661,7 @@ class TestSaveLoad(TestCase):
 
             with self.assertRaisesRegex(RuntimeError, r"Serialized version -1 does not match our current"):
                 f.seek(0)
-                loaded_ep = load(f)
+                load(f)
 
     def test_save_constants(self):
         class Foo(torch.nn.Module):
