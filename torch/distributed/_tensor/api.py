@@ -242,6 +242,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             device=local_tensor.device,
             layout=local_tensor.layout,
             requires_grad=requires_grad,
+            data_ptr=local_tensor.data_ptr(),
         )
 
         tensor_meta = TensorMeta(shape, stride, dtype)
