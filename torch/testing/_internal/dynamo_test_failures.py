@@ -264,7 +264,6 @@ FIXME_default_non_strict = {
     "test_sparse_csr",
     "test_sparse_semi_structured",
     "test_spectral_ops",
-    "test_stateless",
     "test_sympy_utils",
     "test_tensorexpr",
     "test_tensorexpr_pybind",
@@ -2002,6 +2001,10 @@ dynamo_expected_failures = {
     "TestSubclass.test_type_propagation_non_wrapper_tensor_as_param_True",  # test_subclass
     "TestSubclass.test_parametrization_base_tensor_leave_parametrized_False",  # test_subclass
     "TestSubclass.test_param_invariants_sparse_tensor_tensor_requires_grad_False",  # test_subclass
+    "TestStatelessFunctionalAPI.test_reparametrize_module_fail_reset_to_original_torch_func",  # test_stateless
+    "TestStatelessFunctionalAPI.test_reparametrized_module_change_parametrization_original_stateless",  # test_stateless
+    "TestStatelessFunctionalAPI.test_reparametrized_module_change_parametrization_original_torch_func",  # test_stateless
+    "TestStatelessFunctionalAPI.test_reparametrize_module_fail_reset_to_original_stateless",  # test_stateless
 }
 
 dynamo_skips = {
