@@ -474,10 +474,10 @@ class TestControlFlowTraced(TestCase):
         example_inputs = (torch.ones(5, 5),)
         functional_f = torch.func.functionalize(f)
 
-        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
             functional_f(*example_inputs)
 
-        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
             make_fx(torch.func.functionalize(f))(*example_inputs)
 
     def test_cond_functionalized_nested_input_mutation(self):
@@ -501,10 +501,10 @@ class TestControlFlowTraced(TestCase):
 
         example_inputs = (torch.ones(4, 5),)
         functional_f = torch.func.functionalize(f)
-        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
             functional_f(*example_inputs)
 
-        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
             make_fx(torch.func.functionalize(f))(*example_inputs)
 
     def test_cond_functionalized_nested_input_mutation_with_aot_func(self):
@@ -530,10 +530,10 @@ class TestControlFlowTraced(TestCase):
         try:
             example_input_func = to_fun_old(example_input)
             torch._enable_functionalization(reapply_views=False)
-            with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
+            with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
                 f(example_input_func)
 
-            with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
+            with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
                 make_fx(f)(example_input_func)
         finally:
             torch._disable_functionalization()
@@ -548,7 +548,7 @@ class TestControlFlowTraced(TestCase):
                     torch._disable_functionalization()
             return wrapper
 
-        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
             make_fx(f_wrapper(f))(example_input_func)
 
 
@@ -568,7 +568,7 @@ class TestControlFlowTraced(TestCase):
         try:
             example_input_func = to_fun_old(example_input)
             torch._enable_functionalization(reapply_views=False)
-            with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
+            with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
                 f(example_input_func)
         finally:
             torch._disable_functionalization()
@@ -587,7 +587,7 @@ class TestControlFlowTraced(TestCase):
                     torch._disable_functionalization()
             return wrapper
 
-        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
             make_fx(f_wrapper(f))(example_input)
 
     def test_cond_functionalized_aot_func_check_functional(self):

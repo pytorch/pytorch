@@ -116,6 +116,63 @@ def _call_function_and_unflatten_output(tx, fn, args, kwargs, ret_vt, ret_treesp
     )
 
 
+# NOTE:
+# Mutation detection: We detect mutations by checking the example_value's _version
+# This approach has a corner case that if torch.compile is wrapped
+# by an inference_mode(True) context manager, the tensor version will not be upated.
+# So we override the inference_mode to False then run the extracted graph module.
+#
+# Aliasing detection: We detect mutations by checking the example_value's _typed_storage():
+# if output fake_tensor is sharing the same storage with one of the inputs, we consider it aliasing
+def _detect_input_mutations_and_aliasing(tx, graph_module, proxy_args):
+    from torch.multiprocessing.reductions import StorageWeakRef
+
+    orig_example_values = [arg.node.meta["example_value"] for arg in proxy_args]
+    with torch.inference_mode(False), tx.fake_mode, enable_python_dispatcher():
+        # We clone the tensors here because:
+        # 1. if torch.inference_mode(True), the orig_example_values won't have
+        # the _version attribute.
+        # 2. we don't want to mutate the original example values' _version.
+        example_values = [t.clone() for t in orig_example_values]
+        _before_versions = [ex._version for ex in example_values]
+        res = graph_module(*example_values)
+
+        mutated_inputs = [
+            proxy_args[i]
+            for i, (val, old_v) in enumerate(zip(example_values, _before_versions))
+            if val._version != old_v
+        ]
+
+        from torch._C._functorch import is_batchedtensor
+
+        # Note: we cannot access the storage of BatchedTensorImpl (created by vmap) so filtered them out here.
+        # This is safe because dispatcher will unwrap the batched tensor and run torch.cond again using the
+        # the original possibly aliased tensor, cond will have a chance to detect aliasing at that point.
+        non_batched_example_value_proxy = [
+            (example_value, proxy)
+            for example_value, proxy in zip(example_values, proxy_args)
+            if not is_batchedtensor(example_value)
+        ]
+        non_batched_res = [t for t in res if not is_batchedtensor(t)]
+
+        def _detect_aliasing(example_value_proxy, res):
+            input_storages = {
+                StorageWeakRef(example_value._typed_storage()): proxy
+                for example_value, proxy in example_value_proxy
+            }
+            assert isinstance(res, (tuple, list))
+            output_storages = [StorageWeakRef(t._typed_storage()) for t in res]
+            aliased_inputs = [
+                input_storages[ref] for ref in output_storages if ref in input_storages
+            ]
+            return aliased_inputs
+
+        aliased_inputs = _detect_aliasing(
+            non_batched_example_value_proxy, non_batched_res
+        )
+    return mutated_inputs, aliased_inputs
+
+
 def _assert_tensors_nonaliasing(inputs, outputs):
     input_tensor_ids = {
         id(t) for t in pytree.tree_leaves(inputs) if isinstance(t, torch.Tensor)
@@ -690,29 +747,68 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             false_graph, false_lifted_freevars, false_shared, unique_true, unique_false
         )
 
+        true_graph_module = torch.fx.GraphModule(true_nn_modules, true_graph)
+        false_graph_module = torch.fx.GraphModule(false_nn_modules, false_graph)
         true_name = add_subgraph(
             tx,
             self.source,
             "cond_true",
-            torch.fx.GraphModule(true_nn_modules, true_graph),
+            true_graph_module,
         )
         false_name = add_subgraph(
             tx,
             self.source,
             "cond_false",
-            torch.fx.GraphModule(false_nn_modules, false_graph),
+            false_graph_module,
         )
 
         true_node = make_attr(tx, true_name)
         false_node = make_attr(tx, false_name)
 
+        combined_args = true_shared + unique_true + unique_false
         p_args = (
             args[0].as_proxy(),
             true_node,
             false_node,
             # We pick true_shared but it shouldn't matter
-            true_shared + unique_true + unique_false,
+            combined_args,
         )
+
+        for branch_name, module in (
+            (True, true_graph_module),
+            (False, false_graph_module),
+        ):
+            from torch._higher_order_ops.cond import UnsupportedAliasMutationException
+
+            try:
+                mutated_inputs, aliased_inputs = _detect_input_mutations_and_aliasing(
+                    tx, module, combined_args
+                )
+            except UnsupportedAliasMutationException:
+                # In the case of nested cond, the module input mutation/aliasing might be detected at
+                # the functionalization key of torch.ops.higher_order.cond because the module calls the op
+                # directly instead of torch.cond. We wrap the exception as unimplemented to avoid
+                # throwing an internal dynamo error and keep consistent with other mutation cases..
+                unimplemented(
+                    "{branch_name} branch mutates input or its output alias input."
+                )
+
+            def _fmt(proxies):
+                msg = []
+                for i, proxy in enumerate(proxies):
+                    msg.append("- " + str(proxy.node.meta))
+                return "\n".join(msg)
+
+            if len(mutated_inputs) > 0:
+                unimplemented(
+                    "Expected branches to not mutate inputs, buffers, or closures "
+                    f"but found following mutations in {branch_name} branch:\n{_fmt(mutated_inputs)}"
+                )
+            if len(aliased_inputs) > 0:
+                unimplemented(
+                    "Expected branches to not aliase inputs, buffers, or closures "
+                    f"but found following inputs are aliased in {branch_name} branch:\n{_fmt(aliased_inputs)}"
+                )
 
         return _call_function_and_unflatten_output(
             tx, torch.ops.higher_order.cond, p_args, {}, true_r, true_treespec
