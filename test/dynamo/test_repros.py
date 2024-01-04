@@ -75,6 +75,7 @@ def is_fx_tracing_test() -> bool:
 
 
 def has_detectron2():
+    assert False
     try:
         from detectron2.layers.mask_ops import _paste_masks_tensor_shape
 

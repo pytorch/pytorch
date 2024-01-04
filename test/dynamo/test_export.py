@@ -40,6 +40,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
     # The tests in this file are a little redundant,
     # They all take a func, run it with eager, then export it, then compare
     def test_export(self):
+        assert False
         def pre_attention_state_ops(input, mems, state):
             lc_key = state[0]
             lc_val = state[1]
