@@ -543,6 +543,15 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
       return at::Tensor();
     };
 
+    const auto erroring_rev_view_func = [op_name = op_name](const at::Tensor&) {
+      TORCH_CHECK(
+          false,
+          "Accessing the reverse view for ",
+          op_name,
+          " which does not have a derivative implemented is forbidden.");
+      return at::Tensor();
+    };
+
     if (aliased_output_iv.isTensorList()) {
       auto aliased_output = aliased_output_iv.toTensorVector();
       for (auto& sub_output : aliased_output) {
@@ -552,7 +561,7 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
             /* is_bw_differentiable=*/true,
             /* is_fw_differentiable=*/true,
             /* view_func=*/erroring_view_func,
-            /* rev_view_func=*/erroring_view_func,
+            /* rev_view_func=*/erroring_rev_view_func,
             /* creation_meta=*/
             InferenceMode::is_enabled()
                 ? CreationMeta::INFERENCE_MODE
@@ -569,7 +578,7 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
           /* is_bw_differentiable=*/true,
           /* is_fw_differentiable=*/true,
           /* view_func=*/erroring_view_func,
-          /* rev_view_func=*/erroring_view_func,
+          /* rev_view_func=*/erroring_rev_view_func,
           /* creation_meta=*/
           InferenceMode::is_enabled()
               ? CreationMeta::INFERENCE_MODE
