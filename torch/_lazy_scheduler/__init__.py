@@ -441,8 +441,4 @@ FAQ
 Q1: What happens if we have a user-defined segment deep down in a submodule?
 Answer: everything before the defined segment will be in their own segment. Everything after is in another segment.
 You can call this a "segment break".
-
-Q2: What if there are multiple calls to the same module instance's same function?
-Answer: we don't support it for now (we turn off the schedule in this case). In the future we could support it.
-Note that we do support calling the same module class' (but different instances') same function.
 """

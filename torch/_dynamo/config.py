@@ -222,6 +222,8 @@ enforce_cond_guards_match = True
 # about optimize_ddp behavior.
 optimize_ddp = True
 
+lazy_scheduler_compile_fn = None
+
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
 

@@ -1,5 +1,6 @@
 """
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_single_unnamed_segment
+pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_dynamo_entry_point
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_split_module_above_aotautograd_dep_segments
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_split_module_above_aotautograd_non_dep_segments
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_segment_tagging
@@ -376,7 +377,7 @@ class TestLazyScheduler(TestCase):
   def test_single_unnamed_segment(self):
     # Check that output and gradients are correct when there is only one segment in the model.
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    m = TestNonDepSegmentModule()
+    m = TestDepSegmentModule()
     m = m.to(device)
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
@@ -396,10 +397,42 @@ class TestLazyScheduler(TestCase):
       y,
     )
 
-  def test_split_module_above_aotautograd_dep_segments(self):
+  def test_dynamo_entry_point(self):
+    # TODO: how do we interact with DDPOptimizer?
+    def _compile_fn(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor], backend_compile_fn):
+      # TODO: apply splitting logic here
+      for node in gm.graph.nodes:
+        assert "nn_module_method" in node.meta
+      return backend_compile_fn(gm, example_inputs)
+
+    torch._dynamo.config.lazy_scheduler_compile_fn = _compile_fn
+
+    # Check that output and gradients are correct when there is only one segment in the model.
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    m = TestDepSegmentModule()
+    m = m.to(device)
+    x = torch.randn(4, 4, requires_grad=True, device=device)
+    y = torch.randn(4, 4, requires_grad=True, device=device)
+    lazy_scheduler = LazyScheduler([])
+
+    def segment_assignment_fn(gm):
+      for node in gm.graph.nodes:
+        node.meta["segment"] = "unnamed_seg1"
+
+    self._validate(
+      m,
+      functools.partial(
+        lazy_scheduler.compile_fx,
+        segment_assignment_fn=segment_assignment_fn
+      ),
+      x,
+      y,
+    )
+
+  def test_split_module_dep_segments(self):
     # Check that GraphModule produced by Dynamo is correctly split
     # (each submodule only contains one NN method from original module, which maps to one segment)
-    # before entering AOTAutograd.
+    # TODO: change to split graph within Dynamo (similar to DDPOptimizer)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     m = TestDepSegmentModule()
     m = m.to(device)
@@ -439,7 +472,7 @@ class TestLazyScheduler(TestCase):
   def test_split_module_above_aotautograd_non_dep_segments(self):
     # Check that GraphModule produced by Dynamo is correctly split
     # (each submodule only contains one NN method from original module, which maps to one segment)
-    # before entering AOTAutograd.
+    # TODO: change to split graph within Dynamo (similar to DDPOptimizer)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     m = TestNonDepSegmentModule()
     m = m.to(device)
@@ -477,6 +510,7 @@ class TestLazyScheduler(TestCase):
     )
 
   def test_segment_tagging(self):
+    # TODO: change to split graph within Dynamo (similar to DDPOptimizer)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     m = TestNonDepSegmentModule()
     m = m.to(device)
@@ -533,9 +567,11 @@ class TestLazyScheduler(TestCase):
     )
 
   def test_multiple_segments(self):
+    # TODO: change to split graph within Dynamo (similar to DDPOptimizer)
     raise NotImplementedError("TODO")
 
   def test_explicit_schedule(self):
+    # TODO: change to split graph within Dynamo (similar to DDPOptimizer)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     m = TestScheduleModule()
     m = m.to(device)
@@ -601,6 +637,7 @@ class TestLazyScheduler(TestCase):
 
   def test_register_segment_hook(self):
     # Use segment hook instead of explicit schedule to specify the execution order
+    # TODO: change to split graph within Dynamo (similar to DDPOptimizer)
     """
     class SDDModule(nn.Module):
       def forward(self, x):

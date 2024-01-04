@@ -1064,8 +1064,6 @@ class ShapeGuardPrinter(StrPrinter):
                 for symbol, sources in self.symbol_to_source.items()
             })
 
-        print(f"self.symbol_to_source: {self.symbol_to_source}")
-
         assert self.symbol_to_source.get(expr), (
             f"{expr} (could be from {[s.name() for s in self.var_to_sources[expr]]}) "
             f"not in {repr_symbol_to_source()}.  If this assert is failing, it could be "
@@ -2505,10 +2503,7 @@ class ShapeEnv:
             self.log.debug("create_symbol %s duck sized %s", r, source.name())
 
         if isinstance(r, sympy.Symbol):
-            print(f"r: {r}, source: {source}")
-            print(f"self.var_to_val: {self.var_to_val}")
             self.var_to_sources[r].append(source)
-            # self.symbol_to_source[r].append(source)
 
         if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
             symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name] = r
@@ -2715,9 +2710,6 @@ class ShapeEnv:
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
         def track_symint(source, val, constraint=None):
-            if hasattr(val, "node") and hasattr(val.node, "expr"):
-                print(f"val.node.expr: {val.node.expr}")
-            print("track_symint %s %s %s", LazyString(source.name), val, constraint)
             log.debug("track_symint %s %s %s", LazyString(source.name), val, constraint)
             assert not isinstance(val, SymInt) or is_symbolic(val)
 
