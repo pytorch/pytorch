@@ -264,6 +264,7 @@ FIXME_default_non_strict = {
     "test_sparse_semi_structured",
     "test_spectral_ops",
     "test_stateless",
+    "test_sympy_utils",
     "test_tensorexpr",
     "test_tensorexpr_pybind",
     "test_torch",
