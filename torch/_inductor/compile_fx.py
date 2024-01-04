@@ -32,7 +32,7 @@ from torch._dynamo import (
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
-from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
+from torch._dynamo.utils import counters, detect_fake_mode, lazy_format_graph_code
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
@@ -567,6 +567,10 @@ def fx_codegen_and_compile(
         post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
         post_grad_graphs_log.debug("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
+        log.debug(
+            "counters of inductor dict after apply passes on the input FX graph in the post grad pass: %s",
+            counters["inductor"],
+        )
 
     with V.set_fake_mode(fake_mode):
         const_output_index = None
@@ -1100,6 +1104,10 @@ def compile_fx(
             )
 
         model_ = pre_grad_passes(model_, example_inputs_)
+        log.debug(
+            "counters of inductor dict after apply passes on the input FX graph in the pre grad pass: %s",
+            counters["inductor"],
+        )
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
