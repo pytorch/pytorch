@@ -64,6 +64,9 @@ set(SYCL_LIBRARIES)
 find_library(SYCL_RUNTIME_LIBRARY sycl HINTS ${SYCL_LIBRARY_DIR})
 list(APPEND SYCL_LIBRARIES ${SYCL_RUNTIME_LIBRARY})
 
+# Parse HOST_COMPILATION mode.
+option(SYCL_HOST_COMPILATION_CXX "Generated file extension" ON)
+
 # SYCL_VERBOSE_BUILD
 option(SYCL_VERBOSE_BUILD "Print out the commands run while compiling the SYCL source file.  With the Makefile generator this defaults to VERBOSE variable specified on the command line, but can be forced on with this option." OFF)
 
@@ -121,6 +124,27 @@ macro(SYCL_GET_SOURCES_AND_OPTIONS _sycl_sources _cxx_sources _cmake_options)
   endforeach()
 endmacro()
 
+function(SYCL_BUILD_SHARED_LIBRARY shared_flag)
+  set(cmake_args ${ARGN})
+  # If SHARED, MODULE, or STATIC aren't already in the list of arguments, then
+  # add SHARED or STATIC based on the value of BUILD_SHARED_LIBS.
+  list(FIND cmake_args SHARED _sycl_found_SHARED)
+  list(FIND cmake_args MODULE _sycl_found_MODULE)
+  list(FIND cmake_args STATIC _sycl_found_STATIC)
+  if( _sycl_found_SHARED GREATER -1 OR
+      _sycl_found_MODULE GREATER -1 OR
+      _sycl_found_STATIC GREATER -1)
+    set(_sycl_build_shared_libs)
+  else()
+    if (BUILD_SHARED_LIBS)
+      set(_sycl_build_shared_libs SHARED)
+    else()
+      set(_sycl_build_shared_libs STATIC)
+    endif()
+  endif()
+  set(${shared_flag} ${_sycl_build_shared_libs} PARENT_SCOPE)
+endfunction()
+
 function(SYCL_COMPUTE_BUILD_PATH path build_path)
   # Only deal with CMake style paths from here on out
   file(TO_CMAKE_PATH "${path}" bpath)
@@ -160,7 +184,6 @@ endfunction()
 macro(SYCL_WRAP_SRCS sycl_target generated_files)
   # Optional arguments
   set(SYCL_flags "")
-  set(SYCL_C_OR_CXX CXX)
   set(generated_extension ${CMAKE_${SYCL_C_OR_CXX}_OUTPUT_EXTENSION})
 
   set(SYCL_include_dirs "${SYCL_INCLUDE_DIR}")
@@ -359,6 +382,12 @@ endmacro()
 # ADD LIBRARY
 macro(SYCL_ADD_LIBRARY sycl_target)
 
+  if(SYCL_HOST_COMPILATION_CXX)
+    set(SYCL_C_OR_CXX CXX)
+  else()
+    set(SYCL_C_OR_CXX C)
+  endif()
+
   # Separate the sources from the options
   SYCL_GET_SOURCES_AND_OPTIONS(
     _sycl_sources
@@ -366,36 +395,48 @@ macro(SYCL_ADD_LIBRARY sycl_target)
     _cmake_options
     ${ARGN})
 
-  # Compile sycl sources
-  SYCL_WRAP_SRCS(
+  SYCL_BUILD_SHARED_LIBRARY(_sycl_shared_flag ${ARGN})
+
+  if(_sycl_sources)
+    # Compile sycl sources
+    SYCL_WRAP_SRCS(
+      ${sycl_target}
+      ${sycl_target}_sycl_objects
+      ${_sycl_shared_flag}
+      ${ARGN})
+
+    # Compute the file name of the intermedate link file used for separable
+    # compilation.
+    SYCL_COMPUTE_DEVICE_OBJECT_FILE_NAME(device_object ${sycl_target})
+
+    # Add a custom device linkage command to produce a host relocatable object
+    # containing device object module.
+    SYCL_LINK_DEVICE_OBJECTS(
+      ${device_object}
+      ${sycl_target}
+      ${${sycl_target}_sycl_objects})
+
+    add_library(
+      ${sycl_target}
+      ${_cmake_options}
+      ${_cxx_sources}
+      ${${sycl_target}_sycl_objects}
+      ${device_object})
+  else()
+    add_library(
+      ${sycl_target}
+      ${_cmake_options}
+      ${_cxx_sources})
+  endif()
+
+  target_link_libraries(
     ${sycl_target}
-    ${sycl_target}_sycl_objects
-    ${ARGN})
-
-  # Compute the file name of the intermedate link file used for separable
-  # compilation.
-  SYCL_COMPUTE_DEVICE_OBJECT_FILE_NAME(device_object ${sycl_target})
-
-  # Add a custom device linkage command to produce a host relocatable object
-  # containing device object module.
-  SYCL_LINK_DEVICE_OBJECTS(
-    ${device_object}
-    ${sycl_target}
-    ${${sycl_target}_sycl_objects})
-
-  add_library(
-    ${sycl_target}
-    ${_cmake_options}
-    ${_cxx_sources}
-    ${${sycl_target}_sycl_objects}
-    ${device_object})
-
-  target_link_libraries(${sycl_target} ${SYCL_LIBRARIES})
+    ${SYCL_LINK_LIBRARIES_KEYWORD}
+    ${SYCL_LIBRARIES})
 
   set_target_properties(${sycl_target}
     PROPERTIES
-    LINKER_LANGUAGE ${SYCL_C_OR_CXX}
-    )
+    LINKER_LANGUAGE ${SYCL_C_OR_CXX})
 
 endmacro()
 
@@ -403,6 +444,12 @@ endmacro()
 # ADD EXECUTABLE
 macro(SYCL_ADD_EXECUTABLE sycl_target)
 
+  if(SYCL_HOST_COMPILATION_CXX)
+    set(SYCL_C_OR_CXX CXX)
+  else()
+    set(SYCL_C_OR_CXX C)
+  endif()
+
   # Separate the sources from the options
   SYCL_GET_SOURCES_AND_OPTIONS(
     _sycl_sources
@@ -410,35 +457,44 @@ macro(SYCL_ADD_EXECUTABLE sycl_target)
     _cmake_options
     ${ARGN})
 
-  # Compile sycl sources
-  SYCL_WRAP_SRCS(
+  if(_sycl_sources)
+    # Compile sycl sources
+    SYCL_WRAP_SRCS(
+      ${sycl_target}
+      ${sycl_target}_sycl_objects
+      ${ARGN})
+
+    # Compute the file name of the intermedate link file used for separable
+    # compilation.
+    SYCL_COMPUTE_DEVICE_OBJECT_FILE_NAME(device_object ${sycl_target})
+
+    # Add a custom device linkage command to produce a host relocatable object
+    # containing device object module.
+    SYCL_LINK_DEVICE_OBJECTS(
+      ${device_object}
+      ${sycl_target}
+      ${${sycl_target}_sycl_objects})
+
+    add_executable(
+      ${sycl_target}
+      ${_cmake_options}
+      ${_cxx_sources}
+      ${${sycl_target}_sycl_objects}
+      ${device_object})
+  else()
+    add_executable(
+      ${sycl_target}
+      ${_cmake_options}
+      ${_cxx_sources})
+  endif()
+
+  target_link_libraries(
     ${sycl_target}
-    ${sycl_target}_sycl_objects
-    ${ARGN})
-
-  # Compute the file name of the intermedate link file used for separable
-  # compilation.
-  SYCL_COMPUTE_DEVICE_OBJECT_FILE_NAME(device_object ${sycl_target})
-
-  # Add a custom device linkage command to produce a host relocatable object
-  # containing device object module.
-  SYCL_LINK_DEVICE_OBJECTS(
-    ${device_object}
-    ${sycl_target}
-    ${${sycl_target}_sycl_objects})
-
-  add_executable(
-    ${sycl_target}
-    ${_cmake_options}
-    ${_cxx_sources}
-    ${${sycl_target}_sycl_objects}
-    ${device_object})
-
-  target_link_libraries(${sycl_target} ${SYCL_LIBRARIES})
+    ${SYCL_LINK_LIBRARIES_KEYWORD}
+    ${SYCL_LIBRARIES})
 
   set_target_properties(${sycl_target}
     PROPERTIES
-    LINKER_LANGUAGE ${SYCL_C_OR_CXX}
-    )
+    LINKER_LANGUAGE ${SYCL_C_OR_CXX})
 
 endmacro()

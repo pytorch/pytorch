@@ -55,6 +55,9 @@ foreach(flag ${CMAKE_HOST_FLAGS})
   # Extra quotes are added around each flag to help Intel SYCL parse out flags with spaces.
   string(APPEND SYCL_host_compiler_flags "${flag} ")
 endforeach()
+foreach(def ${SYCL_compile_definitions})
+  string(APPEND SYCL_host_compiler_flags "-D${def} ")
+endforeach()
 
 # string(APPEND SYCL_host_compiler_flags "\"")
 set(SYCL_host_compiler "-fsycl-host-compiler=${SYCL_host_compiler}")
