@@ -293,7 +293,6 @@ FIXME_default_non_strict = {
     "torch_np/numpy_tests/core/test_scalar_ctors",
     "torch_np/numpy_tests/core/test_scalar_methods",
     "torch_np/numpy_tests/core/test_scalarinherit",
-    "torch_np/numpy_tests/core/test_scalarmath",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -1486,6 +1485,9 @@ dynamo_expected_failures = {
     "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_f4_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
     "TestConcatenate.test_out_and_dtype_axis_0_out_dtype_f8_casting_equiv",  # torch_np/numpy_tests/core/test_shape_base
     "TestStackMisc.test_stack_out_and_dtype_axis_0_out_dtype_i8_casting_unsafe",  # torch_np/numpy_tests/core/test_shape_base
+    "TestNegative.test_exceptions",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestPower.test_modular_power",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestBaseMath.test_lower_align",  # torch_np/numpy_tests/core/test_scalarmath
 }
 
 dynamo_skips = {
@@ -1536,4 +1538,14 @@ dynamo_skips = {
     "TestFFTShift.test_fft_n",  # known py311 fail
     "TestHstack.test_generator",  # known py311 fail
     "TestVstack.test_generator",  # known py311 fail
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_I_operation0",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_I_operation1",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_L_operation1",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_Q_operation1",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_Q_operation0",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_P_operation0",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_P_operation1",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_H_operation0",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_H_operation1",  # torch_np/numpy_tests/core/test_scalarmath
+    "TestScalarOpsMisc.test_scalar_integer_operation_divbyzero_dtype_L_operation0",  # torch_np/numpy_tests/core/test_scalarmath
 }
