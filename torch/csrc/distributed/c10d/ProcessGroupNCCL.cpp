@@ -1240,27 +1240,16 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     }
   }
 
+  const auto logMsg = c10::str(
+      logPrefix(),
+      "Heartbeat monitor timed out! Process will be terminated after dumping debug info.",
+      " workMetaList_.size()=",
+      workMetaList_.size());
+  LOG(ERROR) << logMsg;
+
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)
   std::future<bool> asyncDebugDump = launchAsyncDebugDump();
-
-  // Create a error message reported from MonitorThread, so
-  // we throw exception and make the whole process to be killed.
-  // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
-  // url here.
-  const auto exitMsg = c10::str(
-      logPrefix(),
-      "ProcessGroupNCCL's watchdog got stuck for ",
-      heartbeatTimeoutInSec_,
-      "seconds without making progress in monitoring enqueued collectives. ",
-      "This typically indicates a NCCL/CUDA API hang blocking the watchdog, ",
-      "and could be triggered by another thread holding the GIL inside a ",
-      "CUDA api, or other deadlock-prone behaviors.",
-      "If you suspect the watchdog is not actually stuck and a longer timeout would help, ",
-      "you can either increase the timeout (TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC) to a larger value "
-      "or disable the heartbeat monitor (TORCH_NCCL_ENABLE_MONITORING=0)."
-      "If either of aforementioned helps, feel free to file an issue to PyTorch about the short timeout "
-      "or false positive abort; otherwise, please attempt to debug the hang.");
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
@@ -1289,14 +1278,23 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   waitForDumpOrTimeout(asyncDebugDump);
 
   if (!terminateHeartbeatMonitorThread_.load()) {
-    const auto logMsg = c10::str(
+    // Create a error message reported from MonitorThread, so
+    // we throw exception and make the whole process to be killed.
+    // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
+    // url here.
+    const auto exitMsg = c10::str(
         logPrefix(),
-        "monitoring thread detects no heartbeat and will finally kill the process!",
-        " terminateProcessGroup_",
-        terminateProcessGroup_,
-        " collectiveDebugInfoMode_",
-        collectiveDebugInfoMode_);
-    LOG(ERROR) << logMsg;
+        "ProcessGroupNCCL's watchdog got stuck for ",
+        heartbeatTimeoutInSec_,
+        "seconds without making progress in monitoring enqueued collectives. ",
+        "This typically indicates a NCCL/CUDA API hang blocking the watchdog, ",
+        "and could be triggered by another thread holding the GIL inside a ",
+        "CUDA api, or other deadlock-prone behaviors.",
+        "If you suspect the watchdog is not actually stuck and a longer timeout would help, ",
+        "you can either increase the timeout (TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC) to a larger value "
+        "or disable the heartbeat monitor (TORCH_NCCL_ENABLE_MONITORING=0)."
+        "If either of aforementioned helps, feel free to file an issue to PyTorch about the short timeout "
+        "or false positive abort; otherwise, please attempt to debug the hang.");
     terminateProcess(exitMsg);
   }
 }
