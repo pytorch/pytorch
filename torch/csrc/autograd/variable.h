@@ -332,8 +332,8 @@ struct TORCH_API ViewInfo {
   /// view_fn is only saved when as_strided is not supported.
   /// If view_fn has value, we use it to recover views in backward.
   std::function<Variable(const Variable&)> view_fn_;
-  /// Analogue of view_fn but in reverse: given a view -> produce a base that is
-  /// the inverse view of view.
+  /// Analogue of view_fn but in reverse: given a view -> produce the base by
+  /// applying the inverse view.
   std::function<Variable(const Variable&)> rev_view_fn_;
 
   /// Accessors for the view function
