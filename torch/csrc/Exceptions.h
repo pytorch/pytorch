@@ -370,10 +370,9 @@ struct PyWarningHandler {
 namespace detail {
 
 struct noop_gil_scoped_release {
-  noop_gil_scoped_release() {
-    // suppress `unused variable` error messages at call sites
-    (void)(this != (this + 1));
-  }
+  // user-defined constructor (i.e. not defaulted) to avoid
+  // unused-variable warnings at usage sites of this class
+  noop_gil_scoped_release() {}
 };
 
 template <bool release_gil>
