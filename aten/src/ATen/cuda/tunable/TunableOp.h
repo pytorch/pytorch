@@ -23,6 +23,10 @@
 
 namespace at::cuda::tunable {
 
+// Running tuning in a loop might cache inputs and impact result.
+// How many buffers should be used in rotation to avoid caching effects.
+constexpr int TuningRotationCount = 2;
+
 template <typename ParamsT>
 class Callable {
   public:
@@ -87,17 +91,17 @@ class TunableOp {
     }
 
   private:
-    static void WarmUp(Callable<ParamsT> *op, const ParamsT* param, int num_iter) {
+    static void WarmUp(Callable<ParamsT> *op, ParamsT* param[TuningRotationCount], int num_iter) {
       for (int i = 0; i < num_iter; i++) {
-        TORCH_CHECK(op->Call(param) == OK);
+        TORCH_CHECK(op->Call(param[i%TuningRotationCount]) == OK);
       }
     }
 
-    static double Profile(Callable<ParamsT> *op, const ParamsT* param, int num_iter) {
+    static double Profile(Callable<ParamsT> *op, ParamsT* param[TuningRotationCount], int num_iter) {
       TimerT timer{};
       timer.Start();
       for (int i = 0; i < num_iter; i++) {
-        TORCH_CHECK(op->Call(param) == OK);
+        TORCH_CHECK(op->Call(param[i%TuningRotationCount]) == OK);
       }
       timer.End();
       return timer.Duration() / num_iter;
@@ -125,11 +129,14 @@ class TunableOp {
       TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
 
       // need a copy of params to reuse
-      ParamsT* reusable_params = params->DeepCopy();
+      ParamsT* reusable_params[TuningRotationCount];
+      for (int i = 0; i < TuningRotationCount; i++) {
+          reusable_params[i] = params->DeepCopy();
+      }
 
       for (size_t i = 0; i < op_names_.size(); i++) {
         auto* candidate = ops_[op_names_[i]].get(); // borrow pointer
-        auto status = candidate->Call(reusable_params);
+        auto status = candidate->Call(reusable_params[0]);
         if (status != OK) {
           TUNABLE_LOG("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
           continue;
@@ -137,7 +144,9 @@ class TunableOp {
 
         if (IsNumericsCheckEnabled()) {
           ParamsT* numerical_params = params->DeepCopy();
-          WarmUp(candidate, numerical_params, 1);
+          ParamsT* numerical_params_as_array[TuningRotationCount];
+          numerical_params_as_array[0] = numerical_params;
+          WarmUp(candidate, numerical_params_as_array, 1);
           status = reference_params->NumericalCheck(numerical_params);
           numerical_params->Delete();
           if (status != OK) {
@@ -206,7 +215,9 @@ class TunableOp {
       }
 
       // done with reusable_params and reference_params
-      reusable_params->Delete();
+      for (int i = 0; i < TuningRotationCount; i++) {
+        reusable_params[i]->Delete();
+      }
       reference_params->Delete();
 
       TUNABLE_LOG("└──found fastest for ", op_sig, '(', params_sig, ") ", id_name);

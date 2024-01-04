@@ -42,17 +42,27 @@ struct GemmParams : OpParams {
   GemmParams* DeepCopy() const {
     GemmParams* copy = new GemmParams;
     *copy = *this;
-    size_t size = m * n * sizeof(T);
     int device;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    copy->c = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(size));
+    size_t a_size = m * k * sizeof(T);
+    size_t b_size = n * k * sizeof(T);
+    size_t c_size = m * n * sizeof(T);
+    copy->a = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(a_size));
+    copy->b = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(b_size));
+    copy->c = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(c_size));
     AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
-        copy->c, device, c, device, size, getCurrentCUDAStream(device), true));
+        const_cast<T*>(copy->a), device, a, device, a_size, getCurrentCUDAStream(device), true));
+    AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
+        const_cast<T*>(copy->b), device, b, device, b_size, getCurrentCUDAStream(device), true));
+    AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
+        copy->c, device, c, device, c_size, getCurrentCUDAStream(device), true));
     return copy;
   }
 
   // only call on object returned by DeepCopy
   void Delete() {
+    c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(a));
+    c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(b));
     c10::cuda::CUDACachingAllocator::raw_delete(c);
   }
 
