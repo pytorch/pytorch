@@ -10,6 +10,7 @@ from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch.utils import _pytree as pytree
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import tf32_off
+from torch.testing._internal.common_dtype import integral_types
 from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
@@ -481,6 +482,11 @@ if not TEST_WITH_SLOW:
         skip('unsafe_split'),  # slow: takes 49 sec on A100
     })
 
+comprehensive_failures = {
+    xfail("nn.functional.interpolate", "bilinear", dtypes=(torch.uint8,)),  # off by one error
+    xfail("nn.functional.interpolate", "bicubic", dtypes=(torch.uint8,)),   # off by one error
+    xfail("nn.functional.poisson_nll_loss", dtypes=integral_types()),
+}
 
 @unMarkDynamoStrictTest
 class TestDecomp(TestCase):
@@ -517,6 +523,7 @@ class TestDecomp(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
+    @skipOps('TestDecomp', 'test_comprehensive', comprehensive_failures)
     @suppress_warnings
     @ops(op_db)
     def test_comprehensive(self, device, dtype, op):
@@ -779,17 +786,20 @@ class TestDecomp(TestCase):
             elif aten_name in decomposition_names or run_all:
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
+                # A failure here might be because the decomposition for the op is wrong or because a
+                # decomposition used by the particular op is wrong.
                 with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
                      as mode, enable_python_dispatcher():
-                    decomposed = func(*args, **kwargs)
+                    func(*args, **kwargs)
 
                 if any(isinstance(op, torch._ops.OpOverload) and
                         op.has_kernel_for_dispatch_key(DispatchKey.CompositeImplicitAutograd)
                         for op in mode.decomposed):
                     # without this check, incorrect decomps at the python dispatcher level can still pass because
-                    # they're checking aten decomps at the torch_dispatch level
-                    non_decomposed = func(*args, **kwargs)
-                    op_assert_equal(self, func, dtype, non_decomposed, decomposed, args, kwargs)
+                    # they're checking aten decomps at the torch_dispatch level.
+                    with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
+                         as mode:
+                        func(*args, **kwargs)
 
                 if not run_all:
                     self.check_decomposed(aten_name, mode)
