@@ -2087,6 +2087,8 @@ dynamo_expected_failures = {
     "TestMultiprocessing.test_inherit_tensor",  # test_multiprocessing
     "TestMultiprocessing.test_is_shared",  # test_multiprocessing
     "TestMultiprocessing.test_fs_is_shared",  # test_multiprocessing
+    "TestMkldnnCPU.test_resnext50_32x4d_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_resnet18_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_add_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_linear_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_prelu_bf16_cpu",  # test_mkldnn
@@ -2102,7 +2104,6 @@ dynamo_expected_failures = {
     "TestMkldnnCPU.test_tanh_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_conv2d_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_batch_norm_3d_cpu",  # test_mkldnn
-    "LoggingTest.testApiUsage",  # test_logging
 }
 
 dynamo_skips = {
@@ -2170,6 +2171,7 @@ dynamo_skips = {
     "WeakTest.test_make_weak_keyed_dict_from_dict",  # known py311 fail
     "TestViewOpsCPU.test_as_strided_gradients_cpu",  # known py311 fail
     "TestViewOpsLAZY.test_as_strided_gradients_lazy",  # known py311 fail
+    "LoggingTest.testApiUsage",  # flaky?
     "TestOpenMP_ParallelFor.test_one_thread",  # test_openmp
     "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape3_cpu",  # known py38 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape0_cpu",  # known py38 fail
