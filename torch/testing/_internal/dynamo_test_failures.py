@@ -188,18 +188,10 @@ FIXME_default_non_strict = {
     "test_fake_tensor",
     "test_flop_counter",
     "test_foreach",
-    "test_function_schema",
-    "test_functional_autograd_benchmark",
-    "test_functionalization",
-    "test_functionalization_of_rng_ops",
-    "test_futures",
     "test_fx",
     "test_fx_experimental",
     "test_fx_passes",
     "test_fx_reinplace_pass",
-    "test_hub",
-    "test_import_stats",
-    "test_itt",
     "test_jit",
     "test_jit_autocast",
     "test_jit_disabled",
@@ -207,7 +199,6 @@ FIXME_default_non_strict = {
     "test_jit_llga_fuser",
     "test_jiterator",
     "test_legacy_vmap",
-    "test_license",
     "test_masked",
     "test_maskedtensor",
     "test_modules",
@@ -2040,6 +2031,8 @@ dynamo_expected_failures = {
     "TestMkldnnCPU.test_tanh_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_conv2d_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_batch_norm_3d_cpu",  # test_mkldnn
+    "TestFunctionalAutogradBenchmark.test_fast_tasks",  # test_functional_autograd_benchmark
+    "TestFunctionSchema.test_serialize_and_deserialize",  # test_function_schema
 }
 
 dynamo_skips = {
@@ -2126,6 +2119,7 @@ dynamo_skips = {
     "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape2_cpu",  # known py311 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape1_cpu",  # known py311 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_2_shape1_cpu",  # known py311 fail
+    "TestFunctionalAutogradBenchmark.test_fast_tasks",  # flaky?
     "TestFrameworkUtils.test_filtering_env_var",  # known py38 fail
     "TestAsArrayCPU.test_default_device_cpu",  # known py38 fail
     "TestAsArrayCPU.test_astensor_consistency_cpu",  # known py311 fail
