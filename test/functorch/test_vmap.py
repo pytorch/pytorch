@@ -1178,6 +1178,7 @@ class TestVmapAPI(TestCase):
         self.assertEqual(out, f(None, y))
         self.assertEqual(out_dims, (None, None, None))
 
+    @xfailIfTorchDynamo
     def test_data_attribute(self):
         def foo(x):
             y = x.data
