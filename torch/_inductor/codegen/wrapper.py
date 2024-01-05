@@ -588,6 +588,11 @@ class WrapperCodeGen(CodeGen):
         line += f"){self.ending}"
         self.writeline(line)
 
+    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+        indices_str = f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
+        args = [x, indices_str, values, accumulate]
+        self.writeline(self.wrap_kernel_call(kernel, args))
+
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
         name,
@@ -2141,6 +2146,32 @@ class CppWrapperCodeGen(WrapperCodeGen):
             line += f", {','.join(kwargs)}"
         line += f"){self.ending}"
         self.writeline(line)
+
+    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+        if (
+            V.graph.aot_mode
+            and V.graph.cpp_wrapper
+            and config.aot_inductor.abi_compatible
+        ):
+            # Make the fallback call ABI-compatible in the C++ wrapper file.
+            kernel = kernel.replace("at::", "aoti_torch_")
+            num_indices = str(
+                len(indices)
+            )  # num_indices for indexing into indices array
+            tensor_handle_array_var = (
+                f"tensor_handle_array_{next(self.kernel_callsite_id)}"
+            )
+            self.writeline(
+                f"AtenTensorHandle {tensor_handle_array_var}[] = {{{', '.join(indices)}}};"
+            )
+            args = [x, tensor_handle_array_var, values, accumulate, num_indices]
+        else:
+            indices_str = (
+                f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
+            )
+            args = [x, indices_str, values, accumulate]
+
+        self.writeline(self.wrap_kernel_call(kernel, args))
 
     def add_benchmark_harness(self, output):
         if V.graph.aot_mode:

@@ -1366,7 +1366,7 @@ class AOTInductorTestsTemplate:
 
         inputs = (
             torch.ones(4, device=self.device, dtype=torch.int64),
-            (torch.tensor([1, 0, 1, 0], dtype=torch.bool),),
+            (torch.tensor([1, 1, 2, 2], device=self.device, dtype=torch.bool),),
             torch.ones(4, device=self.device, dtype=torch.int64),
         )
 
