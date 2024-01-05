@@ -2061,8 +2061,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.rand([1])
         self.assertEqual(fn(x), torch._dynamo.optimize("eager")(fn)(x))
 
-    @unittest.skipIf(not has_detectron2(), "requires detectron2")
     def test_multi_import(self):
+        if not has_detectron2():
+            raise unittest.SkipTest("requires detectron2")
+
         @torch._dynamo.optimize("eager", nopython=True)
         def to_bitmasks(boxes):
             from detectron2.layers.mask_ops import (
@@ -3657,6 +3659,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         make_fn(None)()
 
+    def test_call_finally_opcode_python_3_8(self):
+        def fn():
+            try:
+                return torch.zeros(4)
+            finally:
+                return torch.ones(4)  # noqa: SIM107, B012
+
+        result = torch.compile(fn, backend="aot_eager")()
+        self.assertEqual(result, torch.ones(4))
+
     def test_string_format(self):
         s = "temp{i}"
 
@@ -3812,6 +3824,36 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         fn_opt = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn_opt(torch.zeros(1)), fn(torch.zeros(1)))
 
+    @torch._dynamo.config.patch(log_compilation_metrics=True)
+    def test_many_views_with_mutation(self):
+        # When symbolic storage offsets were added in #113734, tensors_definitely_do_not_overlap
+        # began adding shape guards - a quadratic amount relative to the number of inputs.
+        # Test this configuration, and test that a reasonable number of guards are added.
+        # Note, when dynamic shapes are turned on, this test fails and we still get quadratic guards.
+        def fn(x):
+            x[0].relu_()
+            return torch.cat(x).sum()
+
+        AMT = 32
+        src = torch.rand(16 * (AMT + 1))
+
+        x = [src.as_strided((4, 4), (4, 1), 3 + 16 * i) for i in range(AMT)]
+
+        torch._dynamo.reset()
+        torch._dynamo.utils.clear_compilation_metrics()
+
+        res = torch.compile(fn, backend="aot_eager")(x)
+
+        all_metrics = torch._dynamo.utils.get_compilation_metrics()
+
+        total_guards = sum(metric.guard_count for metric in all_metrics)
+        self.assertLess(total_guards, AMT * 8)
+
+        total_shape_env_guards = sum(
+            metric.shape_env_guard_count for metric in all_metrics
+        )
+        self.assertLess(total_shape_env_guards, AMT * 8)
+
     def test_numpy_tobytes_no_error(self):
         def fn(x):
             x += 1
@@ -3867,7 +3909,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             z = x
             x.data = y
             y.data = torch.zeros([0])
-            return x is z
+            return torch.tensor(x is z)
 
         for backend in ["eager", "aot_eager", "inductor"]:
             for func in [func1, func2, func3]:
@@ -3893,7 +3935,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                     out_compiled = compiled_fn(compiled_a, compiled_b)
                     self.assertEqual(eager_a, compiled_a)
                     self.assertEqual(eager_b, compiled_b)
-                    self.assertEqual(out_eager, out_compiled)
+                    self.assertTrue(torch.equal(out_eager, out_compiled))
 
                     # func1 hits a leaf Variable that requires grad is being used in an in-place operation
                     if requires_grad:
