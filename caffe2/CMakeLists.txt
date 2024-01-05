@@ -955,6 +955,9 @@ endif()
 if(USE_ROCM)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
+  if(USE_FLASH_ATTENTION)
+    target_link_libraries(torch_hip PRIVATE __caffe2_oort)
+  endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_hip)  # see cmake/public/utils.cmake
   # TODO: Not totally sure if this is live or not
@@ -1305,6 +1308,9 @@ if(USE_ROCM)
     /opt/rocm/rocblas/include
     /opt/rocm/hipsparse/include
     )
+  if(USE_FLASH_ATTENTION)
+    target_compile_definitions(torch_hip PRIVATE USE_FLASH_ATTENTION)
+  endif()
 endif()
 
 if(BUILD_LITE_INTERPRETER)
@@ -1412,12 +1418,6 @@ if(USE_CUDA)
   target_compile_definitions(torch_cuda PRIVATE TORCH_CUDA_BUILD_MAIN_LIB)
 elseif(USE_ROCM)
   target_compile_definitions(torch_hip PRIVATE TORCH_HIP_BUILD_MAIN_LIB)
-endif()
-
-if(USE_EXPERIMENTAL_CUDNN_V8_API)
-  if(USE_CUDA)
-    target_compile_definitions(torch_cuda PRIVATE "-DUSE_EXPERIMENTAL_CUDNN_V8_API")
-  endif()
 endif()
 
 set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
