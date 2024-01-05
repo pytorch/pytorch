@@ -23,7 +23,10 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .higher_order_ops import TorchHigherOrderOperatorVariable
+from .higher_order_ops import (
+    FunctorchVmapHigherOrderVariable,
+    TorchHigherOrderOperatorVariable,
+)
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
