@@ -1,5 +1,161 @@
 import torch
+from torch.sparse import SparseSemiStructuredTensor
 
+__all__ = ["SparseSemiStructuredTensorCUTLASS"]
+
+class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor, torch.Tensor, metaclass=SparseSemiStructuredMeta):
+    """This class provides the CUTLASS implementation of semi-structured (2:4) sparsity for acceleration on GPUs.
+    It connects the user to `_sparse_semi_structured_linear`, which uses CUTLASS for accelerated sparse matmul.
+
+    For CUTLASS the compressed representation is stored separately, as two distinct tensors:
+    - sparse_tensor_cutlass (holds the specified elements of original tensor)
+    - meta_tensor_cutlass (holds the metadata bitmask)
+    """
+
+    _DTYPE_SHAPE_CONSTRAINTS = {
+        torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 128, 16, 16),
+        torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 64, 8, 8),
+        torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 64, 8, 8),
+        torch.float32: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 4, 4)
+    }
+
+    @staticmethod
+    def __new__(
+        cls,
+        sparse_tensor_cutlass: torch.Tensor,
+        meta_tensor_cutlass: torch.Tensor,
+        original_shape: Optional[torch.Size] = None,
+        transposed: bool = False,
+    ) -> torch.Tensor:
+        SparseSemiStructuredTensor._show_warning()
+
+        kwargs = {
+            "device": sparse_tensor_cutlass.device,  # type: ignore[assignment]
+            "dtype": sparse_tensor_cutlass.dtype,  # type: ignore[assignment]
+            "layout": sparse_tensor_cutlass.layout,  # type: ignore[assignment]
+            "requires_grad": False,  # type: ignore[assignment]
+        }
+        return torch.Tensor._make_wrapper_subclass(cls, original_shape, **kwargs)  # type: ignore[attr-defined]
+
+    def __init__(
+        self,
+        sparse_tensor_cutlass: torch.Tensor,
+        meta_tensor_cutlass: torch.Tensor,
+        original_shape: Optional[torch.Size] = None,
+        transposed: bool = False,
+    ) -> None:
+        self.sparse_tensor_cutlass = sparse_tensor_cutlass
+        self.meta_tensor_cutlass = meta_tensor_cutlass
+        self.original_shape = original_shape
+        self.transposed = transposed
+
+    def __tensor_flatten__(self) -> Tuple[List[str], Tuple[torch.Size, bool]]:
+        return ['sparse_tensor_cutlass', 'meta_tensor_cutlass'], (self.original_shape, self.transposed)
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride) -> SparseSemiStructuredTensorCUTLASS:
+        original_shape, transposed = meta
+
+        assert len(inner_tensors) == 2, f"Expected 2 inner tensors but got {len(inner_tensors)}"
+        sparse_tensor_cutlass = inner_tensors['sparse_tensor_cutlass']
+        meta_tensor_cutlass = inner_tensors['meta_tensor_cutlass']
+
+        return SparseSemiStructuredTensorCUTLASS(
+            sparse_tensor_cutlass,
+            meta_tensor_cutlass,
+            original_shape=original_shape,
+            transposed=transposed,
+        )
+
+    @classmethod
+    def from_dense(cls, original_tensor) -> SparseSemiStructuredTensorCUTLASS:
+        cls._validate_device_dim_dtype_shape(original_tensor)
+        sparse_tensor_cutlass, meta_tensor_cutlass = sparse_semi_structured_from_dense_cutlass(original_tensor)
+        return cls(sparse_tensor_cutlass, meta_tensor_cutlass, original_shape=original_tensor.shape)
+
+    def to_dense(self) -> torch.Tensor:
+        if self.sparse_tensor_cutlass.dtype == torch.float32:
+            raise RuntimeError("Converting to dense for torch.float32 datatype is not yet supported by CUTLASS backend!")
+
+        return sparse_semi_structured_to_dense_cutlass(
+            self.sparse_tensor_cutlass,
+            self.meta_tensor_cutlass,
+        )
+
+    __torch_function__ = torch._C._disabled_torch_function_impl
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs) -> Any:
+
+        if func is torch.ops.aten.values.default:
+            return args[0].sparse_tensor_cutlass.detach()
+
+        if func is torch.ops.aten.indices.default:
+            return args[0].meta_tensor_cutlass
+
+        # Since this code runs below autograd, a detach corresponds to only returning a new object
+        if func is torch.ops.aten.detach.default:
+            return cls(
+                args[0].sparse_tensor_cutlass,
+                args[0].meta_tensor_cutlass,
+                original_shape=args[0].shape,
+                transposed=args[0].transposed,
+            )
+
+        # Because we cannot go from the compressed representation back to the dense representation currently,
+        # we just keep track of how many times we have been transposed. Depending on whether the sparse matrix
+        # is the first or second argument, we expect an even / odd number of calls to transpose respectively.
+        if func is torch.ops.aten.t.default:
+            return cls(
+                args[0].sparse_tensor_cutlass,
+                args[0].meta_tensor_cutlass,
+                original_shape=torch.Size([args[0].shape[1], args[0].shape[0]]),
+                transposed=not args[0].transposed,
+            )
+
+        # When torch is run with inference mode, pytorch does not decompose torch.ops.aten.linear into a .t() and addmm(),
+        # so we must match the aten.linear op. In this case, we need to explicitly handle collapsing to 2d.
+        if func is torch.ops.aten.linear.default:
+            input_tensor, weight, bias = args
+            shape = input_tensor.shape
+            input_tensor_2d = input_tensor.view(-1, shape[-1])
+            res = torch.addmm(bias, input_tensor_2d, weight.t(), **kwargs)
+            return res.view(*shape[:-1], -1)
+
+        if func in {torch.ops.aten.addmm.default, torch.ops.aten.mm.default}:
+            if func is torch.ops.aten.addmm.default:
+                bias, input_A, input_B = args
+            if func is torch.ops.aten.mm.default:
+                bias, (input_A, input_B) = None, args
+
+            if isinstance(input_A, cls) and not input_A.transposed:
+                row, col = input_B.shape
+                input_B_padded = cls._pad_dense_input(input_B)
+                res = torch._sparse_semi_structured_linear(
+                    input_B_padded.t(),
+                    input_A.sparse_tensor_cutlass,
+                    input_A.meta_tensor_cutlass,
+                    bias=bias
+                ).t()
+                return res[:, :col]
+
+            elif isinstance(input_B, cls) and input_B.transposed:
+                row, col = input_A.shape
+                input_A_padded = cls._pad_dense_input(input_A)
+                res = torch._sparse_semi_structured_linear(
+                    input_A_padded,
+                    input_B.sparse_tensor_cutlass,
+                    input_B.meta_tensor_cutlass,
+                    bias=bias
+                )
+                return res[:row, :]
+
+        error_string = "\n".join(
+            [f"func {func} with args: "]
+            + [f"arg{i}: {arg}" for i, arg in enumerate(args)]
+        )
+
+        raise NotImplementedError(error_string)
 
 def _sparse_semi_structured_from_dense_cutlass(dense):
     if dense.dim() != 2:

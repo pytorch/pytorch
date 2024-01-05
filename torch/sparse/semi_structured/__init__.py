@@ -1,22 +1,28 @@
 import warnings
 from collections import namedtuple
 from typing import Any, Optional, Union, TypeVar, Type
-from abc import ABC, abstractmethod, ABCMeta
+from torch.sparse.semi_structured import SparseSemiStructuredTensorCUTLASS, SparseSemiStructuredTensorCUSPARSELT
 
 import torch
 
 __all__ = [
     "SparseSemiStructuredTensor",
-    "SparseSemiStructuredMeta"
+    "SparseSemiStructuredTensorCUTLASS"
+    "SparseSemiStructuredTensorCUSPARSELT"
+    "to_sparse_semi_structured",
 ]
 
-SemiStructuredType = TypeVar("SemiStructuredTensorType", bound="SparseSemiStructuredTensor")
+_SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
+    "_SEMI_STRUCTURED_SPARSE_CONFIG", "sparse_min_rows sparse_min_cols dense_min_rows dense_min_cols"
+)
 
 class SparseSemiStructuredMeta(ABCMeta, type(torch.Tensor)):
     pass
 
 class SparseSemiStructuredTensor(ABC):
     _FORCE_CUTLASS = True
+    _AUTOPAD_DENSE_INPUT = True
+    _DTYPE_SHAPE_CONSTRAINTS = {}
     _PROTOTYPE_WARNING_SHOWN = False
 
     def __repr__(self) -> str:  # type: ignore[override]
@@ -30,13 +36,11 @@ class SparseSemiStructuredTensor(ABC):
         """
         return (
             f"{self.__class__.__name__}(shape={self.shape}, "
-            f"transposed={self.transposed}, "
-            f"values={self.values()}, "
-            f"metadata={self.indices()})"
+            f"transposed={self.transposed})"
         )
 
     @staticmethod
-    def _show_warning():
+    def _show_warning() -> None:
         if not SparseSemiStructuredTensor._PROTOTYPE_WARNING_SHOWN:
             warnings.warn(
                 (
@@ -50,7 +54,7 @@ class SparseSemiStructuredTensor(ABC):
             SparseSemiStructuredTensor._PROTOTYPE_WARNING_SHOWN = True
 
     @classmethod
-    def _validate_device_dim_dtype_shape(cls, original_tensor):
+    def _validate_device_dim_dtype_shape(cls, original_tensor) -> None:
         # check device
         if not original_tensor.is_cuda:
             raise RuntimeError(
@@ -104,6 +108,7 @@ class SparseSemiStructuredTensor(ABC):
         min_rows = cls._DTYPE_SHAPE_CONSTRAINTS[dense_input.dtype].dense_min_rows
         min_cols = cls._DTYPE_SHAPE_CONSTRAINTS[dense_input.dtype].dense_min_cols
 
+        # calculate padding
         to_pad_m = -m % min_rows if m < min_rows or m % min_rows else 0
         to_pad_n = -n % min_cols if n < min_cols or n % min_rows else 0
         if to_pad_m or to_pad_n:
@@ -113,9 +118,65 @@ class SparseSemiStructuredTensor(ABC):
 
     @classmethod
     @abstractmethod
-    def from_dense(cls, original_tensor) -> SemiStructuredType:
+    def from_dense(cls, original_tensor) -> SparseSemiStructuredTensor:
         pass
 
     @abstractmethod
     def to_dense(self) -> torch.Tensor:
         pass
+
+def to_sparse_semi_structured(
+    original_tensor: torch.Tensor,
+) -> Any:
+    """
+    This function converts a dense tensor into a sparse semi-structured tensor.
+    It will return either
+        1. a SparseSemiStructuredTensor if the input tensor is already in the correct format
+        2. a regular SparseTensor if the input tensor was not in the correct format
+
+    This function will check to ensure the dense tensor has the right dtype, size, dims, and device.
+    We currently only support semi-structured sparse tensors for 2d CUDA tensors.
+    Additionally, your tensor must be a positive multiple of a block size given the dtype
+
+    - torch.float16  (r, c) must be >= and a multiple of 64
+    - torch.int8     (r, c) must be >= and a multiple of 128
+
+    Args:
+        original_tensor (Tensor): the dense tensor to convert
+
+    Returns:
+        SparseSemiStructuredTensor: A sparse semi-structured tensor created from the given original_tensor
+
+    Raises:
+        None
+    Example:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> A = torch.Tensor([0, 0, 1, 1]).tile((128, 32)).half().cuda()
+        tensor([[0., 0., 1.,  ..., 0., 1., 1.],
+                [0., 0., 1.,  ..., 0., 1., 1.],
+                [0., 0., 1.,  ..., 0., 1., 1.],
+                ...,
+                [0., 0., 1.,  ..., 0., 1., 1.],
+                [0., 0., 1.,  ..., 0., 1., 1.],
+                [0., 0., 1.,  ..., 0., 1., 1.]], device='cuda:0', dtype=torch.float16)
+        >>> A_sparse = to_sparse_semi_structured(A)
+        SparseSemiStructuredTensor(shape=torch.Size([128, 128]), transposed=False, values=tensor([[1., 1., 1.,  ..., 1., 1., 1.],
+                [1., 1., 1.,  ..., 1., 1., 1.],
+                [1., 1., 1.,  ..., 1., 1., 1.],
+                ...,
+                [1., 1., 1.,  ..., 1., 1., 1.],
+                [1., 1., 1.,  ..., 1., 1., 1.],
+                [1., 1., 1.,  ..., 1., 1., 1.]], device='cuda:0', dtype=torch.float16),
+            metadata=tensor([[-4370, -4370, -4370,  ..., -4370, -4370, -4370],
+                [-4370, -4370, -4370,  ..., -4370, -4370, -4370],
+                [-4370, -4370, -4370,  ..., -4370, -4370, -4370],
+                ...,
+                [-4370, -4370, -4370,  ..., -4370, -4370, -4370],
+                [-4370, -4370, -4370,  ..., -4370, -4370, -4370],
+                [-4370, -4370, -4370,  ..., -4370, -4370, -4370]], device='cuda:0',
+       dtype=torch.int16))
+    """
+    if SparseSemiStructuredTensor._FORCE_CUTLASS:
+        return SparseSemiStructuredTensorCUTLASS.from_dense(original_tensor)
+    else:
+        return SparseSemiStructuredTensorCUSPARSELT.from_dense(original_tensor)
