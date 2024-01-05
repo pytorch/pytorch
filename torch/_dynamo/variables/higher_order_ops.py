@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import itertools
+import inspect
 import logging
 
 from typing import Dict, List, Optional
@@ -20,6 +21,7 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
 
 from ..exc import (
+    SkipFrame,
     UncapturedHigherOrderOpError,
     unimplemented,
     Unsupported,
@@ -428,6 +430,29 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         unimplemented(f"HigherOrderOperator {self.value.__name__}")
+
+
+class FunctorchVmapHigherOrderVariable(UserFunctionVariable):
+    def call_function(
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        if inspect.getattr_static(self.fn, '_torchdynamo_disable', False):
+            raise SkipFrame(f"'_torchdynamo_disable' set on function '{self.fn.__name__}'")
+
+        try:
+            # Try to trace through vmap call
+            return super().call_function(tx, args, kwargs)
+        except Unsupported:
+            # In case of failure, mimic `torch._dynamo.disable(vmap(g))` behavior by
+            # setting _torchdynamo_disable attribute to True
+            self.fn._torchdynamo_disable = True
+
+            # and mark the function as skipped, to avoid dynamo to try to trace it again
+            from torch._C._dynamo import eval_frame
+            eval_frame.skip_code(args[0].get_code())
+
+            # Graph break
+            raise
 
 
 class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
