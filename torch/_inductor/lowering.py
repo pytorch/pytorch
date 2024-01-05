@@ -4158,28 +4158,6 @@ def upsample_nearest2d_backward(
     return rv
 
 
-@register_lowering(aten.avg_pool1d, type_promotion_kind=None)
-def avg_pool1d(
-    x,
-    kernel_size,
-    stride=(),
-    padding=0,
-    ceil_mode=False,
-    count_include_pad=True,
-    divisor_override=None,
-):
-    return _avg_poolnd(
-        x,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
-        divisor_override,
-        dim=1,
-    )
-
-
 @register_lowering(aten.avg_pool2d, type_promotion_kind=None)
 def avg_pool2d(
     x,
@@ -4310,9 +4288,8 @@ def _avg_poolnd(
             ]
             masks = [range_mask(bh[i], upper[i], lower[i]) for i in range(dim)]
             mask = functools.reduce(ops.and_, masks)
-            return ops.masked(mask, lambda: ops.constant(1, dtype), 0)
+            return ops.to_dtype(mask, dtype)
 
-        # TODO(jansel): optimize to do `int(x<h)` rather than `x<h?1:0`
         result = div(fn_sum(x_loader), fn_sum(ones_loader))
 
     return to_dtype(result, dtype)
