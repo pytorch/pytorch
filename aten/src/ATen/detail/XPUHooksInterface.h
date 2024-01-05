@@ -11,11 +11,21 @@
 
 namespace at {
 
+constexpr const char* XPU_HELP =
+    "The XPU backend requires Intel Extension for Pytorch;"
+    "this error has occurred because you are trying "
+    "to use some XPU's functionality, but the Intel Extension for Pytorch has not been "
+    "loaded for some reason. The Intel Extension for Pytorch MUST "
+    "be loaded, EVEN IF you don't directly use any symbols from that!";
+
 struct TORCH_API XPUHooksInterface {
   virtual ~XPUHooksInterface() {}
 
   virtual void initXPU() const {
-    TORCH_CHECK(false, "Cannot initialize XPU without ATen_xpu library.");
+    TORCH_CHECK(
+        false,
+        "Cannot initialize XPU without Intel Extension for Pytorch.",
+        XPU_HELP);
   }
 
   virtual bool hasXPU() const {
@@ -23,7 +33,10 @@ struct TORCH_API XPUHooksInterface {
   }
 
   virtual std::string showConfig() const {
-    TORCH_CHECK(false, "Cannot query detailed XPU version without ATen_xpu library.");
+    TORCH_CHECK(
+        false,
+        "Cannot query detailed XPU version without Intel Extension for Pytorch. ",
+        XPU_HELP);
   }
 
   virtual int getGlobalIdxFromDevice(const Device& device) const {
@@ -31,11 +44,11 @@ struct TORCH_API XPUHooksInterface {
   }
 
   virtual Generator getXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
-    TORCH_CHECK(false, "Cannot get XPU generator without ATen_xpu library.");
+    TORCH_CHECK(false, "Cannot get XPU generator without Intel Extension for Pytorch. ", XPU_HELP);
   }
 
   virtual const Generator& getDefaultXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
-    TORCH_CHECK(false, "Cannot get default XPU generator without ATen_xpu library.");
+    TORCH_CHECK(false, "Cannot get default XPU generator without Intel Extension for Pytorch. ", XPU_HELP);
   }
 
   virtual int getNumGPUs() const {

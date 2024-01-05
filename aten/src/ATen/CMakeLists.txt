@@ -326,9 +326,7 @@ endif()
 
 if(USE_XPU)
   list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/xpu)
-  list(APPEND ATen_XPU_SRCS
-    ${xpu_cpp}
-  )
+  list(APPEND ATen_XPU_SRCS ${xpu_cpp})
 endif()
 
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)

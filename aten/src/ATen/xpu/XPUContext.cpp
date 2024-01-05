@@ -11,7 +11,7 @@ namespace at::xpu {
 namespace {
 
 /*
- * Currently, there is one device property pool containing the information and
+ * Currently, there is one device properties pool containing the information and
  * capability about each compute-device.
  *
  * Device properties are lazily initialized when the first time properties are
@@ -22,15 +22,15 @@ c10::once_flag init_flag;
 std::deque<c10::once_flag> device_prop_flags;
 std::vector<DeviceProp> device_properties;
 
-std::deque<c10::once_flag> device_global_index_flags;
-std::vector<int> device_global_indexs;
+std::deque<c10::once_flag> device_global_idx_flags;
+std::vector<int> device_global_idxs;
 
 void initXPUContextVectors() {
   num_gpus = c10::xpu::device_count();
   device_prop_flags.resize(num_gpus);
   device_properties.resize(num_gpus);
-  device_global_index_flags.resize(num_gpus);
-  device_global_indexs.resize(num_gpus);
+  device_global_idx_flags.resize(num_gpus);
+  device_global_idxs.resize(num_gpus);
 }
 
 void initDeviceProperty(int device) {
@@ -39,7 +39,7 @@ void initDeviceProperty(int device) {
   device_properties[device] = device_prop;
 }
 
-void initDeviceGlobalId(int device) {
+void initDeviceGlobalIdxs(int device) {
   sycl::device& raw_device = c10::xpu::get_raw_device(device);
   // Get all SYCL devices associated with the SYCL platform.
   auto devices = sycl::device::get_devices();
@@ -47,8 +47,9 @@ void initDeviceGlobalId(int device) {
     return raw_device == device;
   };
   auto it = std::find_if(devices.begin(), devices.end(), match_device);
-  TORCH_CHECK(it != devices.end(), "Cant't find the global id of XPU device.");
-  device_global_indexs[device] =
+  TORCH_CHECK(
+      it != devices.end(), "Cant't find the global index of XPU device.");
+  device_global_idxs[device] =
       static_cast<int>(std::distance(devices.begin(), it));
 }
 
@@ -74,6 +75,8 @@ DeviceProp* getDeviceProperties(int device) {
   return &device_properties[device];
 }
 
+// Return the global index enumerated by sycl::device::get_devices based on the
+// index of a XPU device in the framework.
 int getGlobalIdxFromDevice(int device) {
   c10::call_once(init_flag, initXPUContextVectors);
   TORCH_CHECK(
@@ -83,8 +86,8 @@ int getGlobalIdxFromDevice(int device) {
       ", total number of device is ",
       num_gpus,
       ".");
-  c10::call_once(device_global_index_flags[device], initDeviceGlobalId, device);
-  return device_global_indexs[device];
+  c10::call_once(device_global_idx_flags[device], initDeviceGlobalIdxs, device);
+  return device_global_idxs[device];
 }
 
 } // namespace at::xpu
