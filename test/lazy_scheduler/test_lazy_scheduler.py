@@ -750,7 +750,7 @@ TODO:
 - Unit test: in-place op in named segment
 - For named segments, show its segment ID (prefix + fwd/bwd + nth_call) in profiler annotation in GPU trace
 - Integration with DDPOptimizer
-- Integration with compiled autograd
+- (Later) Integration with compiled autograd
 
 AsyncTensor specific:
 - Support kwargs in AsyncTensor ops
