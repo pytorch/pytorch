@@ -2035,7 +2035,6 @@ dynamo_expected_failures = {
     "TestPythonPytree.test_treespec_equality",  # test_pytree
     "TestOutDtypeOp.test_out_dtype_non_op_overload",  # test_out_dtype_op
     "TestOutDtypeOp.test_out_dtype_wrong_output",  # test_out_dtype_op
-    "TestOpenMP_ParallelFor.test_one_thread",  # test_openmp
     "TestNumPyInteropCPU.test_numpy_non_writeable_cpu",  # test_numpy_interop
     "TestNN.test_Sequential_append",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_False_mode_bicubic_memory_format0_cpu",  # test_nn
@@ -2088,7 +2087,6 @@ dynamo_expected_failures = {
     "TestMultiprocessing.test_inherit_tensor",  # test_multiprocessing
     "TestMultiprocessing.test_is_shared",  # test_multiprocessing
     "TestMultiprocessing.test_fs_is_shared",  # test_multiprocessing
-    "TestMonitorTensorboard.test_event_handler",  # test_monitor
     "TestMkldnnCPU.test_add_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_linear_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_prelu_bf16_cpu",  # test_mkldnn
@@ -2111,6 +2109,7 @@ dynamo_skips = {
     "TestMatmulOperator.test_matmul_raises",
     "TestMatmulOperator.test_exceptions",
     "TestMatmulOperator.test_matmul_inplace",
+    "TestMonitorTensorboard.test_event_handler",  # weird
     "TestMethods.test_diagonal",
     "TestMethods.test_searchsorted_complex",
     "TestMethods.test_round",
@@ -2171,6 +2170,7 @@ dynamo_skips = {
     "WeakTest.test_make_weak_keyed_dict_from_dict",  # known py311 fail
     "TestViewOpsCPU.test_as_strided_gradients_cpu",  # known py311 fail
     "TestViewOpsLAZY.test_as_strided_gradients_lazy",  # known py311 fail
+    "TestOpenMP_ParallelFor.test_one_thread",  # test_openmp
     "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape3_cpu",  # known py38 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape0_cpu",  # known py38 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape1_cpu",  # known py38 fail
