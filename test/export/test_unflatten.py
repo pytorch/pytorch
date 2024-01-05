@@ -420,5 +420,41 @@ class TestUnflatten(TestCase):
         inputs = (torch.rand(2, 3),)
         self.compare_outputs(orig_eager, unflattened, inputs)
 
+    def test_unflatten_container_type(self):
+        class Leaf(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.leaf = Leaf()
+                self.register_buffer("buffer", torch.randn(4, 4))
+
+            def forward(self, x, z):
+                return self.buffer.sum() + self.leaf(x).sum() + z[0].sum() + z[1].sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x, z):
+                y = self.bar.buffer + x + z[0] + z[1]
+                return self.bar(x, z) + y.sum()
+
+        inp = (torch.randn(4, 4), [torch.randn(4, 4), torch.randn(4, 4)])
+        mod = Foo()
+        ep_strict = torch.export.export(mod, inp)
+        ep_non_strict = torch.export.export(mod, inp, strict=False)
+
+        gm_unflat_non_strict = unflatten(ep_non_strict)
+        ep = torch.export.export(gm_unflat_non_strict, inp, strict=False)
+        self.assertTrue(torch.allclose(ep(*inp), mod(*inp)))
+
 if __name__ == "__main__":
     run_tests()
