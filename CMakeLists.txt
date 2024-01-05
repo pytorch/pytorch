@@ -201,9 +201,6 @@ option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 cmake_dependent_option(
-    USE_XPU "Use XPU. Only available on Linux." ON
-    "LINUX" OFF)
-cmake_dependent_option(
      BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -732,23 +729,19 @@ if(MSVC)
   append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
 endif()
 
-# CAVEAT: do NOT check USE_ROCM here, because USE_ROCM is always True until
-#         include(cmake/Dependencies.cmake)
+include(cmake/Dependencies.cmake)
+
+# Moved this cmake set option down here because CMAKE_CUDA_COMPILER_VERSION is not avaialble until now
 cmake_dependent_option(
   USE_FLASH_ATTENTION
-  "Whether to build the flash_attention kernel for scaled dot product attention.\
-  Will be disabled if not supported by the platform" ON
-  "USE_CUDA AND NOT MSVC" OFF)
+  "Whether to build the flash_attention kernel for scaled dot product attention" ON
+  "USE_CUDA AND NOT ROCM AND NOT MSVC AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
 
-# CAVEAT: Again, do not check USE_ROCM here
 # Flash Attention2 will error while building for sm52 while Mem Eff Attention won't
 cmake_dependent_option(
   USE_MEM_EFF_ATTENTION
-  "Enable memory-efficient attention for scaled dot product attention.\
-  Will be disabled if not supported by the platform" ON
-  "USE_CUDA" OFF)
-
-include(cmake/Dependencies.cmake)
+  "Enable memory-efficient attention for scaled dot product attention" ON
+  "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
 
 if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
@@ -1151,7 +1144,6 @@ if(BUILD_SHARED_LIBS)
       COMPONENT dev)
   install(FILES
       ${PROJECT_SOURCE_DIR}/cmake/public/cuda.cmake
-      ${PROJECT_SOURCE_DIR}/cmake/public/xpu.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/mkl.cmake

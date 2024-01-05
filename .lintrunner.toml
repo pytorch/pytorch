@@ -255,8 +255,6 @@ exclude_patterns = [
     '**/*pb.h',
     '**/*CUDA*',
     '**/cuda/*pp',
-    '**/*XPU*',
-    '**/xpu/*pp',
     'aten/src/ATen/core/TensorImpl_test.cpp',
     'third_party/**/*',
     'torch/csrc/api/**',
@@ -2673,7 +2671,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.1.11',
+    'ruff==0.1.9',
 ]
 is_formatter = true
 
