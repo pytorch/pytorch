@@ -1162,9 +1162,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   test_python
   test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
-  #install_torchvision
-  #test_python
-  #test_aten
+  install_torchvision
+  test_python
+  test_aten
   test_xpu_bin
 else
   install_torchvision
