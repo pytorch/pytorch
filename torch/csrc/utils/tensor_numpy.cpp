@@ -318,6 +318,12 @@ ScalarType numpy_dtype_to_aten(int dtype) {
       return kChar;
     case NPY_UINT8:
       return kByte;
+    case NPY_UINT16:
+      return kUInt16;
+    case NPY_UINT32:
+      return kUInt32;
+    case NPY_UINT64:
+      return kUInt64;
     case NPY_BOOL:
       return kBool;
     default:
@@ -344,7 +350,7 @@ ScalarType numpy_dtype_to_aten(int dtype) {
     throw python_error();
   throw TypeError(
       "can't convert np.ndarray of type %s. The only supported types are: "
-      "float64, float32, float16, complex64, complex128, int64, int32, int16, int8, uint8, and bool.",
+      "float64, float32, float16, complex64, complex128, int64, int32, int16, int8, uint64, uint32, uint16, uint8, and bool.",
       ((PyTypeObject*)pytype.get())->tp_name);
 }
 
