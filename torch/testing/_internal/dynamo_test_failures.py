@@ -152,12 +152,10 @@ FIXME_default_non_strict = {
     "nn/test_parametrization",
     "nn/test_pooling",
     "nn/test_pruning",
-    "optim/test_lrscheduler",
-    "optim/test_optim",
-    "optim/test_swa_utils",
     "profiler/test_memory_profiler",
     "profiler/test_profiler",
     "profiler/test_profiler_tree",
+    "test_schema_check",  # nb: times out
     "test_ao_sparsity",
     "test_autograd",
     "test_binary_ufuncs",
@@ -239,28 +237,18 @@ FIXME_default_non_strict = {
     "test_ops_fwd_gradients",
     "test_ops_gradients",
     "test_ops_jit",
-    "test_optim",
-    "test_out_dtype_op",
     "test_overrides",
     "test_package",
-    "test_per_overload_api",
     "test_prims",
     "test_proxy_tensor",
-    "test_pruning_op",
     "test_public_bindings",
     "test_python_dispatch",
-    "test_pytree",
     "test_quantization",
     "test_reductions",
-    "test_scatter_gather_ops",
-    "test_schema_check",
-    "test_segment_reductions",
-    "test_serialization",
     "test_sparse",
     "test_sparse_csr",
     "test_sparse_semi_structured",
     "test_spectral_ops",
-    "test_sympy_utils",
     "test_tensorexpr",
     "test_tensorexpr_pybind",
     "test_torch",
@@ -1956,6 +1944,53 @@ dynamo_expected_failures = {
     "TestShapeOpsCPU.test_clamp_propagates_nans_cpu",  # test_shape_ops
     "TestShapeOpsCPU.test_flip_cpu_bfloat16",  # test_shape_ops
     "TestShapeOpsCPU.test_clamp_cpu_float32",  # test_shape_ops
+    "TestSubclassSerialization.test_tensor_subclass_deepcopy",  # test_serialization
+    "TestOldSerialization.test_save_different_dtype_unallocated",  # test_serialization
+    "TestSubclassSerialization.test_tensor_subclass_getstate_overwrite",  # test_serialization
+    "TestSerialization.test_save_different_dtype_unallocated",  # test_serialization
+    "TestSubclassSerialization.test_tensor_subclass_wrapper_serialization",  # test_serialization
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_float32",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_bfloat16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_complex64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_float64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_bfloat16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_complex128",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_float16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter__reductions_cpu_float16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int32",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_int32",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_float32",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_float16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter__reductions_cpu_float32",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_uint8",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_uint8",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_int16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_complex128",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_int8",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_float64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_complex64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_int64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int8",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter__reductions_cpu_complex64",  # test_scatter_gather_ops
+    "TestCxxPytree.test_pytree_serialize_spec8",  # test_pytree
+    "TestGenericPytree.test_flatten_unflatten_namedtuple_py",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec9",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec3",  # test_pytree
+    "TestGenericPytree.test_flatten_unflatten_deque_py",  # test_pytree
+    "TestGenericPytree.test_flatten_unflatten_deque_cxx",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec2",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec5",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_namedtuple",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec0",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec6",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec4",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec7",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec1",  # test_pytree
+    "TestPythonPytree.test_treespec_equality",  # test_pytree
+    "TestOutDtypeOp.test_out_dtype_non_op_overload",  # test_out_dtype_op
+    "TestOutDtypeOp.test_out_dtype_wrong_output",  # test_out_dtype_op
 }
 
 dynamo_skips = {
@@ -2046,4 +2081,7 @@ dynamo_skips = {
     "TestTensorCreationCPU.test_vander_types_cpu_complex64",  # known py311 fail
     "TestTensorCreationCPU.test_torch_polar_cpu_float32",  # known py311 fail
     "TestTensorCreationCPU.test_torch_polar_cpu_float64",  # known py311 fail
+    "TestSWAUtils.test_averaged_model_all_devices_ema_True",  # flaky
+    "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_False",  # flaky
+    "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_True",  # flaky
 }
