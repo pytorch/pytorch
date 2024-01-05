@@ -485,7 +485,6 @@ if not TEST_WITH_SLOW:
 comprehensive_failures = {
     xfail("nn.functional.interpolate", "bilinear", dtypes=(torch.uint8,)),  # off by one error
     xfail("nn.functional.interpolate", "bicubic", dtypes=(torch.uint8,)),   # off by one error
-    xfail("nn.functional.poisson_nll_loss", dtypes=integral_types()),
 }
 
 @unMarkDynamoStrictTest
