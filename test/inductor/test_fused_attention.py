@@ -606,7 +606,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 .matmul(v)
             )
 
-        self._check_common(dot_prod_attention, contains=False)
+        self._check_common(dot_prod_attention)
 
     @skipIfRocm
     def _test_sdpa_rewriter_15(self):
@@ -629,7 +629,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             weights = torch.nn.functional.softmax(scores, dim=-1)
             return torch.matmul(weights, v)
 
-        self._check_common(dot_prod_attention, contains=False, check_train=False)
+        self._check_common(dot_prod_attention, check_train=False)
 
 
 if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
