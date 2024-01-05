@@ -183,7 +183,7 @@ if torch.distributed.is_available():
     LEGACY_MOD_INLINELIST |= {
         "torch.distributed._tensor.api",
         "torch.distributed._tensor.device_mesh",
-        "torch.distributed._device_mesh",
+        "torch.distributed.device_mesh",
         "torch.distributed.algorithms._checkpoint.checkpoint_wrapper",
         "torch.distributed.tensor.parallel._data_parallel_utils",
         "torch.distributed.tensor.parallel._utils",
@@ -202,7 +202,10 @@ MOD_INLINELIST = {
     "torch._dynamo.comptime",
     "torch._dynamo.polyfill",
     "torch._inductor.test_operators",
+    "torch.amp.autocast_mode",
     "torch.ao.nn",
+    "torch.autograd.function",
+    "torch.cuda.amp.autocast_mode",
     "torch.distributions",
     "torch.fx._pytree",
     "torch.fx.passes.shape_prop",
@@ -215,6 +218,7 @@ MOD_INLINELIST = {
     "torch.utils._foreach_utils",
     "torch.utils._pytree",
     "torch._tensor",
+    "torch._higher_order_ops.strict_mode",
 }
 
 

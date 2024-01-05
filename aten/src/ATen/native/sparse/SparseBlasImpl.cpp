@@ -38,7 +38,8 @@ bool operands_support_triton_mm_kernel(const Tensor& compressed, const Tensor& s
        const auto blocksize = at::sparse_csr::getBlockSize(compressed);
        // Dtype and blocksize checks for potential Triton usage.
        return ((strided.scalar_type() == ScalarType::Half
-                || strided.scalar_type() == ScalarType::BFloat16)
+                || strided.scalar_type() == ScalarType::BFloat16
+                || strided.scalar_type() == ScalarType::Float)
                && compressed.scalar_type() == strided.scalar_type()
                && is_power_of_2(blocksize[0]) && is_power_of_2(blocksize[1])
                && (blocksize[0] >= 16) && (blocksize[1] >= 16)

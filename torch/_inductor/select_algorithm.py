@@ -106,6 +106,9 @@ class TritonTemplateKernel(TritonKernel):
         self.epilogue_fn = epilogue_fn
         self.render_hooks = dict()
 
+    def need_numel_args(self):
+        return False
+
     def jit_line(self):
         if self.use_jit:
             return "@triton.jit"
@@ -184,6 +187,7 @@ class TritonTemplateKernel(TritonKernel):
                     "from torch._inductor.triton_heuristics import template",
                     "from torch._inductor.utils import instance_descriptor",
                     "from torch._inductor import triton_helpers",
+                    TritonKernel.gen_attr_descriptor_import(),
                     "",
                     self.jit_line(),
                     f"def {self.kernel_name}({', '.join(arg_defs)}):",
@@ -556,7 +560,7 @@ class ExternKernelChoice:
         assert callable(kernel)
         assert not hasattr(extern_kernels, name), "duplicate extern kernel"
         self.name = name
-        self.cpp_kernel = cpp_kernel
+        self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
         setattr(extern_kernels, name, kernel)
 
@@ -683,8 +687,8 @@ class ExternKernelCaller(ChoiceCaller):
             cls(
                 layout=self.layout,
                 inputs=self.input_nodes,
-                kernel=self.choice.call_name(),
-                cpp_kernel=self.choice.cpp_kernel,
+                python_kernel_name=self.choice.call_name(),
+                cpp_kernel_name=self.choice.cpp_kernel_name,
                 ordered_kwargs_for_cpp_kernel=self.choice.ordered_kwargs_for_cpp_kernel,
                 kwargs=self.kwargs,
             )
@@ -721,7 +725,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
-        log.info("Max autotune selects from %s choices.", str(len(choices)))
+        log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
         if len(choices) == 1:
             if not isinstance(choices[0], CUDATemplateCaller):

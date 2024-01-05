@@ -152,9 +152,6 @@ class CacheBase:
                     "cuda": torch.version.cuda,
                     "triton": triton_version,
                 },
-                "other": {
-                    "allow_tf32": torch.backends.cuda.matmul.allow_tf32,
-                },
             }
         except (AssertionError, RuntimeError):
             # If cuda is not installed, none of the above config is relevant.
@@ -242,7 +239,7 @@ class PersistentCache(CacheBase):
     def lookup(
         self,
         choices: List[ChoiceCaller],
-        name: str,
+        op: str,
         inputs: str,
         benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
     ) -> Dict[ChoiceCaller, float]:
@@ -250,17 +247,20 @@ class PersistentCache(CacheBase):
         Check to see if we have benchmarked the given choice callers. For each
         choice caller:
 
-            1. Check global_cache[name][inputs][choice], return benchmark if cached.
-            2. Check local_cache[name][inputs][choice], return benchmark if cached.
+            1. Check global_cache[op][inputs][choice][precision], return benchmark if cached.
+            2. Check local_cache[op][inputs][choice][precision], return benchmark if cached.
             3.
                 a. `max_autotune_gemm=True`: benchmark the choice, update
-                    local_cache[name][inputs][choice], and return the benchmark.
+                    local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
+        precision = torch.get_float32_matmul_precision()
 
-        log_stats = partial(log_global_cache_stats, self.system, name, inputs)
-        log_vals = partial(log_global_cache_vals, self.system, name, inputs)
-        log_errors = partial(log_global_cache_errors, self.system, name, inputs)
+        log_stats = partial(log_global_cache_stats, self.system, op, inputs, precision)
+        log_vals = partial(log_global_cache_vals, self.system, op, inputs, precision)
+        log_errors = partial(
+            log_global_cache_errors, self.system, op, inputs, precision
+        )
         timings = {}
 
         def check_cache(cache, callback=None) -> bool:
@@ -268,9 +268,9 @@ class PersistentCache(CacheBase):
             hit = True
             for choice in choices:
                 choice_hash = choice.hash_key()
-                if choice_hash in cache.get(name, {}).get(inputs, {}):
+                if choice_hash in cache.get(op, {}).get(inputs, {}).get(precision, {}):
                     # cache hit
-                    timings[choice] = cache[name][inputs][choice_hash]
+                    timings[choice] = cache[op][inputs][precision][choice_hash]
                 else:
                     # cache miss
                     hit = False
@@ -290,11 +290,10 @@ class PersistentCache(CacheBase):
                     # re-benchmark everything to try to get consistent numbers from the same machine
                     timings = benchmark(choices)
                     assert all(choice in timings for choice in choices)
-
-                    local_cache.setdefault(name, {})
-                    local_cache[name].setdefault(inputs, {})
+                    local_cache.setdefault(op, {})
+                    local_cache[op].setdefault(inputs, {}).setdefault(precision, {})
                     for choice, timing in timings.items():
-                        local_cache[name][inputs][choice.hash_key()] = timing
+                        local_cache[op][inputs][precision][choice.hash_key()] = timing
                 except RuntimeError as e:
                     # catch and log autotuning failures
                     log_errors(e)
@@ -362,7 +361,10 @@ def write(
     hash_type: str = "code",
     specified_dir: str = "",
 ) -> Tuple[str, str]:
-    key: str = get_hash(content, extra, hash_type)
+    # use striped content to compute hash so we don't end up with different
+    # hashes just because the content begins/ends with differnet number of
+    # spaces.
+    key: str = get_hash(content.strip(), extra, hash_type)
     basename, subdir, path = get_path(key, extension, specified_dir)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -1028,6 +1030,9 @@ cdll.LoadLibrary("__lib_path__")
     def __bool__(self) -> bool:
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
+
+        if config.is_fbcode():
+            return True
 
         key, input_path = write(VecISA._avx_code, "cpp")
         from filelock import FileLock
@@ -1933,8 +1938,7 @@ class CppWrapperCodeCache:
     def load(cls, source_code: str, func_name: str, key: str, cuda: bool) -> CDLL:
         name = f"inline_extension_{key}"
         cpp_wrapper_dir = cpp_wrapper_cache_dir(name)
-        if not os.path.exists(cpp_wrapper_dir):
-            os.makedirs(cpp_wrapper_dir)
+        os.makedirs(cpp_wrapper_dir, exist_ok=True)
 
         ext = "so"
         filepath = os.path.join(cpp_wrapper_dir, f"{name}.{ext}")
@@ -2336,6 +2340,8 @@ def _async_compile_initializer(orig_ppid) -> None:
     global _watchdog_thread
     _watchdog_thread = Thread(target=run, daemon=True)
     _watchdog_thread.start()
+    # Ignore Ctrl-C (i.e. SIGINT) sent to pool workers to avoid meaningless log spam.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 _watchdog_thread: Optional[Thread] = None

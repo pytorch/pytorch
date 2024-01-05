@@ -1,6 +1,8 @@
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Utils.h>
 
+#include <utility>
+
 namespace at {
 namespace native {
 namespace vulkan {
@@ -11,12 +13,12 @@ namespace api {
 //
 
 DescriptorSet::DescriptorSet(
-    const VkDevice device,
-    const VkDescriptorSet handle,
-    const ShaderLayout::Signature& shader_layout_signature)
+    VkDevice device,
+    VkDescriptorSet handle,
+    ShaderLayout::Signature shader_layout_signature)
     : device_(device),
       handle_(handle),
-      shader_layout_signature_(shader_layout_signature),
+      shader_layout_signature_(std::move(shader_layout_signature)),
       bindings_{} {}
 
 DescriptorSet::DescriptorSet(DescriptorSet&& other) noexcept
@@ -41,14 +43,14 @@ DescriptorSet& DescriptorSet::operator=(DescriptorSet&& other) noexcept {
 DescriptorSet& DescriptorSet::bind(
     const uint32_t idx,
     const VulkanBuffer& buffer) {
-  DescriptorSet::ResourceBinding binder;
+  DescriptorSet::ResourceBinding binder{};
   binder.binding_idx = idx; // binding_idx
   binder.descriptor_type = shader_layout_signature_[idx]; // descriptor_type
   binder.is_image = false; // is_image
   binder.resource_info.buffer_info.buffer = buffer.handle(); // buffer
   binder.resource_info.buffer_info.offset = buffer.mem_offset(); // offset
   binder.resource_info.buffer_info.range = buffer.mem_range(); // range
-  add_binding(std::move(binder));
+  add_binding(binder);
 
   return *this;
 }
@@ -61,14 +63,14 @@ DescriptorSet& DescriptorSet::bind(
     binding_layout = VK_IMAGE_LAYOUT_GENERAL;
   }
 
-  DescriptorSet::ResourceBinding binder;
+  DescriptorSet::ResourceBinding binder{};
   binder.binding_idx = idx; // binding_idx
   binder.descriptor_type = shader_layout_signature_[idx]; // descriptor_type
   binder.is_image = true; // is_image
   binder.resource_info.image_info.sampler = image.sampler(); // buffer
   binder.resource_info.image_info.imageView = image.image_view(); // imageView
   binder.resource_info.image_info.imageLayout = binding_layout; // imageLayout
-  add_binding(std::move(binder));
+  add_binding(binder);
 
   return *this;
 }
@@ -132,9 +134,9 @@ void DescriptorSet::add_binding(const ResourceBinding& binding) {
 
 DescriptorSetPile::DescriptorSetPile(
     const uint32_t pile_size,
-    const VkDescriptorSetLayout descriptor_set_layout,
-    const VkDevice device,
-    const VkDescriptorPool descriptor_pool)
+    VkDescriptorSetLayout descriptor_set_layout,
+    VkDevice device,
+    VkDescriptorPool descriptor_pool)
     : pile_size_{pile_size},
       set_layout_{descriptor_set_layout},
       device_{device},
@@ -149,7 +151,7 @@ VkDescriptorSet DescriptorSetPile::get_descriptor_set() {
   // No-ops if there are descriptor sets available
   allocate_new_batch();
 
-  const VkDescriptorSet handle = descriptors_[in_use_];
+  VkDescriptorSet handle = descriptors_[in_use_];
   descriptors_[in_use_] = VK_NULL_HANDLE;
 
   in_use_++;
@@ -185,7 +187,7 @@ void DescriptorSetPile::allocate_new_batch() {
 //
 
 DescriptorPool::DescriptorPool(
-    const VkDevice device,
+    VkDevice device,
     const DescriptorPoolConfig& config)
     : device_(device),
       pool_(VK_NULL_HANDLE),
@@ -231,7 +233,7 @@ DescriptorPool::~DescriptorPool() {
 }
 
 DescriptorSet DescriptorPool::get_descriptor_set(
-    const VkDescriptorSetLayout set_layout,
+    VkDescriptorSetLayout set_layout,
     const ShaderLayout::Signature& signature) {
   auto it = piles_.find(set_layout);
   if (piles_.cend() == it) {

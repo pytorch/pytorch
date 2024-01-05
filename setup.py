@@ -160,6 +160,9 @@
 #   USE_ZSTD
 #     Enables use of ZSTD, if the libraries are found
 #
+#   USE_ROCM_KERNEL_ASSERT=1
+#     Enable kernel assert in ROCm platform
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
@@ -1214,6 +1217,7 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
         "include/torch/csrc/inductor/aoti_torch/*.h",
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
@@ -1238,6 +1242,7 @@ def main():
         "include/torch/csrc/profiler/*.h",
         "include/torch/csrc/profiler/orchestration/*.h",
         "include/torch/csrc/profiler/stubs/*.h",
+        "include/torch/csrc/profiler/unwind/*.h",
         "include/torch/csrc/utils/*.h",
         "include/torch/csrc/tensor/*.h",
         "include/torch/csrc/lazy/backend/*.h",
