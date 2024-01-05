@@ -1,4 +1,4 @@
-import hashlib
+import itertools
 import logging
 import operator
 import os
@@ -24,6 +24,8 @@ from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
 from .codegen.common import (
+    DeviceOpOverrides,
+    get_device_op_overrides,
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
     register_backend_for_device,
@@ -63,6 +65,14 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 
+if config.is_fbcode():
+    from torch._inductor.fb.utils import log_module_code
+else:
+
+    def log_module_code(*args, **kwargs):
+        pass
+
+
 def supported_dtype_of_cpp_wrapper(dtype, cuda):
     supported_dtype = {
         torch.float32,
@@ -75,10 +85,11 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
         torch.bool,
         torch.bfloat16,
         torch.complex64,
-        # torch.float16, # TODO: implement this
+        torch.float16,
     }
     if cuda:
-        supported_dtype.add(torch.float16)
+        supported_dtype.add(torch.float8_e4m3fn)
+        supported_dtype.add(torch.float8_e5m2)
 
     return dtype in supported_dtype
 
@@ -182,7 +193,9 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.example_inputs = example_inputs
         self.layout_opt = (
-            layout_opt if layout_opt is not None else self.decide_layout_opt(gm)
+            layout_opt
+            if layout_opt is not None
+            else self.decide_layout_opt(gm, is_inference=is_inference)
         )
         self.num_channels_last_conv = 0
         self.is_inference = is_inference
@@ -209,6 +222,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_buffers: Set[str] = set()
         self.never_reuse_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
+        self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: WrapperCodeGen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
         self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
@@ -247,13 +261,16 @@ class GraphLowering(torch.fx.Interpreter):
         self.init_backend_registration()
 
     @staticmethod
-    def decide_layout_opt(gm) -> bool:
+    def decide_layout_opt(gm, *, is_inference) -> bool:
         """
         Decide if we should enable layout optimization for this graph based on
         heuristics.
         """
         if not config.layout_optimization:
             return False
+
+        if config.force_layout_optimization:
+            return True
 
         conv_nodes = [
             n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default
@@ -283,7 +300,7 @@ class GraphLowering(torch.fx.Interpreter):
         # jx_nest_base
         # volo_d1_224
         if len(list(gm.graph.nodes)) >= 300 * nconv:
-            log.debug("Only a few conv, skip layout optimization")
+            log.debug("Skipped layout opt because only a few conv")
             return False
 
         if any(
@@ -295,6 +312,75 @@ class GraphLowering(torch.fx.Interpreter):
                 "See perf regression with dynamic shape. Follow up in https://github.com/pytorch/pytorch/issues/102670"
             )
             return False
+
+        def is_grouped(n):
+            return n.args[-1] > 1 and n.args[1].meta["val"].size(1) > 1
+
+        def is_in_out_channel(n):
+            return (
+                n.args[1].meta["val"].size(0) * 2 <= n.args[1].meta["val"].size(1)
+                and n.args[1].meta["val"].size(2) > 1
+            )
+
+        def is_small_channel(n):
+            return (
+                n.args[1].meta["val"].size(0) <= 64
+                and n.args[1].meta["val"].size(1) <= 64
+            )
+
+        # only grouped convolutions benchmarked as slower in conv samples for inference only
+        if is_inference:
+            from torch.utils.flop_counter import FlopCounterMode
+
+            flop_counts: Dict[str, float] = defaultdict(float)
+            for node in conv_nodes:
+                success, args, kwargs = torch._inductor.fx_utils.get_fake_args_kwargs(
+                    node
+                )
+
+                if success:
+                    with FlopCounterMode(display=False) as flop_counter_mode:
+                        with V.fake_mode:
+                            node.target(*args, **kwargs)
+
+                    counted_flops = flop_counter_mode.get_total_flops()
+                    if is_grouped(node):
+                        node_type = "grouped"
+                    elif is_small_channel(node):
+                        node_type = "small"
+                    elif is_in_out_channel(node):
+                        node_type = "in_out"
+                    else:
+                        node_type = "default"
+
+                    flop_counts[node_type] += counted_flops
+                else:
+                    log.debug("Conv inputs meta not found")
+
+            # average benchmarked channels last speedup / slowdown, < 1 is speedup.
+            # taken from the set of convolution inputs in benchmarks/dynamo/microbenchmarks/operator_inp_logs/torchbench_train/
+            # To regenerate these numbers follow https://gist.github.com/eellison/55d7a6ed6f39829d68ac56f95f4df5bb
+            GROUPED_MULTIPLIER = 1.358
+            DEFAULT_MULTIPLIER = 0.823
+            IN_OUT_MULTIPLIER = 0.725
+            SMALL_MULTIPLIER = 0.783
+
+            total_flops = sum(flop_counts.values())
+            # TODO - get different values per hardware
+            weighted_flops = (
+                flop_counts["grouped"] * GROUPED_MULTIPLIER
+                + flop_counts["small"] * SMALL_MULTIPLIER
+                + flop_counts["in_out"] * IN_OUT_MULTIPLIER
+                + flop_counts["default"] * DEFAULT_MULTIPLIER
+            )
+            do_layout_opt = weighted_flops <= total_flops
+            if not do_layout_opt:
+                log.debug(
+                    "Skipped layout opt in inference because weighted flops indicate slowdown, default: %d, channels last: %d",
+                    total_flops,
+                    weighted_flops,
+                )
+            return do_layout_opt
 
         # Channels last layout can dramatically hurt grouped conv perf. E.g.
         # Conv with arguments like
@@ -313,10 +399,10 @@ class GraphLowering(torch.fx.Interpreter):
         #
         # The following heuristics skip using channels-last if the model contains
         # grouped convolution with in-channels > 1.
-        if any(
-            n.args[-1] > 1 and n.args[1].meta["val"].size(1) > 1 for n in conv_nodes
-        ):
-            log.debug("Found grouped convolution with >1 in_channels!")
+        if any(is_grouped(n) for n in conv_nodes):
+            log.debug(
+                "Skip layout opt because found grouped convolution with >1 in_channels!"
+            )
             return False
 
         # For some models that contain convolution with larger in-channel than out-channel, applying
@@ -326,22 +412,15 @@ class GraphLowering(torch.fx.Interpreter):
         # - phlippe_densenet (slightly worse)
         # - Background_Matting (1.22x -> 0.821x)
         # - pytorch_CycleGAN_and_pix2pix (1.597x -> 1.294x)
-        if any(
-            n.args[1].meta["val"].size(0) * 2 <= n.args[1].meta["val"].size(1)
-            and n.args[1].meta["val"].size(2) > 1
-            for n in conv_nodes
-        ):
+        if any(is_in_out_channel(n) for n in conv_nodes):
             log.debug(
-                "Skip layout optimization because some convolutions have smaller out_channel"
+                "Skip layout opt because some convolutions have smaller out_channel"
             )
             return False
 
         # Following models are skipped due to this:
         # - functorch_maml_omniglot
-        if all(
-            n.args[1].meta["val"].size(0) <= 64 and n.args[1].meta["val"].size(1) <= 64
-            for n in conv_nodes
-        ):
+        if all(is_small_channel(n) for n in conv_nodes):
             log.debug("Skip layout opt because all convolution channels are too small")
             return False
 
@@ -403,9 +482,10 @@ class GraphLowering(torch.fx.Interpreter):
             self._warned_fallback.add(name)
             perf_hint_log.info("Using FallbackKernel: %s", name)
 
-    def add_device_idx(self, idx: Optional[int]):
-        if idx is not None:
-            self.device_idxs.add(idx)
+    def add_device_info(self, device: torch.device):
+        self.device_types.add(device.type)
+        if device.index is not None:
+            self.device_idxs.add(device.index)
 
     @property
     def fake_mode(self):
@@ -452,6 +532,9 @@ class GraphLowering(torch.fx.Interpreter):
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
+        # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
+        if not isinstance(buffer, ir.ComputedBuffer) or not buffer.is_zero_elements():
+            self.add_device_info(buffer.get_device())
         return name
 
     def register_list(self, buffer_names: List[str]):
@@ -520,9 +603,11 @@ class GraphLowering(torch.fx.Interpreter):
                 name = f"{prefix}_{cnt}"
                 cnt += 1
             self.constants[name] = data
-            self.constant_reprs[name] = hashlib.sha256(
-                repr(data).encode("utf-8")
-            ).hexdigest()
+            self.constant_reprs[name] = (
+                f"{data.device!r} {data.dtype!r} "
+                f"{tuple(data.size())!r} {tuple(data.stride())!r} "
+                f"{hash(data):x}"
+            )
             return name
 
         name = allocate(name)
@@ -576,8 +661,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
-        self.device_types.add(example.device.type)
-        self.add_device_idx(example.device.index)
+        self.add_device_info(example.device)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -768,6 +852,14 @@ class GraphLowering(torch.fx.Interpreter):
             is_input_for_as_strided = any(
                 user.target in as_strided_ops for user in n.users
             )
+            if (
+                is_output
+                and isinstance(result, TensorBox)
+                and isinstance(result.data, ir.BaseView)
+            ):
+                # Realize so that outputs are correctly aliased
+                result.realize()
+
             if (is_output or is_input_for_as_strided) and isinstance(
                 n.meta["val"], torch.Tensor
             ):
@@ -910,10 +1002,6 @@ class GraphLowering(torch.fx.Interpreter):
             return
 
         device_types = self.device_types.copy()
-        # In terms of some operations that don't have input tensors, we need to
-        # check the device of the buffers.
-        for buffer in self.buffers:
-            device_types.add(buffer.get_device().type)
         device_types.discard("cpu")
         # TODO(Eikan): Only support mixing cpu and other device now.
         assert len(device_types) <= 1, "Does not support mixing {}".format(
@@ -921,6 +1009,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         only_cpu = len(device_types) == 0
         device_type = "cpu" if only_cpu else device_types.pop()
+
+        self.device_ops = get_device_op_overrides(device_type)
         wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
         assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls()
@@ -946,12 +1036,26 @@ class GraphLowering(torch.fx.Interpreter):
                 else:
                     assert isinstance(
                         x, torch.Tensor
-                    ), "Unknown type when creating real inputs"
+                    ), "Unknown type when creating real inputs" + str(type(x))
                     return x
+
+            if tracing_context := torch._guards.TracingContext.try_get():
+                if tracing_context.output_strides:
+                    tracing_context.output_strides.clear()
+
+                params_flat = [
+                    param
+                    for param in tracing_context.params_flat  # type: ignore[union-attr]
+                    if param is not None
+                ]
+                real_inputs = [
+                    materialize(x) for x in itertools.chain(params_flat, V.real_inputs)
+                ]
+            else:
+                real_inputs = [materialize(x) for x in V.real_inputs]
 
             with torch.utils._python_dispatch._disable_current_modes():
                 assert self.example_inputs is not None
-                real_inputs = [materialize(x) for x in self.example_inputs]
                 compiled(real_inputs)
             del real_inputs
 
@@ -1009,6 +1113,8 @@ class GraphLowering(torch.fx.Interpreter):
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
         # TODO. Revisit this once the logging API is more mature
         assert mod.__file__ is not None
+
+        log_module_code(mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
         output_code_log.info("Output code written to: %s", mod.__file__)

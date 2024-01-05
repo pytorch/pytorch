@@ -369,6 +369,9 @@ public:
   Vectorized<T> expm1() const {
     return map(Sleef_expm1f8_u10);
   }
+  Vectorized<T> exp_u20() const {
+    return exp();
+  }
   Vectorized<T> fmod(const Vectorized<T> & q) const {
     __m256 x_lo, x_hi;
     cvt_to_fp32<T>(values, x_lo, x_hi);

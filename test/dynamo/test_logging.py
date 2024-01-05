@@ -143,7 +143,7 @@ from user code:
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
-    test_inductor_debug = within_range_record_test(3, 15, inductor=logging.DEBUG)
+    test_inductor_debug = within_range_record_test(3, 17, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 4, inductor=logging.INFO)
 
     @make_logging_test()
@@ -248,17 +248,18 @@ LoweringException: AssertionError:
         for logger_qname in torch._logging._internal.log_registry.get_log_qnames():
             logger = logging.getLogger(logger_qname)
 
-            if logger_qname in dynamo_qnames:
+            # if logger_qname is a.b.c and dynamo_qnames contains a.b, it still matches dynamo's INFO setting
+            if any(logger_qname.find(d) == 0 for d in dynamo_qnames):
                 self.assertEqual(
                     logger.getEffectiveLevel(),
                     logging.INFO,
-                    msg=f"expected {logger_qname} is INFO, got {logger.level}",
+                    msg=f"expected {logger_qname} is INFO, got {logging.getLevelName(logger.getEffectiveLevel())}",
                 )
             else:
                 self.assertEqual(
                     logger.getEffectiveLevel(),
                     logging.DEBUG,
-                    msg=f"expected {logger_qname} is DEBUG, got {logger.level}",
+                    msg=f"expected {logger_qname} is DEBUG, got {logging.getLevelName(logger.getEffectiveLevel())}",
                 )
 
     @make_logging_test(graph_breaks=True)

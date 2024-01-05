@@ -46,6 +46,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(absolute);
   OP_DECOMPOSE(absolute_);
   OP_DECOMPOSE(arctan2);
+  OP_DECOMPOSE(arctan2_);
   OP_DECOMPOSE(argsort);
   OP_DECOMPOSE(avg_pool1d);
   OP_DECOMPOSE(adaptive_max_pool1d);

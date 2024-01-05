@@ -107,7 +107,7 @@ class TracerBase:
     scope : Scope
 
     # Records the module call stack
-    module_stack: OrderedDict[str, str]
+    module_stack: OrderedDict[str, Tuple[str, Any]]
 
     # Mapping of node name to module scope
     node_name_to_scope: Dict[str, Tuple[str, type]]
@@ -510,7 +510,7 @@ class ParameterProxy(Proxy):
     """
     def __init__(self, tracer: TracerBase, node: Node, name, param):
         super().__init__(node, tracer)
-        assert(isinstance(param, torch.nn.Parameter))
+        assert isinstance(param, torch.nn.Parameter)
         self.param = param
         self.name = name
 

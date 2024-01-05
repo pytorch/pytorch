@@ -74,8 +74,7 @@
 #include <utility>
 #endif
 
-namespace at {
-namespace meta {
+namespace at::meta {
 
 static inline void check_for_unsupported_isin_dtype(const ScalarType type) {
   // Bail out for dtypes unsupported by the sorting algorithm to keep the interface consistent.
@@ -263,9 +262,9 @@ TORCH_PRECOMPUTE_META_FUNC2(min, dim)(const Tensor& self, int64_t dim, bool keep
       .set_dim(maybe_wrap_dim(dim, self.dim()));
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(where_kernel); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(max_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -862,5 +861,4 @@ TORCH_IMPL_FUNC(isneginf_out) (const Tensor& self, const Tensor& result) {
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

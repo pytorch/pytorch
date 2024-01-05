@@ -30,7 +30,7 @@ __all__ = [
 ]
 
 
-def _find_root(edge_or_node: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]) -> EdgeOrNode:
+def _find_root_edge_or_node(edge_or_node: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]) -> EdgeOrNode:
     """Find the root node for the sharing tree
     Args:
         edge_or_node: edge/node that we want to find the root
@@ -42,7 +42,7 @@ def _find_root(edge_or_node: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeO
     parent = shared_with_map[edge_or_node]
     if parent == edge_or_node:
         return edge_or_node
-    root = _find_root(parent, shared_with_map)
+    root = _find_root_edge_or_node(parent, shared_with_map)
     # path compression
     shared_with_map[edge_or_node] = root
     return root
@@ -50,37 +50,37 @@ def _find_root(edge_or_node: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeO
 def _union(parent: EdgeOrNode, child: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]) -> None:
     """Merge the subtree for `child` with `parent`, the order is important here
     """
-    root_parent = _find_root(parent, shared_with_map)
-    root_child = _find_root(child, shared_with_map)
+    root_parent = _find_root_edge_or_node(parent, shared_with_map)
+    root_child = _find_root_edge_or_node(child, shared_with_map)
     # union the two trees by pointing the root of child to root of parent
     shared_with_map[root_child] = root_parent
 
-def _update_shared_with(edge_or_node: EdgeOrNode, qspec: QuantizationSpecBase, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]):
+def _update_shared_with(child: EdgeOrNode, qspec: QuantizationSpecBase, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]):
     """Update the `shared_with_map` based on the qspec, this applies the `SharedQuantizationSpec`
     configuration and established the relationship between `edge_or_node` with the edge/node that it
     is pointing to, we'll use this information in the end to get the group id
     """
     if isinstance(qspec, SharedQuantizationSpec):
-        sharing_with = qspec.edge_or_node
+        parent = qspec.edge_or_node
         # we point from edge_or_node to the node that it is sharing_with, e.g.
         # qspec for a = SharedQuantizationSpec(b) means `a` points to `b`
-        _union(sharing_with, edge_or_node, shared_with_map)
+        _union(parent, child, shared_with_map)
 
-def _find_root_qspec(
+def _unwrap_shared_qspec(
     qspec: QuantizationSpecBase,
     edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase],
     shared_with_map: Dict[EdgeOrNode, EdgeOrNode]
 ) -> QuantizationSpecBase:
     """Unwraps qspec to get the final root qspec (non SharedQuantizationSpec)
     if qspec is SharedQuantizationSpec
-       (1). tries to find the root node for the node that the qspec points to
+       (1). tries to find the root edge or node for the node that the qspec points to
        (2). recursively find the root qspec based on the qspec for the root node
     """
     if isinstance(qspec, SharedQuantizationSpec):
         sharing_with = qspec.edge_or_node
-        root = _find_root(sharing_with, shared_with_map)
+        root = _find_root_edge_or_node(sharing_with, shared_with_map)
         qspec = edge_or_node_to_qspec[root]
-        return _find_root_qspec(qspec, edge_or_node_to_qspec, shared_with_map)
+        return _unwrap_shared_qspec(qspec, edge_or_node_to_qspec, shared_with_map)
     return qspec
 
 def _has_same_dtype(qspec_a: QuantizationSpecBase, qspec_b: QuantizationSpecBase):
@@ -112,6 +112,28 @@ def _get_edge_or_node_to_qspec(model: torch.fx.GraphModule) -> Dict[EdgeOrNode, 
                 qspec = qa.output_qspec
                 edge_or_node_to_qspec[output_node] = qspec
     return edge_or_node_to_qspec
+
+def _union_input_edge_with(input_edge, input_edge_root_qspec, edge_or_node, edge_or_node_to_qspec, shared_with_map):
+    """Union input edge with another edge or node, used in implicit sharing to point the current input
+    edge to other user edges of the producer node, or the output of producer node since these are
+    referring to the same Tensor
+    """
+    root_qspec = None
+    if edge_or_node in edge_or_node_to_qspec:
+        qspec = edge_or_node_to_qspec[edge_or_node]
+        root_qspec = _unwrap_shared_qspec(qspec, edge_or_node_to_qspec, shared_with_map)
+    # TODO: add assertions for types of root qspecs
+    if (
+        root_qspec is not None and
+        _has_same_dtype(root_qspec, input_edge_root_qspec) and
+        _has_same_is_dynamic(root_qspec, input_edge_root_qspec)
+    ):
+        # the input arg to the node should reuse the existing output observer for arg
+        # since dtype is the same (we may want to extend this to be a more strict check
+        # in the future)
+        # so we point from `input_edge` to `arg` (output of the argument)
+        _union(edge_or_node, input_edge, shared_with_map)
+
 
 def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, QuantizationSpecBase]) -> Dict[EdgeOrNode, int]:
     """Map from edge/node to the group ID, generated from quantization annotations,
@@ -171,36 +193,50 @@ def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, Quanti
             _update_shared_with(output_node, qspec, shared_with_map)
         else:
             input_edge = edge_or_node
-            input_edge_root = _find_root(input_edge, shared_with_map)
-            input_edge_root_qspec = edge_or_node_to_qspec[input_edge_root]
-            input_edge_root_qspec = _find_root_qspec(input_edge_root_qspec, edge_or_node_to_qspec, shared_with_map)
+            input_edge_root_qspec = _unwrap_shared_qspec(qspec, edge_or_node_to_qspec, shared_with_map)
 
-            # find root_qspec for `arg` Node (the output of previous node)
             assert isinstance(input_edge, tuple)
             arg, n = input_edge
             if n.meta["quantization_annotation"].allow_implicit_sharing:
-                arg_as_output_root_qspec = None
-                if arg in edge_or_node_to_qspec:
-                    arg_as_output_qspec = edge_or_node_to_qspec[arg]
-                    arg_as_output_root_qspec = _find_root_qspec(arg_as_output_qspec, edge_or_node_to_qspec, shared_with_map)
-                # TODO: add assertions for types of root qspecs
-                if (
-                    arg_as_output_root_qspec is not None and
-                    _has_same_dtype(arg_as_output_root_qspec, input_edge_root_qspec) and
-                    _has_same_is_dynamic(arg_as_output_root_qspec, input_edge_root_qspec)
-                ):
-                    # the input arg to the node should reuse the existing output observer for arg
-                    # since dtype is the same (we may want to extend this to be a more strict check
-                    # in the future)
-                    # so we point from `input_edge` to `arg` (output of the argument)
-                    _union(arg, input_edge, shared_with_map)
+                # NOTE: the order is important here, we first share with other users and then share with previous
+                # output because the reverse order could cause circular dependency
+                # e.g node1 -> node2
+                #          \ -> node3
+                # when processing (node1, node2), if we first point (node1, node2) to node1
+                # Step 1. shared_map = {(node1, node2): node1}
+                # Step 2. after that, we point the (node1, node2) to its other user (node1, node3) ,
+                # which means shared_map = {(node1, node2): node1, node1: (node1, node3)}
+                # because we will point the root of (node1, node2) (in this case node1) to the root of (node1, node3)
+                # Step 3. and when we process (node1, node3), it can try to point to node1 as well, then we'll
+                # have a circular dependency
+                # the following order works around this issue, but this does not allow arbitrary configuration
+                # of sharing so it might break in a different case in the future, when it breaks
+                # quantizer writer can check the notes here to debug the issue
+
+                # sharing with other users of the producer node
+                # (arg, user)
+                for user in arg.users:
+                    if user is n:
+                        continue
+                    arg_to_user_edge = (arg, user)
+                    _union_input_edge_with(
+                        input_edge,
+                        input_edge_root_qspec,
+                        arg_to_user_edge,
+                        edge_or_node_to_qspec,
+                        shared_with_map
+                    )
+
+                # sharing with output of producer node
+                _union_input_edge_with(input_edge, input_edge_root_qspec, arg, edge_or_node_to_qspec, shared_with_map)
+
             _update_shared_with(input_edge, qspec, shared_with_map)
 
     # now that we get the sharing relations between all edges and nodes, we can assingn group ids
     cur_group_id = 0
     edge_or_node_to_group_id: Dict[EdgeOrNode, int] = {}
     for edge_or_node in shared_with_map.keys():
-        root = _find_root(edge_or_node, shared_with_map)
+        root = _find_root_edge_or_node(edge_or_node, shared_with_map)
         if root not in edge_or_node_to_group_id:
             edge_or_node_to_group_id[root] = cur_group_id
             cur_group_id += 1
@@ -281,10 +317,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     # otherwise, we'll insert a new observer/fake_quant node
 
     existing_obs_node = None
-    # skip inserting new observers if there is an observer inserted for the arg before
-    # that has the same dtype that we want to insert here
-    # alternatively we could have a dedup pass after we insert all observers to deduplicate
-    # observers
+    # skip inserting new observers if the same observer instance is inserted before for another user
     # Example:
     # conv1 -> obs1 -> existing_obs -> conv2
     #             \ -> conv3
@@ -296,19 +329,10 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         if not _is_activation_post_process_node(maybe_obs_node, named_modules):
             continue
         maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
-        if (
-            type(maybe_obs_mod) == type(input_edge_obs_or_fq) and
-            maybe_obs_mod.dtype == input_edge_obs_or_fq.dtype
-        ):
-            input_edge_obs_or_fq = maybe_obs_mod  # type: ignore[assignment]
-            existing_obs_node = maybe_obs_node
-            break
+        if id(maybe_obs_mod) == id(input_edge_obs_or_fq):
+            return maybe_obs_node
 
-    if existing_obs_node is None:
-        new_arg = _insert_obs_or_fq(arg, input_edge_obs_or_fq, model, named_modules, model.graph)
-    else:
-        new_arg = existing_obs_node
-
+    new_arg = _insert_obs_or_fq(arg, input_edge_obs_or_fq, model, named_modules, model.graph)
     return new_arg
 
 def _maybe_insert_input_observers_for_node(
@@ -335,11 +359,22 @@ def _maybe_insert_input_observers_for_node(
     # Look through every input arg.  If that arg's target dtype does not
     # match the current node's target dtype, insert an observer.
     new_args = []
+    # map from old arg to new arg, used for updating the numeric debug handle map
+    remap = {}
     for arg in node.args:
         new_arg = _maybe_insert_input_observer_for_arg_or_kwarg(
             node, arg, qconfig, model, named_modules, obs_or_fq_map, is_qat,
         )
         new_args.append(new_arg)
+        remap[arg] = new_arg
+
+    if "numeric_debug_handle" in node.meta:
+
+        def remap_fn(x):
+            return remap.get(x, x)
+
+        numeric_debug_handle = node.meta["numeric_debug_handle"]
+        node.meta["numeric_debug_handle"] = {remap_fn(k): v for k, v in numeric_debug_handle.items()}
 
     # Clone has a memory_format kwarg and zeros_like has a pin_memory kwarg
     # that persist in exported graph. This is just a work around for these.
