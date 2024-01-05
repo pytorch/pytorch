@@ -43,6 +43,8 @@ C10_DIAGNOSTIC_POP()
 
 namespace at { namespace native {
 
+ 
+
 auto get_fe_dtype(const Tensor& t) {
   namespace fe = cudnn_frontend;
   auto dtype = t.scalar_type();
@@ -56,6 +58,61 @@ auto get_fe_dtype(const Tensor& t) {
   }
   return fe_dtype;
 }
+
+ namespace { 
+ namespace fe = cudnn_frontend;
+using graph_and_tensors = std::tuple<
+                                    std::shared_ptr<fe::graph::Graph>,
+                                    std::shared_ptr<fe::graph::Tensor_attributes>, // X,
+                                    std::shared_ptr<fe::graph::Tensor_attributes>, // mean,
+                                    std::shared_ptr<fe::graph::Tensor_attributes>, // inv_var,
+                                    std::shared_ptr<fe::graph::Tensor_attributes>, // scale,
+                                    std::shared_ptr<fe::graph::Tensor_attributes>, // bias,
+                                    std::shared_ptr<fe::graph::Tensor_attributes>, // epsilon,
+                                    std::shared_ptr<fe::graph::Tensor_attributes> // Y
+                        >;
+
+struct LayerNormParams {
+  c10::DeviceIndex device_id;
+  fe::DataType_t dataType;
+  int64_t M;
+  int64_t N; 
+};
+
+void setLayerNormParams(LayerNormParams& params, const Tensor& X, int64_t M, int64_t N) {
+  memset(&params, 0, sizeof(params));
+  params.device_id = at::cuda::current_device();
+  params.dataType = get_fe_dtype(X);
+}
+
+struct LayerNormCacheKeyWrapper : ParamsWrapper<LayerNormParams> {
+  LayerNormCacheKeyWrapper(const Tensor& X, int64_t M, int64_t N) {
+    setLayerNormParams(this->pod, X, M, N);
+  }
+};
+
+ template <typename T, typename KeyType>
+struct LayerNormGraphCache {
+std::unordered_map<KeyType, graph_and_tensors, ParamsWrapperHash<KeyType>> engine_cache;
+
+// no mutexes here as caches are now thread local for v8, can also return a pointer
+// to the Execution Plan if we know it will not be invalidated by another thread
+T* find(const KeyType& key) {
+  auto it = engine_cache.find(key);
+  if (it == engine_cache.end()) {
+    return nullptr;
+  }
+  return &(it->second);
+}
+
+void update(const KeyType& key, T& results) {
+  engine_cache.erase(key);
+  engine_cache.emplace(key, std::move(results));
+}
+
+};
+
+ }
 
 void raw_cudnn_layernorm_forward_out(const Tensor& X, const Tensor& scale, const Tensor& bias, float epsilon, Tensor* mean, Tensor* rstd, Tensor* Y, int64_t M, int64_t N) {
   TORCH_WARN("called");
