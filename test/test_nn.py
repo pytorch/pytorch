@@ -35,7 +35,8 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, IS_WINDOWS, gcIfJetson, set_default_dtype
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION, \
+    PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
@@ -12400,6 +12401,8 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.double, torch.float, torch.half)
     def test_transformerencoderlayer(self, device, dtype):
+        if TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION and dtype == torch.half:
+            self.skipTest("Skip on ROCM due to Flash Attention tolerances")
         # this is a deterministic test for TransformerEncoderLayer
         d_model = 4
         nhead = 2
@@ -12613,6 +12616,8 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.half, torch.float)
     def test_transformerencoderlayer_gelu(self, device, dtype):
+        if TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION and dtype == torch.half:
+            self.skipTest("Skip on ROCM due to Flash Attention tolerances")
         # this is a deterministic test for TransformerEncoderLayer with gelu activation
         d_model = 4
         nhead = 2

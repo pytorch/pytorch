@@ -15,6 +15,7 @@
 #include <c10/core/SymInt.h>
 #include <c10/core/SymFloat.h>
 #include <c10/util/string_view.h>
+#include <c10/util/Array.h>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -58,12 +59,7 @@ inline c10::SymFloat calculate_scale(
   return c10::SymFloat(softmax_scale);
 }
 
-// This helper function creates a constexpr std::array
-// From a compile time list of values
-template <typename V, typename... T>
-inline constexpr auto array_of(T&&... t) -> std::array<V, sizeof...(T)> {
-  return {{std::forward<T>(t)...}};
-}
+using c10::array_of;
 
 inline bool input_requires_grad(sdp_params const& params) {
   const bool any_inputs_require_grad = params.query.requires_grad() ||
