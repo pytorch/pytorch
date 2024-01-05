@@ -62,15 +62,7 @@ FIXME_default_non_strict = {
     "export/test_upgrade",
     "export/test_verifier",
     "functorch/test_aotdispatch",
-    "functorch/test_control_flow",
-    "functorch/test_dims",
-    "functorch/test_eager_transforms",
-    "functorch/test_logging",
-    "functorch/test_memory_efficient_fusion",
-    "functorch/test_minifier",
     "functorch/test_ops",
-    "functorch/test_parsing",
-    "functorch/test_rearrange",
     "functorch/test_vmap",
     "functorch/test_vmap_registrations",
     "inductor/test_aot_inductor",
@@ -2298,6 +2290,99 @@ dynamo_expected_failures = {
     "TestDistributionShapes.test_mixture_same_family_shape",  # distributions/test_distributions
     "TestFunctors.test_cat_transform",  # distributions/test_distributions
     "TestFunctors.test_cat_transform_non_uniform",  # distributions/test_distributions
+    "TestRearrange.test_ellipsis_ops",  # functorch/test_rearrange
+    "TestRearrange.test_concatenations_and_stacking",  # functorch/test_rearrange
+    "TestRearrange.test_rearrange_permutations",  # functorch/test_rearrange
+    "TestRearrange.test_collapsed_ellipsis_errors_out",  # functorch/test_rearrange
+    "TestRearrange.test_rearrange_consistency",  # functorch/test_rearrange
+    "TestRearrange.test_unsqueeze",  # functorch/test_rearrange
+    "TestRearrange.test_squeeze",  # functorch/test_rearrange
+    "TestMin.test_manual_stuff",  # functorch/test_dims
+    "TestMin.test_dim_args",  # functorch/test_dims
+    "TestMin.test_dims_with_size",  # functorch/test_dims
+    "TestMin.test_functorch",  # functorch/test_dims
+    "TestMin.test_eq",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_adapt",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_monkey",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_network",  # functorch/test_dims
+    "TestMin.test_doc",  # functorch/test_dims
+    "TestMin.test_c",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_index_placement",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_dims_with_size",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_with_dims_split",  # functorch/test_dims
+    "TestMin.test_index",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_softmax_split",  # functorch/test_dims
+    "TestMin.test_mm_fuse",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_simple",  # functorch/test_dims
+    "TestMin.test_seg",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_doc",  # functorch/test_dims
+    "TestMin.test_attn",  # functorch/test_dims
+    "TestMin.test_mask",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_mm",  # functorch/test_dims
+    "TestMin.test_index_placement",  # functorch/test_dims
+    "TestMin.test_dir",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_hello",  # functorch/test_dims
+    "TestMin.test_network",  # functorch/test_dims
+    "TestMin.test_permute_orig",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_parse",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_order_keyword",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_seg",  # functorch/test_dims
+    "TestMin.test_diag",  # functorch/test_dims
+    "TestMin.test_monkey",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_embed",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_stack",  # functorch/test_dims
+    "TestMin.test_hello",  # functorch/test_dims
+    "TestMin.test_expand",  # functorch/test_dims
+    "TestMin.test_time_mm_fuse",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_compare_dims",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_manual_stuff",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_max",  # functorch/test_dims
+    "TestMin.test_adapt",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_dir",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_order",  # functorch/test_dims
+    "TestMin.test_mm",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_index",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_permute_orig",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_functorch",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_dim_args",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_eq",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_mask",  # functorch/test_dims
+    "TestMin.test_big_split",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_attn",  # functorch/test_dims
+    "TestMin.test_max",  # functorch/test_dims
+    "TestMin.test_compare_dims",  # functorch/test_dims
+    "TestMin.test_parse",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_big_split",  # functorch/test_dims
+    "TestMin.test_simple",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_mm_fuse",  # functorch/test_dims
+    "TestMin.test_order_keyword",  # functorch/test_dims
+    "TestMin.test_inplace",  # functorch/test_dims
+    "TestMin.test_with_dims_split",  # functorch/test_dims
+    "TestMin.test_softmax_split",  # functorch/test_dims
+    "TestMin.test_order",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_c",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_inplace",  # functorch/test_dims
+    "TestMin.test_embed",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_diag",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_expand",  # functorch/test_dims
+    "TestMin.test_stack",  # functorch/test_dims
+    "TestControlFlowTraced.test_tracing_map_symbolic_simple",  # functorch/test_control_flow
+    "TestControlFlow.test_map_list_in_out",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_nested_cond_map_cond_symbolic",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_autograd_aot_functionalized",  # functorch/test_control_flow
+    "TestControlFlow.test_map_autograd_nested_list",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_autograd_symbolic_simple",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_real",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_map_functionalized_aot_func",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_symbolic_list",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_symbolic_dict",  # functorch/test_control_flow
+    "TestControlFlow.test_map_dict_in_out",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_autograd_symbolic_list",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_autograd_symbolic_dict",  # functorch/test_control_flow
+    "TestControlFlow.test_map_autograd_no_grad_output",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_map_functionalized",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_nested_map_cond_symbolic",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_nested_map_cond_real",  # functorch/test_control_flow
 }
 
 dynamo_skips = {
