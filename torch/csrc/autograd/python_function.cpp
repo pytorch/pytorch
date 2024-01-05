@@ -202,6 +202,9 @@ auto PyNode::compiled_apply(
   // to the forward, and their metadata, so we pass the fwdInputs
   THPObjectPtr fwdInputMetadatas(
       PyTuple_New(static_cast<Py_ssize_t>(is_variable_input.size())));
+  if (!fwdInputMetadatas)
+    throw python_error();
+
   int offset = 0;
   for (const auto i : c10::irange(is_variable_input.size())) {
     if (!is_variable_input[i]) {
@@ -214,28 +217,18 @@ auto PyNode::compiled_apply(
     const auto& input_info = input_infos[i - offset];
 
     // Metadata is a tuple of 4 elements: (layout, device, dtype, size)
-    PyObject* fwdInputMetadata(PyTuple_New(static_cast<Py_ssize_t>(4)));
-    PyTuple_SET_ITEM(
-        fwdInputMetadata,
-        static_cast<Py_ssize_t>(0),
-        autograd::utils::wrap(input_info.layout));
-    PyTuple_SET_ITEM(
-        fwdInputMetadata,
-        static_cast<Py_ssize_t>(1),
-        THPDevice_New(input_info.device));
-    PyTuple_SET_ITEM(
-        fwdInputMetadata,
-        static_cast<Py_ssize_t>(2),
-        autograd::utils::wrap(input_info.scalar_type));
-    PyTuple_SET_ITEM(
-        fwdInputMetadata,
-        static_cast<Py_ssize_t>(3),
-        to_py_size(input_info.size));
+    PyObject* fwdInputMetadata = PyTuple_Pack(
+      4,
+      autograd::utils::wrap(input_info.layout),
+      THPDevice_New(input_info.device),
+      autograd::utils::wrap(input_info.scalar_type),
+      to_py_size(input_info.size));
+    if (!fwdInputMetadata)
+      throw python_error();
 
-    PyTuple_SetItem(
-        fwdInputMetadatas.get(), static_cast<Py_ssize_t>(i), fwdInputMetadata);
+    PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, fwdInputMetadata);
   }
-  PyObject* saved_tensors(unpack_saved_variables(
+  THPObjectPtr saved_tensors(unpack_saved_variables(
       py_fn, [](const Variable& var) { return THPVariable_Wrap(var); }));
   TORCH_INTERNAL_ASSERT(
       _backward_idx.has_value(),
@@ -246,7 +239,7 @@ auto PyNode::compiled_apply(
       "OOOi",
       pyInputs.get(),
       fwdInputMetadatas.get(),
-      saved_tensors,
+      saved_tensors.get(),
       *_backward_idx));
 
   if (!r)
@@ -287,6 +280,14 @@ auto PyNode::name() const -> std::string {
   auto f = (THPFunction*)obj;
   auto name = std::string(Py_TYPE(f)->tp_name);
   return name;
+}
+
+auto PyNode::compiled_autograd_should_lift() const -> bool {
+  pybind11::gil_scoped_acquire gil;
+  static PyObject* attr_name =
+      PyUnicode_InternFromString("_compiled_autograd_should_lift");
+  THPObjectPtr should_lift(PyObject_GetAttr(obj, attr_name));
+  return PyObject_IsTrue(should_lift.get()) == 1;
 }
 
 void PyNode::compiled_args(CompiledNodeArgs& args) {
@@ -335,9 +336,9 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
 
   static PyObject* forward_cls_name =
       PyUnicode_InternFromString("_forward_cls");
-  PyObject* forward_cls(PyObject_GetAttr(obj, forward_cls_name));
+  THPObjectPtr forward_cls(PyObject_GetAttr(obj, forward_cls_name));
   static PyObject* backward_name = PyUnicode_InternFromString("backward");
-  PyObject* backward(PyObject_GetAttr(forward_cls, backward_name));
+  PyObject* backward(PyObject_GetAttr(forward_cls.get(), backward_name));
   _backward_idx =
       args.add_backward(c10::SafePyObject(backward, getPyInterpreter()));
 }
@@ -355,7 +356,7 @@ variable_list PyNode::apply_with_saved(
   saved.before(f->input_info);
   f->compiled_autograd_tracing = true;
   variable_list result;
-  if (name() == "CompiledFunctionBackward") {
+  if (!compiled_autograd_should_lift()) {
     // special case on AotAutograd generated backward class
     result = apply(variable_list(inputs));
   } else {

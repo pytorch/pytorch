@@ -315,6 +315,7 @@ class FunctionMeta(type):
             name + "Backward", (BackwardCFunction,), {"_forward_cls": cls}
         )
         backward_fn._autograd_function_id = next(AUTOGRAD_FUNCTION_COUNTER)  # type: ignore[attr-defined]
+        backward_fn._compiled_autograd_should_lift = attrs.get("_compiled_autograd_should_lift", True)
         cls._backward_cls = backward_fn
 
         super().__init__(name, bases, attrs)
