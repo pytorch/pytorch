@@ -120,14 +120,6 @@ FIXME_default_non_strict = {
     "inductor/test_triton_heuristics",
     "inductor/test_triton_wrapper",
     "inductor/test_unbacked_symints",
-    "lazy/test_bindings",
-    "lazy/test_debug_util",
-    "lazy/test_extract_compiled_graph",
-    "lazy/test_functionalization",
-    "lazy/test_generator",
-    "lazy/test_meta_kernel",
-    "lazy/test_reuse_ir",
-    "lazy/test_step_closures",
     "lazy/test_ts_opinfo",
     "profiler/test_memory_profiler",
     "profiler/test_profiler",
@@ -2383,6 +2375,7 @@ dynamo_expected_failures = {
     "TestControlFlowTraced.test_map_functionalized",  # functorch/test_control_flow
     "TestControlFlowTraced.test_nested_map_cond_symbolic",  # functorch/test_control_flow
     "TestControlFlowTraced.test_nested_map_cond_real",  # functorch/test_control_flow
+    "TestMetaKernel.test_addmm_invalid_dtype",  # lazy/test_meta_kernel
 }
 
 dynamo_skips = {
@@ -2487,4 +2480,8 @@ dynamo_skips = {
     "TestMkldnnFusion.test_single_conv",  # known py311 fail
     "TestTorchDlPackCPU.test_dlpack_export_is_conj_cpu",  # known py311 fail
     "TestPythonDispatcher.test_quantized_structured_not_implemented",  # known py38 fail
+    "TestLazyReuseIr.testAdd",  # known py311 fail
+    "TestLazyReuseIr.testAddSubFallback",  # known py311 fail
+    "TestLazyReuseIr.testBatchNorm",  # known py311 fail
+    "TestLazyReuseIr.testAddSub",  # known py311 fail
 }
