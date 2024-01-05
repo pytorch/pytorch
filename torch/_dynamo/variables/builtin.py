@@ -677,8 +677,8 @@ class BuiltinVariable(VariableTracker):
         if self.fn == dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
         if self.fn == itertools.chain and name == "from_iterable":
-			assert len(args) == 1
-			assert len(kwargs) == 0
+            assert len(args) == 1
+            assert len(kwargs) == 0
             obj = args[0]
             items = []
             for item in obj.unpack_var_sequence(tx):
