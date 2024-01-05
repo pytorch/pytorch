@@ -1,9 +1,5 @@
 # tests in this list will run without Dynamo strict mode by default.
 FIXME_default_non_strict = {
-    "backends/xeon/test_launch",
-    "benchmark_utils/test_benchmark_utils",
-    "distributions/test_constraints",
-    "distributions/test_distributions",
     "dynamo/test_activation_checkpointing",
     "dynamo/test_after_aot",
     "dynamo/test_aot_autograd",
@@ -2300,6 +2296,10 @@ dynamo_expected_failures = {
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution
     "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution
+    "TestDistributionShapes.test_mixture_same_family_shape",  # distributions/test_distributions
+    "TestFunctors.test_cat_transform",  # distributions/test_distributions
+    "TestFunctors.test_cat_transform_non_uniform",  # distributions/test_distributions
+    "TestTorchrun.test_multi_threads",  # backends/xeon/test_launch
 }
 
 dynamo_skips = {
