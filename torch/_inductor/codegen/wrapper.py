@@ -478,7 +478,18 @@ class WrapperCodeGen(CodeGen):
                 continue
             size = self.codegen_shape_tuple(buf.get_size())
             stride = self.codegen_shape_tuple(buf.get_stride())
-            self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
+            error_msg = """
+Found a size/stride mismatch. Try re-running with layout optimization disabled:
+You can do this with either:
+    `torch._inductor.config.layout_optimization = False` (programatically)
+    `TORCHINDUCTOR_LAYOUT_OPTIMIZATION=0` (env var)
+If you are using DDP, and the assert is still failing even with layout optimization disabled,
+then please additionally try disabling the DDP Optimizer:
+    `torch._dynamo.config.optimize_ddp = False`
+"""
+            self.prefix.writeline(
+                f"assert_size_stride({name}, {size}, {stride}), {error_msg}"
+            )
 
     def write_prefix(self):
         self.prefix.splice(
