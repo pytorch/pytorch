@@ -67,12 +67,6 @@ _decomp_test_ops_core_autograd = [
     and op.supports_autograd
 ]
 
-# decomposition names which have py_impl decorators
-py_impl_decomposition_names = {
-    "interpolate",  # because of bilinear2d,
-    "upsample_bilinear",
-}
-
 
 def diff_arg(arg, requires_grad=True):
     def is_differentiable_arg(arg):
@@ -789,7 +783,7 @@ class TestDecomp(TestCase):
                      as mode, enable_python_dispatcher():
                     decomposed = func(*args, **kwargs)
 
-                if aten_name in py_impl_decomposition_names:
+                if op.has_kernel_for_dispatch_key(DispatchKey.CompositeImplicitAutograd):
                     # without this check, incorrect decomps at the python dispatcher level can still pass because
                     # they're checking aten decomps at the torch_dispatch level
                     non_decomposed = func(*args, **kwargs)

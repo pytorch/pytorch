@@ -4576,6 +4576,9 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape(D, rank)), scale_factor=1.7)
         yield SampleInput(make_arg(shape(D, rank)), scale_factor=0.6)
 
+def reference_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs)
+
     if mode in ('bilinear', ):
         make_arg = partial(
             make_tensor,
@@ -13649,6 +13652,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_upsample, 'bilinear'),
+           reference_inputs_func=partial(reference_inputs_upsample, 'bilinear'),
            skips=(
                # RuntimeError: false
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
