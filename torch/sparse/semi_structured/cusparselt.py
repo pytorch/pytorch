@@ -1,17 +1,33 @@
+from __future__ import annotations
+
+from typing import Any, Optional
+
 import torch
 
-from torch.sparse import SparseSemiStructuredTensor
+from torch.sparse.semi_structured import (
+    _SEMI_STRUCTURED_SPARSE_CONFIG,
+    SparseSemiStructuredMeta,
+    SparseSemiStructuredTensor,
+)
 
 __all__ = ["SparseSemiStructuredTensorCUSPARSELT"]
 
-class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor, torch.Tensor, metaclass=SparseSemiStructuredMeta):
 
+class SparseSemiStructuredTensorCUSPARSELT(  # type: ignore[misc]
+    SparseSemiStructuredTensor,
+    torch.Tensor,
+    metaclass=SparseSemiStructuredMeta
+):
+    """
+    This subclass connects cuSPARSELt to the user.
+    """
     _DTYPE_SHAPE_CONSTRAINTS = {
         torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 16, 16),
         torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
         torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
-        torch.float32: _SEMI_STRUCTURED_SPARSE_CONFIG(8, 8, 4, 4)
+        torch.float32: _SEMI_STRUCTURED_SPARSE_CONFIG(8, 8, 4, 4),
     }
+
     _FUSE_TRANSPOSE = False
     _DEFAULT_ALG_ID = 0
 
@@ -23,8 +39,8 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor, torch.Ten
         transposed: bool = False,
         fuse_transpose: bool = False,
         alg_id_cusparselt: int = 0,
-    ):
-        SparseSemiStructuredTensor._show_warning()
+    ) -> SparseSemiStructuredTensorCUSPARSELT:
+        torch.sparse.SparseSemiStructuredTensor._show_warning()
 
         kwargs = {}
         kwargs["device"] = compressed_tensor_cusparselt.device  # type: ignore[assignment]
@@ -49,13 +65,20 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor, torch.Ten
         self.alg_id_cusparselt = alg_id_cusparselt
 
     def __tensor_flatten__(self):
-        return ['compressed_tensor_cusparselt'], (self.original_shape, self.transposed, self.fuse_transpose, self.alg_id_cusparselt)
+        return ["compressed_tensor_cusparselt"], (
+            self.original_shape,
+            self.transposed,
+            self.fuse_transpose,
+            self.alg_id_cusparselt,
+        )
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
         original_shape, transposed, fuse_transpose, alg_id_cusparselt = meta
-        assert len(inner_tensors) == 1, f"Expected 1 inner tensors but got {len(inner_tensors)}"
-        compressed_tensor_cusparselt = inner_tensors['compressed_tensor_cusparselt']
+        assert (
+            len(inner_tensors) == 1
+        ), f"Expected 1 inner tensors but got {len(inner_tensors)}"
+        compressed_tensor_cusparselt = inner_tensors["compressed_tensor_cusparselt"]
 
         return SparseSemiStructuredTensorCUSPARSELT(
             compressed_tensor_cusparselt,
@@ -97,7 +120,9 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor, torch.Ten
             input_tensor, weight, bias = args
             shape = input_tensor.shape
             input_tensor_2d = input_tensor.view(-1, shape[-1])
-            res = torch.ops.aten.addmm.default(bias, input_tensor_2d, weight.t(), **kwargs)
+            res = torch.ops.aten.addmm.default(
+                bias, input_tensor_2d, weight.t(), **kwargs
+            )
             return res.view(*shape[:-1], -1)
 
         if func in {torch.ops.aten.addmm.default, torch.ops.aten.mm.default}:
@@ -105,7 +130,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor, torch.Ten
                 bias, input_A, input_B = args
             if func is torch.ops.aten.mm.default:
                 input_A, input_B = args
-                bias=None
+                bias = None
 
             # first element sparse
             if isinstance(input_A, cls) and not input_A.transposed:
@@ -115,7 +140,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor, torch.Ten
                     input_A.compressed_tensor_cusparselt,
                     input_B_padded,
                     bias=bias,  # type: ignore[arg-type]
-                    alg_id=input_A.alg_id_cusparselt
+                    alg_id=input_A.alg_id_cusparselt,
                 )
                 return res[:, :col]
 
@@ -128,7 +153,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor, torch.Ten
                     input_A_padded.t(),
                     bias=bias,  # type: ignore[arg-type]
                     transpose_result=input_B.fuse_transpose,
-                    alg_id=input_B.alg_id_cusparselt
+                    alg_id=input_B.alg_id_cusparselt,
                 )
                 res = res if input_B.fuse_transpose else res.t()
                 return res[:row, :]
@@ -137,13 +162,17 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor, torch.Ten
         if func is torch.ops.aten.values.default:
             m, k = args[0].shape
             num_kept_elements = m * k // 2
-            return args[0].compressed_tensor_cusparselt[:num_kept_elements].view(m, k // 2)
+            return (
+                args[0].compressed_tensor_cusparselt[:num_kept_elements].view(m, k // 2)
+            )
 
         # handle indices
         if func is torch.ops.aten.indices.default:
             m, k = args[0].shape
             num_kept_elements = m * k // 2
-            metadata = args[0].compressed_tensor_cusparselt[num_kept_elements:].view(m, -1)
+            metadata = (
+                args[0].compressed_tensor_cusparselt[num_kept_elements:].view(m, -1)
+            )
             metadata_dtype = torch.int32 if args[0].dtype == torch.int8 else torch.int16
             return metadata.view(metadata_dtype)
 
@@ -160,4 +189,4 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor, torch.Ten
         return cls(compressed_tensor_cusparselt, original_shape=original_tensor.shape)
 
     def to_dense(self):
-        raise RuntimeError("Converting to dense is not yet supported by cuSPARSELt backend!")
+        return torch.mm(self, torch.eye(col, dtype=self.dtype, device=self.device))

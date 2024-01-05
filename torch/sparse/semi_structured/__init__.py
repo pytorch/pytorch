@@ -1,23 +1,25 @@
 import warnings
+
+from abc import ABC, ABCMeta, abstractclassmethod, abstractmethod
 from collections import namedtuple
-from typing import Any, Optional, Union, TypeVar, Type
-from torch.sparse.semi_structured import SparseSemiStructuredTensorCUTLASS, SparseSemiStructuredTensorCUSPARSELT
+from typing import Any, Optional, Type, TypeVar, Union
 
 import torch
 
 __all__ = [
     "SparseSemiStructuredTensor",
-    "SparseSemiStructuredTensorCUTLASS"
-    "SparseSemiStructuredTensorCUSPARSELT"
     "to_sparse_semi_structured",
 ]
 
 _SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
-    "_SEMI_STRUCTURED_SPARSE_CONFIG", "sparse_min_rows sparse_min_cols dense_min_rows dense_min_cols"
+    "_SEMI_STRUCTURED_SPARSE_CONFIG",
+    "sparse_min_rows sparse_min_cols dense_min_rows dense_min_cols",
 )
 
-class SparseSemiStructuredMeta(ABCMeta, type(torch.Tensor)):
+
+class SparseSemiStructuredMeta(ABCMeta, torch._C._TensorMeta):
     pass
+
 
 class SparseSemiStructuredTensor(ABC):
     _FORCE_CUTLASS = True
@@ -34,6 +36,8 @@ class SparseSemiStructuredTensor(ABC):
         Raises:
             None
         """
+        assert hasattr(self, "shape")
+        assert hasattr(self, "transposed")
         return (
             f"{self.__class__.__name__}(shape={self.shape}, "
             f"transposed={self.transposed})"
@@ -72,7 +76,7 @@ class SparseSemiStructuredTensor(ABC):
         # check contiguous
         if not original_tensor.is_contiguous():
             raise RuntimeError(
-                f"Error original_tensor is not contiguous!"
+                "Error original_tensor is not contiguous!"
                 "Only contiguous tensors are currently supported."
             )
 
@@ -95,7 +99,7 @@ class SparseSemiStructuredTensor(ABC):
             )
 
     @classmethod
-    def _pad_dense_input(cls, dense_input : torch.Tensor) -> torch.Tensor:
+    def _pad_dense_input(cls, dense_input: torch.Tensor) -> torch.Tensor:
         """
         Calculates padding for dense tensor and pads tensor if necessary.
         If padding is not required, this function returns the original tensor.
@@ -118,12 +122,13 @@ class SparseSemiStructuredTensor(ABC):
 
     @classmethod
     @abstractmethod
-    def from_dense(cls, original_tensor) -> SparseSemiStructuredTensor:
+    def from_dense(cls, original_tensor) -> SparseSemiStructuredMeta:
         pass
 
     @abstractmethod
     def to_dense(self) -> torch.Tensor:
-        pass
+        pass  # type: ignore[empty-body]
+
 
 def to_sparse_semi_structured(
     original_tensor: torch.Tensor,
@@ -149,6 +154,7 @@ def to_sparse_semi_structured(
 
     Raises:
         None
+
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> A = torch.Tensor([0, 0, 1, 1]).tile((128, 32)).half().cuda()
@@ -176,6 +182,11 @@ def to_sparse_semi_structured(
                 [-4370, -4370, -4370,  ..., -4370, -4370, -4370]], device='cuda:0',
        dtype=torch.int16))
     """
+    from torch.sparse import (
+        SparseSemiStructuredTensorCUSPARSELT,
+        SparseSemiStructuredTensorCUTLASS,
+    )
+
     if SparseSemiStructuredTensor._FORCE_CUTLASS:
         return SparseSemiStructuredTensorCUTLASS.from_dense(original_tensor)
     else:
