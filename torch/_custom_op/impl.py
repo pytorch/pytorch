@@ -409,7 +409,6 @@ class CustomOp:
         """
 
         def inner(f):
-            frame = inspect.stack()[1]
             self._check_doesnt_have_library_meta_impl()
             self._register_impl("abstract", f, stacklevel=_stacklevel)
             location = self._get_impl("abstract").location

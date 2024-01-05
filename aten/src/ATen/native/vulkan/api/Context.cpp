@@ -33,22 +33,26 @@ Context::Context(size_t adapter_i, const ContextConfig& config)
 }
 
 Context::~Context() {
-  flush();
-  // Let the device know the context is done with the queue
-  adapter_p_->return_queue(queue_);
+  try {
+    flush();
+    // Let the device know the context is done with the queue
+    adapter_p_->return_queue(queue_);
+  } catch (...) {
+    TORCH_WARN("Exception thrown when destroying the Vulkan Context!");
+  }
 }
 
 DescriptorSet Context::submit_compute_prologue(
     CommandBuffer& command_buffer,
     const ShaderInfo& shader_descriptor,
     const utils::uvec3& local_workgroup_size) {
-  const VkDescriptorSetLayout shader_layout =
+  VkDescriptorSetLayout shader_layout =
       shader_layout_cache().retrieve(shader_descriptor.kernel_layout);
 
-  const VkPipelineLayout pipeline_layout =
+  VkPipelineLayout pipeline_layout =
       pipeline_layout_cache().retrieve(shader_layout);
 
-  const VkPipeline pipeline = pipeline_cache().retrieve(
+  VkPipeline pipeline = pipeline_cache().retrieve(
       {pipeline_layout_cache().retrieve(shader_layout),
        shader_cache().retrieve(shader_descriptor),
        local_workgroup_size});
@@ -70,9 +74,7 @@ void Context::submit_compute_epilogue(
   command_buffer.dispatch(global_workgroup_size);
 }
 
-void Context::submit_cmd_to_gpu(
-    const VkFence fence_handle,
-    const bool final_use) {
+void Context::submit_cmd_to_gpu(VkFence fence_handle, const bool final_use) {
   if (cmd_) {
     cmd_.end();
     adapter_p_->submit_cmd(

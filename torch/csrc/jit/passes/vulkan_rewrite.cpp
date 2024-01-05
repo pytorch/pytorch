@@ -57,6 +57,24 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
   linear_rewriter.runOnGraph(graph);
 }
 
+void insertPrePackedLayernormOp(std::shared_ptr<Graph>& graph) {
+  std::string layernorm_pattern = R"(
+    graph(%input, %normalized_shape, %weight, %bias, %eps, %cudnn_enable):
+        %r = aten::layer_norm(%input, %normalized_shape, %weight, %bias, %eps, %cudnn_enable)
+        return (%r))";
+  std::string prepacked_ops_pattern = R"(
+    graph(%input, %normalized_shape, %weight, %bias, %eps, %cudnn_enable):
+        %op_context : __torch__.torch.classes.vulkan.LayernormPackedContext = vulkan_prepack::create_layernorm_context(
+            %weight, %bias, %eps)
+        %res = vulkan_prepack::run_layernorm_context(%input, %normalized_shape, %op_context)
+        return (%res))";
+
+  SubgraphRewriter layernorm_rewriter;
+  layernorm_rewriter.RegisterRewritePattern(
+      layernorm_pattern, prepacked_ops_pattern);
+  layernorm_rewriter.runOnGraph(graph);
+}
+
 void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
 
@@ -369,6 +387,7 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
 
 void vulkanInsertPrePackedOps(std::shared_ptr<Graph>& graph) {
   insertPrePackedLinearOp(graph);
+  insertPrePackedLayernormOp(graph);
   insertPrePackedConv2dOp(graph);
   rewriteQuantizedOps(graph);
   insertPrePackedGruOp(graph);
@@ -409,6 +428,8 @@ void vulkanFoldPrePackingOps(script::Module& m) {
              "vulkan_quantized_prepack::convert_linear_context")) ||
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::create_linear_context")) ||
+        (n->kind() ==
+         Symbol::fromQualString("vulkan_prepack::create_layernorm_context")) ||
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::create_gru_context")) ||
         (n->kind() ==

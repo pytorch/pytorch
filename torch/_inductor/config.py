@@ -4,6 +4,11 @@ from typing import Any, Dict, TYPE_CHECKING
 
 import torch
 
+
+def is_fbcode():
+    return not hasattr(torch.version, "git_version")
+
+
 # add some debug printouts
 debug = False
 
@@ -20,7 +25,7 @@ verbose_progress = False
 fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
 # use cpp wrapper instead of python wrapper
-cpp_wrapper = False
+cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
 # dead code elimination
 dce = False
@@ -79,11 +84,19 @@ pattern_matcher = True
 post_grad_custom_pre_pass = None
 post_grad_custom_post_pass = None
 
+# Registers a custom pregrad pass. Note that the pre-grad IR is 1.
+# non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
+# use post-grad passes.
+pre_grad_custom_pass = None
+
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
 # Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
 efficient_conv_bn_eval_fx_passes = False
+
+# Enable predispatch aten IR for export
+is_predispatch = False
 
 # Deprecated
 group_fusion = False
@@ -99,6 +112,7 @@ pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
     "batch_layernorm": {},
     "batch_tanh": {},
     "batch_relu": {},
+    "batch_sigmoid": {},
 }
 
 # Post grad group/batch fusion and options, set to empty dict to disable fusion.
@@ -158,6 +172,13 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
+# force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
+# when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
+# for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure
+# that triton does not use TF32 wherever cublas would not use TF32
+force_same_precision = (
+    True if is_fbcode() else os.environ.get("TORCHINDUCTOR_FORCE_SAME_PRECISION") == "1"
+)
 # Specify candidate backends for gemm autotune.
 # Possible choices are combinations of: ATen, Triton, CUTLASS.
 # ATen: default Pytorch ATen kernels.
@@ -193,6 +214,10 @@ coordinate_descent_search_radius = int(
 )
 
 layout_optimization = os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", "1") == "1"
+
+
+force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
+
 
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
@@ -257,11 +282,6 @@ always_keep_tensor_constants = False
 
 # assert that indirect indexing does not read / write out of bounds
 assert_indirect_indexing = True
-
-
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
-
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -347,6 +367,9 @@ _raise_error_for_testing = False
 _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
+# Specify a file where we print out the profiling results.
+# None means we do not dump results to a file.
+profile_bandwidth_output = os.environ.get("TORCHINDUCTOR_PROFILE_OUTPUT", None)
 
 # TODO: remove later
 disable_cpp_codegen = False
@@ -360,6 +383,21 @@ freezing: bool = os.environ.get("TORCHINDUCTOR_FREEZING", "0") == "1"
 # Make freezing invalidate the eager Parameters of nn modules, to avoid memory overhead
 # of potentially keeping multiple copies of weights.
 freezing_discard_parameters: bool = False
+
+# Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
+# should be run with this flag both on and off to make sure we have coverage.
+allow_stack_allocation: bool = True
+
+# Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
+# to maximize performance for use cases that it can accommodate at the expense of
+# generality. In brief:
+# - inputs and outputs are ArrayRefTensor<T> (note that strides are required, but the
+#   tensor must be contiguous)
+# - constant handling is unchanged because it is not a per-inference-iteration bottleneck
+#
+# When the DSO is generated in this mode, the usual interface will also be supported,
+# but performance for that interface may be degraded.
+use_minimal_arrayref_interface: bool = False
 
 
 # config specific to codegen/cpp.py
@@ -413,6 +451,9 @@ class cpp:
     # Make scatter_reduce fallback when reduce is sum to avoid performance regression
     # using atomic_add.
     fallback_scatter_reduce_sum = True
+
+    # Use funsafe-math-optimizations when compiling
+    enable_unsafe_math_opt_flag = False
 
 
 # config specific to codegen/triton.py
@@ -615,6 +656,16 @@ class trace:
 
     # SVG figure showing fx with fusion
     draw_orig_fx_graph = os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
+
+    # We draw our fx graphs with the "record" shape attribute by default.
+    # Sometimes, when the graph is very complex, we may hit dot errors like below:
+    #   "flat edge between adjacent nodes one of which has a record shape -
+    #    replace records with HTML-like labels"
+    # and thus fail to generate a graph. So, let's give the user an option
+    # to specify the shape attribute for the dot graph. For example, passing
+    # INDUCTOR_DOT_GRAPH_SHAPE_SVG = "none" would let us generate HTML-like lables
+    # to workaround the above failure.
+    dot_graph_shape = os.environ.get("INDUCTOR_DOT_GRAPH_SHAPE_SVG", None)
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False

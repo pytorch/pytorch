@@ -53,23 +53,21 @@ class _X86InductorQuantizationAnnotation(QuantizationAnnotation):
     _is_output_of_quantized_pattern: bool = False
 
 
-# Ops support int8 data type and excludes ops like conv, linear.
-quantizable_ops_pt2e: Set = {
-    torch.ops.aten.max_pool2d.default,
-    torch.ops.aten.cat.default,
-    torch.ops.aten.avg_pool2d.default,
-}
-
-
-# Ops that:
-# 1. Ops prefer to run with int8 when int8 input is given.
-# 2. Ops don't support int8 in and fp32 out.
+# Operations that:
+# 1. Operations are optimized to run with int8 when int8 input provided.
+# 2. Operations do not support int8 input and produce fp32 output.
 int8_in_int8_out_ops_pt2e: Set = {
     torch.ops.aten.max_pool2d.default,
     torch.ops.aten.cat.default,
     torch.ops.aten.avg_pool2d.default,
+    torch.ops.aten.adaptive_avg_pool2d.default,
+    torch.ops.aten.flatten.using_ints,
 }
 
+
+# Operations support the int8 data type and exclude operations such as conv and linear.
+# A superset of int8_in_int8_out_ops_pt2e incorporating additional operators.
+quantizable_ops_pt2e = copy.deepcopy(int8_in_int8_out_ops_pt2e)
 
 QUANT_ANNOTATION_KEY = "quantization_annotation"
 
@@ -445,7 +443,9 @@ class X86InductorQuantizer(Quantizer):
             ) = self._get_output_nodes_of_partitions(
                 [conv_partition, bn_partition, binary_partition, unary_partition]
             )
-
+            if len(bn_output_node.users) != 1:
+                # Conv BN pattern should only has 1 user.
+                continue
             (
                 bn_output_node_idx,
                 extra_input_node_idx,
@@ -502,7 +502,9 @@ class X86InductorQuantizer(Quantizer):
             ) = self._get_output_nodes_of_partitions(
                 [conv_partition, bn_partition, binary_partition]
             )
-
+            if len(bn_output_node.users) != 1:
+                # Conv BN pattern should only has 1 user.
+                continue
             (
                 bn_output_node_idx,
                 extra_input_node_idx,
@@ -544,9 +546,18 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_qat_conv2d_bn_unary(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        fused_partitions = find_sequential_partitions(
-            gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU]
-        )
+        fused_partitions = []
+        unary_patterns = [
+            [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU],
+            [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.Hardtanh],
+            [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU6],
+        ]
+        for unary_pattern in unary_patterns:
+            partitions = find_sequential_partitions(gm, unary_pattern)
+            if partitions:
+                # Extend the fused_partitions if partitions is not empty
+                fused_partitions.extend(partitions)
+
         for fused_partition in fused_partitions:
             conv_partition, bn_partition, unary_partition = fused_partition
             (
@@ -634,6 +645,9 @@ class X86InductorQuantizer(Quantizer):
             conv_node, binary_node, unary_node = self._get_output_nodes_of_partitions(
                 [conv_partition, binary_partition, unary_partition]
             )
+            if len(conv_node.users) != 1:
+                # Conv Node should only has 1 user node
+                continue
             conv_node_idx, extra_input_node_idx = self._get_input_idx_for_binary_node(
                 conv_node, binary_node
             )
@@ -676,6 +690,9 @@ class X86InductorQuantizer(Quantizer):
             conv_node, binary_node = self._get_output_nodes_of_partitions(
                 [conv_partition, binary_partition]
             )
+            if len(conv_node.users) != 1:
+                # Conv Node should only has 1 user node
+                continue
             conv_node_idx, extra_input_node_idx = self._get_input_idx_for_binary_node(
                 conv_node, binary_node
             )
@@ -707,9 +724,18 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_conv2d_unary(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        fused_partitions = find_sequential_partitions(
-            gm, [torch.nn.Conv2d, torch.nn.ReLU]
-        )
+        fused_partitions = []
+        unary_patterns = [
+            [torch.nn.Conv2d, torch.nn.ReLU],
+            [torch.nn.Conv2d, torch.nn.Hardtanh],
+            [torch.nn.Conv2d, torch.nn.ReLU6],
+        ]
+        for unary_pattern in unary_patterns:
+            partitions = find_sequential_partitions(gm, unary_pattern)
+            if partitions:
+                # Extend the fused_partitions if partitions is not empty
+                fused_partitions.extend(partitions)
+
         for fused_partition in fused_partitions:
             conv_partition, unary_partition = fused_partition
             conv_node, unary_node = self._get_output_nodes_of_partitions(
@@ -734,7 +760,7 @@ class X86InductorQuantizer(Quantizer):
         conv_partitions = get_source_partitions(
             gm.graph, [torch.nn.Conv2d, torch.nn.functional.conv2d]
         )
-        conv_partitions = list(itertools.chain(*conv_partitions.values()))
+        conv_partitions = list(itertools.chain.from_iterable(conv_partitions.values()))
         for conv_partition in conv_partitions:
             if len(conv_partition.output_nodes) > 1:
                 raise ValueError("conv partition has more than one output node")
@@ -909,7 +935,9 @@ class X86InductorQuantizer(Quantizer):
         linear_partitions = get_source_partitions(
             gm.graph, [torch.nn.Linear, torch.nn.functional.linear]
         )
-        linear_partitions = list(itertools.chain(*linear_partitions.values()))
+        linear_partitions = list(
+            itertools.chain.from_iterable(linear_partitions.values())
+        )
         for partition in linear_partitions:
             if len(partition.output_nodes) > 1:
                 raise ValueError(

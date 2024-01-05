@@ -17,6 +17,7 @@ from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphi
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_LINUX,
@@ -41,11 +42,10 @@ importlib.import_module("filelock")
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
-HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
-    unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
+    unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
 
 
