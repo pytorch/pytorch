@@ -250,6 +250,8 @@ def _share_state_and_init_handle_attrs(
         fsdp_state._default_stream = root_state._default_stream
         fsdp_state._exec_order_data = root_state._exec_order_data
         fsdp_state._free_event_queue = root_state._free_event_queue
+        if fsdp_state._fsdp_extension is not None:
+            fsdp_state._fsdp_extension.compute_stream = root_state._default_stream
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
@@ -279,6 +281,10 @@ def _init_streams(
     high_priority = -1 if state.limit_all_gathers and uses_hybrid_sharding else 0
     # Default stream for computation
     state._default_stream = state._device_handle.current_stream()
+    if state._fsdp_extension is not None:
+        # set the compute stream to the FSDP extension
+        state._fsdp_extension.compute_stream = state._default_stream
+
     # Stream for unshard logic, including allocating the all-gather destination
     # tensors and the all-gathers themselves
     state._unshard_stream = state._device_handle.Stream(priority=high_priority)
@@ -441,7 +447,9 @@ def _pre_forward_unshard(
     if not handle._prefetched:
         _unshard(state, handle, state._unshard_stream, state._pre_unshard_stream)
     handle._needs_pre_forward_unshard = False
-    state._device_handle.current_stream().wait_stream(state._unshard_stream)
+    # Don't wait during trace
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        state._device_handle.current_stream().wait_stream(state._unshard_stream)
     with torch.profiler.record_function(
         "FullyShardedDataParallel._pre_forward_prefetch"
     ):
@@ -638,6 +646,7 @@ def _pre_backward_hook(
     state: _FSDPState,
     module: nn.Module,
     handle: FlatParamHandle,
+    grad,
     *unused: Any,
 ) -> Any:
     """
@@ -649,8 +658,13 @@ def _pre_backward_hook(
     """
     # Only run the pre-backward hook once per group of handles involved in the
     # same module forward computation
-    if handle and handle._ran_pre_backward_hook:
-        return
+    if (
+        handle
+        and hasattr(handle, "_ran_pre_backward_hook")
+        and handle._ran_pre_backward_hook
+    ):
+        log.debug("%s %s", id(state), "Not Running pre backward! Already Ran!")
+        return grad
 
     with torch.profiler.record_function("FullyShardedDataParallel._pre_backward_hook"):
         # Queue the post-backward callback once for the root FSDP instance to
@@ -669,7 +683,7 @@ def _pre_backward_hook(
         # per-handle in the pre-backward hook, so we can return early here if
         # there are no handles.
         if not handle:
-            return
+            return grad
         handle._training_state = HandleTrainingState.BACKWARD_PRE
 
         if handle._needs_pre_backward_unshard:
@@ -682,7 +696,9 @@ def _pre_backward_hook(
                     state._unshard_stream,
                     state._pre_unshard_stream,
                 )
-            state._device_handle.current_stream().wait_stream(state._unshard_stream)
+            # Don't wait during trace
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                state._device_handle.current_stream().wait_stream(state._unshard_stream)
 
         # Set this to `False` to ensure that a mistargeted prefetch does not
         # actually unshard these handles
@@ -693,6 +709,7 @@ def _pre_backward_hook(
             _prefetch_handle(state, handle, _PrefetchMode.BACKWARD)
         handle.prepare_gradient_for_backward()
         handle._ran_pre_backward_hook = True
+        return grad
 
 
 @no_type_check
@@ -700,6 +717,7 @@ def _pre_backward_hook(
 def _post_backward_hook(
     state: _FSDPState,
     handle: FlatParamHandle,
+    flat_param,
     *unused: Any,
 ):
     """
@@ -745,7 +763,10 @@ def _post_backward_hook(
 
         # Wait for all ops in the current stream (e.g. gradient computation) to
         # finish before reduce-scattering the gradient
-        state._post_backward_stream.wait_stream(state._device_handle.current_stream())
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            state._post_backward_stream.wait_stream(
+                state._device_handle.current_stream()
+            )
 
         with state._device_handle.stream(state._post_backward_stream):
             autograd_computed_grad = flat_param.grad.data
@@ -840,7 +861,9 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
             group=pg,
         )
         if uses_hybrid_sharded_strategy:
-            state._all_reduce_stream.wait_stream(state._post_backward_stream)
+            # Don't wait during trace
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                state._all_reduce_stream.wait_stream(state._post_backward_stream)
             with state._device_handle.stream(state._all_reduce_stream):
                 # Since the new sharded gradient is produced in the post-
                 # backward stream and consumed in the all-reduce stream,
@@ -1505,10 +1528,12 @@ def _register_post_backward_final_callback(
     if state._post_backward_callback_queued:
         return
     _assert_in_training_states(state, [TrainingState.IDLE])
-    state._post_backward_callback_queued = True
-    Variable._execution_engine.queue_callback(
-        functools.partial(_post_backward_final_callback, state, module)
-    )
+    # Trace does not need this callback
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        state._post_backward_callback_queued = True
+        Variable._execution_engine.queue_callback(
+            functools.partial(_post_backward_final_callback, state, module)
+        )
 
 
 def _wait_for_computation_stream(
@@ -1521,6 +1546,9 @@ def _wait_for_computation_stream(
     For example, this should be called in the FSDP root's pre-forward to
     respect optimizer step computation.
     """
+    # Tracing does not need to wait
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        return
     unshard_stream.wait_stream(computation_stream)  # type: ignore[attr-defined]
     # Having the pre-all-gather stream wait for the current stream even if we
     # do not leverage the pre-all-gather stream is tolerable since this only
