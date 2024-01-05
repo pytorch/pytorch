@@ -259,13 +259,6 @@ AttributeError::AttributeError(const char* format, ...) {
   va_end(fmt_args);
 }
 
-LinAlgError::LinAlgError(const char* format, ...) {
-  va_list fmt_args{};
-  va_start(fmt_args, format);
-  msg = formatMessage(format, fmt_args);
-  va_end(fmt_args);
-}
-
 void PyWarningHandler::InternalHandler::process(const c10::Warning& warning) {
   warning_buffer_.push_back(warning);
 }

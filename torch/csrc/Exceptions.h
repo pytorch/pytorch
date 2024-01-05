@@ -325,14 +325,6 @@ struct AttributeError : public PyTorchError {
   }
 };
 
-// Translates to Python LinAlgError
-struct LinAlgError : public PyTorchError {
-  LinAlgError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
-  PyObject* python_type() override {
-    return THPException_LinAlgError;
-  }
-};
-
 // ATen warning handler for Python
 struct PyWarningHandler {
   // Move actual handler into a separate class with a noexcept
