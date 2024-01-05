@@ -10,7 +10,6 @@ from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch.utils import _pytree as pytree
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import tf32_off
-from torch.testing._internal.common_dtype import integral_types
 from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
@@ -756,6 +755,12 @@ class TestDecomp(TestCase):
         aten_name = op.decomp_aten_name or op.aten_name
 
         func = op.get_op()
+
+        def run_without_python_dispatcher(mode):
+            return any(isinstance(op, torch._ops.OpOverload) and
+                       op.has_kernel_for_dispatch_key(DispatchKey.CompositeImplicitAutograd)
+                       for op in mode.decomposed.union([func]))
+
         for sample_input in samples:
             if requires_grad:
                 fn, primals = normalize_op_input_output(func, sample_input)
@@ -770,6 +775,12 @@ class TestDecomp(TestCase):
                 with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
                      as mode, enable_python_dispatcher():
                     decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *primals)
+                    if run_without_python_dispatcher(mode):
+                        # without this check, incorrect decomps at the python dispatcher level can still pass because
+                        # they're checking aten decomps at the torch_dispatch level.
+                        with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
+                             as mode:
+                            decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *primals)
                 if aten_name in decomposition_names:
                     self.check_decomposed(aten_name, mode)
 
@@ -779,6 +790,12 @@ class TestDecomp(TestCase):
                     with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
                          as mode, enable_python_dispatcher():
                         decomp_vjp_fn(cotangents)
+                    if run_without_python_dispatcher(mode):
+                        # without this check, incorrect decomps at the python dispatcher level can still pass because
+                        # they're checking aten decomps at the torch_dispatch level.
+                        with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
+                             as mode:
+                            decomp_vjp_fn(cotangents)
                     if not run_all:
                         self.check_decomposed(op.aten_backward_name, mode)
 
@@ -791,9 +808,7 @@ class TestDecomp(TestCase):
                      as mode, enable_python_dispatcher():
                     func(*args, **kwargs)
 
-                if any(isinstance(op, torch._ops.OpOverload) and
-                        op.has_kernel_for_dispatch_key(DispatchKey.CompositeImplicitAutograd)
-                        for op in mode.decomposed):
+                if run_without_python_dispatcher(mode):
                     # without this check, incorrect decomps at the python dispatcher level can still pass because
                     # they're checking aten decomps at the torch_dispatch level.
                     with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
