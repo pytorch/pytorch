@@ -7,13 +7,14 @@ torch.manual_seed(1337)
 class Net(torch.nn.Module):
     def __init__(self, device):
         super().__init__()
-        self.fc = torch.nn.Linear(64, 10)
-        self.const_1 = torch.randn((10), device=device)
-        self.const_2 = torch.randn((10), device=device)
+        self.w_pre = torch.randn(4, 4, device=device)
+        self.w_add = torch.randn(4, device=device)
 
     def forward(self, x, y):
-        const_3 = self.const_1 + self.const_2
-        return self.fc(torch.sin(x) + torch.cos(y)) + const_3
+        w_transpose = torch.transpose(self.w_pre, 0, 1)
+        w_relu = torch.nn.functional.relu(w_transpose)
+        w = w_relu + self.w_add
+        return torch.matmul(x, w)
 
 data = {}
 
@@ -38,10 +39,8 @@ for device in ["cpu", "cuda"]:
         f"model_so_path_{device}": model_so_path,
         f"inputs_{device}": [x, y],
         f"outputs_{device}": [ref_output],
-        f"fc_weight_{device}": params["fc.weight"],
-        f"fc_bias_{device}": params["fc.bias"],
-        f"const_1_{device}": model.const_1,
-        f"const_2_{device}": model.const_2,
+        f"const_1_{device}": model.w_pre,
+        f"const_2_{device}": model.w_add,
     })
 
 # Use this to communicate tensors to the cpp code
