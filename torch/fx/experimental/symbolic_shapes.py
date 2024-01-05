@@ -2232,15 +2232,19 @@ class ShapeEnv:
                 for i in range(len(size))
                 if stride[i] is not None and ex_stride[i] >= 0
             }
+
             # iterate over unbound strides in sorted order
-            val_list = sorted(
-                [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
-                key=lambda tup: (
-                    # Order singletons by their coefficients.
-                    # 1 here to order singletons after non-singletons.
+            def singleton_aware_sort(tup):
+                # Order singletons by their coefficients.
+                # 1 here to order singletons after non-singletons.
+                return (
                     (1, tup[0].node.singleton_coeff(), tup[1]) if is_singleton(tup[0])
                     else (0, *tup)
                 )
+
+            val_list = sorted(
+                [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
+                key=singleton_aware_sort
             )
             for _, i in val_list:
                 if stride[i] is None and ex_stride[i] in candidates:
@@ -2254,7 +2258,7 @@ class ShapeEnv:
                         (ex_stride[i], i)
                         for i in range(len(stride))
                         if stride[i] is None
-                    ]
+                    ], key=singleton_aware_sort
                 )
                 stride[i] = self.create_symbol(
                     val,
