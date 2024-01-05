@@ -2,13 +2,13 @@ import math
 import operator
 import traceback
 from functools import partial
-from typing import Callable, Dict, List, NamedTuple, Set, Tuple
+from typing import Callable, Dict, List, NamedTuple, Set
 
 import sympy
 
 import torch
 import torch.fx
-from torch._export.pass_base import _ExportPassBase, ProxyValue, PassResult
+from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse, ProxyValue, PassResult
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -40,15 +40,13 @@ def _convert_range_to_int(range: ValueRanges):
     return min_val, max_val
 
 
-class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
+class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBaseDeprecatedDoNotUse):
     def __init__(
         self,
         range_constraints: Dict[sympy.Symbol, ValueRanges],
-        equality_constraints: List[Tuple[InputDim, InputDim]],
     ):
         super().__init__()
         self.range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
-        self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
         self._asserts_generated_unbacked_symbols: Set[sympy.Symbol] = set()
         self.counter = 0
 
