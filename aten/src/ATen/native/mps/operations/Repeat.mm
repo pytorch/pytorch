@@ -40,6 +40,7 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
 
   TORCH_CHECK(repeats.size() >= (size_t)self.dim(),
               "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
+  TORCH_CHECK(!self.is_complex(), "repeat(): Not supported for complex yet!");
 
   // Add new leading dimensions to the tensor if the
   // number of target dimensions is larger than the
