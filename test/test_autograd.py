@@ -5972,25 +5972,44 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(Exception, "only supported when use_reentrant=False"):
             out = checkpoint(lambda x: x.sin(), x, use_reentrant=True, context_fn=context_fn)
 
-    def test_checkpoint_errors_if_use_reentrant_not_passed_explicitly(self):
+    def test_checkpoint_warns_if_use_reentrant_not_passed_explcitly(self):
         a = torch.randn(1, requires_grad=True)
-        error_str = "please pass in use_reentrant=True or use_reentrant=False explicitly"
 
-        with self.assertRaisesRegex(ValueError, error_str):
+        # Passing explicitly should not warn
+        with warnings.catch_warnings(record=True) as w:
+            checkpoint(lambda x: x, a, use_reentrant=False)
+        self.assertEqual(len(w), 0)
+
+        # Not passing explicitly warns
+        with warnings.catch_warnings(record=True) as w:
             checkpoint(lambda x: x, a)
+        self.assertEqual(len(w), 1)
+        self.assertIn(
+            "the use_reentrant parameter should be passed explicitly",
+            str(w[0].message)
+        )
 
-    def test_checkpoint_sequential_errors_if_use_reentrant_not_passed_explicitly(self):
+    def test_checkpoint_sequential_warns_if_use_reentrant_not_passed_explcitly(self):
         a = torch.randn(3, requires_grad=True)
         modules_list = [
             torch.nn.Linear(3, 3),
             torch.nn.Linear(3, 3),
             torch.nn.Linear(3, 3)
         ]
-        error_str = "please pass in use_reentrant=True or use_reentrant=False explicitly"
+
+        # Passing explicitly should not warn
+        with warnings.catch_warnings(record=True) as w:
+            checkpoint_sequential(modules_list, 3, a, use_reentrant=False)
+        self.assertEqual(len(w), 0)
 
         # Not passing explicitly warns
-        with self.assertRaisesRegex(ValueError, error_str):
+        with warnings.catch_warnings(record=True) as w:
             checkpoint_sequential(modules_list, 3, a)
+        self.assertEqual(len(w), 1)
+        self.assertIn(
+            "the use_reentrant parameter should be passed explicitly",
+            str(w[0].message)
+        )
 
     def test_checkpoint_detects_non_determinism(self):
         def save_3_tensors(x):
