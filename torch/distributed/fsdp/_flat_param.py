@@ -2706,13 +2706,13 @@ def _warn_use_fake_reduce(log: logging.Logger, warning: str):
 
 
 def _same_storage(a, b):
-    return a._typed_storage()._data_ptr() == b._typed_storage().data_ptr()
+    return a.untyped_storage().data_ptr() == b.untyped_storage().data_ptr()
 
 
 def _same_storage_size(a: torch.Tensor, b: int):
-    return a._typed_storage()._size() == b
+    return a.untyped_storage().size() // a.element_size() == b
 
 
 def _storage_size_allocated(tensor: Tensor):
-    storage_size: int = tensor._typed_storage()._size()
+    storage_size: int = tensor.untyped_storage().size()
     return storage_size > 0
