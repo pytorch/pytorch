@@ -2712,7 +2712,7 @@ def _same_storage(a, b):
 
 @torch._dynamo.allow_in_graph
 def _same_storage_size(a: torch.Tensor, b: int):
-    return a.untyped_storage().size() == b
+    return a.untyped_storage().size() // a.element_size() == b
 
 
 @torch._dynamo.allow_in_graph
