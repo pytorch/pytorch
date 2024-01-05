@@ -61,6 +61,7 @@ from torch._dynamo.testing import (
     reset_rng_state,
     same,
 )
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 
 try:
     from torch._dynamo.utils import clone_inputs, graph_break_reasons
@@ -129,6 +130,120 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "doctr_det_predictor",
     "dlrm",
 }
+
+# These models currently fail accuracy with eager Adam optimizer
+# so we use SGD when running the full benchmarks
+# https://github.com/pytorch/pytorch/issues/115966
+BENCHMARK_USE_SGD = {
+    # TorchBench
+    "BERT_pytorch",
+    "LearningToPaint",
+    "alexnet",
+    "dcgan",
+    "demucs",
+    "densenet121",
+    "dlrm",
+    "fastNLP_Bert",
+    "mobilenet_v2",
+    "phlippe_densenet",
+    "phlippe_resnet",
+    "pytorch_stargan",
+    "resnet18",
+    "shufflenet_v2_x1_0",
+    "speech_transformer",
+    "squeezenet1_1",
+    "stable_diffusion_text_encoder",
+    "timm_efficientdet",
+    "timm_nfnet",
+    "timm_regnet",
+    "timm_vision_transformer",
+    "timm_vovnet",
+    "vgg16",
+    "hf_T5",  # Fails dynamic https://github.com/pytorch/pytorch/issues/115968
+    # HF
+    "AlbertForMaskedLM",
+    "BartForCausalLM",
+    "BartForConditionalGeneration",
+    "BlenderbotSmallForCausalLM",
+    "BlenderbotSmallForConditionalGeneration",
+    "DebertaV2ForQuestionAnswering",  # eager OOM
+    "ElectraForCausalLM",
+    "M2M100ForConditionalGeneration",
+    "MBartForCausalLM",
+    "MBartForConditionalGeneration",
+    "OPTForCausalLM",
+    "PLBartForCausalLM",
+    "PLBartForConditionalGeneration",
+    "PegasusForCausalLM",
+    "Speech2Text2ForCausalLM",
+    "TrOCRForCausalLM",
+    "XGLMForCausalLM",
+    # TIMM
+    "adv_inception_v3",
+    "botnet26t_256",
+    "cait_m36_384",  # OOM
+    "coat_lite_mini",
+    "convit_base",
+    "dpn107",
+    "fbnetv3_b",
+    "gernet_l",
+    "lcnet_050",
+    "mixnet_l",
+    "res2net101_26w_4s",
+    "res2net50_14w_8s",
+    "res2next50",
+    "resnest101e",
+    "sebotnet33ts_256",
+    "swsl_resnext101_32x16d",
+    "tf_efficientnet_b0",
+    "ghostnet_100",
+    "gmixer_24_224",
+    "tinynet_a",
+}
+
+# These models OOM in CI
+# due to the extra memory of Adam optimizer states,
+# so we fall back to SGD in CI
+CI_USE_SGD = {
+    "torchrec_dlrm",
+    "demucs",
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+    "hf_T5_base",
+    "hf_clip",
+    "llama_v2_7b_16h",
+    "mobilenet_v2_quantized_qat",
+    "phi_1_5 resnet50_quantized_qat",
+    "BlenderbotForCausalLM",
+    "cait_m36_384",
+    "DALLE2_pytorch",
+    "moco",
+    "timm_efficientdet",
+    "ghostnet_100",
+    "regnety_002",
+    "poolformer_m36",
+    "inception_v3",
+    "tinynet_a",
+    "selecsls42b",
+    "mobilevit_s",
+    "pytorch_CycleGAN_and_pix2pix",
+    "vision_maskrcnn",
+    "resmlp_12_224",
+    "dlrm",
+    "resnet50",
+    "dm_nfnet_f0",
+    "pit_b_224",
+    "tf_mixnet_l",
+}
+
 
 DO_NOT_CAST_INPUTS = {"stable_diffusion"}
 
@@ -703,10 +818,27 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
     return output_str
 
 
+@contextlib.contextmanager
+def override_synchronize_with_onnx_iobinding(iobinding):
+    global synchronize
+    prev_synchrnoize = synchronize
+    try:
+        if iobinding is not None:
+
+            def new_synchronize():
+                iobinding.synchronize_inputs()
+                iobinding.synchronize_outputs()
+
+            synchronize = new_synchronize
+        yield
+    finally:
+        synchronize = prev_synchrnoize
+
+
 def speedup_experiment_onnx(
-    onnx_model_cls: Type[OnnxModelFromTorchScript],
     args,
     model_iter_fn,
+    onnx_model: OnnxModel,
     model,
     example_inputs,
     **kwargs,
@@ -715,9 +847,8 @@ def speedup_experiment_onnx(
     Measure speedups over eager.
 
     This function is responsible for the following:
-        1. Creation of OnnxModel, which handles export, ort initialization.
-        2. Creating iobinding with OnnxModel if device is CUDA, which is essential for perf measurement.
-        3. Running ORT with OnnxModel.
+        1. Creating iobinding with OnnxModel if device is CUDA, which is essential for perf measurement.
+        2. Running ORT with OnnxModel.
 
     Writes to ./{output_filename}, which should be
         `pathlib.Path(self.output_dir) / f"{self.compiler}_{suite}_{self.dtype}_{self.mode}_{self.device}_{self.testing}.csv".
@@ -729,16 +860,7 @@ def speedup_experiment_onnx(
     should_randomize_input = args.randomize_input
     times = args.iterations_per_run
 
-    onnx_model = onnx_model_cls(
-        args.output_directory or ".",
-        model,
-        copy.deepcopy(example_inputs),
-        dynamic_shapes=args.dynamic_shapes,
-    )
-
-    def create_onnx_input_binded_fn(
-        onnx_model: OnnxModelFromTorchScript, pt_inputs, example_outputs
-    ):
+    def create_onnx_input_binded_fn(onnx_model: OnnxModel, pt_inputs, example_outputs):
         # Goal is to move the iobinding creation outside of the timer function.
         iobinding, outputs = onnx_model.create_iobinding(pt_inputs, example_outputs)
 
@@ -747,9 +869,9 @@ def speedup_experiment_onnx(
             if collect_outputs:
                 return outputs
 
-        return onnxrt_model_iter_fn
+        return onnxrt_model_iter_fn, iobinding
 
-    def create_onnx_fn(onnx_model: OnnxModelFromTorchScript, pt_inputs):
+    def create_onnx_fn(onnx_model: OnnxModel, pt_inputs):
         # NOTE: Making perf comparison fair by moving out the i/o adapting part.
         # 1. Pre-adapt `pt_inputs` to `onnx_inputs` here.
         # 2. Drop `onnx_outputs` to `pt_outputs` adapting. Output comparison is not part of perf measurement.
@@ -760,12 +882,52 @@ def speedup_experiment_onnx(
 
         return onnxrt_model_iter_fn
 
+    def timed_onnx(model, onnx_model: OnnxModel, inputs):
+        if current_device == "cpu" or onnx_model.is_cpu():
+            onnxrt_model_iter_fn = create_onnx_fn(onnx_model, inputs)
+            iobinding = None
+        else:
+            onnxrt_model_iter_fn, iobinding = create_onnx_input_binded_fn(
+                onnx_model, inputs, expected_output
+            )
+        with override_synchronize_with_onnx_iobinding(iobinding):
+            return timed(
+                model,
+                onnxrt_model_iter_fn,
+                inputs,
+                return_result=True,
+                times=times,
+                collect_outputs=args.collect_outputs,
+            )
+
+    # Insert ONNX warm-up
+    inputs = (
+        randomize_input(copy.deepcopy(example_inputs))
+        if should_randomize_input
+        else example_inputs
+    )
+    _, expected_output = timed(
+        model,
+        model_iter_fn,
+        inputs,
+        return_result=True,
+        times=times,
+        collect_outputs=args.collect_outputs,
+    )
+    for _ in range(2):
+        timed_onnx(model, onnx_model, inputs)
+
     for rep in range(args.repeat):
         inputs = (
             randomize_input(copy.deepcopy(example_inputs))
             if should_randomize_input
             else example_inputs
         )
+        if torch.cuda.device_count() > 1:
+            # Manually set correct torch.cuda.current_device to ensure torch.cuda.synchronize() works as intended.
+            # When there are more than 1 cuda devices, the first one is used for pytorch eager.
+            # The second one is used for onnx ort.
+            torch.cuda.set_device(0)
         timings[rep, 0], expected_output = timed(
             model,
             model_iter_fn,
@@ -774,22 +936,12 @@ def speedup_experiment_onnx(
             times=times,
             collect_outputs=args.collect_outputs,
         )
-
-        if current_device == "cpu" or onnx_model.is_cpu():
-            onnxrt_model_iter_fn = create_onnx_fn(onnx_model, inputs)
-        else:
-            onnxrt_model_iter_fn = create_onnx_input_binded_fn(
-                onnx_model, inputs, expected_output
-            )
-
-        timings[rep, 1], actual_output = timed(
-            model,
-            onnxrt_model_iter_fn,
-            inputs,
-            return_result=True,
-            times=times,
-            collect_outputs=args.collect_outputs,
-        )
+        if torch.cuda.device_count() > 1:
+            # Manually set correct torch.cuda.current_device to ensure torch.cuda.synchronize() works as intended.
+            # When there are more than 1 cuda devices, the first one is used for pytorch eager.
+            # The second one is used for onnx ort.
+            torch.cuda.set_device(1)
+        timings[rep, 1], actual_output = timed_onnx(model, onnx_model, inputs)
 
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
@@ -1058,11 +1210,16 @@ class OnnxModel(abc.ABC):
 
     _COMPILER_NAME: str
 
-    def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
-        # Hack to get model name.
-        from torch._functorch import aot_autograd
-
-        model_name = aot_autograd.model_name
+    def __init__(
+        self,
+        output_directory,
+        model,
+        example_inputs,
+        dynamic_shapes: bool,
+        copy_before_export: bool = False,
+    ):
+        model_name = current_name
+        self.copy_before_export = copy_before_export
         self.model_dir = self._generate_onnx_model_directory(
             output_directory, self._COMPILER_NAME, model_name
         )
@@ -1231,10 +1388,14 @@ class OnnxModelFromTorchScript(OnnxModel):
 
     _COMPILER_NAME = "torchscript"
 
-    def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
+    def __init__(
+        self, output_directory, model, example_inputs, dynamic_shapes: bool, **kwargs
+    ):
         if dynamic_shapes:
             raise NotImplementedError("NYI dynamic shapes for OnnxModelFromTorchScript")
-        super().__init__(output_directory, model, example_inputs, dynamic_shapes)
+        super().__init__(
+            output_directory, model, example_inputs, dynamic_shapes, **kwargs
+        )
         self._export(
             model,
             example_inputs,
@@ -1246,6 +1407,10 @@ class OnnxModelFromTorchScript(OnnxModel):
         self.onnx_session = self._init_ort_session(self.model_path)
 
     def _export(self, model, example_inputs, output_path: str, /, **kwargs) -> None:
+        if self.copy_before_export:
+            # Deepcopy model before export to avoid modification to baseline model.
+            model = copy.deepcopy(model)
+
         # Hack for huggingface models (kwargs only).
         if isinstance(example_inputs, dict):
 
@@ -1307,8 +1472,12 @@ class OnnxModelFromDynamo(OnnxModel):
 
     _COMPILER_NAME = "dynamo"
 
-    def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
-        super().__init__(output_directory, model, example_inputs, dynamic_shapes)
+    def __init__(
+        self, output_directory, model, example_inputs, dynamic_shapes: bool, **kwargs
+    ):
+        super().__init__(
+            output_directory, model, example_inputs, dynamic_shapes, **kwargs
+        )
         self._dynamic_shapes = dynamic_shapes
         self._onnx_program = self._export(model, example_inputs, self.model_path)
         # Clear the model proto to save memory.
@@ -1320,6 +1489,10 @@ class OnnxModelFromDynamo(OnnxModel):
     def _export(
         self, model, example_inputs, output_path: str
     ) -> torch.onnx.ONNXProgram:
+        if self.copy_before_export:
+            # Deepcopy model before export to avoid modification to baseline model.
+            model = copy.deepcopy(model)
+
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
         onnx_program = torch.onnx.dynamo_export(
@@ -1507,18 +1680,25 @@ class OnnxExportErrorParser:
         )
 
 
+@dataclasses.dataclass
+class OnnxContext:
+    onnx_model: Optional[OnnxModel] = None
+
+
 def optimize_onnx_ctx(
     output_directory: str,
-    onnx_model_cls: Type[OnnxModelFromTorchScript],
+    onnx_model_cls: Type[OnnxModel],
     run_n_iterations: Callable,
     dynamic_shapes: bool = False,
+    copy_before_export: bool = False,
 ) -> Callable:
     # NOTE(bowbao): This function creates and returns the onnx version of 'run_n_iterations',
     # which does the following:
     #   1. Export and cache model.
     #   2. Create iobinding for ORT.
     #   3. Run ORT for n iterations.
-    onnx_model: Optional[OnnxModelFromTorchScript] = None
+    # The cached model is stored in 'context' under the returned callable.
+    context = OnnxContext()
     test_data_dumped = False
 
     def run_n_iterations_onnx(model, inputs, n=2):
@@ -1534,14 +1714,16 @@ def optimize_onnx_ctx(
         output_error_filename = output_filename[:-4] + "_export_error.csv"
         parser = OnnxExportErrorParser(current_device, current_name, current_batch_size)
         try:
-            nonlocal onnx_model
-            if onnx_model is None:
-                onnx_model = onnx_model_cls(
+            nonlocal context
+            if context.onnx_model is None:
+                context.onnx_model = onnx_model_cls(
                     output_directory,
                     model,
                     copy.deepcopy(inputs),
                     dynamic_shapes=dynamic_shapes,
+                    copy_before_export=copy_before_export,
                 )
+            onnx_model = context.onnx_model
 
             for _ in range(n):
                 nonlocal test_data_dumped
@@ -1559,6 +1741,11 @@ def optimize_onnx_ctx(
             for parsed_error in parser.parse_diagnostic_context(diagnostic_context):
                 output_csv(
                     output_error_filename, parsed_error.headers, parsed_error.row
+                )
+            if context.onnx_model is not None:
+                e.onnx_program.save_diagnostics(
+                    f"{context.onnx_model.model_dir}/"
+                    f"{current_onnx_compiler}_{current_name}_{current_device}.sarif"
                 )
 
             # Check also the raw exception that caused export failure.
@@ -1578,6 +1765,8 @@ def optimize_onnx_ctx(
             parsed_error = parser.parse_exception(e)
             output_csv(output_error_filename, parsed_error.headers, parsed_error.row)
             raise
+
+    run_n_iterations_onnx.context = context
 
     return run_n_iterations_onnx
 
@@ -1744,42 +1933,57 @@ class BenchmarkRunner:
         self.model_iter_fn = None
         self.grad_scaler = DummyGradScaler()
         self.autocast = contextlib.nullcontext
+        self.autocast_arg = {}
         self.optimizer = None
         self._args = None
 
-    def setup_amp(self):
+    def setup_amp(self, current_device=None):
         if self.args.only in self.fp32_only_models:
             return
 
-        if self.args.amp and self.args.devices == ["cuda"]:
-            # AMP training can lead to small loss values which can undeflow
-            # gradient values returning in zero gradients. To solve this
-            # problem, PyTorch introduces GradScaler. GradScaler is a stateful
-            # structure, that scales the loss values to prevent underflow. Loss
-            # values are big at the beginning of training (therefore not
-            # requiring scaling), while loss value tends to be small as network
-            # starts getting better (requiring scaling). GradScaler manages all
-            # of this fine tuning, checking the gradients are turning to inf,
-            # discarding such batches.
+        devices = [current_device] if current_device else self.args.devices
+        if self.args.amp:
+            if devices == ["cuda"]:
+                # AMP training can lead to small loss values which can undeflow
+                # gradient values returning in zero gradients. To solve this
+                # problem, PyTorch introduces GradScaler. GradScaler is a stateful
+                # structure, that scales the loss values to prevent underflow. Loss
+                # values are big at the beginning of training (therefore not
+                # requiring scaling), while loss value tends to be small as network
+                # starts getting better (requiring scaling). GradScaler manages all
+                # of this fine tuning, checking the gradients are turning to inf,
+                # discarding such batches.
 
-            # Since we are not running a long iteration, default value of
-            # init_scale 65536 is going to turn all gradients to inf. Therefore,
-            # we just use a init_scale of 2.0 for benchmarking purpose.
+                # Since we are not running a long iteration, default value of
+                # init_scale 65536 is going to turn all gradients to inf. Therefore,
+                # we just use a init_scale of 2.0 for benchmarking purpose.
 
-            # Disabling Gradscaler because
-            #  1) Benchmark setup runs 2 iterations of fwd-bwd. So, not useful.
-            #  2) Current setup shares grad_scaler for eager and dynamo model,
-            #  which is bad as Gradscaler has state and can adjust the scaling
-            #  factor between eager and dynamo run, making accuracy check
-            #  harder.
-            # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
-            self.autocast = torch.cuda.amp.autocast
-        elif (self.args.bfloat16 or self.args.amp) and self.args.devices == ["cpu"]:
-            self.autocast = torch.cpu.amp.autocast
+                # Disabling Gradscaler because
+                #  1) Benchmark setup runs 2 iterations of fwd-bwd. So, not useful.
+                #  2) Current setup shares grad_scaler for eager and dynamo model,
+                #  which is bad as Gradscaler has state and can adjust the scaling
+                #  factor between eager and dynamo run, making accuracy check
+                #  harder.
+                # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+                self.autocast = torch.cuda.amp.autocast
+            if devices == ["cpu"]:
+                self.autocast = torch.cpu.amp.autocast
+            if self.args.amp_dtype:
+                amp_dtype = (
+                    torch.float16
+                    if self.args.amp_dtype == "float16"
+                    else torch.bfloat16
+                )
+                self.autocast_arg["dtype"] = amp_dtype
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
+            if (name in CI_USE_SGD and self.args.ci) or name in BENCHMARK_USE_SGD:
+                self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
+            else:
+                self.optimizer = torch.optim.Adam(
+                    params, lr=0.01, capturable=True, foreach=True
+                )
         else:
             self.optimizer = None
 
@@ -1855,7 +2059,6 @@ class BenchmarkRunner:
     def skip_models_due_to_control_flow(self):
         return set()
 
-    @property
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
@@ -1925,12 +2128,9 @@ class BenchmarkRunner:
         try:
             self.model_iter_fn(model, example_inputs)
         except Exception as e:
-            print(f"Original Error: {str(e)}")
-            raise NotImplementedError("Eager model failed to run") from e
+            raise RuntimeError("Eager run failed") from e
 
     def maybe_cast(self, model, example_inputs):
-        model = self.deepcopy_model(model)
-        example_inputs = clone_inputs(example_inputs)
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
         return model, example_inputs
 
@@ -1967,6 +2167,7 @@ class BenchmarkRunner:
             self.model_iter_fn(mod, inputs, collect_outputs=False)
         return self.model_iter_fn(mod, inputs, collect_outputs=True)
 
+    @torch._disable_dynamo(recursive=True)
     def optimizer_zero_grad(self, mod):
         if self.optimizer is not None:
             self.optimizer.zero_grad(True)
@@ -2111,6 +2312,7 @@ class BenchmarkRunner:
             # Collect the fp64 reference outputs to be used later for accuracy checking.
             fp64_outputs = None
             model_fp64 = None
+            inputs_fp64 = None
             try:
                 model_fp64, inputs_fp64 = cast_to_fp64(
                     self.deepcopy_and_maybe_ddp(model),
@@ -2132,7 +2334,8 @@ class BenchmarkRunner:
                 self.args.cosine = True
                 fp64_outputs = None
             finally:
-                del model_fp64
+                del model_fp64, inputs_fp64
+                torch.cuda.empty_cache()
 
             tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
                 self.args.training, current_device, name
@@ -2161,6 +2364,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
+                torch.cuda.empty_cache()
 
             # Rerun native pytorch
             reset_rng_state()
@@ -2177,9 +2381,11 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_2nd_run_fail"
                 )
+                log.exception(e)
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
+                torch.cuda.empty_cache()
 
             # Two eager runs should have exactly same result
             is_same = True
@@ -2217,7 +2423,7 @@ class BenchmarkRunner:
                     # apply export on module directly
                     # no need for n iterations
                     # the logic should be the same to self.model_iter_fn (forward_pass)
-                    with self.autocast():
+                    with self.autocast(**self.autocast_arg):
                         optimized_model_iter_fn = optimize_ctx(
                             model_copy, example_inputs
                         )
@@ -2242,11 +2448,11 @@ class BenchmarkRunner:
             if name in self.skip_accuracy_check_as_eager_non_deterministic:
                 return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
-            # Workaround for ONNX for non-tensor outputs
             if (
                 current_onnx_compiler == "torchscript"
                 or current_onnx_compiler == "dynamo"
             ):
+                # Workaround for ONNX for non-tensor outputs
                 (
                     correct_result,
                     new_result,
@@ -2254,6 +2460,10 @@ class BenchmarkRunner:
                 ) = _OnnxPatch.patch_non_tensor_outputs(
                     correct_result, new_result, fp64_outputs
                 )
+                # Relax tolerance for ONNX cuda
+                if current_device == "cuda":
+                    tolerance = 1e-2
+
                 # TODO: store correct_result into the dumped file for offline onnx model validation.
                 # The downside and potential problem, is that the output formats may be different.
                 # E.g., the output order might not match, None might be part of output, etc.
@@ -2317,20 +2527,10 @@ class BenchmarkRunner:
                 new_result = optimized_model_iter_fn(model, example_inputs)
             except Exception as e:
                 log.exception(e)
-                if (
-                    self.args.ci
-                    and isinstance(e, BackendCompilerFailed)
-                    and (
-                        "Internal Triton PTX codegen error" in str(e)
-                        or "cubin" in str(e)
-                    )
-                ):
-                    return "pass_due_to_skip"
-                else:
-                    print(
-                        "TorchDynamo optimized model failed to run because of following error"
-                    )
-                    return "fail_to_run"
+                print(
+                    "TorchDynamo optimized model failed to run because of following error"
+                )
+                return "fail_to_run"
 
             def dump_max_mean_values(tol, ref, res):
                 if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
@@ -2461,6 +2661,11 @@ class BenchmarkRunner:
                     f"{ok:3}/{total:3} +{frames_third_pass} frames {compilation_time:3.0f}s"
                 )
 
+            if experiment.func is speedup_experiment_onnx:
+                experiment = functools.partial(
+                    experiment, optimized_model_iter_fn.context.onnx_model
+                )
+
             if not hasattr(model, name):
                 model.name = name
             results.append(experiment(model, example_inputs, **experiment_kwargs))
@@ -2533,6 +2738,8 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment, tag
             )
             print(status)
+        torch.cuda.empty_cache()
+
         if self.args.timing:
             from torch._dynamo.utils import op_count, print_time_report
             from torch.utils._stats import simple_call_counter
@@ -2677,9 +2884,6 @@ def parse_args(args=None):
         "--batch-size-file", type=str, help="String to load batch size from"
     )
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
-    parser.add_argument(
-        "--cpp-wrapper", action="store_true", help="turn on cpp/cuda wrapper codegen"
-    )
     parser.add_argument(
         "--freezing", action="store_true", help="turn on freezing", default=False
     )
@@ -2952,7 +3156,11 @@ def parse_args(args=None):
     group_prec.add_argument(
         "--amp", action="store_true", help="use automatic mixed precision"
     )
-
+    parser.add_argument(
+        "--amp-dtype",
+        choices=("bfloat16", "float16"),
+        help="the data type used with automatic mixed precision",
+    )
     group_printout = parser.add_mutually_exclusive_group()
     group_printout.add_argument(
         "--verbose", "-v", action="store_true", help="enable verbose debug printouts"
@@ -3128,6 +3336,24 @@ def main(runner, original_dir=None, args=None):
         # single process path just uses the main process
         args.world_size = 1
         process_entry(0, runner, original_dir, args)
+
+
+def write_csv_when_exception(args, name: str, status: str, device=None):
+    print(status)
+    placeholder_batch_size = 0
+    devices = [device] if device is not None else args.devices
+    if args.accuracy:
+        headers = ["dev", "name", "batch_size", "accuracy"]
+        rows = [[device, name, placeholder_batch_size, status] for device in devices]
+    elif args.performance:
+        headers = ["dev", "name", "batch_size", "speedup", "abs_latency"]
+        rows = [[device, name, placeholder_batch_size, 0.0, 0.0] for device in devices]
+    else:
+        headers = []
+        rows = [[device, name, placeholder_batch_size, 0.0] for device in devices]
+
+    for row in rows:
+        output_csv(output_filename, headers, row)
 
 
 def run(runner, args, original_dir=None):
@@ -3342,11 +3568,12 @@ def run(runner, args, original_dir=None):
         output_filename = "xla.csv"
     elif args.torchscript_onnx:
         optimize_ctx = functools.partial(
-            optimize_onnx_ctx, args.output_directory or ".", OnnxModelFromTorchScript
+            optimize_onnx_ctx,
+            args.output_directory or ".",
+            OnnxModelFromTorchScript,
+            copy_before_export=args.performance,  # Accuarcy bench already did deepcopy
         )
-        experiment = functools.partial(
-            speedup_experiment_onnx, OnnxModelFromTorchScript
-        )
+        experiment = speedup_experiment_onnx
         output_filename = "torchscript_onnx.csv"
         current_onnx_compiler = "torchscript"
     elif args.dynamo_onnx:
@@ -3355,8 +3582,9 @@ def run(runner, args, original_dir=None):
             args.output_directory or ".",
             OnnxModelFromDynamo,
             dynamic_shapes=args.dynamic_shapes,
+            copy_before_export=args.performance,
         )
-        experiment = functools.partial(speedup_experiment_onnx, OnnxModelFromDynamo)
+        experiment = speedup_experiment_onnx
         output_filename = "dynamo_onnx.csv"
         current_onnx_compiler = "dynamo"
     elif args.dynamo_onnx_aot_inline:
@@ -3365,10 +3593,9 @@ def run(runner, args, original_dir=None):
             args.output_directory or ".",
             OnnxModelFromDynamoAotInline,
             dynamic_shapes=args.dynamic_shapes,
+            copy_before_export=args.performance,
         )
-        experiment = functools.partial(
-            speedup_experiment_onnx, OnnxModelFromDynamoAotInline
-        )
+        experiment = speedup_experiment_onnx
         output_filename = "dynamo_onnx_aot_inline.csv"
         current_onnx_compiler = "dynamo"
     elif args.speedup_dynamo_ts:
@@ -3429,7 +3656,6 @@ def run(runner, args, original_dir=None):
         )
         inductor_config.split_reductions = not args.disable_split_reductions
         inductor_config.triton.divisible_by_16 = not args.disable_divisible_by_16
-        inductor_config.cpp_wrapper = args.cpp_wrapper
         if args.inference:
             inductor_config.freezing = args.freezing
 
@@ -3504,6 +3730,7 @@ def run(runner, args, original_dir=None):
                     torch.Tensor, lambda x: x.to(device=device), example_inputs
                 )
             else:
+                name = model_name
                 try:
                     with tqdm(desc="loading model"):
                         extra_args = []
@@ -3558,12 +3785,18 @@ def run(runner, args, original_dir=None):
                                     batch_size=batch_size,
                                     extra_args=extra_args,
                                 )
-                except NotImplementedError as e:
-                    print(e)
+                except RuntimeError as e:
                     import traceback
 
+                    mode = "train" if args.training else "eval"
+                    print(f"{device:4} {mode:5} {name:34} ")
                     print(traceback.format_exc())
-                    logging.warning("%s failed to load", args.only)
+                    status = (
+                        "model_fail_to_load"
+                        if isinstance(e, NotImplementedError)
+                        else "eager_fail_to_run"
+                    )
+                    write_csv_when_exception(args, name, status, device)
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:
@@ -3617,6 +3850,7 @@ def run(runner, args, original_dir=None):
 
             else:
                 model, example_inputs = runner.cast_based_on_args(model, example_inputs)
+            runner.setup_amp(current_device)
             runner.run_one_model(
                 name,
                 model,
@@ -3648,32 +3882,8 @@ def run(runner, args, original_dir=None):
         nmodels = len(model_names)
         for i, name in enumerate(model_names):
             current_name = name
-            placeholder_batch_size = 0
             if args.progress:
                 print(f"Running model {i+1}/{nmodels}", flush=True)
-
-            def write_csv(status):
-                if args.accuracy:
-                    headers = ["dev", "name", "batch_size", "accuracy"]
-                    rows = [
-                        [device, name, placeholder_batch_size, status]
-                        for device in args.devices
-                    ]
-                elif args.performance:
-                    headers = ["dev", "name", "batch_size", "speedup", "abs_latency"]
-                    rows = [
-                        [device, name, placeholder_batch_size, 0.0, 0.0]
-                        for device in args.devices
-                    ]
-                else:
-                    headers = []
-                    rows = [
-                        [device, name, placeholder_batch_size, 0.0]
-                        for device in args.devices
-                    ]
-
-                for row in rows:
-                    output_csv(output_filename, headers, row)
 
             try:
                 timeout = args.timeout
@@ -3683,11 +3893,11 @@ def run(runner, args, original_dir=None):
                     [sys.executable] + sys.argv + [f"--only={name}"], timeout=timeout
                 )
             except subprocess.TimeoutExpired:
-                print("TIMEOUT", file=sys.stderr)
-                write_csv("timeout")
-            except subprocess.SubprocessError:
-                print("ERROR", file=sys.stderr)
-                write_csv("infra_error")
+                write_csv_when_exception(args, name, "timeout")
+            except subprocess.CalledProcessError as e:
+                print("Run failed with return code: ", e.returncode, file=sys.stderr)
+                print("Output: ", e.output, file=sys.stderr)
+                print("Error: ", e.stderr, file=sys.stderr)
         print_summary(output_filename, print_dataframe=args.print_dataframe_summary)
 
 

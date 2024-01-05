@@ -67,7 +67,14 @@ BATCH_SIZE_DIVISORS = {
     "xcit_large_24_p8_224": 4,
 }
 
-REQUIRE_HIGHER_TOLERANCE = set("sebotnet33ts_256")
+REQUIRE_HIGHER_TOLERANCE = {
+    "fbnetv3_b",
+    "gmixer_24_224",
+    "hrnet_w18",
+    "inception_v3",
+    "sebotnet33ts_256",
+    "selecsls42b",
+}
 
 SCALED_COMPUTE_LOSS = {
     "ese_vovnet19b_dw",
@@ -304,8 +311,8 @@ class TimmRunner(BenchmarkRunner):
         cosine = self.args.cosine
         tolerance = 1e-3
         if is_training:
-            if REQUIRE_HIGHER_TOLERANCE:
-                tolerance = 2 * 1e-2
+            if name in REQUIRE_HIGHER_TOLERANCE:
+                tolerance = 4 * 1e-2
             else:
                 tolerance = 1e-2
         return tolerance, cosine
@@ -325,13 +332,13 @@ class TimmRunner(BenchmarkRunner):
         return reduce_to_scalar_loss(pred) / 1000.0
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        with self.autocast():
+        with self.autocast(**self.autocast_arg):
             return mod(*inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
         self.optimizer_zero_grad(mod)
-        with self.autocast():
+        with self.autocast(**self.autocast_arg):
             pred = mod(*cloned_inputs)
             if isinstance(pred, tuple):
                 pred = pred[0]
