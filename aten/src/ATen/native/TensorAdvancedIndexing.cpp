@@ -193,7 +193,7 @@ void scatter_meta_impl(
     const c10::optional<Tensor>& src = nullopt,
     const c10::optional<c10::string_view> reduce = nullopt) {
   int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
-  at::native::scatter_gather_dtype_check("scatter", self, index, src);
+  at::ScalarType common_dtype = at:: native::scatter_gather_dtype_check("scatter", self, index, src);
   at::native::scatter_shape_check(self, wrapped_dim, index, src);
   auto output = meta.maybe_get_output(0);
 
@@ -205,7 +205,7 @@ void scatter_meta_impl(
     }
   }
 
-  meta.set_output_raw_strided(0, self.sizes(), {}, self.options());
+  meta.set_output_raw_strided(0, self.sizes(), {}, self.options().dtype(common_dtype));
   if (reduce.has_value()) {
     // Check if we have a valid reduce operator.
     at::native::get_operator_enum(reduce.value(), use_new_options);
@@ -1818,8 +1818,19 @@ TORCH_IMPL_FUNC(scatter_add)
   auto mut_out = const_cast<Tensor&>(out);
   dim = maybe_wrap_dim(dim, self.dim());
 
+  at::ScalarType common_dtype = out.scalar_type();
+  Tensor common_dtype_src = src;
+  if (src.scalar_type() != common_dtype) {
+    common_dtype_src = src.to(common_dtype);
+  }
+
+  Tensor common_dtype_self = self;
+  if (self.scalar_type() != common_dtype) {
+    common_dtype_self = self.to(common_dtype);
+  }
+
   if (!self.is_same(mut_out)) {
-    mut_out.copy_(self);
+    mut_out.copy_(common_dtype_self);
   }
 
   if (index.numel() == 0) return;
@@ -1827,12 +1838,12 @@ TORCH_IMPL_FUNC(scatter_add)
   // See Note [Enabling Deterministic Operations]
   // Avoid gpuAtomicAdd for CUDA if deterministic mode is turned on
   if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA) {
-    _scatter_via_index_put(self, dim, index, src, mut_out, /*accumulate*/true);
+    _scatter_via_index_put(common_dtype_self, dim, index, common_dtype_src, mut_out, /*accumulate*/true);
   } else {
-    if (can_use_expanded_index_path(mut_out, dim, index, src, /*is_scatter_like*/true)) {
-      scatter_add_expanded_index_stub(self.device().type(), mut_out, index, src);
+    if (can_use_expanded_index_path(mut_out, dim, index, common_dtype_src, /*is_scatter_like*/true)) {
+      scatter_add_expanded_index_stub(common_dtype_self.device().type(), mut_out, index, common_dtype_src);
     } else {
-      scatter_add_stub(self.device().type(), mut_out, dim, index, src);
+      scatter_add_stub(common_dtype_self.device().type(), mut_out, dim, index, common_dtype_src);
     }
   }
 }
