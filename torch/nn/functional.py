@@ -4967,6 +4967,13 @@ Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
 greater than 0.0 is specified.
 
+.. note::
+
+    For a boolean `attn_mask`, a True value indicates that the corresponding key value 
+    will be **included** for the purpose of attention. This is different from 
+    :class:`~torch.nn.Transformer` and :class:`~torch.nn.MultiheadAttention`,
+    where a True value indicates that the corresponding element is **ignored**.
+    
 .. code-block:: python
 
     # Efficient implementation equivalent to the following:
