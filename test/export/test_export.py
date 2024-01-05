@@ -2528,6 +2528,23 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # this doesn't work today
         gm_unflat_strict = unflatten(ep)
 
+    def test_non_strict_retrace(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x1, x2, x3, x4, x5):
+                x3_1, x3_2 = x3
+                return x1.sum() + x2.sum() + x3_1.sum() + x3_2.sum() + x4.sum() + x5.sum()
+
+        inps = (torch.randn(4, 4), torch.randn(4, 4), (torch.randn(4, 4), torch.randn(4, 4)), torch.randn(4, 4), torch.randn(4, 4))
+        mod = MyModule()
+        ep = torch.export.export(mod, inps, strict=False)
+        unflatten_module = unflatten(ep)
+        ep_retrace = torch.export.export(unflatten_module, inps, strict=False)
+        self.assertTrue(torch.allclose(ep_retrace(*inps), mod(*inps)))
+
 
 if __name__ == '__main__':
     run_tests()

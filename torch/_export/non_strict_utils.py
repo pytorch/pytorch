@@ -52,7 +52,14 @@ def fake_tree(mode, arg, t_constraints, source, sources):
     Call fakify while recursively mapping on lists and dictionaries. Using pytree map
     would be ideal here, but we are also building sources as we recurse.
     """
-    if isinstance(arg, (tuple, list)):
+    if isinstance(arg, tuple):
+        return tuple(
+            [
+                fake_tree(mode, arg, t_constraints, GetItemSource(source, i), sources)
+                for i, arg in enumerate(arg)
+            ]
+        )
+    elif isinstance(arg, list):
         return [
             fake_tree(mode, arg, t_constraints, GetItemSource(source, i), sources)
             for i, arg in enumerate(arg)
@@ -91,6 +98,15 @@ def make_fake_inputs(nn_module, args, constraints):
     ) as fake_mode:
         original_signature = inspect.signature(nn_module.forward)
         params = original_signature.parameters
+
+        # This means we can't reliably rely on signature to get the source info
+        if len(params) != len(args):
+            params = []  # type: ignore[assignment]
+            count = 0
+            for arg in args:
+                params.append("arg_" + str(count))  # type: ignore[attr-defined]
+                count += 1
+
         sources: Dict[Tuple[int, int], Source] = {}
         fake_args = tuple(
             fake_tree(fake_mode, arg, t_constraints, LocalSource(x), sources)
