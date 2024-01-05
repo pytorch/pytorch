@@ -3366,8 +3366,8 @@ def upsample_bilinear2d(
         v4 = v4.to(dtype)
 
     def mul(b, a):
-        # Weights computation for uint8_t and multiplication trick
-        # Port of https://github.com/pytorch/pytorch/blob/faea6f2c7a4d6e6e7ebe21752eaa7b0ad05afa79/aten/src/ATen/native/cpu/UpSampleKernel.cpp#L872-L912
+        # Weights computation for uint8_t and multiplication trick. Port of
+        # https://github.com/pytorch/pytorch/blob/faea6f2c7a4d6e6e7ebe21752eaa7b0ad05afa79/aten/src/ATen/native/cpu/UpSampleKernel.cpp#L872-L912
         if input.dtype != torch.uint8:
             return torch.mul(b, a)
         else:

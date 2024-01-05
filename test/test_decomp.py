@@ -783,7 +783,9 @@ class TestDecomp(TestCase):
                      as mode, enable_python_dispatcher():
                     decomposed = func(*args, **kwargs)
 
-                if op.has_kernel_for_dispatch_key(DispatchKey.CompositeImplicitAutograd):
+                if any(isinstance(op, torch._ops.OpOverload) and
+                        op.has_kernel_for_dispatch_key(DispatchKey.CompositeImplicitAutograd)
+                        for op in mode.decomposed):
                     # without this check, incorrect decomps at the python dispatcher level can still pass because
                     # they're checking aten decomps at the torch_dispatch level
                     non_decomposed = func(*args, **kwargs)
