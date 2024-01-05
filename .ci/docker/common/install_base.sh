@@ -66,6 +66,7 @@ install_ubuntu() {
     libsndfile-dev \
     ${maybe_libomp_dev} \
     ${maybe_libnccl_dev} \
+    jemalloc2 \
     software-properties-common \
     wget \
     sudo \
