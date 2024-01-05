@@ -14,7 +14,8 @@ __all__ = ["SparseSemiStructuredTensorCUTLASS"]
 
 
 class SparseSemiStructuredTensorCUTLASS(  # type: ignore[misc]
-    SparseSemiStructuredTensor, torch.Tensor,
+    SparseSemiStructuredTensor,
+    torch.Tensor,
     metaclass=SparseSemiStructuredMeta
 ):
     """This class provides the CUTLASS implementation of semi-structured (2:4) sparsity for acceleration on GPUs.
@@ -24,7 +25,6 @@ class SparseSemiStructuredTensorCUTLASS(  # type: ignore[misc]
     - sparse_tensor_cutlass (holds the specified elements of original tensor)
     - meta_tensor_cutlass (holds the metadata bitmask)
     """
-    # __metaclass__ = SparseSemiStructuredMeta
 
     _DTYPE_SHAPE_CONSTRAINTS = {
         torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 128, 16, 16),
@@ -58,6 +58,15 @@ class SparseSemiStructuredTensorCUTLASS(  # type: ignore[misc]
         original_shape: torch.Size,
         transposed: bool = False,
     ) -> None:
+    """
+        This constructor should not be called directly. Instead use `from_dense` or `from_sparse_coo`.
+
+        Args:
+            sparse_tensor_cutlass (torch.Tensor): The sparse tensor in CUTLASS format.
+            meta_tensor_cutlass (torch.Tensor): The metadata tensor in CUTLASS format.
+            original_shape (torch.Size): The shape of the original dense tensor.
+            transposed (bool): If ``True``, the sparse tensor and metadata are
+    """
         self.sparse_tensor_cutlass = sparse_tensor_cutlass
         self.meta_tensor_cutlass = meta_tensor_cutlass
         self.original_shape = original_shape
