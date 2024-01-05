@@ -1377,12 +1377,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         items = self.popn(inst.argval * 2)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert (
+            if not (
                 isinstance(k, (ConstantVariable, EnumVariable, BuiltinVariable))
                 or (isinstance(k, TensorVariable) and k.specialized_value is not None)
                 or k.is_python_constant()
-            )
-
+            ):
+                unimplemented(f"BUILD_MAP {items}")
             result[ConstDictVariable.get_key(k)] = v
         assert len(result) == len(items) / 2
         self.push(ConstDictVariable(result, dict, mutable_local=MutableLocal()))
@@ -2251,12 +2251,18 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         result = skipfiles.check_verbose(func, is_inlined_call=True)
         if result.skipped:
-            from torch._dynamo.variables.misc import produce_trampoline_autograd_apply
+            from torch._dynamo.variables.misc import (
+                produce_trampoline_autograd_apply,
+                produce_trampoline_autograd_bwd,
+                produce_trampoline_autograd_fwd,
+            )
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
             if hasattr(func.fn, "_origin") and func.fn._origin in [
+                produce_trampoline_autograd_fwd,
                 produce_trampoline_autograd_apply,
+                produce_trampoline_autograd_bwd,
             ]:
                 # Known sound
                 return skipfiles.SkipResult(False, "allowlist in dynamo known function")
