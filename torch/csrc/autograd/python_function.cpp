@@ -216,11 +216,14 @@ auto PyNode::compiled_apply(
 
     const auto& input_info = input_infos[i - offset];
 
+    PyObject* device(THPDevice_New(input_info.device));
+    if (!device)
+      throw_python_error();
     // Metadata is a tuple of 4 elements: (layout, device, dtype, size)
     PyObject* fwdInputMetadata = PyTuple_Pack(
         4,
         autograd::utils::wrap(input_info.layout),
-        THPDevice_New(input_info.device),
+        device,
         autograd::utils::wrap(input_info.scalar_type),
         to_py_size(input_info.size));
     if (!fwdInputMetadata)
