@@ -290,26 +290,45 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             outputs = m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
+    def _test_hf_bert_ddp_inductor(self, static_graph):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            model, inputs = get_hf_bert(self.rank)
+            model = DDP(model, static_graph=static_graph)
+            run_hf_bert_ddp(self, model, inputs, "inductor")
+
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_ddp_inductor(self):
+        self._test_hf_bert_ddp_inductor(static_graph=False)
 
+    @skip_if_lt_x_gpu(2)
+    @import_transformers_or_skip()
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @patch.object(config, "optimize_ddp", True)
+    @patch.object(torch._inductor.config, "fallback_random", True)
+    def test_hf_bert_ddp_inductor_static_graph(self):
+        self._test_hf_bert_ddp_inductor(static_graph=True)
+
+    def _test_hf_bert_aot_eager(self, static_graph):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             model, inputs = get_hf_bert(self.rank)
-            model = DDP(model)
-            run_hf_bert_ddp(self, model, inputs, "inductor")
+            model = DDP(model, static_graph=static_graph)
+            run_hf_bert_ddp(self, model, inputs, "aot_eager")
 
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @patch.object(config, "optimize_ddp", True)
     def test_hf_bert_ddp_aot_eager(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            model, inputs = get_hf_bert(self.rank)
-            model = DDP(model)
-            run_hf_bert_ddp(self, model, inputs, "aot_eager")
+        self._test_hf_bert_aot_eager(static_graph=False)
+
+    @skip_if_lt_x_gpu(2)
+    @import_transformers_or_skip()
+    @patch.object(config, "optimize_ddp", True)
+    def test_hf_bert_ddp_aot_eager_static_graph(self):
+        self._test_hf_bert_aot_eager(static_graph=True)
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -643,6 +662,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     @torch._inductor.config.patch({"layout_optimization": True, "keep_output_stride": False})
     @patch.object(config, "optimize_ddp", True)
+    @patch.object(config, "optimize_ddp_lazy_compile", True)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor_layout_optimizations(self):
         assert config.optimize_ddp
@@ -679,6 +699,41 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
 
+
+    @patch.object(config, "optimize_ddp", True)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_graph_split_inductor_transpose(self):
+        assert config.optimize_ddp
+
+        B = 100
+        N = 30
+        D = 50
+        K = 70
+
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear0 = nn.Linear(N, K)
+                self.linear1 = torch.nn.Linear(D * K, 2048)
+
+            def forward(self, x):
+                xt = x.transpose(2, 1)
+                xt = self.linear0(xt).flatten(1)
+                return self.linear1(xt)
+
+        mod = Foo().to(self.device)
+
+        compiled_mod = torch.compile(mod, backend="inductor")
+        ddp_compiled_mod = DDP(compiled_mod, device_ids=self.device_ids)
+
+        x = torch.randn((B, N, D), dtype=torch.float32, device=self.device)
+        self.assertTrue(same(mod(x), ddp_compiled_mod(x)))
+
+        x_1 = torch.randn((B * 2, N, D), dtype=torch.float32, device=self.device)
+        self.assertTrue(same(mod(x_1), ddp_compiled_mod(x_1)))
+
+        x_2 = torch.randn((B * 3, N, D), dtype=torch.float32, device=self.device)
+        self.assertTrue(same(mod(x_2), ddp_compiled_mod(x_2)))
 
     @patch.object(config, "optimize_ddp", True)
     def test_no_split(self):
@@ -896,6 +951,52 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 .check(f"""{expected_guard_source} "L['self'].net[0]" ID_MATCH""") \
                 .run(GUARDS_FILE.getvalue())
             self.assertTrue(same(correct_outputs, outputs))
+
+    def test_fsdp_skip_register_attr_or_module(self):
+        """
+        ensure FSDP module is not registered as attrbutes
+        in the fx graph
+        see `not source.guard_source().is_fsdp_module()`
+        before calling `register_attr_or_module`
+        in variables/builder.py
+        """
+        class ToyModel(nn.Module):
+            def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5):
+                super().__init__()
+                self.net = nn.Sequential(
+                    *[nn.Linear(in_feat, hidden_feat), nn.ReLU()]
+                    + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+                )
+
+            def forward(self, inputs):
+                out = self.net(inputs)
+                return out
+
+        torch._dynamo.reset()
+
+        device = f"cuda:{self.rank}"
+        m = ToyModel(in_feat=10, hidden_feat=5000, out_feat=5,).to(device)
+        inputs = torch.rand(20, 10).to(device)
+        m.apply(init_weights)
+        correct_outputs = m(inputs)
+        fsdp_m = FSDP(m, use_orig_params=True)
+
+        def debug_compiler(gm, _):
+            for node in gm.graph.nodes:
+                if node.op == "get_attr":
+                    for name in [
+                        "l__self___net_0_weight",
+                        "l__self___net_0_bias",
+                        "l__self___net_2_weight",
+                        "l__self___net_2_bias"
+                    ]:
+                        self.assertFalse(name in node.name, f"FSDP module {name} should not be registered as attributes")
+            return gm
+
+        opt_m = torch._dynamo.optimize(backend=debug_compiler)(fsdp_m)
+        outputs = opt_m(inputs)
+
+        self.assertTrue(same(correct_outputs, outputs))
 
     def test_fsdp_dup_tensors_same_source(self):
         """

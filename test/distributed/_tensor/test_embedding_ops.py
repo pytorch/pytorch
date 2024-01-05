@@ -136,7 +136,7 @@ class TestEmbeddingOp(DTensorTestBase):
     def test_sharded_embedding_rowwise(self):
         with self.assertRaisesRegex(
             NotImplementedError,
-            "Only support ColwiseParallel when parallelizing Embedding now.",
+            "RowwiseParallel currently only support nn.Linear!",
         ):
             self._run_embedding_op_test(0, [5, 12], 16, 22)
 

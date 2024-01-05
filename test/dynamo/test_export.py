@@ -6,7 +6,7 @@ with test_export_persist_assert)
 import copy
 import functools
 import inspect
-import math
+import io
 import operator
 import unittest
 from enum import Enum
@@ -32,6 +32,7 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_cuda import TEST_CUDA
 
 
 class ExportTests(torch._dynamo.test_case.TestCase):
@@ -2289,6 +2290,35 @@ def forward(self, x):
         ):
             torch.export.export(qux, (torch.tensor(3), 5))
 
+    @unittest.skipIf(not TEST_CUDA, "No CUDA available.")
+    def test_export_with_parameters(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.features = torch.nn.Sequential(
+                    torch.nn.Conv2d(
+                        3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
+                    ),
+                    torch.nn.ReLU(inplace=True),
+                )
+
+            def forward(self, x):
+                return self.features(x)
+
+        model = MyModule().eval().cuda()
+        random_inputs = (torch.rand([32, 3, 32, 32]).to("cuda"),)
+        dim_x = torch.export.Dim("dim_x", min=1, max=32)
+        exp_program = torch.export.export(
+            model, random_inputs, dynamic_shapes={"x": {0: dim_x}}
+        )
+        output_buffer = io.BytesIO()
+        # Tests if we can restore saved nn.Parameters when we load them again
+        torch.export.save(exp_program, output_buffer)
+        loaded_model = torch.export.load(output_buffer)
+        self.assertTrue(
+            isinstance(loaded_model.module().features_0_weight, torch.nn.Parameter)
+        )
+
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2367,8 +2397,8 @@ def forward(self, x):
         constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0)]
 
         example_inputs = (copy(x), y)
-        ep = torch._export._export(foo, example_inputs, constraints=constraints)
-        with self.assertRaisesRegex(RuntimeError, "Input.*shape.*specialized at 2"):
+        ep = torch.export.export(foo, example_inputs, constraints=constraints)
+        with self.assertRaisesRegex(RuntimeError, "input.*shape.*to be equal to 2"):
             ep(torch.randn(3), y)
 
         dim0_x, dim0_y = torch.export.dims("dim0_x", "dim0_y")
@@ -2571,8 +2601,6 @@ def forward(self, x):
         capture_scalar_outputs=True,
     )
     def test_exported_graph_serialization(self):
-        import io
-
         def f(x, y):
             b = x.item()
             torch._constrain_as_size(b)
@@ -2935,15 +2963,9 @@ def forward(self, x):
         def f(x):
             return x[: round(x.shape[0] / 2)]
 
-        def f_correct(x):
-            return x[: math.floor(x.shape[0] / 2)]
+        gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Calling round()"):
-            gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
-
-        gm, _ = torch._dynamo.export(f_correct, aten_graph=True)(torch.ones(6, 4))
-
-        self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
+        self.assertEqual(f(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
     def test_cond_supported_pred_types(self):
         def true_fn(x):
@@ -4020,8 +4042,8 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         self.assertExpectedInline(
             gm.true_graph_0.code.strip(),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, arg0_1, arg2_1);  arg0_1 = arg2_1 = None
+def forward(self, arg0_1, arg1_1):
+    out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, arg1_1, arg0_1);  arg1_1 = arg0_1 = None
     sum_1 = torch.ops.aten.sum.default(out_dtype);  out_dtype = None
     return (sum_1,)""",
         )
@@ -4029,8 +4051,8 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertExpectedInline(
             gm.false_graph_0.code.strip(),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mul.Tensor, torch.int32, arg0_1, arg2_1);  arg0_1 = arg2_1 = None
+def forward(self, arg0_1, arg1_1):
+    out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mul.Tensor, torch.int32, arg1_1, arg0_1);  arg1_1 = arg0_1 = None
     sum_1 = torch.ops.aten.sum.default(out_dtype);  out_dtype = None
     return (sum_1,)""",
         )

@@ -146,9 +146,9 @@ void MPSStream::addCompletedHandler(MTLCommandBufferHandler block) {
 }
 
 void MPSStream::fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t offset, SyncType syncType) {
-  TORCH_INTERNAL_ASSERT(length >= offset);
-  if (length == 0)
+  if (length == 0) {
     return;
+  }
   dispatch_sync(_serialQueue, ^() {
     @autoreleasepool {
       endKernelCoalescing();
