@@ -1648,7 +1648,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
   if (PyBool_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackBool(obj));
   } else if (THPUtils_checkLong(obj)) {
-    int overflow;
+    int overflow = -1;
     long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
     if (value == -1 && PyErr_Occurred()) {
       throw python_error();
@@ -1725,7 +1725,7 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
   }
 
   if (THPUtils_checkLong(arg)) {
-    int overflow;
+    int overflow = -1;
     long long value = PyLong_AsLongLongAndOverflow(arg, &overflow);
     if (value == -1 && PyErr_Occurred()) {
       throw python_error();
