@@ -651,6 +651,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
               " and ",
               output.size(dim),
               ".");
+  TORCH_CHECK(!self.is_complex(), "index_select(): Yet not supported for complex");
 
   for (const auto i : irange(self.dim())) {
     if (i == dim)
@@ -988,7 +989,7 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Te
 
   auto inputType = getMPSDataType(self);
   auto sourceType = getMPSDataType(source);
-  if (inputType == MPSDataTypeUInt8 || (!is_macos_13_or_newer() && inputType == MPSDataTypeBool)) {
+  if (inputType == MPSDataTypeUInt8 || inputType == MPSDataTypeBool) {
     inputType = MPSDataTypeInt8;
   }
 
