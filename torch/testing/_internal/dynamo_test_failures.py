@@ -167,18 +167,8 @@ FIXME_default_non_strict = {
     "test_cpp_api_parity",
     "test_cpp_extensions_aot_ninja",
     "test_cpp_extensions_aot_no_ninja",
-    "test_cpp_extensions_jit",
-    "test_cpp_extensions_open_device_registration",
-    "test_cuda",
-    "test_cuda_expandable_segments",
-    "test_cuda_multigpu",
-    "test_cuda_nvml_based_avail",
-    "test_cuda_primary_ctx",
-    "test_cuda_sanitizer",
-    "test_cuda_trace",
     "test_custom_ops",
     "test_dataloader",
-    "test_datapipe",
     "test_decomp",
     "test_foreach",
     "test_fx",
@@ -2091,6 +2081,11 @@ dynamo_expected_failures = {
     "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_conv2d_cpu_float64",  # test_expanded_weights  # noqa: B950
     "TestExpandedWeightModuleCPU.test_Conv2d_circular_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
     "TestTorchDlPackCPU.test_dlpack_export_non_strided_cpu",  # test_dlpack
+    "TestIterDataPipeGraphFastForward.test_simple_snapshot_custom_self_next",  # test_datapipe
+    "TestIterDataPipeGraphFastForward.test_simple_snapshot_custom_non_generator",  # test_datapipe
+    "TestGraph.test_traverse_circular_datapipe",  # test_datapipe
+    "TestGraph.test_traverse_unhashable_datapipe",  # test_datapipe
+    "TestCppExtensionJIT.test_cpp_frontend_module_has_same_output_as_python",  # test_cpp_extensions_jit
 }
 
 dynamo_skips = {
