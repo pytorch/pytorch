@@ -5976,18 +5976,11 @@ for shape in [(1,), ()]:
         a = torch.randn(1, requires_grad=True)
 
         # Passing explicitly should not warn
-        with warnings.catch_warnings(record=True) as w:
-            checkpoint(lambda x: x, a, use_reentrant=False)
-        self.assertEqual(len(w), 0)
+        self.assertNotWarn(lambda: checkpoint(lambda x: x, a, use_reentrant=False))
 
         # Not passing explicitly warns
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarnsOnceRegex(UserWarning, ".*the use_reentrant parameter should be passed explicitly.*"):
             checkpoint(lambda x: x, a)
-        self.assertEqual(len(w), 1)
-        self.assertIn(
-            "the use_reentrant parameter should be passed explicitly",
-            str(w[0].message)
-        )
 
     def test_checkpoint_sequential_warns_if_use_reentrant_not_passed_explcitly(self):
         a = torch.randn(3, requires_grad=True)
@@ -5998,18 +5991,11 @@ for shape in [(1,), ()]:
         ]
 
         # Passing explicitly should not warn
-        with warnings.catch_warnings(record=True) as w:
-            checkpoint_sequential(modules_list, 3, a, use_reentrant=False)
-        self.assertEqual(len(w), 0)
+        self.assertNotWarn(lambda: checkpoint_sequential(modules_list, 3, a, use_reentrant=False))
 
         # Not passing explicitly warns
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertWarnsOnceRegex(UserWarning, ".*the use_reentrant parameter should be passed explicitly.*"):
             checkpoint_sequential(modules_list, 3, a)
-        self.assertEqual(len(w), 1)
-        self.assertIn(
-            "the use_reentrant parameter should be passed explicitly",
-            str(w[0].message)
-        )
 
     def test_checkpoint_detects_non_determinism(self):
         def save_3_tensors(x):

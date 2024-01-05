@@ -469,7 +469,7 @@ def checkpoint(
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
             "details on the differences between the two variants."
         )
-        use_reentrant=True
+        use_reentrant = True
 
     # Hack to mix *args with **kwargs in a python 2.7-compliant way
     preserve = kwargs.pop("preserve_rng_state", True)
@@ -557,7 +557,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
             "details on the differences between the two variants."
         )
-        use_reentrant=True
+        use_reentrant = True
 
     # Hack for keyword-only parameter in a python 2.7-compliant way
     preserve = kwargs.pop("preserve_rng_state", True)
