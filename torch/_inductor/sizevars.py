@@ -328,6 +328,21 @@ class SizeVarAllocator:
     def guard_lt(self, left: Expr, right: Expr) -> None:
         assert self.shape_env.evaluate_expr(sympy.Lt(left, right))
 
+    def expect_true(self, expr: Expr, *, msg: str) -> None:
+        expr = sympy_subs(expr, self.inv_precomputed_replacements)
+        self.shape_env.defer_runtime_assert(expr, msg, fx_node=V.graph.current_node)
+
+    def expect_equals(self, left: Expr, right: Expr, *, msg: str) -> Expr:
+        # Prefer returning the expression without unbacked symints
+        if self.shape_env.is_unbacked_symint(left):
+            self.expect_true(sympy.Eq(left, right), msg=msg)
+            return right
+        elif self.shape_env.is_unbacked_symint(right):
+            self.expect_true(sympy.Eq(left, right), msg=msg)
+            return left
+        else:
+            return self.guard_equals(left, right)
+
     # The evaluate functions evaluate some symbolic sympy expression
     # (NB: not necessarily an Expr) and return what the concrete result
     # is, guarding on the expression being that result
@@ -491,9 +506,7 @@ class SizeVarAllocator:
         return result
 
     def stride_order(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
-        strides = tuple(
-            map(abs, self.stride_hints(index, vars))  # type: ignore[arg-type]
-        )
+        strides = tuple(map(abs, self.stride_hints(index, vars)))
         order = list(range(len(strides)))
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
         return order

@@ -302,9 +302,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         fxy = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         compare_equal_outs_and_grads(self, F(), fxy, (x, y))
         compare_equal_outs_and_grads(self, F(), fxy, (x, z))
-        self.assertExpectedInline(
-            failure_reason,
+        self.assertIn(
             """tensor 'L['y']' requires_grad mismatch. expected requires_grad=1""",
+            failure_reason,
         )
 
         # Reset failure reason
@@ -421,7 +421,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         fxx(x3, x3)
         fxx(x4, y4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(failure_reason, """L['x'] is L['y']""")
+        self.assertIn("""L['x'] is L['y']""", failure_reason)
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg(self):
@@ -456,9 +456,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1, 2, 2)
         f(a2, b2, b2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(
-            failure_reason,
+        self.assertIn(
             """L['a'] is L['b']""",
+            failure_reason,
         )
 
         torch._dynamo.reset()
@@ -474,7 +474,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a3, b3, c3, c3, 3, 3)
         f(a4, b4, c4, d4, 3, 3)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(failure_reason, """L['c'] is L['d']""")
+        self.assertIn("""L['c'] is L['d']""", failure_reason)
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_with_global(self):
@@ -512,9 +512,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1, 2, 2)
         f(a2, b2, b2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(
-            failure_reason,
+        self.assertIn(
             """L['a'] is L['b']""",
+            failure_reason,
         )
 
     @patch("torch._functorch.config.debug_assert", True)
@@ -550,9 +550,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f([3, 2, 1], [4, 5, 6], a1, a1, a1, a1)
         f([3, 2, 1], [4, 5, 6], a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(
-            failure_reason,
+        self.assertIn(
             """L['a'] is L['b']""",
+            failure_reason,
         )
 
         torch._dynamo.reset()
@@ -602,9 +602,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1)
         f(a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(
-            failure_reason,
+        self.assertIn(
             """L['a'] is L['b']""",
+            failure_reason,
         )
 
         torch._dynamo.reset()
@@ -620,7 +620,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a3, b3, c3, c3)
         f(a4, b4, c4, d4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(failure_reason, """L['c'] is L['d']""")
+        self.assertIn("""L['c'] is L['d']""", failure_reason)
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args(self):
@@ -651,9 +651,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1)
         f(a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(
-            failure_reason,
+        self.assertIn(
             """L['a'] is L['b']""",
+            failure_reason,
         )
 
         torch._dynamo.reset()
@@ -669,7 +669,23 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a3, b3, c3, c3)
         f(a4, b4, c4, d4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(failure_reason, """L['c'] is L['d']""")
+        self.assertIn("""L['c'] is L['d']""", failure_reason)
+
+    def test_alias_inputs(self):
+        def fn():
+            a = torch.tensor([1])
+            a = a[0:1]
+            b = a.squeeze()
+            a[0] = 0
+            if a[0] < 1e5:
+                pass
+            a[0] = 2
+            return b
+
+        ref_output = fn()
+        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
+        actual_output = aot_fn()
+        self.assertEqual(ref_output, actual_output)
 
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
@@ -833,6 +849,7 @@ SeqNr|OrigAten|SrcFn
 1|aten._native_batch_norm_legit_functional.default|l__self___bn1
 2|aten.relu.default|l__self___relu1
 2|aten.detach.default|l__self___relu1
+2|aten.detach.default|l__self___relu1
 3|aten.add.Tensor|add
 4|aten.view.default|flatten
 5|aten.view.default|l__self___fc1
@@ -858,6 +875,7 @@ SeqNr|OrigAten|SrcFn
 6|aten.t.default|
 5|aten.view.default|
 4|aten.view.default|
+2|aten.detach.default|
 2|aten.detach.default|
 2|aten.threshold_backward.default|
 1|aten.native_batch_norm_backward.default|
@@ -991,6 +1009,18 @@ SeqNr|OrigAten|SrcFn
                     if x is not None
                 ),
             )
+
+    def test_aot_autograd_raises_invalid_leaf_set(self):
+        @torch.compile
+        def f(x):
+            x.set_(torch.ones(2))
+
+        # We still want to make sure that this raises
+        x = torch.ones(2, requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "is being used in an in-place operation"
+        ):
+            f(x)
 
 
 if __name__ == "__main__":

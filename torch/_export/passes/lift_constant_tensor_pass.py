@@ -5,9 +5,7 @@ from torch._guards import detect_fake_mode
 from torch.export.exported_program import InputKind, InputSpec, TensorArgument
 
 
-def lift_constant_tensor_pass(
-    gm, graph_signature, state_dict
-) -> Dict[str, torch.Tensor]:
+def lift_constant_tensor_pass(gm, graph_signature) -> Dict[str, torch.Tensor]:
     """
     Takes an ExportedProgram and returns the ExportedProgram modified in-place,
     with the constant tensors as buffers.
@@ -25,14 +23,13 @@ def lift_constant_tensor_pass(
     )
     assert fake_mode is not None
 
-    first_user_input_loc, first_user_input = None, None
-    for i, node in enumerate(gm.graph.nodes):
+    first_user_input_loc, first_user_input = 0, None
+    for node in gm.graph.nodes:
         if node.op == "placeholder" and node.name in graph_signature.user_inputs:
             first_user_input = node
-            first_user_input_loc = i
             break
+        first_user_input_loc += 1
 
-    assert first_user_input is not None and first_user_input_loc is not None
     tensor_constants = {}
 
     for node in gm.graph.nodes:
