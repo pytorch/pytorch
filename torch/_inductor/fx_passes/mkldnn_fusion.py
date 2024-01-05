@@ -366,12 +366,69 @@ if torch._C._has_mkldnn:
 
         return fn
 
+    def _get_remaining_users(extra_input_node, compute_node):
+        # Think about this pattern:
+        #      ReLU
+        #     /   \
+        #  Conv1
+        #   /      \
+        # Conv2
+        #   \      /
+        #      Add
+        # Although, the extra input node (ReLU) has more than 1 users: Conv1 and Add.
+        # The Conv1 is the ancestor node of the current compute node (Conv2).
+        # This indicates that the buffer of ReLU has completed all its usage,
+        # So we can safely make changes to it now by doing Conv2->Add inplace fusion.
+        # Take above case as example:
+        # * extra_input_node: ReLU
+        # * compute_node: Conv2
+        # _get_remaining_users will return the users of extra_input_node which are not
+        # ancestor node of compute_node.
+        def _is_ancestor_node(_current_node, _ancestor_node):
+            # Check whether _ancestor_node is the ancestor node of _current_node
+            _node_list = [_current_node]
+            _visited_nodes = set()
+            while len(_node_list) != 0:
+                _current_node = _node_list.pop(0)
+                if _current_node not in _visited_nodes:
+                    _visited_nodes.add(_current_node)
+                    if _current_node == _ancestor_node:
+                        return True
+                    elif isinstance(
+                        _current_node, torch.fx.Node
+                    ) and _current_node.op not in ["placeholder", "output", "get_attr"]:
+                        for input in _current_node.all_input_nodes:
+                            _node_list.append(input)  # noqa: PERF402
+            return False
+
+        return [
+            user
+            for user in list(extra_input_node.users)
+            if not _is_ancestor_node(compute_node, user)
+        ]
+
     def _is_valid_computation_binary_inplace(computation_op, binary_op, other_index):
         def fn(match):
             if not _is_valid_computation_binary(computation_op, binary_op)(match):
                 return False
             binary_nodes = filter_nodes(match.nodes, binary_op)
-            if any(len(n.args[other_index].users) > 1 for n in binary_nodes):
+
+            def _get_compute_node(_binary_node, _other_index):
+                assert (
+                    len(_binary_node.all_input_nodes) == 2
+                ), "Binary node should have 2 input nodes."
+                _compute_index = 1 if (_other_index == 0) else 0
+                return _binary_node.args[_compute_index]
+
+            if any(
+                len(
+                    _get_remaining_users(
+                        n.args[other_index], _get_compute_node(n, other_index)
+                    )
+                )
+                > 1
+                for n in binary_nodes
+            ):
                 return False
             if any(
                 n.args[other_index].op in ["placeholder", "output"]
@@ -680,7 +737,7 @@ if torch._C._has_mkldnn:
                     :-1
                 ] == torch.Size(reshape_2[:-1])
                 can_remove_reshape = can_remove_reshape and (
-                    reduce(lambda x, y: x * y, reshape_2[:-1]) == reshape_1[0]
+                    reduce(operator.mul, reshape_2[:-1]) == reshape_1[0]
                 )
 
             if can_remove_reshape:
@@ -822,9 +879,12 @@ if torch._C._has_mkldnn:
             return False
         batch_size = input_meta_value.shape[0]
         is_bf16_weight = weight_meta_value.dtype == torch.bfloat16
-        # for fp32, mkl should be enabled and batch_size should not be a free symbol.
-        if not is_bf16_weight and (
-            (not torch._C.has_mkl) or has_free_symbols(batch_size)
+        # on x86, for fp32, mkl should be enabled and batch_size should not be a free symbol.
+        # on aarch64, use mkldnn op for fp32 as well if acl is enabled
+        if (
+            not is_bf16_weight
+            and not mkldnn._is_mkldnn_acl_supported()
+            and ((not torch._C.has_mkl) or has_free_symbols(batch_size))
         ):
             return False
         for meta_value in [input_meta_value, weight_meta_value]:
@@ -999,7 +1059,7 @@ if torch._C._has_mkldnn:
                 batch_size = input.meta.get("val").shape[0]
                 if has_free_symbols(batch_size):
                     assert (
-                        is_bf16_weight
+                        is_bf16_weight or mkldnn._is_mkldnn_acl_supported()
                     ), f"only bf16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
                 # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
                 packed_weight_inputs = (
@@ -1010,7 +1070,7 @@ if torch._C._has_mkldnn:
                 )
                 packed_weight_op = (
                     mkldnn._reorder_linear_weight
-                    if is_bf16_weight
+                    if (is_bf16_weight or mkldnn._is_mkldnn_acl_supported())
                     else torch.ops.mkl._mkl_reorder_linear_weight
                 )
                 packed_weight_node = graph.create_node(
@@ -1018,7 +1078,7 @@ if torch._C._has_mkldnn:
                 )
 
                 packed_linear_inputs: Tuple[Any, ...] = (input, packed_weight_node)
-                if is_bf16_weight:
+                if is_bf16_weight or mkldnn._is_mkldnn_acl_supported():
                     packed_linear_inputs += (bias, "none", [], "")
                     packed_linear_op = mkldnn._linear_pointwise.default
                 else:
@@ -1070,7 +1130,13 @@ if torch._C._has_mkldnn:
 
     @functools.lru_cache(None)
     def _mkldnn_fusion_init():
-        if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
+        # TODO: aarch64: enable op fusion for acl once it supports fused operators. Disabling it for now.
+        # Otherwise even the matmul or innerproduct can not be accelerated with acl
+        if (
+            torch.backends.mkldnn.enabled
+            and torch.backends.mkldnn.is_available()
+            and not torch.ops.mkldnn._is_mkldnn_acl_supported()
+        ):
             _register_unary_fusion()
             _register_inplace_fusion()
             _register_binary_unary_fusion()

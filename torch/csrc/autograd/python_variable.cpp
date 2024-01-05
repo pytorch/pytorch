@@ -652,12 +652,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // NB: pin_memory doesn't actually do anything
   // TODO: strides variant?
   static PythonArgParser parser({
-      "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, "
-      "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
-      "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
-      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
-      "DispatchKeySet _extra_dispatch_keys=None)",
-      "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides, "
+      "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef? strides=None, "
       "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
@@ -699,42 +694,40 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
   // don't bother releasing GIL here, as we are not allocating any nontrivial
   // data
-  // TODO: for_blob produces non-resizable tensors, we might want this to be
-  // resizable (have to define a custom allocator in that case)
   Tensor tensor;
-  if (r.idx == 0) {
-    TORCH_CHECK(
-        !r.toDispatchKeySetOptional(13),
-        "This overload of _make_wrapper_subclass does not support _extra_dispatch_keys");
-    tensor = at::for_blob(nullptr, r.intlist(1))
-                 .strides(r.intlistOptional(2))
-                 .storage_offset(r.toInt64Optional(3))
-                 .context(nullptr, [](void* ctx) {})
-                 .target_device(
-                     options.device()) // TODO: this shouldn't be necessary if
-                                       // it came from options
-                 .options(options)
-                 .allocator(c10::GetAllocator(c10::kMeta))
-                 .resizeable_storage()
-                 .make_tensor();
 
-    const auto sizes_strides_policy = r.stringViewOptional(10);
-    if (sizes_strides_policy.has_value()) {
-      tensor.unsafeGetTensorImpl()->set_python_custom_sizes_strides(
-          parseSizesStridesPolicyArgument(*sizes_strides_policy));
-    }
-  } else {
+  {
     AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
     tracer::impl::NoTracerDispatchMode tracer_guard{};
+
+    auto sym_sizes = r.symintlist(1);
+    auto sym_strides_own = r.symintlistOptional(2);
+    auto sym_strides =
+        static_cast<c10::optional<c10::SymIntArrayRef>>(sym_strides_own);
+    auto sym_storage_offset = r.toSymIntOptional(3);
+
+    c10::SymInt size_bytes;
+    auto dtype_itemsize = static_cast<int64_t>(options.dtype().itemsize());
+    if (sym_strides.has_value()) {
+      size_bytes = at::detail::computeStorageNbytes(
+          sym_sizes,
+          sym_strides.value(),
+          dtype_itemsize,
+          sym_storage_offset.value_or(0));
+    } else {
+      size_bytes = at::detail::computeStorageNbytesContiguous(
+          sym_sizes, dtype_itemsize, sym_storage_offset.value_or(0));
+    }
 
     // We use storages **only** to track aliasing of subclasses during tracing.
     // The actual data pointers are not valid.
     Storage storage{
         Storage::use_byte_size_t{},
-        0,
-        at::DataPtr{nullptr, r.device(7)},
+        size_bytes,
         /*allocator=*/c10::GetAllocator(c10::kMeta),
         /*resizable=*/true};
+    // TODO: constructor should probably accept data pointer
+    storage.set_data_ptr_noswap(at::DataPtr{nullptr, r.device(7)});
 
     auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
     if (auto mb_extra_keys = r.toDispatchKeySetOptional(13)) {
@@ -743,14 +736,17 @@ static PyObject* THPVariable_make_wrapper_subclass(
     tensor = at::detail::make_tensor<TensorImpl>(
         std::move(storage), keys, options.dtype());
 
-    auto sym_sizes = r.symintlist(1);
-    auto sym_strides = r.symintlist(2);
-    auto sym_storage_offset = r.toSymIntOptional(3);
-
     TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
 
-    tensor_impl->set_sizes_and_strides(
-        sym_sizes, sym_strides, sym_storage_offset.value_or(0));
+    if (sym_strides.has_value()) {
+      tensor_impl->set_sizes_and_strides(
+          sym_sizes, sym_strides.value(), sym_storage_offset);
+    } else {
+      TORCH_CHECK(
+          !sym_storage_offset.has_value(),
+          "setting storage offset without stride not supported");
+      tensor_impl->generic_set_sizes_contiguous(sym_sizes);
+    }
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {
@@ -901,9 +897,8 @@ static int THPVariable_set_grad_fn(
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "_grad_fn", obj);
   }
-  THPUtils_assertRet(
-      -1, obj, "Deletion of _grad_fn not allowed. Detach tensor instead!");
-  THPUtils_assertRet(-1, obj == Py_None, "_grad_fn can be only set to None");
+  TORCH_CHECK(obj, "Deletion of _grad_fn not allowed. Detach tensor instead!");
+  TORCH_CHECK(obj == Py_None, "_grad_fn can be only set to None");
   THPVariable_Unpack(self).detach_();
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -923,8 +918,8 @@ int THPVariable_set_data(THPVariable* self, PyObject* data, void* unused) {
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "data", data);
   }
-  THPUtils_assertRet(
-      -1, data, "Deleting tensor data is not allowed. Delete tensor instead!");
+  TORCH_CHECK(
+      data, "Deleting tensor data is not allowed. Delete tensor instead!");
   if (!THPVariable_Check(data)) {
     throw torch::TypeError(
         "Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
@@ -950,10 +945,8 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
       THPVariable_Check(py_grad),
       "assigned grad expected to be a Tensor or None but got grad of type ",
       THPUtils_typename(py_grad));
-  THPUtils_assertRet(
-      -1,
-      self != (THPVariable*)py_grad,
-      "can't assign Variable as its own grad");
+  TORCH_CHECK(
+      self != (THPVariable*)py_grad, "can't assign Variable as its own grad");
 
   const auto& grad = THPVariable_Unpack(py_grad);
   TORCH_CHECK(
@@ -1115,8 +1108,7 @@ int THPVariable_set_names(PyObject* self, PyObject* names, void* unused) {
   if (names == Py_None) {
     at::internal_set_names_inplace(var, at::nullopt);
   } else {
-    THPUtils_assertRet(
-        -1,
+    TORCH_CHECK(
         THPUtils_checkDimnameList(names),
         "names must either be None or a tuple of dim names");
     at::internal_set_names_inplace(var, torch::parseDimnameList(names));
@@ -1133,8 +1125,7 @@ int THPVariable_set_requires_grad(
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "requires_grad", obj);
   }
-  THPUtils_assertRet(
-      -1, obj && PyBool_Check(obj), "requires_grad must be a bool");
+  TORCH_CHECK(obj && PyBool_Check(obj), "requires_grad must be a bool");
   const auto& var = THPVariable_Unpack(self);
   auto requires_grad = (obj == Py_True);
   if (!var.is_leaf()) {
@@ -1186,7 +1177,7 @@ int THPVariable_set_backwards_hooks(
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "_backward_hooks", obj);
   }
-  THPUtils_assertRet(-1, obj, "Deletion of _backwards_hooks not allowed!");
+  TORCH_CHECK(obj, "Deletion of _backwards_hooks not allowed!");
   if (obj == Py_None) {
     obj = nullptr;
   }
@@ -1227,8 +1218,7 @@ int THPVariable_set_post_accumulate_grad_hooks(
     return handle_torch_function_setter(
         self, "_post_accumulate_grad_hooks", obj);
   }
-  THPUtils_assertRet(
-      -1, obj, "Deletion of _post_accumulate_grad_hooks not allowed!");
+  TORCH_CHECK(obj, "Deletion of _post_accumulate_grad_hooks not allowed!");
   if (obj == Py_None) {
     obj = nullptr;
   }

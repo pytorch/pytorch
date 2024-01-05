@@ -20,7 +20,11 @@ from torch._decomp.decompositions import (
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._higher_order_ops.out_dtype import out_dtype
-from torch._prims_common import type_to_dtype
+from torch._prims_common import (
+    elementwise_dtypes,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    type_to_dtype,
+)
 
 from . import config, inductor_prims
 
@@ -186,7 +190,7 @@ def round_dec(x, decimals=0):
 @pw_cast_for_opmath
 def bmm(self, batch2):
     if config.coordinate_descent_tuning:
-        if self.shape[1] == 1:
+        if self.shape[1] == 1 or batch2.shape[2] == 1:
             out = (self.unsqueeze(-1) * batch2.unsqueeze(1)).sum(dim=2)
             return out
     if self.device.type == "cpu":
@@ -260,14 +264,18 @@ def angle(x):
         return torch.where(
             torch.isnan(x.real), float("nan"), torch.atan2(x.imag, x.real)
         )
-    else:
-        # when x is real number
-        #   if x >= 0, return 0
-        #   if x < 0, return pi
-        #   if x is nan, return nan
-        ret = torch.where(x < 0, math.pi, 0.0)
-        nan = torch.where(torch.isnan(x), float("nan"), 0.0)
-        return ret + nan
+
+    # when x is real number
+    #   if x >= 0, return 0
+    #   if x < 0, return pi
+    #   if x is nan, return nan
+    _, dtype = elementwise_dtypes(
+        x,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+    pi = torch.scalar_tensor(math.pi, dtype=dtype, device=x.device)
+    ret = torch.where(x < 0, pi, 0.0)
+    return torch.where(torch.isnan(x), float("nan"), ret)
 
 
 @register_decomposition([aten.add])
@@ -297,7 +305,7 @@ def lift(self):
 @register_decomposition([aten.bernoulli.default])
 def bernoulli(self, *, generator=None):
     assert generator is None
-    return torch.rand_like(self, dtype=torch.float32) < self
+    return (torch.rand_like(self, dtype=torch.float32) < self).to(self.dtype)
 
 
 @register_decomposition([aten.fmin, prims.fmin])
