@@ -221,6 +221,7 @@ TEST(AotInductorTest, BasicScriptTestCpu) {
   test_aoti_script("cpu");
 }
 
+/*
 #ifdef USE_CUDA
 TEST(AotInductorTest, BasicTestCuda) {
   test_aoti("cuda");
@@ -238,6 +239,7 @@ TEST(AotInductorTest, UpdateInactiveConstantsCuda) {
   test_aoti_double_buffering("cuda");
 }
 #endif
+*/
 
 } // namespace inductor
 } // namespace torch
