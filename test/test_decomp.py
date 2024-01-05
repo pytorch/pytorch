@@ -781,7 +781,14 @@ class TestDecomp(TestCase):
                 kwargs = sample_input.kwargs
                 with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
                      as mode, enable_python_dispatcher():
-                    func(*args, **kwargs)
+                    decomposed = func(*args, **kwargs)
+
+                if op.has_kernel_for_dispatch_key(DispatchKey.CompositeImplicitAutograd):
+                    # without this check, incorrect decomps at the python dispatcher level can still pass because
+                    # they're checking aten decomps at the torch_dispatch level
+                    non_decomposed = func(*args, **kwargs)
+                    op_assert_equal(self, func, dtype, non_decomposed, decomposed, args, kwargs)
+
                 if not run_all:
                     self.check_decomposed(aten_name, mode)
             else:
