@@ -432,8 +432,10 @@ class FunctorchVmapHigherOrderVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
-        if inspect.getattr_static(self.fn, '_torchdynamo_disable', False):
-            raise SkipFrame(f"'_torchdynamo_disable' set on function '{self.fn.__name__}'")
+        if inspect.getattr_static(self.fn, "_torchdynamo_disable", False):
+            raise SkipFrame(
+                f"'_torchdynamo_disable' set on function '{self.fn.__name__}'"
+            )
 
         try:
             # Try to trace through vmap call
@@ -445,6 +447,7 @@ class FunctorchVmapHigherOrderVariable(UserFunctionVariable):
 
             # and mark the function as skipped, to avoid dynamo to try to trace it again
             from torch._C._dynamo import eval_frame
+
             eval_frame.skip_code(args[0].get_code())
 
             # Graph break
