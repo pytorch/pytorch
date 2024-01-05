@@ -188,18 +188,10 @@ FIXME_default_non_strict = {
     "test_fake_tensor",
     "test_flop_counter",
     "test_foreach",
-    "test_function_schema",
-    "test_functional_autograd_benchmark",
-    "test_functionalization",
-    "test_functionalization_of_rng_ops",
-    "test_futures",
     "test_fx",
     "test_fx_experimental",
     "test_fx_passes",
     "test_fx_reinplace_pass",
-    "test_hub",
-    "test_import_stats",
-    "test_itt",
     "test_jit",
     "test_jit_autocast",
     "test_jit_disabled",
@@ -207,7 +199,6 @@ FIXME_default_non_strict = {
     "test_jit_llga_fuser",
     "test_jiterator",
     "test_legacy_vmap",
-    "test_license",
     "test_masked",
     "test_maskedtensor",
     "test_modules",
@@ -2103,6 +2094,8 @@ dynamo_expected_failures = {
     "TestMkldnnCPU.test_conv2d_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_batch_norm_3d_cpu",  # test_mkldnn
     "LoggingTest.testApiUsage",  # test_logging
+    "TestFunctionalAutogradBenchmark.test_fast_tasks",  # test_functional_autograd_benchmark
+    "TestFunctionSchema.test_serialize_and_deserialize",  # test_function_schema
 }
 
 dynamo_skips = {
