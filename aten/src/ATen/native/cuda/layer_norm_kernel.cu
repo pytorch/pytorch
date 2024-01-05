@@ -1017,6 +1017,15 @@ void LayerNormKernelImplInternal(
   }
 }
 
+inline bool use_cudnn_layernorm(const Tensor& gamma, const Tensor& beta) {
+  static bool enabled = (c10::utils::check_env("TORCH_CUDNN_LAYERNORM_ENABLED") == true);
+  bool ok = enabled && gamma.numel() && beta.numel();
+  if (ok) {
+    TORCH_WARN("USING EXPERIMENTAL CUDNN LAYERNORM");
+  }
+  return ok;
+}
+
 void LayerNormKernelImpl(
     const Tensor& X,
     const Tensor& gamma,
@@ -1027,17 +1036,20 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  at::native::raw_cudnn_layernorm_forward_out(X, gamma, beta, eps, mean, rstd, Y, M, N);
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
-      X.scalar_type(),
-      "LayerNormKernelImpl",
-      [&]() {
-        using acc_t = acc_type<scalar_t, true>;
-        LayerNormKernelImplInternal<scalar_t, acc_t>(
-            X, gamma, beta, M, N, static_cast<acc_t>(eps), Y, mean, rstd);
-      });
+  if (use_cudnn_layernorm(gamma, beta)) {
+    at::native::raw_cudnn_layernorm_forward_out(X, gamma, beta, eps, mean, rstd, Y, M, N);
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        X.scalar_type(),
+        "LayerNormKernelImpl",
+        [&]() {
+          using acc_t = acc_type<scalar_t, true>;
+          LayerNormKernelImplInternal<scalar_t, acc_t>(
+              X, gamma, beta, M, N, static_cast<acc_t>(eps), Y, mean, rstd);
+        });
+  }
 }
 
 template<typename T, typename T_ACC> __device__

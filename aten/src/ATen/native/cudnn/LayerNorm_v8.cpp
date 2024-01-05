@@ -68,7 +68,7 @@ void raw_cudnn_layernorm_forward_out(const Tensor& X, const Tensor& scale, const
   // cuDNN only seems to care about non-normalized and normalized dimensions, and we can only have one non-normalized-dimension, so...
   // we reshape to
   // N, M, 1, 1 because cuDNN also has the restruction that everything must be in 4-D
-  auto X_reshaped = X.reshape({N, M, 1, 1});
+  auto X_reshaped = X.reshape({M, N, 1, 1});
   auto X_fe = graph.tensor(fe::graph::Tensor_attributes()
                            .set_name("X")
                            .set_dim(std::vector<int64_t>(X_reshaped.sizes().begin(), X_reshaped.sizes().end()))
@@ -84,14 +84,14 @@ void raw_cudnn_layernorm_forward_out(const Tensor& X, const Tensor& scale, const
   //}
   auto scale_fe = graph.tensor(fe::graph::Tensor_attributes()
                                 .set_name("scale")
-                                .set_dim({1, M, 1, 1})
-                                .set_stride({M, 1, M, M})
+                                .set_dim({1, N, 1, 1})
+                                .set_stride({N, 1, N, N})
                                 .set_data_type(get_fe_dtype(scale)));
-  auto bias_fe  = graph.tensor(fe::graph::Tensor_attributes()
+  auto bias_fe  = bias.numel() ? graph.tensor(fe::graph::Tensor_attributes()
                                .set_name("bias")
-                               .set_dim({1, M, 1, 1})
-                               .set_stride({M, 1, M, M})
-                               .set_data_type(get_fe_dtype(bias)));
+                               .set_dim({1, N, 1, 1})
+                               .set_stride({N, 1, N, N})
+                               .set_data_type(get_fe_dtype(bias))) : nullptr;
   auto epsilon_fe = graph.tensor(fe::graph::Tensor_attributes()
                                   .set_name("epsilon")
                                   .set_dim({1, 1, 1, 1})
@@ -125,13 +125,11 @@ void raw_cudnn_layernorm_forward_out(const Tensor& X, const Tensor& scale, const
       {X_fe, X_reshaped.data_ptr()},
       {mean_fe, mean->data_ptr()},
       {inv_variance_fe, rstd->data_ptr()},
-      {scale_fe, scale.numel() ? scale.data_ptr() : nullptr},
-      {bias_fe, bias.numel() ? bias.data_ptr() : nullptr},
+      {scale_fe, scale.data_ptr()},
+      {bias_fe, bias.data_ptr()},
       {epsilon_fe, &epsilon},
       {Y_fe, Y->data_ptr()}};
-  if (scale.numel() && bias.numel()) {
-    TORCH_INTERNAL_ASSERT(graph.execute(handle, variant_pack, workspace_ptr.get()).is_good());
-  }
+  TORCH_INTERNAL_ASSERT(graph.execute(handle, variant_pack, workspace_ptr.get()).is_good());
 }
 
 
