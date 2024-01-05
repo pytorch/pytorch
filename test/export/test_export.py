@@ -2204,7 +2204,7 @@ def forward(self, l_x_):
     def test__scaled_dot_product_flash_attention(self):
         class Module(torch.nn.Module):
             def forward(self, q, k, v):
-                res = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+                res = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v)
                 return res[0]
 
         m = Module()
