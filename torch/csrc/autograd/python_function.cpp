@@ -218,11 +218,11 @@ auto PyNode::compiled_apply(
 
     // Metadata is a tuple of 4 elements: (layout, device, dtype, size)
     PyObject* fwdInputMetadata = PyTuple_Pack(
-      4,
-      autograd::utils::wrap(input_info.layout),
-      THPDevice_New(input_info.device),
-      autograd::utils::wrap(input_info.scalar_type),
-      to_py_size(input_info.size));
+        4,
+        autograd::utils::wrap(input_info.layout),
+        THPDevice_New(input_info.device),
+        autograd::utils::wrap(input_info.scalar_type),
+        to_py_size(input_info.size));
     if (!fwdInputMetadata)
       throw python_error();
 
@@ -357,7 +357,6 @@ variable_list PyNode::apply_with_saved(
   f->compiled_autograd_tracing = true;
   variable_list result;
   if (!compiled_autograd_should_lift()) {
-    // special case on AotAutograd generated backward class
     result = apply(variable_list(inputs));
   } else {
     result = compiled_apply(variable_list(inputs), saved.get_py_compiler());
