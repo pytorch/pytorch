@@ -1,3 +1,4 @@
+#if !defined(C10_MOBILE) && !defined(ANDROID)
 #pragma once
 
 #include <c10/cuda/CUDAStream.h>
@@ -12,6 +13,8 @@ class TORCH_API AOTIModelContainerRunnerCuda : public AOTIModelContainerRunner {
       size_t num_models = 1,
       const std::string& cubin_dir = "");
 
+  ~AOTIModelContainerRunnerCuda();
+
   std::vector<at::Tensor> run(std::vector<at::Tensor>& inputs);
 
   std::vector<at::Tensor> run_with_cuda_stream(
@@ -20,3 +23,4 @@ class TORCH_API AOTIModelContainerRunnerCuda : public AOTIModelContainerRunner {
 };
 
 } // namespace torch::inductor
+#endif

@@ -1,3 +1,4 @@
+#if !defined(C10_MOBILE) && !defined(ANDROID)
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 
 namespace torch::inductor {
@@ -7,6 +8,8 @@ AOTIModelContainerRunnerCuda::AOTIModelContainerRunnerCuda(
     size_t num_models,
     const std::string& cubin_dir)
     : AOTIModelContainerRunner(model_so_path, num_models, false, cubin_dir) {}
+
+AOTIModelContainerRunnerCuda::~AOTIModelContainerRunnerCuda() {}
 
 std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run(
     std::vector<at::Tensor>& inputs) {
@@ -23,3 +26,4 @@ std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run_with_cuda_stream(
 }
 
 } // namespace torch::inductor
+#endif
