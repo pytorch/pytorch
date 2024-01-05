@@ -63,9 +63,9 @@ bool registerGilChecker() {
   });
   return true;
 }
-#endif // USE_C10D_NCCL
 
 static bool registered = registerGilChecker();
+#endif // USE_C10D_NCCL
 
 // Wrapper to ensure GIL is released before destructing ProcessGroupGloo
 // TODO: move this somewhere more generally useful
