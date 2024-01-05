@@ -674,10 +674,15 @@ def get_ghstack_prs(
     for stacked_pr, rev in entire_stack:
         if stacked_pr.is_closed():
             continue
-        if not are_ghstack_branches_in_sync(repo, stacked_pr.head_ref()):
+        base_ref = stacked_pr.base_ref()
+        if base_ref == pr.default_branch():
+            base_ref = repo.get_merge_base(
+                f"{repo.remote}/{base_ref}", f"{repo.remote}/{stacked_pr.head_ref()}"
+            )
+        if not are_ghstack_branches_in_sync(repo, stacked_pr.head_ref(), base_ref):
             raise RuntimeError(
                 f"PR {stacked_pr.pr_num} is out of sync with the corresponding revision {rev} on "
-                + f"branch {orig_ref} that would be merged into main.  "
+                + f"branch {stacked_pr.get_ghstack_orig_ref()} that would be merged into {stacked_pr.default_branch()}.  "
                 + "This usually happens because there is a non ghstack change in the PR.  "
                 + f"Please sync them and try again (ex. make the changes on {orig_ref} and run ghstack)."
             )
