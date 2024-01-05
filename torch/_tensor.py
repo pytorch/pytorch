@@ -106,7 +106,8 @@ class Tensor(torch._C.TensorBase):
                     not torch._C._has_storage(self)
                     and self.device.type == torch._C._get_privateuse1_backend_name()
                 )
-                or (type(self) is not Tensor)
+                or (type(self) is not Tensor and self.data_ptr() == 0)
+                or type(self).__name__ == "DTensor"
             ):
                 new_tensor = self.clone()
                 if type(new_tensor) is not type(self):
