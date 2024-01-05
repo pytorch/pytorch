@@ -5055,6 +5055,18 @@ class CommonTemplate:
         if self.device != "cpu":
             self.assertTrue(same(arg1, arg2))
 
+    def test_slice_mutation3(self):
+        def fn(a):
+            a[:2, :2].fill_(10)
+
+        opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
+
+        x1 = torch.randn(8, 8, device=self.device)
+        x2 = x1.clone()
+        fn(x1)
+        opt_fn(x2)
+        self.assertEqual(x1, x2)
+
     def test_tensor_index_slice(self):
         def fn(a):
             x = torch.tensor([1, 2], device=self.device)

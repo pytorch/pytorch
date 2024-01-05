@@ -1,17 +1,41 @@
+import operator
 from collections import defaultdict, namedtuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Tuple
+
 import torch
+import torch.utils._pytree as pytree
+from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_functional
+from torch._inductor import inductor_prims
+from torch._inductor.fx_utils import get_node_storage
 from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
+from torch._inductor.virtualized import V
+from torch.fx.immutable_collections import immutable_dict
 
 
 aten = torch.ops.aten
+inductor_prims
 InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
 InplaceOpHandler = namedtuple("InplaceOpHandler", ["handler", "mutated_arg"])
 
+_SCATTER_OP_TO_VIEW = {
+    torch.ops.aten.diagonal_scatter.default: torch.ops.aten.diagonal.default,
+    torch.ops.aten.select_scatter.default: torch.ops.aten.select.int,
+    torch.ops.aten.slice_scatter.default: torch.ops.aten.slice.Tensor,
+    torch.ops.aten.as_strided_scatter.default: torch.ops.aten.as_strided.default,
+}
 
-def replace_target_with(graph, node, new_target):
-    node.target = new_target
+
+def _is_view_op(tgt):
+    if tgt is None or not isinstance(tgt, torch._ops.OpOverload):
+        return None
+    schema = tgt._schema
+    if len(schema.arguments) > 0:
+        first_arg = schema.arguments[0]
+        # check if op is a view
+        return first_arg.alias_info is not None and not first_arg.alias_info.is_write
 
 
 def graph_call_function(graph, fn, *args, **kwargs):
@@ -27,71 +51,160 @@ def graph_call_function(graph, fn, *args, **kwargs):
     return node
 
 
-def reinplace_slice_scatter(graph, node):
-    def arg_extractor(self, src, dim=0, start=None, end=None, step=1):
-        return self, src, dim, start, end, step
+@dataclass
+class ViewOp:
+    target: torch._ops.OpOverload
+    args: Tuple[Any, ...]
+    kwargs: Dict[str, Any]
 
-    self_, src, dim, start, end, step = arg_extractor(*node.args, **node.kwargs)
-    with graph.inserting_before(node):
-        view = graph_call_function(
-            graph,
-            aten.slice.Tensor,
-            self_,
-            dim,
-            start,
-            end,
-            step,
+
+def _inplace_generalized_scatter(inp, src, view_ops):
+    tmp = inp
+    for view in view_ops:
+        fake_args, fake_kwargs = pytree.tree_map(
+            lambda node: node.meta["val"] if isinstance(node, torch.fx.Node) else node,
+            (view.args, view.kwargs),
         )
-        graph_call_function(graph, aten.copy_.default, view, src)
-    node.replace_all_uses_with(self_)
-    graph.erase_node(node)
+        tmp = view.target(tmp, *fake_args, **fake_kwargs)
+    tmp.copy_(src)
+    return inp
 
 
-def reinplace_select_scatter(graph, node):
-    def arg_extractor(self, src, dim, index):
-        return self, src, dim, index
-
-    self_, src, dim, index = arg_extractor(*node.args, **node.kwargs)
-    with graph.inserting_before(node):
-        view = graph_call_function(graph, aten.select.int, self_, dim, index)
-        graph_call_function(graph, aten.copy_.default, view, src)
-    node.replace_all_uses_with(self_)
-    graph.erase_node(node)
+def _generalized_scatter(inp, src, view_ops):
+    out = inp.clone()
+    return _inplace_generalized_scatter(inp, src, view_ops)
 
 
-def reinplace_as_strided_scatter(graph, node):
-    def arg_extractor(self, src, size, stride, storage_offset=None):
-        return self, src, size, stride, storage_offset
+def _decompose_generalized_scatter(graph, node):
+    inp, src, view_ops = node.args
+    assert not node.kwargs
 
-    self_, src, size, stride, storage_offset = arg_extractor(*node.args, **node.kwargs)
-    with graph.inserting_before(node):
-        view = graph_call_function(
-            graph,
-            aten.as_strided.default,
-            self_,
-            size,
-            stride,
-            storage_offset,
+    if node.target is _generalized_scatter:
+        inp = graph_call_function(graph, aten.clone, inp)
+
+    tmp = inp
+    for view in view_ops:
+        tmp = graph_call_function(graph, view.target, tmp, *view.args, **view.kwargs)
+
+    graph_call_function(graph, aten.copy_, tmp, src)
+    return inp
+
+
+def decompose_generalized_scatter(graph):
+    for node in graph.nodes:
+        if node.target not in (_generalized_scatter, _inplace_generalized_scatter):
+            continue
+
+        with graph.inserting_before(node):
+            new_node = _decompose_generalized_scatter(graph, node)
+        node.replace_all_uses_with(new_node)
+        graph.erase_node(node)
+
+
+def canonicalize_view_scatter_ops(graph):
+    """
+    This canonicalizes view scatter ops into the generalized form, defined as:
+      def scatter(inp, src, views):
+        tmp = inp.clone()
+        for view in views:
+          tmp = view(tmp)
+        tmp.copy_(src)
+
+    We also fuse consecutive view scatter ops of the form
+        a = scatter(view2(self), src, [view1])
+        b = scatter(self, a, [view2])
+    which can be rewritten as
+        b = scatter(self, src, [view2, view1])
+        a = view2(b)
+
+    This is both more efficient as we only do a single scatter, and also
+    easier to reinplace since there is only one use of `self`
+    """
+
+    node_to_view_base = {}
+    node_to_view_op: Dict[torch.fx.Node, List[ViewOp]] = defaultdict(list)
+
+    def handle_views(node):
+        inp = node.args[0]
+        node_to_view_base[node] = node_to_view_base.get(inp, inp)
+        node_to_view_op[node] = [
+            *node_to_view_op[inp],
+            ViewOp(
+                node.target,
+                args=node.args[1:],
+                kwargs=node.kwargs,
+            ),
+        ]
+
+    def handle_view_scatter(node):
+        assert len(node.args) >= 2
+        inp, src = node.args[:2]
+
+        scatter_view_op = ViewOp(
+            _SCATTER_OP_TO_VIEW[node.target],
+            args=node.args[2:],
+            kwargs=node.kwargs,
         )
-        graph_call_function(graph, aten.copy_.default, view, src)
 
-    node.replace_all_uses_with(self_)
-    graph.erase_node(node)
+        if can_fuse := src.target is _generalized_scatter:
+            src_inp, src_src, src_scatter_view_op = src.args
+
+            inp_base = node_to_view_base.get(inp, inp)
+            src_base = node_to_view_base.get(src_inp, src_inp)
+            can_fuse = inp_base is src_base and node_to_view_op[src_inp] == [
+                *node_to_view_op[inp],
+                scatter_view_op,
+            ]
+
+        if not can_fuse:
+            with graph.inserting_before(node):
+                new_node = graph_call_function(
+                    graph,
+                    _generalized_scatter,
+                    inp,
+                    src,
+                    [scatter_view_op],
+                )
+            node.replace_all_uses_with(new_node)
+            graph.erase_node(node)
+            return
+
+        with graph.inserting_before(src):
+            new_node = graph_call_function(
+                graph,
+                _generalized_scatter,
+                inp,
+                src_src,
+                [scatter_view_op, *src_scatter_view_op],
+            )
+            node.replace_all_uses_with(new_node)
+            graph.erase_node(node)
+
+            if src.users:
+                new_src = graph_call_function(
+                    graph,
+                    _SCATTER_OP_TO_VIEW[node.target],
+                    new_node,
+                    *node.args[2:],
+                    **node.kwargs,
+                )
+
+                handle_views(new_src)
+                src.replace_all_uses_with(new_src)
+
+            graph.erase_node(src)
+
+    for node in graph.nodes:
+        if _is_view_op(node.target):
+            handle_views(node)
+        elif node.target in _SCATTER_OP_TO_VIEW:
+            handle_view_scatter(node)
+
 
 inplaceable_ops = {
-    aten.index_put.default: InplaceOpHandler(
-        functools.partial(replace_target_with, new_target=aten.index_put_.default),
-        0,
-    ),
-    aten._unsafe_index_put.default: InplaceOpHandler(
-        functools.partial(
-            replace_target_with, new_target=inductor_prims._unsafe_index_put_
-        ),
-        0,
-    ),
-    aten.slice_scatter.default: InplaceOpHandler(reinplace_slice_scatter, 0),
-    aten.select_scatter.default: InplaceOpHandler(reinplace_select_scatter, 0),
-    aten.as_strided_scatter.default: InplaceOpHandler(reinplace_as_strided_scatter, 0),
+    aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
+    aten._unsafe_index_put.default: InplaceableOp(inductor_prims._unsafe_index_put_, 0),
+    _generalized_scatter: InplaceableOp(_inplace_generalized_scatter, 0),
 }
 
 try:
@@ -118,7 +231,7 @@ for outplace_op, inplace_op in inplaceable_foreach_ops_lowerings.items():
 inplaceable_triton_ops = {triton_kernel_wrapper_functional}
 
 
-def reinplace_inplaceable_ops(graph):
+def reinplace_inplaceable_ops_core(graph):
     """
     Reinplaces in-placeable operations.
     If there are no uses of a view of the mutated arg after the current node,
@@ -217,7 +330,7 @@ def reinplace_inplaceable_ops(graph):
                 copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                 if copy_node is not None:
                     graph.erase_node(copy_node)
-                inplaceable_op.handler(graph, node)
+                node.target = inplaceable_op.inplace_op
         elif node.target in inplaceable_triton_ops:
             # inplaceable_triton_ops take an additional argument called
             # tensors_to_clone which contain a list of tensors to clone
@@ -256,3 +369,9 @@ def reinplace_inplaceable_ops(graph):
     for node, replacement in replace_list:
         node.replace_all_uses_with(replacement)
         graph.erase_node(node)
+
+
+def reinplace_inplaceable_ops(graph):
+    canonicalize_view_scatter_ops(graph)
+    reinplace_inplaceable_ops_core(graph)
+    decompose_generalized_scatter(graph)
