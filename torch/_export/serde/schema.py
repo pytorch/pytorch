@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = (3, 1)
 TREESPEC_VERSION = 1
 
 
@@ -309,11 +309,19 @@ class GraphModule:
     module_call_graph: List[ModuleCallEntry]
 
 
+# Invariant: Every time a change is made to the schema, one of the versions
+#            should be upadted.
+@dataclass
+class SchemaVersion:
+    major: int  # Major version number is bumped every time a breaking change is made.
+    minor: int  # Minor version number is bumped when a compatible change is made.
+
+
 @dataclass
 class ExportedProgram:
     graph_module: GraphModule
     # Key is the opset namespace (ex. aten), and value is the version number
     opset_version: Dict[str, int]
     range_constraints: Dict[str, RangeConstraint]
-    schema_version: int
+    schema_version: SchemaVersion
     dialect: str
