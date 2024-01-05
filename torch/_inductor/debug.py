@@ -89,7 +89,9 @@ def draw_buffers(nodes: List[BaseSchedulerNode], print_graph=False, fname=None):
     gm = GraphModule({}, graph)
     legalize_graph(gm)
     gm.graph.lint()
-    draw_graph(gm, fname, clear_meta=False)
+    draw_graph(
+        gm, fname, clear_meta=False, dot_graph_shape=config.trace.dot_graph_shape
+    )
 
 
 def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
@@ -271,8 +273,7 @@ def enable_aot_logging():
     stack.enter_context(patch("functorch.compile.config.debug_partitioner", True))
 
     path = os.path.join(get_debug_dir(), "torchinductor")
-    if not os.path.exists(path):
-        os.makedirs(path)
+    os.makedirs(path, exist_ok=True)
 
     fh = logging.FileHandler(
         os.path.join(
@@ -474,6 +475,7 @@ class DebugFormatter:
             clear_meta=False,
             prog=GRAPHVIZ_COMMAND_SCALABLE,
             parse_stack_trace=True,
+            dot_graph_shape=config.trace.dot_graph_shape,
         )
 
     def output_code(self, filename):

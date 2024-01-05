@@ -26,8 +26,7 @@
 #include <ATen/ops/vdot_native.h>
 #endif
 
-namespace at {
-namespace meta {
+namespace at::meta {
 TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta, const Scalar& alpha) {
   TORCH_CHECK((mat.dim() == 2 && vec.dim() == 1 && self.dim() <= 1),
     "vector + matrix @ vector expected, got ", self.dim(), ", ", mat.dim(), ", ", vec.dim());
@@ -37,9 +36,9 @@ TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec,
   auto names = at::namedinference::propagate_names_for_addmv(mat, vec, self);
   set_output_raw_strided(0, IntArrayRef(mat.sizes().data(), 1), {}, vec.options(), names);
 }
-}
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 template<typename scalar_t>
 void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, int64_t lda, const scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
@@ -223,4 +222,4 @@ Tensor vdot(const Tensor &self, const Tensor &other){
 
 }
 
-}}  // namespace at::native
+}  // namespace at::native

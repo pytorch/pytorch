@@ -445,6 +445,13 @@ int64_t _fused_sdp_choice_meta(
     bool is_causal,
     c10::optional<double> scale) {
   auto query_key_set = query_.key_set();
+#if defined(USE_ROCM)
+  bool has_rocm = query_key_set.has(c10::DispatchKey::HIP);
+  if (has_rocm) {
+    auto choice_int = _fused_sdp_choice_stub(at::kHIP, query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+    return choice_int;
+  }
+#else
   bool has_cuda = query_key_set.has(c10::DispatchKey::CUDA);
   if (has_cuda) {
     auto choice_int = _fused_sdp_choice_stub(
@@ -458,6 +465,7 @@ int64_t _fused_sdp_choice_meta(
         scale);
     return choice_int;
   }
+#endif
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 namespace {
@@ -522,9 +530,14 @@ c10::optional<Tensor> convert_boolean_attn_mask(const c10::optional<Tensor>& att
 // We apply this function to the top level SDPA so that
 // if padding is done it will be tracked for backward automatically
 
-template <int alignment>
-bool is_aligned(const SymInt& size){
-  return size % alignment == 0;
+template<int alignment>
+bool aligned_tensor(const at::Tensor& tensor){
+  for(const auto i : c10::irange(tensor.dim() - 1)){
+    if(tensor.sym_stride(i) % alignment != 0){
+      return false;
+    }
+  }
+  return tensor.sym_stride(-1) == 1;
 }
 
 template <int alignment>
@@ -540,31 +553,16 @@ at::Tensor preprocess_mask(
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value) {
-  constexpr int mem_eff_alignment = 16;
-  // Expand to 4d case
-  at::Tensor attn_mask = mask.expand_symint(
+  constexpr int mem_eff_alignment = 8;
+  at::Tensor result_mask = mask;
+  if (!aligned_tensor<mem_eff_alignment>(mask)) {
+    result_mask = pad_bias<mem_eff_alignment>(mask);
+  }
+  return result_mask.expand_symint(
       {query.sym_size(0),
        query.sym_size(1),
        query.sym_size(2),
        key.sym_size(2)});
-
-  bool aligned_last_dim = is_aligned<mem_eff_alignment>(attn_mask.sym_size(-1));
-  // Apply pad_bias and store the result in attn_mask
-  if (!aligned_last_dim) {
-    return pad_bias<mem_eff_alignment>(attn_mask);
-  }
-  // Check and make the tensor contiguous if needed
-  auto needs_contig = [](const c10::SymInt& stride) {
-    return (stride % 16 != 0) || (stride == 0);
-  };
-  if (needs_contig(attn_mask.sym_stride(0)) ||
-      needs_contig(attn_mask.sym_stride(1)) ||
-      needs_contig(attn_mask.sym_stride(2)) ||
-      needs_contig(attn_mask.sym_stride(3))) {
-    return attn_mask.contiguous();
-  }
-
-  return attn_mask;
 }
 // FlashAttentionV2 requires that head dimension be a multiple of 8
 // This was previously done within the kernel, however
@@ -635,7 +633,8 @@ Tensor scaled_dot_product_attention(
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (query_.device().type() == DeviceType::CUDA
-      || query_.device().type() == DeviceType::CPU){
+      || query_.device().type() == DeviceType::CPU
+      || query_.device().type() == DeviceType::HIP){
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
       query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   }

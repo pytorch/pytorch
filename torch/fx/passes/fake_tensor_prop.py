@@ -35,7 +35,11 @@ class FakeTensorProp(torch.fx.Interpreter):
 
         result = super().run_node(n)
         sym = None
-        if 'val' in n.meta and isinstance(v := n.meta['val'], torch.SymInt) and isinstance(v.node.expr, sympy.Symbol) and free_unbacked_symbols(v):
+        if (
+            'val' in n.meta and
+            isinstance(v := n.meta['val'], torch.SymInt) and
+            isinstance(v.node.expr, sympy.Symbol) and free_unbacked_symbols(v)
+        ):
             sym = v
 
         def extract_val(obj):
