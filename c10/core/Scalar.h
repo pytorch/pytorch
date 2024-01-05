@@ -61,8 +61,16 @@ class C10_API Scalar {
 
   Scalar(uint16_t vv) : Scalar(vv, true) {}
   Scalar(uint32_t vv) : Scalar(vv, true) {}
-  // TODO: Make this go to HAS_u when it overflows
-  Scalar(uint64_t vv) : Scalar(vv, true) {}
+  Scalar(uint64_t vv) {
+    if (vv > static_cast<uint64_t>(INT64_MAX)) {
+      tag = Tag::HAS_u;
+      v.u = vv;
+    } else {
+      tag = Tag::HAS_i;
+      // NB: no need to use convert, we've already tested convertibility
+      v.i = static_cast<int64_t>(vv);
+    }
+  }
 
 #undef DEFINE_IMPLICIT_CTOR
 
@@ -84,7 +92,6 @@ class C10_API Scalar {
     v.i = convert<int64_t, c10::SymBool>(vv);
   }
 
-  // TODO: test HAS_u
 #define DEFINE_ACCESSOR(type, name)                                   \
   type to##name() const {                                             \
     if (Tag::HAS_d == tag) {                                          \
@@ -96,6 +103,8 @@ class C10_API Scalar {
       return checked_convert<type, bool>(v.i, #type);                 \
     } else if (Tag::HAS_i == tag) {                                   \
       return checked_convert<type, int64_t>(v.i, #type);              \
+    } else if (Tag::HAS_u == tag) {                                   \
+      return checked_convert<type, uint64_t>(v.u, #type);             \
     } else if (Tag::HAS_si == tag) {                                  \
       return checked_convert<type, int64_t>(                          \
           toSymInt().guard_int(__FILE__, __LINE__), #type);           \
@@ -226,9 +235,17 @@ class C10_API Scalar {
       TORCH_CHECK(!isSymbolic(), "NYI SymFloat equality");
       return v.d == num;
     } else if (tag == Tag::HAS_i) {
-      return v.i == num;
+      if (overflows<T>(v.i, /* strict_unsigned */ true)) {
+        return false;
+      } else {
+        return static_cast<T>(v.i) == num;
+      }
     } else if (tag == Tag::HAS_u) {
-      return v.u == num;
+      if (overflows<T>(v.u, /* strict_unsigned */ true)) {
+        return false;
+      } else {
+        return static_cast<T>(v.u) == num;
+      }
     } else if (tag == Tag::HAS_si) {
       TORCH_INTERNAL_ASSERT(false, "NYI SymInt equality");
     } else if (isBoolean()) {
@@ -251,9 +268,17 @@ class C10_API Scalar {
       TORCH_CHECK(!isSymbolic(), "NYI SymFloat equality");
       return (v.d == num.real()) && (num.imag() == T());
     } else if (tag == Tag::HAS_i) {
-      return v.i == num.real() && num.imag() == T();
+      if (overflows<T>(v.i, /* strict_unsigned */ true)) {
+        return false;
+      } else {
+        return static_cast<T>(v.i) == num.real() && num.imag() == T();
+      }
     } else if (tag == Tag::HAS_u) {
-      return v.u == num.real() && num.imag() == T();
+      if (overflows<T>(v.u, /* strict_unsigned */ true)) {
+        return false;
+      } else {
+        return static_cast<T>(v.u) == num.real() && num.imag() == T();
+      }
     } else if (tag == Tag::HAS_si) {
       TORCH_INTERNAL_ASSERT(false, "NYI SymInt equality");
     } else if (isBoolean()) {
@@ -347,8 +372,8 @@ class C10_API Scalar {
   // of some quantity (integral versus floating point).  So actually,
   // HAS_u is used solely to represent unsigned integers that could
   // not be represented as a signed integer.  That means only uint64_t
-  // potentially can get this tag; uint8_t fits into a regular int
-  // and so for BC reasons we keep as an int.
+  // potentially can get this tag; smaller types like uint8_t fits into a
+  // regular int and so for BC reasons we keep as an int.
 
   // NB: assumes that self has already been cleared
   // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
