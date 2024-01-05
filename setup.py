@@ -160,6 +160,9 @@
 #   USE_ZSTD
 #     Enables use of ZSTD, if the libraries are found
 #
+#   USE_ROCM_KERNEL_ASSERT=1
+#     Enable kernel assert in ROCm platform
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
@@ -576,6 +579,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report("-- Detected CUDA at " + cmake_cache_vars["CUDA_TOOLKIT_ROOT_DIR"])
         else:
             report("-- Not using CUDA")
+        if cmake_cache_vars["USE_XPU"]:
+            report("-- Detected XPU runtime at " + cmake_cache_vars["SYCL_LIBRARY_DIR"])
+        else:
+            report("-- Not using XPU")
         if cmake_cache_vars["USE_MKLDNN"]:
             report("-- Using MKLDNN")
             if cmake_cache_vars["USE_MKLDNN_ACL"]:
@@ -1180,6 +1187,7 @@ def main():
         "include/c10/cuda/impl/*.h",
         "include/c10/hip/*.h",
         "include/c10/hip/impl/*.h",
+        "include/c10/xpu/*.h",
         "include/torch/*.h",
         "include/torch/csrc/*.h",
         "include/torch/csrc/api/include/torch/*.h",
@@ -1214,6 +1222,7 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
         "include/torch/csrc/inductor/aoti_torch/*.h",
         "include/torch/csrc/inductor/aoti_torch/c/*.h",

@@ -294,9 +294,6 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
   Tensor other = iter.input(1);
   Tensor out = iter.output();
 
-  id<MTLBuffer> inputBuffer = getMTLBufferStorage(input);
-  id<MTLBuffer> otherBuffer = getMTLBufferStorage(other);
-  id<MTLBuffer> outputBuffer = getMTLBufferStorage(out);
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   const uint32_t nDim = iter.ndim();
@@ -346,18 +343,11 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
       getMPSProfiler().beginProfileKernel(binaryPSO, kernel, {input, other});
 
       [computeEncoder setComputePipelineState:binaryPSO];
-      [computeEncoder setBuffer:inputBuffer offset:input.storage_offset() * input.element_size() atIndex:0];
-      [computeEncoder setBuffer:otherBuffer offset:other.storage_offset() * other.element_size() atIndex:1];
-      [computeEncoder setBuffer:outputBuffer offset:out.storage_offset() * out.element_size() atIndex:2];
+      mtl_setBuffer(computeEncoder, input, 0);
+      mtl_setBuffer(computeEncoder, other, 1);
+      mtl_setBuffer(computeEncoder, out, 2);
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
-
-      NSUInteger tgSize = binaryPSO.maxTotalThreadsPerThreadgroup;
-      if (tgSize > numThreads) {
-        tgSize = numThreads;
-      }
-
-      MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+      mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
 
       getMPSProfiler().endProfileKernel(binaryPSO);
     }

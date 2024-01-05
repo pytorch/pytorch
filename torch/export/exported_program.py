@@ -1,6 +1,7 @@
 import copy
 import dataclasses
 import functools
+import types
 from typing import (
     Any,
     Callable,
@@ -272,9 +273,7 @@ class ExportedProgram:
             )
         else:
             ordered_tensor_constants = ()
-        self._check_input_constraints(
-            *ordered_params, *ordered_buffers, *ordered_tensor_constants, *args
-        )
+        self._check_input_constraints(*args)
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
         # See: torch/_functorch/aot_autograd.py#L1034
@@ -346,17 +345,23 @@ class ExportedProgram:
         )
         return string
 
-    def module(self, *, flat: bool = True) -> torch.nn.Module:
+    def module(self) -> torch.nn.Module:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
         """
-        from torch._export.exported_program import unlift_exported_program_lifted_states
-        from torch._export.unflatten import unflatten
+        from ._unlift import _unlift_exported_program_lifted_states
 
-        if flat:
-            return unlift_exported_program_lifted_states(self)
-        else:
-            return unflatten(self)
+        module = _unlift_exported_program_lifted_states(self)
+
+        def _train(self, mode: bool = True):
+            raise NotImplementedError("Calling train() is not supported yet.")
+
+        def _eval(self, mode: bool = True):
+            raise NotImplementedError("Calling eval() is not supported yet.")
+
+        module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
+        module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
+        return module
 
     @_disable_prexisiting_fake_mode
     def run_decompositions(
@@ -418,12 +423,24 @@ class ExportedProgram:
         new_placeholders = _get_placeholders(gm)
         new_outputs = list(gm.graph.nodes)[-1].args[0]
 
+        # To match the output target with correct input for input mutations
+        # need to find the old to new placeholder map
+        old_new_placeholder_map = {
+            spec.arg.name: new_placeholders[i].name
+            for i, spec in enumerate(self.graph_signature.input_specs)
+            if not isinstance(spec.arg, ConstantArgument)
+        }
+
         input_specs = [
             InputSpec(spec.kind, update_arg(spec.arg, new_placeholders[i]), spec.target)
             for i, spec in enumerate(self.graph_signature.input_specs)
         ]
         output_specs = [
-            OutputSpec(spec.kind, update_arg(spec.arg, new_outputs[i]), spec.target)
+            OutputSpec(
+                spec.kind,
+                update_arg(spec.arg, new_outputs[i]),
+                old_new_placeholder_map.get(spec.target, spec.target),
+            )
             for i, spec in enumerate(self.graph_signature.output_specs)
         ]
 
@@ -466,14 +483,13 @@ class ExportedProgram:
             for inp_dim1, inp_dim2 in self.equality_constraints
         ]
 
-        state_dict = self.state_dict.copy()
         lift_constant_tensor_pass(gm, new_graph_signature)
         _replace_sym_size_ops_pass(gm)
         exported_program = ExportedProgram(
             gm,
             gm.graph,
             new_graph_signature,
-            state_dict,
+            self.state_dict,
             new_range_constraints,
             new_equality_constraints,
             copy.deepcopy(self.module_call_graph),
@@ -483,7 +499,7 @@ class ExportedProgram:
         )
 
         if len(new_range_constraints) > 0 or len(new_equality_constraints) > 0:
-            exported_program = exported_program._transform(
+            exported_program = exported_program._transform_do_not_use(
                 _AddRuntimeAssertionsForInlineConstraintsPass(
                     new_range_constraints, new_equality_constraints
                 )
@@ -491,7 +507,7 @@ class ExportedProgram:
 
         return exported_program
 
-    def _transform(self, *passes: PassType) -> "ExportedProgram":
+    def _transform_do_not_use(self, *passes: PassType) -> "ExportedProgram":
         pm = PassManager(list(passes))
         res = pm(self.graph_module)
         transformed_gm = res.graph_module if res is not None else self.graph_module
@@ -568,12 +584,30 @@ class ExportedProgram:
     def _check_input_constraints(self, *args):
         from torch._export.utils import _check_input_constraints_for_graph
 
+        placeholders = [p for p in self.graph.nodes if p.op == "placeholder"]
+        input_placeholders = [
+            p
+            for p, s in zip(placeholders, self.graph_signature.input_specs)
+            if s.kind == InputKind.USER_INPUT
+        ]
         _check_input_constraints_for_graph(
-            self.graph, self.range_constraints, self.equality_constraints
-        )(*args)
+            input_placeholders, args, self.range_constraints
+        )
 
     def _validate(self):
         self.verifier().check(self)
+
+    # TODO This hack is necessary until executorch can update their pin in pytorch CI.
+    def __getattribute__(self, name):
+        if name == "_transform":
+            import os
+
+            if (
+                os.environ.get("CI", None) == "true"
+                and os.environ.get("GITHUB_ACTIONS", None) == "true"
+            ):
+                return self._transform_do_not_use
+        return super().__getattribute__(name)
 
 
 def _get_updated_range_constraints(
@@ -602,4 +636,7 @@ def _get_updated_range_constraints(
         for k, v in shape_env.var_to_range.items()
         if k not in shape_env.replacements
     }
+    for k, v in shape_env.runtime_var_to_range.items():
+        if k not in shape_env.replacements:
+            range_constraints[k] = v
     return range_constraints

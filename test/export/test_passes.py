@@ -4,6 +4,7 @@ with test_functionalization_with_native_python_assertion)
 """
 
 # Owner(s): ["module: dynamo"]
+import math
 import unittest
 from typing import List, Set
 import operator
@@ -12,13 +13,12 @@ import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing import FileCheck
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import export
-from torch._export.passes import (
-    ReplaceViewOpsWithViewCopyOpsPass,
-)
+from torch.export import export
+from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
     is_view_op,
     get_view_copy_of_view_op,
+    ReplaceViewOpsWithViewCopyOpsPass,
 )
 from torch._export.passes.functionalize_side_effectful_ops_pass import (
     _FunctionalizeSideEffectfulOpsPass,
@@ -76,7 +76,7 @@ class TestPasses(TestCase):
         dim1_x = torch.export.Dim("dim1_x", min=2, max=6)
         ep = torch.export.export(M(), (x,), dynamic_shapes={"x": {1: dim1_x}})
 
-        with self.assertRaisesRegex(RuntimeError, "is outside of specified dynamic range"):
+        with self.assertRaisesRegex(RuntimeError, r"Expected input l_x_.shape\[1\] to be <= 6, but got 7"):
             ep(torch.zeros(2, 7, 3))
 
         self.assertEqual(ep(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
@@ -99,10 +99,10 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}}
         )
 
-        with self.assertRaisesRegex(RuntimeError, "is outside of specified dynamic range"):
+        with self.assertRaisesRegex(RuntimeError, r"Expected input l_x_.shape\[1\] to be <= 6, but got 7"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
-        with self.assertRaisesRegex(RuntimeError, "is outside of specified dynamic range"):
+        with self.assertRaisesRegex(RuntimeError, r"Expected input l_y_.shape\[0\] to be >= 3, but got 2"):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
@@ -123,12 +123,12 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None}
         )
 
-        with self.assertRaisesRegex(RuntimeError, "is outside of specified dynamic range"):
+        with self.assertRaisesRegex(RuntimeError, r"Expected input l_x_.shape\[1\] to be <= 6, but got 7"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError, r"shape\[0\] is specialized at 5"
+            RuntimeError, r"Expected input l_y_.shape\[0\] to be equal to 5, but got 2"
         ):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
@@ -152,12 +152,12 @@ class TestPasses(TestCase):
         dim1_y = torch.export.Dim("dim1_y", min=3, max=6)
         ep = torch.export.export(M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}})
 
-        with self.assertRaisesRegex(RuntimeError, r"shape\[1\] is specialized at 2"):
+        with self.assertRaisesRegex(RuntimeError, r"shape\[1\] to be equal to 2"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError, r"shape\[0\] is specialized at 5"
+            RuntimeError, r"Expected input l_y_.shape\[0\] to be equal to 5, but got 2"
         ):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
@@ -181,7 +181,7 @@ class TestPasses(TestCase):
         ep = export(M(), (x,))
         self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 1)
 
-        ep = ep._transform(ReplaceViewOpsWithViewCopyOpsPass())
+        ep = ep._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
         self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 0)
 
     def test_functionalization_with_view_copy(self) -> None:
@@ -193,7 +193,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
 
-        ep = export(foo, (x,))._transform(ReplaceViewOpsWithViewCopyOpsPass())
+        ep = export(foo, (x,))._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
         # After this pass, there shouldn't be any view nodes in the graph
         self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view.default) == 0)
         self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view_copy.default) > 0)
@@ -316,9 +316,6 @@ class TestPasses(TestCase):
             exactly=True,
         ).run(gm.code)
 
-        # TODO(ycao): ExportedProgram._transform() forbids changes to number
-        # of inputs/outputs for now. When it supports that better, change this
-        # back to using ExportedProgram._transform()
         gm = _FunctionalizeSideEffectfulOpsPass()(ep.graph_module).graph_module
 
         with self.assertRaisesRegex(
@@ -338,6 +335,17 @@ class TestPasses(TestCase):
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
         ).run(gm.code)
+
+    def test_math_ops(self):
+        def func(x):
+            return (
+                torch.tensor([math.ceil(x.item())]),
+                torch.tensor([math.floor(x.item())]),
+            )
+
+        x = torch.randn(1, dtype=torch.float32)
+        ep = torch.export.export(func, args=(x,))
+        _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
 
 
 if __name__ == '__main__':
