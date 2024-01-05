@@ -56,8 +56,7 @@ namespace {
   const int MODE_MAX = 2;
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template<typename scalar_t>
 scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
@@ -1782,6 +1781,5 @@ Tensor _embedding_bag_sparse_backward_symint(
   }
   return native::embedding_backward_symint(index_grad, indices, std::move(num_weights), padding_idx,
                                     scale_grad_by_freq, true);
-}
 }
 } // namespace at::native

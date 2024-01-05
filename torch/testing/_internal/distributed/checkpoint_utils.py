@@ -19,7 +19,6 @@ def with_temp_dir(
 
     @wraps(func)
     def wrapper(self, *args: Tuple[object], **kwargs: Dict[str, Any]) -> None:
-
         if dist.is_initialized():
             # Only create temp_dir when rank is 0
             if dist.get_rank() == 0:
