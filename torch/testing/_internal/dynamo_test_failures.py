@@ -208,18 +208,8 @@ FIXME_default_non_strict = {
     "test_jiterator",
     "test_legacy_vmap",
     "test_license",
-    "test_logging",
     "test_masked",
     "test_maskedtensor",
-    "test_matmul_cuda",
-    "test_meta",
-    "test_mkl_verbose",
-    "test_mkldnn",
-    "test_mkldnn_fusion",
-    "test_mkldnn_verbose",
-    "test_mobile_optimizer",
-    "test_model_dump",
-    "test_model_exports_to_core_aten",
     "test_modules",
     "test_namedtensor",
     "test_namedtuple_return_api",
@@ -2099,6 +2089,22 @@ dynamo_expected_failures = {
     "TestMultiprocessing.test_is_shared",  # test_multiprocessing
     "TestMultiprocessing.test_fs_is_shared",  # test_multiprocessing
     "TestMonitorTensorboard.test_event_handler",  # test_monitor
+    "TestMkldnnCPU.test_add_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_linear_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_prelu_bf16_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_prelu_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_batch_norm_2d_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_mul_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_conv1d_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_linear_lowp_cpu_float16",  # test_mkldnn
+    "TestMkldnnCPU.test_sigmoid_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_conv3d_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_reshape_blocked_format_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_copy_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_tanh_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_conv2d_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_batch_norm_3d_cpu",  # test_mkldnn
+    "LoggingTest.testApiUsage",  # test_logging
 }
 
 dynamo_skips = {
@@ -2194,4 +2200,5 @@ dynamo_skips = {
     "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_True",  # flaky
     "TestOpenMP_ParallelFor.test_n_threads",  # known py311 fail
     "TestNativeFunctions.test_intlist_error_with_overload",  # known py311 fail
+    "TestMkldnnFusion.test_single_conv",  # known py311 fail
 }
