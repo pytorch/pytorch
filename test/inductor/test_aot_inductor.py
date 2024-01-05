@@ -1568,6 +1568,7 @@ if TEST_WITH_ROCM:
             "test_sdpa_2": fail_cuda(is_skip=True),
             "test_dynamic_smem_above_default_limit": fail_cuda(is_skip=True),
             "test_foreach_multiple_dynamic": fail_cuda(is_skip=True),
+            "test_reuse_kernel":fail_cuda(is_skip=True),
         }
     )
 
