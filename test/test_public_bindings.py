@@ -292,7 +292,6 @@ class TestPublicBindings(TestCase):
             "torch.backends._coreml.preprocess",
             "torch.contrib._tensorboard_vis",
             "torch.distributed._composable",
-            "torch.distributed._device_mesh",
             "torch.distributed._functional_collectives",
             "torch.distributed._functional_collectives_impl",
             "torch.distributed._shard",

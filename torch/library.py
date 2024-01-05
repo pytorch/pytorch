@@ -6,6 +6,7 @@ import weakref
 import functools
 import inspect
 import re
+import sys
 
 __all__ = [
     'Library',
@@ -418,8 +419,8 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
 
     """
     source = torch._library.utils.get_source(_stacklevel + 1)
-    frame = inspect.stack()[_stacklevel]
-    caller_module = inspect.getmodule(frame[0])
+    frame = sys._getframe(_stacklevel)
+    caller_module = inspect.getmodule(frame)
     # Can be none if you call impl_abstract from somewhere there isn't a module
     # (e.g. __main__)
     caller_module_name = None if caller_module is None else caller_module.__name__

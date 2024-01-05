@@ -4143,7 +4143,7 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
                 # Don't use node.name() here as it is not consistent on windows
                 node_name = node.__class__.__name__ if node else "None"
                 pr.append(f"Running {func} from within {node_name}")
-                return func(*args, **kwargs or {})
+                return func(*args, **(kwargs or {}))
 
         with MyMode():
             pr.append("FW")
@@ -4284,7 +4284,7 @@ Done""")
                 y = x * 2 + 4
 
         function_events = p.function_events
-        foo_event = [event for event in function_events if "foo" in event.name][0]
+        foo_event = next(event for event in function_events if "foo" in event.name)
         self.assertEqual(foo_event.count, 1)
 
     def test_record_function_legacy(self):
@@ -4299,7 +4299,7 @@ Done""")
                 torch.ops.profiler._record_function_exit(handle)
 
         function_events = p.function_events
-        foo_event = [event for event in function_events if "bar" in event.name][0]
+        foo_event = next(event for event in function_events if "bar" in event.name)
         self.assertEqual(foo_event.count, 1)
 
     def test_profiler_aggregation_fake(self):
@@ -4319,7 +4319,7 @@ Done""")
         ]
         for thread, ranges in threads:
             for range in ranges:
-                assert(len(range) == 3)
+                assert len(range) == 3
                 events.append(
                     FunctionEvent(
                         id=range[2],
@@ -4340,7 +4340,7 @@ Done""")
         def get_children_ids(event):
             return [child.id for child in event.cpu_children]
 
-        assert([get_children_ids(event) for event in events] == res)
+        assert [get_children_ids(event) for event in events] == res
 
     def test_profiler_aggregation_table(self):
         """
@@ -5972,44 +5972,25 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(Exception, "only supported when use_reentrant=False"):
             out = checkpoint(lambda x: x.sin(), x, use_reentrant=True, context_fn=context_fn)
 
-    def test_checkpoint_warns_if_use_reentrant_not_passed_explcitly(self):
+    def test_checkpoint_errors_if_use_reentrant_not_passed_explicitly(self):
         a = torch.randn(1, requires_grad=True)
+        error_str = "please pass in use_reentrant=True or use_reentrant=False explicitly"
 
-        # Passing explicitly should not warn
-        with warnings.catch_warnings(record=True) as w:
-            checkpoint(lambda x: x, a, use_reentrant=False)
-        self.assertEqual(len(w), 0)
-
-        # Not passing explicitly warns
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertRaisesRegex(ValueError, error_str):
             checkpoint(lambda x: x, a)
-        self.assertEqual(len(w), 1)
-        self.assertIn(
-            "please pass in use_reentrant=True or use_reentrant=False explicitly",
-            str(w[0].message)
-        )
 
-    def test_checkpoint_sequential_warns_if_use_reentrant_not_passed_explcitly(self):
+    def test_checkpoint_sequential_errors_if_use_reentrant_not_passed_explicitly(self):
         a = torch.randn(3, requires_grad=True)
         modules_list = [
             torch.nn.Linear(3, 3),
             torch.nn.Linear(3, 3),
             torch.nn.Linear(3, 3)
         ]
-
-        # Passing explicitly should not warn
-        with warnings.catch_warnings(record=True) as w:
-            checkpoint_sequential(modules_list, 3, a, use_reentrant=False)
-        self.assertEqual(len(w), 0)
+        error_str = "please pass in use_reentrant=True or use_reentrant=False explicitly"
 
         # Not passing explicitly warns
-        with warnings.catch_warnings(record=True) as w:
+        with self.assertRaisesRegex(ValueError, error_str):
             checkpoint_sequential(modules_list, 3, a)
-        self.assertEqual(len(w), 1)
-        self.assertIn(
-            "please pass in use_reentrant=True or use_reentrant=False explicitly",
-            str(w[0].message)
-        )
 
     def test_checkpoint_detects_non_determinism(self):
         def save_3_tensors(x):
@@ -8742,6 +8723,18 @@ get_out().sum().backward()
         self.assertEqual(y_expected, y1_expected)
         self.assertEqual(y, y2)
         self.assertEqual(y_expected, y2_expected)
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_gradcheck_default_device_placement_context(self):
+        # During gradcheck with fast_mode=True, we create a random vector on the CPU device using a CPU generator.
+        # This test ensures that this still works when the default device is set to something else by the user.
+        with torch.device('cuda'):
+            x = torch.randn(3, dtype=torch.double, requires_grad=True)
+
+            def func(inp):
+                return inp ** 2.0
+
+            self.assertTrue(gradcheck(func, x, fast_mode=True))
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -11868,6 +11861,7 @@ class TestAutogradMultipleDispatch(TestCase):
 
 from autograd.test_complex import TestAutogradComplex  # noqa: F401
 from autograd.test_functional import TestAutogradFunctional  # noqa: F401
+from autograd.test_logging import TestAutogradLogging  # noqa: F401
 
 # e.g., TestAutogradDeviceTypeCPU and TestAutogradDeviceTypeCUDA
 instantiate_device_type_tests(
