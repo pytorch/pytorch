@@ -2281,6 +2281,71 @@ class GraphModule(torch.nn.Module):
 {'batched_output': ['add'], 'sum_1': ['sum_1'], 'sum_2': ['sum_2']}""",
         )
 
+    @config.patch(capture_func_transforms=True)
+    def test_vmap_with_graph_break(self):
+        counters.clear()
+
+        def g(x):
+            y = x.cos()
+            print('hi')
+            return y.sin()
+
+        def fn(x):
+            return torch.vmap(g)(x)
+
+        x = torch.randn(3, 4)
+        opt = torch.compile(fn, backend="aot_eager", fullgraph=False)
+        expected = fn(x)
+        got = opt(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(expected, got)
+
+    @unittest.expectedFailure
+    @config.patch(capture_func_transforms=True)
+    def test_vmap_with_graph_break_2(self):
+        counters.clear()
+
+        def cos(x):
+            print('cos')
+            return x.cos()
+
+        def sin(x):
+            print('sin')
+            return x.sin()
+
+        def g(x):
+            y = cos(x)
+            return sin(y)
+
+        def fn(x):
+            return torch.vmap(g, randomness='same')(x)
+
+        x = torch.randn(3, 4)
+        opt = torch.compile(fn, backend="aot_eager", fullgraph=False)
+        expected = fn(x)
+        got = opt(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(expected, got)
+
+    @unittest.expectedFailure
+    def test_vmap_with_graph_break_lambda(self):
+        counters.clear()
+
+        def sin(x):
+            print('sin')
+            return x.sin()
+
+        def fn(x):
+            return torch.vmap(lambda x: sin(x))(x)
+
+        x = torch.randn(3, 4)
+        opt = torch.compile(fn, backend="aot_eager", fullgraph=False)
+        expected = fn(x)
+        got = opt(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(expected, got)
+
+
     def test_cond_pytree_operands(self):
         def _construct_pytree():
             a = torch.randn(3, 3)
