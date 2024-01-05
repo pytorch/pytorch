@@ -155,6 +155,7 @@ FIXME_default_non_strict = {
     "profiler/test_memory_profiler",
     "profiler/test_profiler",
     "profiler/test_profiler_tree",
+    "test_schema_check",  # nb: times out
     "test_ao_sparsity",
     "test_autograd",
     "test_binary_ufuncs",
