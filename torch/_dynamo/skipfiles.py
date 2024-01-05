@@ -323,8 +323,6 @@ def check_file(filename, is_inlined_call=False):
     # temporary hack otherwise inline will be skipped
     if (
         bool(SKIP_DIRS_RE.match(filename))
-        and not filename.endswith("variables/torch.py")
-        and not filename.endswith("variables/user_defined.py")
         and not filename.endswith("variables/inline_helper.py")
         and not filename.endswith("torch/autograd/__init__.py")
     ):

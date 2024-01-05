@@ -600,12 +600,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             raise unimplemented("torch.compile does not support strided NestedTensor")
         elif self.value == torch.ops.inductor.accumulate_grad_.default:
             from .builder import SourcelessBuilder
-
-            def dummy_accumulate_grad_(t1, t2):
-                if t1.grad is None:
-                    t1.grad = t2
-                else:
-                    t1.grad += t2
+            from .inline_helper import dummy_accumulate_grad_
 
             dummy_accumulate_grad_variable = SourcelessBuilder()(
                 tx, dummy_accumulate_grad_
