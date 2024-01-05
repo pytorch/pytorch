@@ -1,9 +1,13 @@
 # Owner(s): ["module: dynamo"]
+import unittest
+
 import torch
+import torch._dynamo as torchdynamo
 from torch.export import export
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestSafeguard(TestCase):
     # If the autograd state doesn't change, dynamo eliminates autograd state manager op and later export can succeed.
     # Otherwise, autograd can be preserved in the produced gragh, and export will fail.
