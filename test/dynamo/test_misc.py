@@ -1875,6 +1875,17 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+    def test_numpy_subdtype(self):
+        def fn(x, n):
+            return np.issubdtype(type(n), np.integer) + x
+
+        args = [torch.randn(10), 4096]
+        correct = fn(*args)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        self.assertEqual(opt_fn(*args), correct)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_numpy_take_along_axis(self):
         def fn(x, i, a):
             return np.take_along_axis(x, i, a)
@@ -3978,6 +3989,22 @@ def fn():
         del x
         self.assertIsNone(mod_ref(), None)
         self.assertIsNone(mod_weight_ref(), None)
+
+    def test_release_scope_memory(self):
+        def inner(y):
+            y
+
+        inner = torch._dynamo.optimize("eager")(inner)
+
+        p_ref = None
+
+        x = torch.randn((10, 10))
+        inner(x)
+
+        p_ref = weakref.ref(x)
+        self.assertTrue(p_ref() is not None)
+        del x
+        self.assertTrue(p_ref() is None)
 
     def test_update_locals_and_stack_uses_shared_cache(self):
         def fn(x):

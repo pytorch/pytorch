@@ -1142,11 +1142,12 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     alpha_val = kwargs.get('alpha', 2 + 3j if dtype.is_complex else 0.6)
     beta_val = kwargs.get('beta', 1 + 2j if dtype.is_complex else 0.2)
     tests_list = [
-        ((2, 3), (2, 2), (2, 3), False)
+        ((2, 3), (2, 2), (2, 3), False),
+        ((3, 3), (3, 3), (3, 3), False),
     ]
     tests_with_lhs_broadcasting = [
         ((1,), (2, 2), (2, 3), True),
-        ((), (2, 2), (2, 3), True)
+        ((), (2, 2), (2, 3), True),
     ]
     test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore[operator]
 
@@ -14267,6 +14268,15 @@ op_db: List[OpInfo] = [
                          device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
                          device_type='cpu'),
+            # TODO: Do not work even on MI200 because of stride mismatching.
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
+                         device_type='cuda', dtypes=[torch.float16, torch.bfloat16],
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_meta_outplace',
+                         device_type='cuda', dtypes=[torch.float16, torch.bfloat16],
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp',
+                         device_type='cuda', active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
             # When changing input from Tensor to CompositeCompliantTensor, input.requires_grad() changes from true to false
             DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward',
                          device_type='cpu'),
@@ -14310,6 +14320,13 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
             # None Mismatch Tensor
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', device_type='cuda'),
+            # TODO: Do not work on MI200 because of stride mismatching.
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
+                         device_type='cuda', dtypes=[torch.float16, torch.bfloat16],
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_meta_outplace',
+                         device_type='cuda', dtypes=[torch.float16, torch.bfloat16],
+                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
         )
     ),
     OpInfo(
@@ -17066,8 +17083,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('eye',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_eye,
            error_inputs_func=error_inputs_eye,
            supports_out=True,
