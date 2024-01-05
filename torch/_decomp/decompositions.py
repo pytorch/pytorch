@@ -4449,7 +4449,7 @@ def _weight_norm_interface(x, y, dim):
 @register_decomposition(aten.isin)
 @out_wrapper()
 def isin(elements, test_elements, *, assume_unique=False, invert=False):
-    if test_elements.numel() < 10.0*torch.pow(torch.tensor(elements.numel(), dtype=torch.float32), torch.tensor(0.145)):
+    if test_elements.numel() < 10.0*pow(elements.numel(), 0.145):
         return isin_default(elements, test_elements, invert=invert)
     else:
         return isin_sorting(elements, test_elements, assume_unique=assume_unique, invert=invert)
