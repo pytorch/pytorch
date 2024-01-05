@@ -12,7 +12,7 @@ namespace at { namespace native {
 
 #if AT_CUDNN_ENABLED()
 
-void raw_cudnn_layernorm_forward_out(const Tensor& X, const Tensor& scale, const Tensor& bias, float epsilon,  Tensor* mean,  Tensor* rstd);
+void raw_cudnn_layernorm_forward_out(const Tensor& X, const Tensor& scale, const Tensor& bias, float epsilon,  Tensor* mean,  Tensor* rstd, Tensor* Y, int64_t M, int64_t N);
 
 #endif
 }}

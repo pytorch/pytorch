@@ -57,7 +57,7 @@ auto get_fe_dtype(const Tensor& t) {
   return fe_dtype;
 }
 
-void raw_cudnn_layernorm_forward_out(const Tensor& X, const Tensor& scale, const Tensor& bias, float epsilon, Tensor* mean, Tensor* rstd) {
+void raw_cudnn_layernorm_forward_out(const Tensor& X, const Tensor& scale, const Tensor& bias, float epsilon, Tensor* mean, Tensor* rstd, Tensor* Y, int64_t M, int64_t N) {
   TORCH_WARN("called");
   namespace fe = cudnn_frontend;
   fe::graph::Graph graph;
@@ -65,33 +65,37 @@ void raw_cudnn_layernorm_forward_out(const Tensor& X, const Tensor& scale, const
       .set_intermediate_data_type(fe::DataType_t::FLOAT)
       .set_compute_data_type(fe::DataType_t::FLOAT);
   TORCH_WARN(X.sizes(), scale.sizes(), bias.sizes(), mean->sizes(), rstd->sizes());
+  // cuDNN only seems to care about non-normalized and normalized dimensions, and we can only have one non-normalized-dimension, so...
+  // we reshape to
+  // N, M, 1, 1 because cuDNN also has the restruction that everything must be in 4-D
+  auto X_reshaped = X.reshape({N, M, 1, 1});
   auto X_fe = graph.tensor(fe::graph::Tensor_attributes()
                            .set_name("X")
-                           .set_dim(std::vector<int64_t>(X.sizes().begin(), X.sizes().end()))
-                           .set_stride(std::vector<int64_t>(X.strides().begin(), X.strides().end())));
-  std::vector<int64_t> scale_bias_sizes(X.sizes().size(), 1); // init to 1
-  std::vector<int64_t> scale_bias_strides(X.strides().size(), scale.sizes()[0]); // init to M
-  for (int i = scale_bias_sizes.size() - 1; i >= 0; i--) {
-    if (scale.sizes()[0] == X.sizes()[i]) {
-	scale_bias_sizes[i] = scale.sizes()[0];
-        scale_bias_strides[i] = 1;
-        break;
-    }
-  }
+                           .set_dim(std::vector<int64_t>(X_reshaped.sizes().begin(), X_reshaped.sizes().end()))
+                           .set_stride(std::vector<int64_t>(X_reshaped.strides().begin(), X_reshaped.strides().end())));
+  //std::vector<int64_t> scale_bias_sizes(X.sizes().size(), 1); // init to 1
+  //std::vector<int64_t> scale_bias_strides(X.strides().size(), scale.sizes()[0]); // init to M
+  //for (int i = scale_bias_sizes.size() - 1; i >= 0; i--) {
+  //  if (scale.sizes()[0] == X.sizes()[i]) {
+  //      scale_bias_sizes[i] = scale.sizes()[0];
+  //      scale_bias_strides[i] = 1;
+  //      break;
+  //  }
+  //}
   auto scale_fe = graph.tensor(fe::graph::Tensor_attributes()
                                 .set_name("scale")
-                                .set_dim(scale_bias_sizes)
-                                .set_stride(scale_bias_strides)
+                                .set_dim({1, M, 1, 1})
+                                .set_stride({M, 1, M, M})
                                 .set_data_type(get_fe_dtype(scale)));
   auto bias_fe  = graph.tensor(fe::graph::Tensor_attributes()
                                .set_name("bias")
-                               .set_dim(scale_bias_sizes)
-                               .set_stride(scale_bias_strides)
+                               .set_dim({1, M, 1, 1})
+                               .set_stride({M, 1, M, M})
                                .set_data_type(get_fe_dtype(bias)));
   auto epsilon_fe = graph.tensor(fe::graph::Tensor_attributes()
                                   .set_name("epsilon")
-                                  .set_dim(std::vector<int64_t>(X.sizes().size(), 1))
-                                  .set_stride(std::vector<int64_t>(X.strides().size(), 1))
+                                  .set_dim({1, 1, 1, 1})
+                                  .set_stride({1, 1, 1, 1})
                                   .set_data_type(fe::DataType_t::FLOAT));
   auto layernorm_options =
       fe::graph::Layernorm_attributes().set_forward_phase(fe::NormFwdPhase_t::TRAINING).set_epsilon(epsilon_fe);
@@ -100,8 +104,6 @@ void raw_cudnn_layernorm_forward_out(const Tensor& X, const Tensor& scale, const
   inv_variance_fe->set_output(true).set_data_type(get_fe_dtype(*rstd));
 
   Y_fe->set_output(true);
-
-
 
 
   cudnnHandle_t handle = getCudnnHandle();
@@ -114,6 +116,22 @@ void raw_cudnn_layernorm_forward_out(const Tensor& X, const Tensor& scale, const
   TORCH_INTERNAL_ASSERT(graph.check_support(handle).is_good());
 
   TORCH_INTERNAL_ASSERT(graph.build_plans(handle).is_good());
+
+  auto workspace_size = graph.get_workspace_size();
+  auto workspace_ptr = c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
+  TORCH_INTERNAL_ASSERT(!workspace_size || workspace_ptr);
+
+  std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack = {
+      {X_fe, X_reshaped.data_ptr()},
+      {mean_fe, mean->data_ptr()},
+      {inv_variance_fe, rstd->data_ptr()},
+      {scale_fe, scale.numel() ? scale.data_ptr() : nullptr},
+      {bias_fe, bias.numel() ? bias.data_ptr() : nullptr},
+      {epsilon_fe, &epsilon},
+      {Y_fe, Y->data_ptr()}};
+  if (scale.numel() && bias.numel()) {
+    TORCH_INTERNAL_ASSERT(graph.execute(handle, variant_pack, workspace_ptr.get()).is_good());
+  }
 }
 
 
