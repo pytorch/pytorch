@@ -63,7 +63,7 @@ class TestPrioritizations:
     Describes the results of whether heuristics consider a test relevant or not.
 
     All the different ranks of tests are disjoint, meaning a test can only be in one category, and they are only
-    declared at initization time.
+    declared at initialization time.
 
     A list can be empty if a heuristic doesn't consider any tests to be in that category.
 
