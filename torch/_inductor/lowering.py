@@ -4158,33 +4158,12 @@ def upsample_nearest2d_backward(
     return rv
 
 
-fallbacks_avg_poolnd = (
-    fallback_handler(aten.avg_pool1d.default, add_to_fallback_set=False),
-    fallback_handler(aten.avg_pool2d.default, add_to_fallback_set=False),
-    fallback_handler(aten.avg_pool3d.default, add_to_fallback_set=False),
+fallback_avg_pool2d = fallback_handler(
+    aten.avg_pool2d.default, add_to_fallback_set=False
 )
-
-
-@register_lowering(aten.avg_pool1d, type_promotion_kind=None)
-def avg_pool1d(
-    x,
-    kernel_size,
-    stride=(),
-    padding=0,
-    ceil_mode=False,
-    count_include_pad=True,
-    divisor_override=None,
-):
-    return _avg_poolnd(
-        x,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
-        divisor_override,
-        dim=1,
-    )
+fallback_avg_pool3d = fallback_handler(
+    aten.avg_pool3d.default, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten.avg_pool2d, type_promotion_kind=None)
@@ -4279,7 +4258,11 @@ def _avg_poolnd(
     window_size = functools.reduce(operator.mul, kernel_size)
     if window_size > 25:
         # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
-        return fallbacks_avg_poolnd[dim - 1](
+        if dim == 2:
+            fallback = fallback_avg_pool2d
+        elif dim == 3:
+            fallback = fallback_avg_pool3d
+        return fallback(
             x,
             kernel_size,
             stride,
@@ -4314,7 +4297,8 @@ def _avg_poolnd(
     else:
         ones_loader = constant_boundary_condition(
             ones_like(x),
-            1.0 if count_include_pad else 0.0,
+            0.0,
+            padding if count_include_pad else None,
             dim=dim,
         )
 
