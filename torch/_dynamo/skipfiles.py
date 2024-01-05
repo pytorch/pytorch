@@ -325,6 +325,7 @@ def check_file(filename, is_inlined_call=False):
         bool(SKIP_DIRS_RE.match(filename))
         and not filename.endswith("variables/torch.py")
         and not filename.endswith("variables/user_defined.py")
+        and not filename.endswith("variables/inline_helper.py")
         and not filename.endswith("torch/autograd/__init__.py")
     ):
         return SkipResult(True, "skipped according skipfiles.SKIP_DIRS")

@@ -294,15 +294,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             from torch._dynamo import compiled_autograd
             from torch.autograd.variable import Variable
+            from .inline_helper import dummy_user_function_to_inline_gm
             from .tensor import map_fake_tensor_to_tensor_variable
 
             assert len(args) == 5
-
-            # can't directly wrap gm in a UserFunctionVariable so have to wrap it in a
-            # normal python function
-            def dummy_user_function_to_inline(gm, input, hook, size):
-                # TODO: need to take the output of the gm and assign it back to the input.grad
-                return gm(input, hook, size)
 
             def inline_fx(graph):
                 # We need to inline the graphmodule and let dynamo trace through it with inputs.
@@ -314,7 +309,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     from .lists import BaseListVariable
 
                     user_fn_variable = SourcelessBuilder()(
-                        tx, dummy_user_function_to_inline
+                        tx, dummy_user_function_to_inline_gm
                     )
                     # gm_variable is a UserDefinedObjectVariable
                     gm_variable = SourcelessBuilder()(tx, graph)
@@ -338,15 +333,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     # assume hook and size to be empty for now
                     hook_variable = cls([], mutable_local=MutableLocal())
                     size_variable = cls([], mutable_local=MutableLocal())
-                    # output of the inline, need to find the corresponding inputs
-                    res = tx.inline_user_function_return(
-                        user_fn_variable,
-                        (
-                            gm_variable,
+                    arg_list_variable = cls(
+                        [
                             input_list_variable,
                             hook_variable,
                             size_variable,
-                        ),
+                        ],
+                        mutable_local=MutableLocal(),
+                    )
+                    # output of the inline, need to find the corresponding inputs
+                    res = tx.inline_user_function_return(
+                        user_fn_variable,
+                        (gm_variable, arg_list_variable),
                         {},
                     )
                     # TODO: we should avoid running the actual backward

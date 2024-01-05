@@ -127,6 +127,7 @@ def decompose_and_inline_torch_op(tx, op, args, kwargs):
     from ..utils import get_fake_value
     from .base import MutableLocal
     from .builder import SourcelessBuilder
+    from .inline_helper import dummy_user_function_to_inline_gm
     from .lists import BaseListVariable
 
     # convert he arguments from VariableTracker to fake tensors + constants again
@@ -186,13 +187,9 @@ def decompose_and_inline_torch_op(tx, op, args, kwargs):
     print("\nfx code")
     print(fx_g.code)
 
-    # TODO(JackCaoG): handle kwargs
-    def dummy_user_function_to_inline_bm(gm, args):
-        return gm(*args)
-
     # now inline this fx graph and return the output
     # question: will there be a loop? How do I tell if op is CompositeImplicitAutograd
-    user_fn_variable = SourcelessBuilder()(tx, dummy_user_function_to_inline_bm)
+    user_fn_variable = SourcelessBuilder()(tx, dummy_user_function_to_inline_gm)
     gm_variable = SourcelessBuilder()(tx, fx_g)
     cls = BaseListVariable.cls_for(list)
     input_list_variable = cls(
