@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing import FileCheck
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch.export import export
-from torch._export.pass_base import _ExportPassBase
+from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
     is_view_op,
     get_view_copy_of_view_op,
@@ -181,7 +181,7 @@ class TestPasses(TestCase):
         ep = export(M(), (x,))
         self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 1)
 
-        ep = ep._transform(ReplaceViewOpsWithViewCopyOpsPass())
+        ep = ep._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
         self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 0)
 
     def test_functionalization_with_view_copy(self) -> None:
@@ -193,7 +193,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
 
-        ep = export(foo, (x,))._transform(ReplaceViewOpsWithViewCopyOpsPass())
+        ep = export(foo, (x,))._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
         # After this pass, there shouldn't be any view nodes in the graph
         self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view.default) == 0)
         self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view_copy.default) > 0)
@@ -316,9 +316,6 @@ class TestPasses(TestCase):
             exactly=True,
         ).run(gm.code)
 
-        # TODO(ycao): ExportedProgram._transform() forbids changes to number
-        # of inputs/outputs for now. When it supports that better, change this
-        # back to using ExportedProgram._transform()
         gm = _FunctionalizeSideEffectfulOpsPass()(ep.graph_module).graph_module
 
         with self.assertRaisesRegex(
@@ -348,7 +345,7 @@ class TestPasses(TestCase):
 
         x = torch.randn(1, dtype=torch.float32)
         ep = torch.export.export(func, args=(x,))
-        _ExportPassBase()(ep.graph_module)
+        _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
 
 
 if __name__ == '__main__':
