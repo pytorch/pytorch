@@ -1768,6 +1768,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.prefix.writeline(
                     f"constants_info_[{idx}].stride = {{{stride_str}}};"
                 )
+                if name in V.graph.dynamo_flat_name_to_original_fqn:
+                    self.prefix.writeline(
+                        f"""constants_info_[{idx}].original_fqn = "{V.graph.dynamo_flat_name_to_original_fqn[name]}";"""
+                    )
 
             self.prefix.writeline("update_constants_map(std::move(constants_map));")
             self.prefix.writeline("update_constants_array(std::move(constants_array));")
