@@ -74,6 +74,10 @@ ScalarType promoteTypes(ScalarType a, ScalarType b) {
         toString(b));
   }
 
+  if (isBarebonesUnsignedType(a) || isBarebonesUnsignedType(b)) {
+    return ScalarType::Undefined;
+  }
+
   auto ix_a = dtype2index[static_cast<int64_t>(a)];
   TORCH_INTERNAL_ASSERT(ix_a != -1);
   auto ix_b = dtype2index[static_cast<int64_t>(b)];
