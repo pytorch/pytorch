@@ -40,7 +40,7 @@ def _powerSGD_comm_hook_wrapper(
 
 class DDPCommHookType(Enum):
     """
-    Enumerate ``ddp_comm_hooks`` and ``ddp_comm_hook_wrapper`` partials.
+    Enumerate ``ddp_comm_hooks`` and ``ddp_comm_hook_wrapper`` communucation hook types.
 
     DDPCommHookType enumerates the hooks of ``torch.distributed.algorithms.ddp_comm_hooks``
     as names and ``ddp_comm_hook_wrapper`` partials with hook specified. As an example,

@@ -46,7 +46,7 @@ def _apply_optim_in_backward_hook(
     gradient_is_bucket_view: bool
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
-    Check for overlap optimizer with backward pass.
+    Register hook to apply the optimizer in backward.
 
     If torch.distributed.optim._apply_optimizer_in_backward is used to overlap
     optimizer with backward pass, DDP will run the below hook to run optimizer

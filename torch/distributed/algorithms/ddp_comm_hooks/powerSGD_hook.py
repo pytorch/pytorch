@@ -101,7 +101,7 @@ def _should_compress(
 
 
 def _report_compression_stats(bucket, state):
-    """Report compression stats at frequency of `compression_stats_logging_frequency` specified in PowerSGD state."""
+    """Report compression stats at frequency of ``compression_stats_logging_frequency`` specified in PowerSGD state."""
     if (
         bucket.is_last()
         and state.iter >= state.next_stats_report
@@ -284,7 +284,7 @@ class PowerSGDState:
 
     def __setstate__(self, state):
         r"""
-        Take a provided ``state`` and retrieves ``PowerSGDState``.
+        Take a provided ``state`` and set to this ``PowerSGDState`` instance.
 
         ``process_group`` is set to default.
         """

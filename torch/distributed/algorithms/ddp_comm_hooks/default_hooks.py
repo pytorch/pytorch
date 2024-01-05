@@ -118,7 +118,7 @@ def fp16_compress_wrapper(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     """
-    Cast input tensor to ``torch.float16``, cast reult of hook back to input dtype.
+    Cast input tensor to ``torch.float16``, cast result of hook back to input dtype.
 
     This wrapper casts the input gradient tensor of a given DDP communication hook to half-precision
     floating point format (``torch.float16``), and casts the resulting tensor of the given hook back to

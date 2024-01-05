@@ -243,7 +243,7 @@ def hook_with_zero_step(
         bucket: dist.GradBucket,
     ) -> torch.futures.Future[torch.Tensor]:
         r"""
-        Return :class:`Future`.
+        Return :class:`Future` that runs the optimizer step if this corresponds to the last gradient bucket.
 
         Perform equivalent of :class:`ZeroRedundancyOptimizer` :meth:`step` if ``bucket`` is last gradient bucket.
         The function gives a gradient bucket tensor and

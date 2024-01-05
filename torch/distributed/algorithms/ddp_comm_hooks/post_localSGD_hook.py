@@ -37,7 +37,7 @@ class PostLocalSGDState:
         start_localSGD_iter,
         post_local_gradient_allreduce=True,
     ):
-        """Initialize state object with given parameters, prints when localSGD start."""
+        """Initialize state object with given parameters and log when localSGD start."""
         logger.info(
             "Local SGD will be started after %s iterations", start_localSGD_iter
         )

@@ -123,7 +123,7 @@ def quantization_perchannel_hook(
     """
     Apply``torch.quantize_per_channel`` logic to DDP using ``allgather`` protocol.
 
-    Compared to pertensor, the main motivation of perchannel is
+    Compared to per-tensor, the main motivation of per-channel is
     for considerably large tensors such as a tensor that contains 6 million
     elements quantizing per a bucket size of 512 (or 128) elements may significantly
     increase the resolution.
