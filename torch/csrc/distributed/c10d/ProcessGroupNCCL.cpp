@@ -341,11 +341,6 @@ std::string dump_nccl_trace() {
   return NCCLTraceBuffer::get()->dump();
 }
 
-c10::optional<std::function<std::string()>>& get_cpp_trace_dumper() {
-  static c10::optional<std::function<std::string()>> dumper(c10::nullopt);
-  return dumper;
-}
-
 // Return CUDA device with ordinal given by input rank.  If we aren't
 // bound to a specific device, there is no strict guarantee that this
 // heuristic is the correct assignment of ranks to GPUs that Python
@@ -1236,7 +1231,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     }
 
     // Check the heart beat of watchdog thread.
-    auto heartbeat = heartbeat_.load();
+    auto heartbeat = heartbeat_;
     if (heartbeat != heartBeatCounter) {
       heartBeatCounter = heartbeat;
     } else {
@@ -1251,11 +1246,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       " workMetaList_.size()=",
       workMetaList_.size());
   LOG(ERROR) << logMsg;
-
-  auto& cpp_dumper = get_cpp_trace_dumper();
-  if (cpp_dumper.has_value()) {
-    LOG(INFO) << "Dumping c++ stacktraces: " << cpp_dumper.value()();
-  }
 
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)

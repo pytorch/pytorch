@@ -20,7 +20,7 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils import _pytree as pytree
 
 
-__all__ = ["_ExportPassBaseDeprecatedDoNotUse"]
+__all__ = ["_ExportPassBase"]
 
 
 Argument = Any
@@ -43,7 +43,7 @@ class ExportPassBaseError(RuntimeError):
     pass
 
 
-class _ExportPassBaseDeprecatedDoNotUse(PassBase):
+class _ExportPassBase(PassBase):
     """
     Interpreter-based pass class to help users maintain the IR spec while writing
     transformations.
@@ -55,7 +55,10 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
 
 
     class ExportTracer(PythonKeyTracer):
-        def __init__(self, callback: "_ExportPassBaseDeprecatedDoNotUse", codegen: CodeGen) -> None:
+        """
+        Tracer used to create nodes during the retracing part of the Expo_ExportPassBasertPassBase
+        """
+        def __init__(self, callback: "_ExportPassBase", codegen: CodeGen) -> None:
             super().__init__()
             self.callback = callback
             self.root = torch.nn.Module()
@@ -150,7 +153,10 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             node.meta["tensor_meta"] = pytree.tree_map(make_tensor_meta, value)
 
     class ExportInterpreter(fx.Interpreter):
-        def __init__(self, callback: "_ExportPassBaseDeprecatedDoNotUse", gm: fx.GraphModule) -> None:
+        """
+        Interpreter to callback on any _ExportPassBase functions
+        """
+        def __init__(self, callback: "_ExportPassBase", gm: fx.GraphModule) -> None:
             super().__init__(gm)
             self.callback = callback
             self.node: torch.fx.Node = next(iter(gm.graph.nodes))
@@ -434,13 +440,3 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             result = self.call_submodule(graph_module, tuple(inputs))
 
         return result
-
-# TODO This hack is necessary until executorch can update their pin in pytorch CI.
-import os
-
-if (
-    os.environ.get("CI", None) == "true"
-    and os.environ.get("GITHUB_ACTIONS", None) == "true"
-):
-    _ExportPassBase = _ExportPassBaseDeprecatedDoNotUse
-    __all__.append("_ExportPassBase")

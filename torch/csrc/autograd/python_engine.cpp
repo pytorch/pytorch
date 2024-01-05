@@ -204,26 +204,25 @@ PyObject* THPEngine_run_backward(
           &allow_unreachable,
           &accumulate_grad))
     return nullptr;
-  TORCH_CHECK(
+  THPUtils_assert(
       PyTuple_Check(tensors),
       "tensors argument is expected to "
-      "be a tuple, but got ",
+      "be a tuple, but got %s",
       THPUtils_typename(tensors));
-  TORCH_CHECK(
+  THPUtils_assert(
       PyTuple_Check(grad_tensors),
       "grad_tensors argument is "
-      "expected to be a tuple, but got ",
+      "expected to be a tuple, but got %s",
       THPUtils_typename(grad_tensors));
 
   Py_ssize_t num_tensors = PyTuple_GET_SIZE(tensors);
   Py_ssize_t num_gradients = PyTuple_GET_SIZE(grad_tensors);
-  TORCH_CHECK(
+  THPUtils_assert(
       num_tensors == num_gradients,
-      "got ",
+      "got %ld tensors and %ld "
+      "gradients",
       num_tensors,
-      " tensors and ",
-      num_gradients,
-      " gradients");
+      num_gradients);
 
   // The user either called autograd.backward(...) or autograd.grad(...) to get
   // here
@@ -240,11 +239,11 @@ PyObject* THPEngine_run_backward(
   grads.reserve(num_tensors);
   for (const auto i : c10::irange(num_tensors)) {
     PyObject* _tensor = PyTuple_GET_ITEM(tensors, i);
-    TORCH_CHECK(
+    THPUtils_assert(
         THPVariable_Check(_tensor),
-        "element ",
-        i,
-        " of tensors tuple is not a Tensor");
+        "element %d of tensors "
+        "tuple is not a Tensor",
+        i);
     const auto& variable = THPVariable_Unpack(_tensor);
     TORCH_CHECK(
         !isBatchedTensor(variable),
@@ -256,11 +255,10 @@ PyObject* THPEngine_run_backward(
         "call autograd.grad() outside torch.vmap or file a bug report "
         "with your use case.")
     auto gradient_edge = torch::autograd::impl::gradient_edge(variable);
-    TORCH_CHECK(
+    THPUtils_assert(
         gradient_edge.function,
-        "element ",
-        i,
-        " of tensors does not require grad and does not have a grad_fn");
+        "element %d of tensors does not require grad and does not have a grad_fn",
+        i);
     roots.push_back(std::move(gradient_edge));
 
     PyObject* grad = PyTuple_GET_ITEM(grad_tensors, i);
@@ -276,16 +274,14 @@ PyObject* THPEngine_run_backward(
       }
       grads.push_back(grad_var);
     } else {
-      TORCH_CHECK(
+      THPUtils_assert(
           grad == Py_None,
-          "element ",
-          i,
-          " of gradients tuple is not a Tensor or None");
-      TORCH_CHECK(
+          "element %d of gradients tuple is not a Tensor or None",
+          i);
+      THPUtils_assert(
           !variable.requires_grad(),
-          "element ",
-          i,
-          " of gradients tuple is None, but the corresponding Tensor requires grad");
+          "element %d of gradients tuple is None, but the corresponding Tensor requires grad",
+          i);
     }
   }
 
@@ -316,7 +312,7 @@ PyObject* THPEngine_run_backward(
         if (accumulate_grad) {
           tensor.retain_grad();
         }
-        TORCH_CHECK(
+        THPUtils_assert(
             tensor.requires_grad(),
             "One of the differentiated Tensors does not require grad");
         if (!grad_fn) {
@@ -334,10 +330,10 @@ PyObject* THPEngine_run_backward(
         auto node = PyTuple_GetItem(input, 0);
         bool isTHPFunction = THPFunction_Check(node);
         bool isTHPCppFunction = THPCppFunction_Check(node);
-        TORCH_CHECK(
+        THPUtils_assert(
             isTHPFunction || isTHPCppFunction,
             "GradientEdge first object must be an autograd.graph.Node "
-            "but got ",
+            "but got %s",
             THPUtils_typename(node));
         std::shared_ptr<torch::autograd::Node> node_sp;
         if (isTHPFunction) {
@@ -349,9 +345,9 @@ PyObject* THPEngine_run_backward(
         auto output_nr = THPUtils_unpackUInt32(PyTuple_GetItem(input, 1));
         output_edges.emplace_back(node_sp, output_nr);
       } else {
-        TORCH_CHECK(
+        THPUtils_assert(
             false,
-            "all inputs have to be Tensors or GradientEdges, but got ",
+            "all inputs have to be Tensors or GradientEdges, but got %s",
             THPUtils_typename(input));
       }
     }
@@ -371,7 +367,7 @@ PyObject* THPEngine_run_backward(
     if (!py_outputs)
       return nullptr;
     for (const auto i : c10::irange(num_inputs)) {
-      TORCH_CHECK(
+      THPUtils_assert(
           allow_unreachable || outputs[i].defined(),
           "One of the "
           "differentiated Tensors appears to not have been used "

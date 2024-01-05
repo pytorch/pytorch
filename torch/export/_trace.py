@@ -564,12 +564,13 @@ def _export(
         )
         assert out_spec is not None
         return ExportedProgram(
-            root=ep_non_strict.gm,
-            graph=ep_non_strict.gm.graph,
-            graph_signature=ep_non_strict.sig,
-            state_dict=_get_params_buffers(f),
-            range_constraints=range_constraints,
-            module_call_graph=[
+            ep_non_strict.gm,
+            ep_non_strict.gm.graph,
+            ep_non_strict.sig,
+            _get_params_buffers(f),
+            range_constraints,
+            equality_constraints,
+            [
                 ModuleCallEntry(
                     "",
                     ModuleCallSignature(
@@ -577,7 +578,7 @@ def _export(
                     ),
                 )
             ],
-            example_inputs=(args, kwargs),
+            (args, kwargs),
             tensor_constants=ep_non_strict.tensor_constants,
         )
 
@@ -747,7 +748,7 @@ def _export(
         len(export_graph_signature.input_specs),
     )
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
-    range_constraints = _process_constraints(
+    range_constraints, equality_constraints = _process_constraints(
         gm,
         num_lifted,
         flat_args,
@@ -772,13 +773,14 @@ def _export(
 
     assert orig_out_spec is not None
     exported_program = ExportedProgram(
-        root=gm,
-        graph=gm.graph,
-        graph_signature=export_graph_signature,
+        gm,
+        gm.graph,
+        export_graph_signature,
         # TODO(zhxchen17) Return empty state_dict for functions.
-        state_dict=params_buffers,
-        range_constraints=range_constraints,
-        module_call_graph=[
+        params_buffers,
+        range_constraints,
+        equality_constraints,
+        [
             ModuleCallEntry(
                 "",
                 ModuleCallSignature(
@@ -787,13 +789,15 @@ def _export(
             )
         ]
         + [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
-        example_inputs=(args, kwargs),
+        (args, kwargs),
         tensor_constants=tensor_constants,
     )
 
-    if len(range_constraints) > 0:
-        exported_program = exported_program._transform_do_not_use(
-            _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)
+    if len(range_constraints) > 0 or len(equality_constraints) > 0:
+        exported_program = exported_program._transform(
+            _AddRuntimeAssertionsForInlineConstraintsPass(
+                range_constraints, equality_constraints
+            )
         )
 
     return exported_program

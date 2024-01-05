@@ -1555,17 +1555,11 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
-            unimplemented(
-                f"data dependent operator: {cause.func}; "
-                "to enable, set torch._dynamo.config.capture_scalar_outputs = True"
-            )
+            unimplemented(f"data dependent operator: {cause.func}")
         elif isinstance(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
-            unimplemented(
-                f"dynamic shape operator: {cause.func}; "
-                "to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True"
-            )
+            unimplemented(f"dynamic shape operator: {cause.func}")
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
         ):
