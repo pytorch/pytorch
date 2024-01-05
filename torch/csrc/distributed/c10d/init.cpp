@@ -51,6 +51,7 @@
 
 namespace {
 
+#ifdef USE_C10D_NCCL
 bool registerGilChecker() {
   c10d::get_gil_checker().emplace([]() {
     // basically if this function can acquire the gil, it will return quickly.
@@ -62,6 +63,7 @@ bool registerGilChecker() {
   });
   return true;
 }
+#endif // USE_C10D_NCCL
 
 static bool registered = registerGilChecker();
 
