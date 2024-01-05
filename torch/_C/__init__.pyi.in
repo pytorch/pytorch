@@ -56,7 +56,7 @@ from torch._prims_common import DeviceLikeType
 
 # This module is defined in torch/csrc/Module.cpp
 
-from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunctions, _cpu
+from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunctions, _cpu, _aoti
 
 K = TypeVar("K")
 T = TypeVar("T")
@@ -1103,6 +1103,8 @@ def _set_deterministic_algorithms(
 ) -> None: ...  # THPModule_setDeterministicAlgorithms
 def _get_deterministic_fill_uninitialized_memory() -> _bool: ...  # THPModule_deterministicFillUninitializedMemory
 def _set_deterministic_fill_uninitialized_memory(arg: _bool) -> None: ...  # THPModule_setDeterministicFillUninitializedMemory
+def _get_nnpack_enabled() -> _bool: ...  # THPModule_userEnabledNNPACK
+def _set_nnpack_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledNNPACK
 def _get_warnAlways() -> _bool: ...  # THPModule_warnAlways
 def _set_warnAlways(arg: _bool) -> None: ...  # THPModule_setWarnAlways
 def _get_cudnn_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuDNN
@@ -1208,6 +1210,7 @@ has_mkl: _bool
 _has_mps: _bool
 has_lapack: _bool
 _has_cuda: _bool
+_has_magma: _bool
 _has_mkldnn: _bool
 _has_cudnn: _bool
 has_spectral: _bool
@@ -1653,7 +1656,7 @@ def _cuda_cudaCachingAllocator_raw_alloc(size: _int, cuda_stream: _int) -> _int:
 def _cuda_cudaCachingAllocator_raw_delete(ptr: _int) -> None: ...
 def _cuda_cudaCachingAllocator_set_allocator_settings(env: str) -> None: ...
 def _cuda_beginAllocateCurrentStreamToPool(device: _int, mempool_id: Tuple[_int, _int]) -> None: ...
-def _cuda_endAllocateCurrentStreamToPool(device: _int) -> None: ...
+def _cuda_endAllocateCurrentStreamToPool(device: _int, mempool_id: Tuple[_int, _int]) -> None: ...
 def _cuda_releasePool(device: _int, mempool_id: Tuple[_int, _int]) -> None: ...
 def _cuda_checkPoolLiveAllocations(device: _int, mempool_id: Tuple[_int, _int], expected_live_allocations: Set) -> _bool: ...
 def _cuda_setCheckpointPoolState(device: _int, state: _cuda_CUDAAllocator_AllocatorState,  stale_storages: List[_int], storages_to_add_deleters_to: List[_int]) -> None: ...

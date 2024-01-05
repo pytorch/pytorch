@@ -18,6 +18,7 @@ from torch.testing._internal.common_dtype import (
 
 
 import numpy as np
+import operator
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -550,37 +551,37 @@ class TestTypePromotion(TestCase):
                 name="lt",
                 out_op=lambda x, y, d: torch.lt(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.lt(x, y),
-                compare_op=lambda x, y: x < y,
+                compare_op=operator.lt,
             ),
             dict(
                 name="le",
                 out_op=lambda x, y, d: torch.le(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.le(x, y),
-                compare_op=lambda x, y: x <= y,
+                compare_op=operator.le,
             ),
             dict(
                 name="gt",
                 out_op=lambda x, y, d: torch.gt(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.gt(x, y),
-                compare_op=lambda x, y: x > y,
+                compare_op=operator.gt,
             ),
             dict(
                 name="ge",
                 out_op=lambda x, y, d: torch.ge(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.ge(x, y),
-                compare_op=lambda x, y: x >= y,
+                compare_op=operator.ge,
             ),
             dict(
                 name="eq",
                 out_op=lambda x, y, d: torch.eq(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.eq(x, y),
-                compare_op=lambda x, y: x == y,
+                compare_op=operator.eq,
             ),
             dict(
                 name="ne",
                 out_op=lambda x, y, d: torch.ne(x, y, out=torch.empty(0, dtype=torch.bool, device=d)),
                 ret_op=lambda x, y: torch.ne(x, y),
-                compare_op=lambda x, y: x != y,
+                compare_op=operator.ne,
             ),
         ]
         for op in comparison_ops:
@@ -627,12 +628,12 @@ class TestTypePromotion(TestCase):
     @onlyNativeDeviceTypes
     def test_complex_assertraises(self, device):
         comparison_ops = [
-            dict(name="lt", compare_op=lambda x, y: x < y, ),
-            dict(name="le", compare_op=lambda x, y: x <= y, ),
-            dict(name="gt", compare_op=lambda x, y: x > y, ),
-            dict(name="ge", compare_op=lambda x, y: x >= y, ),
-            dict(name="eq", compare_op=lambda x, y: x == y, ),
-            dict(name="ne", compare_op=lambda x, y: x != y, ),
+            dict(name="lt", compare_op=operator.lt, ),
+            dict(name="le", compare_op=operator.le, ),
+            dict(name="gt", compare_op=operator.gt, ),
+            dict(name="ge", compare_op=operator.ge, ),
+            dict(name="eq", compare_op=operator.eq, ),
+            dict(name="ne", compare_op=operator.ne, ),
         ]
         for op in comparison_ops:
             is_cuda = torch.device(device).type == 'cuda'
