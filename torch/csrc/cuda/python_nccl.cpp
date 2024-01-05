@@ -13,7 +13,6 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 
-
 using namespace at;
 using namespace torch;
 using namespace torch::cuda::nccl;
