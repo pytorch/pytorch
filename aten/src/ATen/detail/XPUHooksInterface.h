@@ -26,7 +26,7 @@ struct TORCH_API XPUHooksInterface {
     TORCH_CHECK(false, "Cannot query detailed XPU version without ATen_xpu library.");
   }
 
-  virtual int getGlobalIdFromDevice(const Device& device) const {
+  virtual int getGlobalIdxFromDevice(const Device& device) const {
     TORCH_CHECK(false, "Cannot get XPU global device id without ATen_xpu library.");
   }
 

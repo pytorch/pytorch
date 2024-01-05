@@ -13,6 +13,6 @@ TORCH_XPU_API DeviceProp* getCurrentDeviceProperties();
 
 TORCH_XPU_API DeviceProp* getDeviceProperties(int device);
 
-TORCH_XPU_API int getGlobalIdFromDevice(int device);
+TORCH_XPU_API int getGlobalIdxFromDevice(int device);
 
 } // namespace at::xpu

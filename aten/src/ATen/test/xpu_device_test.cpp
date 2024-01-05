@@ -40,13 +40,13 @@ TEST(XpuDeviceTest, getDeviceFromPtr) {
   ASSERT_THROW(at::xpu::getDeviceFromPtr(&dummy), c10::Error);
 }
 
-TEST(XpuDeviceTest, getGlobalIdFromDevice) {
+TEST(XpuDeviceTest, getGlobalIdxFromDevice) {
   if (!at::xpu::is_available()) {
     return;
   }
 
   int target_device = 0;
-  int global_index = at::xpu::getGlobalIdFromDevice(target_device);
+  int global_index = at::xpu::getGlobalIdxFromDevice(target_device);
   auto devices = sycl::device::get_devices();
   ASSERT_EQ_XPU(devices[global_index], at::xpu::get_raw_device(target_device));
 
@@ -61,9 +61,9 @@ TEST(XpuDeviceTest, getGlobalIdFromDevice) {
   }
   // Test the last device.
   target_device = at::xpu::device_count() - 1;
-  global_index = at::xpu::getGlobalIdFromDevice(target_device);
+  global_index = at::xpu::getGlobalIdxFromDevice(target_device);
   ASSERT_EQ_XPU(devices[global_index], at::xpu::get_raw_device(target_device));
 
   target_device = at::xpu::device_count();
-  ASSERT_THROW(at::xpu::getGlobalIdFromDevice(target_device), c10::Error);
+  ASSERT_THROW(at::xpu::getGlobalIdxFromDevice(target_device), c10::Error);
 }

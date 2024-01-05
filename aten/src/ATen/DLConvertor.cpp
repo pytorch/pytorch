@@ -103,7 +103,7 @@ static DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
     case DeviceType::XPU:
       ctx.device_type = DLDeviceType::kDLOneAPI;
       ctx.device_id =
-          at::detail::getXPUHooks().getGlobalIdFromDevice(tensor.device());
+          at::detail::getXPUHooks().getGlobalIdxFromDevice(tensor.device());
       break;
     default:
       TORCH_CHECK(false, "Cannot pack tensors on " + tensor.device().str());

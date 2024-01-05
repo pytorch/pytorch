@@ -13,7 +13,7 @@ struct XPUHooks : public at::XPUHooksInterface {
   void initXPU() const override;
   bool hasXPU() const override;
   std::string showConfig() const override;
-  int getGlobalIdFromDevice(const at::Device& device) const override;
+  int getGlobalIdxFromDevice(const at::Device& device) const override;
   Device getDeviceFromPtr(void* data) const override;
   int getNumGPUs() const override;
 };

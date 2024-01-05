@@ -17,9 +17,9 @@ std::string XPUHooks::showConfig() const {
   return "XPU backend";
 }
 
-int XPUHooks::getGlobalIdFromDevice(const at::Device& device) const {
+int XPUHooks::getGlobalIdxFromDevice(const at::Device& device) const {
   TORCH_CHECK(device.is_xpu(), "Only the XPU device type is expected.");
-  return at::xpu::getGlobalIdFromDevice(device.index());
+  return at::xpu::getGlobalIdxFromDevice(device.index());
 }
 
 Device XPUHooks::getDeviceFromPtr(void* data) const {

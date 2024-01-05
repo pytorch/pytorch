@@ -74,7 +74,7 @@ DeviceProp* getDeviceProperties(int device) {
   return &device_properties[device];
 }
 
-int getGlobalIdFromDevice(int device) {
+int getGlobalIdxFromDevice(int device) {
   c10::call_once(init_flag, initXPUContextVectors);
   TORCH_CHECK(
       device >= 0 && device < num_gpus,
