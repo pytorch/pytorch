@@ -38,6 +38,7 @@ from typing import (
 from unittest import mock
 
 import sympy
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
@@ -382,20 +383,21 @@ def tuple_sorted(x):
     return sorted(x, key=sort_func)
 
 
+P = ParamSpec("P")
 RV = TypeVar("RV", covariant=True)
 
 
-# FIXME this should take in a ParamSpec too
-class CachedFunction(Generic[RV], Protocol):
+class CachedMethod(Generic[P, RV], Protocol):
     @staticmethod
     def clear_cache(self) -> None:
         ...
 
-    def __call__(self, *args, **kwargs) -> RV:
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV:
         ...
 
 
-def cache_on_self(fn: Callable[..., RV]) -> CachedFunction[RV]:
+# See https://github.com/python/mypy/issues/13222#issuecomment-1193073470 to understand the type signature
+def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
     key = f"__{fn.__name__}_cache"
 
     @functools.wraps(fn)
@@ -607,11 +609,16 @@ def has_incompatible_cudagraph_ops(gm):
     return False
 
 
-instance_descriptor = collections.namedtuple(
-    "instance_descriptor",
-    ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
-    defaults=[tuple(), tuple(), tuple(), tuple()],
-)
+try:
+    from triton.compiler.compiler import AttrsDescriptor as instance_descriptor
+except ImportError:
+    # To support older version of triton which does not have AttrsDescriptor
+    # class
+    instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
+        "instance_descriptor",
+        ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
+        defaults=[tuple(), tuple(), tuple(), tuple()],
+    )
 
 
 @functools.lru_cache(None)
@@ -1111,13 +1118,27 @@ def get_device_tflops(dtype):
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
-    if dtype in (torch.float16, torch.bfloat16):
-        return get_max_tensorcore_tflops(dtype)
 
-    if torch.backends.cuda.matmul.allow_tf32:
-        return get_max_tensorcore_tflops(torch.float32)
+    if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
+        # Triton API change in https://github.com/openai/triton/pull/2293
+        from triton.testing import nvsmi
+
+        sm_clock = nvsmi(["clocks.max.sm"])[0]
+        if dtype in (torch.float16, torch.bfloat16):
+            return get_max_tensorcore_tflops(dtype, sm_clock)
+
+        if torch.backends.cuda.matmul.allow_tf32:
+            return get_max_tensorcore_tflops(torch.float32, sm_clock)
+        else:
+            return get_max_simd_tflops(torch.float32, sm_clock)
     else:
-        return get_max_simd_tflops(torch.float32)
+        if dtype in (torch.float16, torch.bfloat16):
+            return get_max_tensorcore_tflops(dtype)
+
+        if torch.backends.cuda.matmul.allow_tf32:
+            return get_max_tensorcore_tflops(torch.float32)
+        else:
+            return get_max_simd_tflops(torch.float32)
 
 
 @functools.lru_cache(None)
@@ -1179,7 +1200,7 @@ class Placeholder(enum.Enum):
 def aot_inductor_launcher(so_path: str, device: str):
     if device == "cuda":
         return f"""
-            #include <torch/csrc/inductor/aoti_model_container_runner_cuda.h>
+            #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 
             torch::inductor::AOTIModelContainerRunnerCuda runner("{so_path}");
 
@@ -1187,13 +1208,13 @@ def aot_inductor_launcher(so_path: str, device: str):
                 return runner.run(input_tensors);
             }}
 
-            std::vector<const char*> get_call_spec() {{
+            std::vector<std::string> get_call_spec() {{
                 return runner.get_call_spec();
             }}
         """
     elif device == "cpu":
         return f"""
-            #include <torch/csrc/inductor/aoti_model_container_runner.h>
+            #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 
             torch::inductor::AOTIModelContainerRunnerCpu runner("{so_path}");
 
@@ -1201,7 +1222,7 @@ def aot_inductor_launcher(so_path: str, device: str):
                 return runner.run(input_tensors);
             }}
 
-            std::vector<const char*> get_call_spec() {{
+            std::vector<std::string> get_call_spec() {{
                 return runner.get_call_spec();
             }}
         """

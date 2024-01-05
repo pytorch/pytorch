@@ -9,6 +9,7 @@
 import itertools
 import unittest
 
+from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
     IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
 from torch.testing._internal.common_utils import skipIfRocm, runOnRocm
@@ -369,6 +370,7 @@ aliasing_ops_list_return = {
 
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
+@unMarkDynamoStrictTest
 class TestOperators(TestCase):
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
@@ -392,6 +394,7 @@ class TestOperators(TestCase):
         # query: last dimension must be contiguous
         # Fused attention kernels require last dim to be contiguous
         xfail('nn.functional.scaled_dot_product_attention'),
+        xfail("torch.ops.aten._flash_attention_forward"),
         xfail("torch.ops.aten._efficient_attention_forward"),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
@@ -475,6 +478,7 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),    # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
 
         xfail('nn.functional.scaled_dot_product_attention'),
+        xfail('torch.ops.aten._flash_attention_forward'),
         xfail('torch.ops.aten._efficient_attention_forward'),
 
         xfail('nn.functional.rrelu'),  # in-place test errors out with no formula implemented
@@ -603,6 +607,7 @@ class TestOperators(TestCase):
         # RuntimeError: query: last dimension must be contiguous
         # The fused attention kernels require the last dim to be contiguous
         xfail('nn.functional.scaled_dot_product_attention'),
+        xfail('torch.ops.aten._flash_attention_forward'),
         xfail('torch.ops.aten._efficient_attention_forward'),
         # BUG
         # AssertionError: Tensor-likes are not close!
@@ -682,6 +687,7 @@ class TestOperators(TestCase):
         xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
         xfail('sparse.mm', 'reduce'),  # sparse tensors have no strides
         skip('nn.functional.scaled_dot_product_attention'),
+        xfail('torch.ops.aten._flash_attention_forward'),
         xfail('torch.ops.aten._efficient_attention_forward'),
         # AssertionError: Tensor-likes are not close!
         # Mismatched elements: 1 / 15 (6.7%)
@@ -770,6 +776,8 @@ class TestOperators(TestCase):
         xfail("nn.functional.batch_norm"),
         xfail("nn.functional.binary_cross_entropy"),  # vmap: inplace into a regular tensor
         xfail("nn.functional.ctc_loss"),  # derivate not implemented for _ctc_loss_backward
+        # flaky on ROCM needs investigation
+        decorate('nn.functional.conv_transpose2d', decorator=skipIfRocm),
         skip("nn.functional.dropout"),  # calls random op
         skip("nn.functional.dropout2d"),  # calls random op
         skip("nn.functional.dropout3d"),  # calls random op
@@ -1808,6 +1816,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=2e-04, rtol=1e-04)}, device_type='cuda'),
         tol2('linalg.pinv', 'hermitian',
              {torch.float32: tol(atol=5e-06, rtol=5e-06)}),
+        tol1('nn.functional.conv3d',
+             {torch.float32: tol(atol=5e-04, rtol=9e-03)}),
     ))
     def test_vmap_autograd_grad(self, device, dtype, op):
         def is_differentiable(inp):

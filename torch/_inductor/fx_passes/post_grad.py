@@ -3,7 +3,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict, namedtuple
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from sympy import Expr
 
@@ -15,12 +15,18 @@ from torch._decomp import register_decomposition
 
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_functional
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
+
+from torch._utils_internal import print_graph
 from torch.fx.experimental.symbolic_shapes import definitely_true, sym_eq
 from torch.fx.immutable_collections import immutable_dict
 
 from .. import config, inductor_prims, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
-from ..lowering import lowerings as L
+
+from ..lowering import (
+    inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
+    lowerings as L,
+)
 from ..pattern_matcher import (
     _return_true,
     Arg,
@@ -40,7 +46,6 @@ from ..pattern_matcher import (
 from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
 from .group_batch_fusion import group_batch_fusion_passes
-
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -78,11 +83,17 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     if config.pattern_matcher:
         lazy_init()
 
+        print_graph(gm.graph, "Before group batch fusion in post grad pass.")
         group_batch_fusion_passes(gm.graph, pre_grad=False)
+        print_graph(gm.graph, "After group batch fusion in post grad pass.")
         remove_noop_ops(gm.graph)
-
+        print_graph(gm.graph, "Before split cat in post grad pass.")
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
+            print_graph(
+                gm.graph,
+                "Apply split cat pattern matcher PatternMatcherPass in post grad.",
+            )
         if is_inference:
             inference_patterns.apply(gm.graph)
 
@@ -101,13 +112,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     gm.recompile()
     gm.graph.lint()
 
-    if config.is_fbcode():
-        from torch._inductor.fb.utils import get_everpaste_url
-
-        log.info(
-            "Print graph after recompile in post grad passes: %s",
-            get_everpaste_url(str(gm.graph)),
-        )
+    print_graph(gm.graph, "After recompile in post grad pass.")
 
 
 @init_once_fakemode
@@ -376,7 +381,8 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
 
     assert new_size is not None
     dtype = functools.reduce(
-        torch.promote_types, [x.get_dtype() for x in itertools.chain(*inputs)]
+        torch.promote_types,
+        [x.get_dtype() for x in itertools.chain.from_iterable(inputs)],
     )
     device = inputs[0][0].get_device()
     kernel = ir.ConcatKernel(
@@ -631,6 +637,34 @@ def remove_noop_ops(graph: torch.fx.Graph):
 
 InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
 
+inplaceable_ops = {
+    aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
+    aten._unsafe_index_put.default: InplaceableOp(inductor_prims._unsafe_index_put_, 0),
+}
+
+try:
+    c10d_functional = torch.ops._c10d_functional
+    inplaceable_collective_ops = {
+        c10d_functional.all_reduce.default: InplaceableOp(
+            c10d_functional.all_reduce_.default, 0
+        ),
+        c10d_functional.all_reduce_coalesced.default: InplaceableOp(
+            c10d_functional.all_reduce_coalesced_.default, 0
+        ),
+    }
+    inplaceable_ops.update(inplaceable_collective_ops)
+except AttributeError:
+    # _c10d_functional ops are only available when torch
+    # is built with USE_DISTRIBUTED=1.
+    pass
+
+inplaceable_foreach_ops = {}
+for outplace_op, inplace_op in inplaceable_foreach_ops_lowerings.items():
+    inplaceable_foreach_ops[outplace_op] = InplaceableOp(inplace_op, 0)
+
+
+inplaceable_triton_ops = {triton_kernel_wrapper_functional}
+
 
 def reinplace_inplaceable_ops(graph):
     """
@@ -654,19 +688,22 @@ def reinplace_inplaceable_ops(graph):
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
-        if node.target == aten.copy_.default:
+        if node.target == aten.copy_.default and node.args[0].op == "placeholder":
             dst = node.args[0]
             src = node.args[1]
             # If the target is a getitem and it indexes a possible clone,
             # then skip over it
-            if (
-                src.target == operator.getitem
-                and src.args[0].target == triton_kernel_wrapper_functional
-                and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
+            if src.target == operator.getitem and (
+                (
+                    src.args[0].target == triton_kernel_wrapper_functional
+                    and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
+                )
+                or (src.args[0].target in inplaceable_foreach_ops)
             ):
                 src = src.args[0]
+
             copy_args_to_copy_nodes[(dst, src)] = node
-            assert node.args[0].op == "placeholder"
+
             mutated_inputs.add(node.args[0])
 
     def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
@@ -711,31 +748,7 @@ def reinplace_inplaceable_ops(graph):
                 node, shared_view_nodes, copy_node=None
             )
 
-    inplaceable_ops = {
-        aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
-        aten._unsafe_index_put.default: InplaceableOp(
-            inductor_prims._unsafe_index_put_, 0
-        ),
-    }
-
-    try:
-        c10d_functional = torch.ops._c10d_functional
-        inplaceable_collective_ops = {
-            c10d_functional.all_reduce.default: InplaceableOp(
-                c10d_functional.all_reduce_.default, 0
-            ),
-            c10d_functional.all_reduce_coalesced.default: InplaceableOp(
-                c10d_functional.all_reduce_coalesced_.default, 0
-            ),
-        }
-        inplaceable_ops.update(inplaceable_collective_ops)
-    except AttributeError:
-        # _c10d_functional ops are only available when torch
-        # is built with USE_DISTRIBUTED=1.
-        pass
-
-    inplaceable_triton_ops = {triton_kernel_wrapper_functional}
-
+    replace_list: List[Tuple[Any, Any]] = []
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
             mutated_arg = node.args[inplaceable_op.mutated_arg]
@@ -760,11 +773,31 @@ def reinplace_inplaceable_ops(graph):
                     copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                     if copy_node is not None:
                         graph.erase_node(copy_node)
+                    for user in node.users:
+                        if user.target == operator.getitem and user.args[1] == arg:
+                            replace_list.append((user, mutated_arg))
                 else:
                     tensors_to_clone.append(arg)
             kwargs = dict(node.kwargs)
             kwargs["tensors_to_clone"] = tensors_to_clone
             node.kwargs = immutable_dict(kwargs)
+        elif (
+            inplaceable_op := inplaceable_foreach_ops.get(node.target, None)
+        ) is not None:
+            mutated_args = node.args[inplaceable_op.mutated_arg]
+
+            if not all((arg, node) in copy_args_to_copy_nodes for arg in mutated_args):
+                continue
+
+            if can_inplace(node, mutated_args):
+                for arg in mutated_args:
+                    copy_node = copy_args_to_copy_nodes[(arg, node)]
+                    graph.erase_node(copy_node)
+
+                node.target = inplaceable_op.inplace_op
+    for node, replacement in replace_list:
+        node.replace_all_uses_with(replacement)
+        graph.erase_node(node)
 
 
 @register_lowering_pattern(
@@ -961,169 +994,203 @@ def fused_int_mm_mul(match: Match, mat1, mat2, mat3, out_dtype=None):
     return inductor.kernel.mm.tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype)
 
 
-def allows_mixed_devices(op):
-    return op in (
-        aten.index.Tensor,
-        aten.index_put.default,
-        aten.index_put_.default,
-        aten.copy.default,
-        aten.copy_.default,
-        aten.slice_scatter.default,
-    )
+class ConstructorMoverPass:
+    def __init__(self, target: str, allow_outputs: bool = False) -> None:
+        """
+        Move constructors from cpu to the target_device.
+
+        Sweeps through the module, looking for constructor nodes that can be moved
+        to the target_device.
+
+        A constructor node can be moved to the target_device iff all of its users
+        can also be moved (tested by cannot_be_moved). Otherwise, all dependent
+        constructor nodes won't be moved.
+
+        - target: target device type
+        - allow_outputs: allow outputs to be moved
+        """
+
+        self.target = target
+        self.allow_outputs = allow_outputs
+
+        assert isinstance(target, str), (
+            "target should be a string representing the device type. "
+            f"Got: {type(target).__name__}"
+        )
+
+    def allow_cpu_device(self, node: fx.Node) -> bool:
+        """
+        Returns whether a node that returns a tensor on the target device may have
+        cpu tensors as input.
+        """
+        return node.target in (
+            torch.ops.aten.index.Tensor,
+            torch.ops.aten.index_put.default,
+            torch.ops.aten.index_put_.default,
+            torch.ops.aten.copy.default,
+            torch.ops.aten.copy_.default,
+            torch.ops.aten.slice_scatter.default,
+        )
+
+    def cannot_be_moved(self, node: fx.Node) -> bool:
+        """
+        Returns whether a node can be moved to the target device.
+
+        If this function returns False, it means that this node and all of its users
+        won't be moved into the target device.
+        """
+        if node.target == "output":
+            return not self.allow_outputs
+
+        if not (
+            isinstance(node.target, torch._ops.OpOverload)
+            and node.target.namespace in ("prims", "aten")
+        ):
+            return True
+
+        return False
+
+    def get_node_device(self, node: fx.Node) -> Optional[torch.device]:
+        """
+        Get the device of a node.
+        """
+        ten = node.meta.get("val")
+        return None if not isinstance(ten, torch.Tensor) else ten.device
+
+    def get_cpu_indeg_count(self, graph: fx.Graph) -> Dict[fx.Node, int]:
+        """
+        Get the number of cpu inputs to a node
+        """
+        cpu_indeg: Dict[fx.Node, int] = Counter()
+
+        for node in graph.nodes:
+            cpu_count = 0
+
+            def add_cpu_inp(node):
+                nonlocal cpu_count
+                device = self.get_node_device(node)
+                cpu_count += device is not None and device.type == "cpu"
+
+            pytree.tree_map_only(fx.Node, add_cpu_inp, (node.args, node.kwargs))
+
+            if cpu_count:
+                cpu_indeg[node] = cpu_count
+
+        return cpu_indeg
+
+    def __call__(self, graph: fx.Graph) -> None:
+        target_devices = set()
+        constructors = []
+
+        for node in graph.nodes:
+            device = self.get_node_device(node)
+            if device and device.type == self.target:
+                target_devices.add(device)
+
+            if not (
+                isinstance(node.target, torch._ops.OpOverload)
+                and node.target.namespace in ("prims", "aten")
+            ):
+                continue
+
+            if not torch._subclasses.fake_tensor._is_tensor_constructor(node.target):
+                continue
+
+            if not node.kwargs.get("device") == torch.device("cpu"):
+                continue
+
+            constructors.append(node)
+
+        # not handling multiple target devices initially
+        if not constructors or len(target_devices) != 1:
+            return
+
+        movable_constructors = self.find_movable_constructors(graph, constructors)
+
+        for node in movable_constructors:
+            kwargs = node.kwargs.copy()
+            kwargs["device"] = next(iter(target_devices))
+            node.kwargs = kwargs
+
+    def find_movable_constructors(
+        self, graph: fx.Graph, constructors: List[fx.Node]
+    ) -> Set[fx.Node]:
+        """
+        Starting from the cpu constructors, iterate through the graph and test that all of their
+        downstream uses can safely be moved to cpu.
+        """
+        cpu_indeg: Dict[fx.Node, int] = self.get_cpu_indeg_count(graph)
+
+        # which constructors cannot be moved to cuda
+        cannot_move_to_cuda: Set[fx.Node] = set()
+
+        # For any node in the graph, which constructors does it have a dependency on
+        constructor_dependencies: Dict[fx.Node, Set[fx.Node]] = defaultdict(set)
+
+        # if a cpu node has a dependency on two different cpu constructors,
+        # then if either constructor cannot be moved to cuda, the other cannot as well.
+        # In this case any node with a dependency on one will have a dependency on the other
+        equal_constructor_sets: Dict[fx.Node, Set[fx.Node]] = {
+            c: {c} for c in constructors
+        }
+
+        def make_dependencies_equivalent(
+            set1: Set[fx.Node], set2: Set[fx.Node]
+        ) -> Set[fx.Node]:
+            # could use union find but not worth complexity here
+            set1.update(set2)
+            for obj in set1:
+                equal_constructor_sets[obj] = set1
+            return set1
+
+        queue: List[fx.Node] = list(constructors)
+
+        for c in queue:
+            constructor_dependencies[c].add(c)
+
+        while queue:
+            node = queue.pop()
+            dependencies = constructor_dependencies[node]
+
+            for user in node.users:
+                if self.cannot_be_moved(user):
+                    cannot_move_to_cuda.update(dependencies)
+                    break
+
+                # this node was used on a op which takes in multiple devices and output a cuda
+                # tensor. we can convert its cpu input to cuda without making further changes
+                node_device = self.get_node_device(user)
+                if (
+                    self.allow_cpu_device(user)
+                    and node_device
+                    and node_device.type == self.target
+                ):
+                    del cpu_indeg[user]
+                else:
+                    # otherwise, we should continue look at its downstream uses
+                    cpu_indeg[user] -= 1
+                    if cpu_indeg[user] == 0:
+                        del cpu_indeg[user]
+                        queue.append(user)
+
+                unioned_set = make_dependencies_equivalent(
+                    dependencies, constructor_dependencies[user]
+                )
+                constructor_dependencies[user] = unioned_set
+
+        for node in cpu_indeg:
+            if constructor_dependencies[node]:
+                cannot_move_to_cuda.update(constructor_dependencies[node])
+
+        all_cannot_move_to_cuda = cannot_move_to_cuda.copy()
+        for constructor in cannot_move_to_cuda:
+            all_cannot_move_to_cuda.update(equal_constructor_sets[constructor])
+
+        return set(constructors) - all_cannot_move_to_cuda
 
 
-def cannot_be_moved_to_cuda(node):
-    if node.target == "output":
-        return True
-
-    if not isinstance(
-        node.target, torch._ops.OpOverload
-    ) and node.target.namespace not in ("prims", "aten"):
-        return True
-
-    # only move ops to inductor lowerings for now,
-    # fallback ops may have weird cpu/cuda incompatibilities
-    return (
-        node.target not in torch._inductor.lowering.lowerings
-        or node.target in torch._inductor.lowering.fallbacks
-    )
-
-
-def get_node_device(node: fx.Node) -> Optional[torch.device]:
-    ten = node.meta.get("val")
-    return None if not isinstance(ten, torch.Tensor) else ten.device
-
-
-def get_cpu_indeg_count(graph) -> Dict[fx.Node, int]:
-    """
-    Get the number of cpu inputs to a node
-    """
-    cpu_indeg: Dict[fx.Node, int] = Counter()
-
-    for node in graph.nodes:
-        cpu_count = 0
-
-        def add_cpu_inp(node):
-            nonlocal cpu_count
-            device = get_node_device(node)
-            cpu_count += device is not None and device.type == "cpu"
-
-        pytree.tree_map_only(torch.fx.Node, add_cpu_inp, (node.args, node.kwargs))
-
-        if cpu_count:
-            cpu_indeg[node] = cpu_count
-
-    return cpu_indeg
-
-
-def move_constructors_to_cuda(graph):
+def move_constructors_to_cuda(graph: fx.Graph) -> None:
     """
     Moves intermediary tensors which are constructed on the cpu to cuda when safe
     """
-    if not torch.backends.cuda.is_built():
-        return
-
-    cuda_devices = set()
-    constructors = []
-
-    for node in graph.nodes:
-        device = get_node_device(node)
-        if device and device.type == "cuda":
-            cuda_devices.add(device)
-
-        if not isinstance(
-            node.target, torch._ops.OpOverload
-        ) or node.target.namespace not in ("prims", "aten"):
-            continue
-
-        if not torch._subclasses.fake_tensor._is_tensor_constructor(node.target):
-            continue
-
-        if not node.kwargs.get("device") == torch.device("cpu"):
-            continue
-
-        constructors.append(node)
-
-    # not handling multiple cuda devices initially
-    if not constructors or len(cuda_devices) != 1:
-        return
-
-    movable_constructors = find_movable_constructors(graph, constructors)
-
-    for node in movable_constructors:
-        kwargs = node.kwargs.copy()
-        kwargs["device"] = next(iter(cuda_devices))
-        node.kwargs = kwargs
-
-
-def find_movable_constructors(graph, constructors: List[fx.Node]) -> Set[fx.Node]:
-    """
-    Starting from the cpu constructors, iterate through the graph and test that all of their
-    downstream uses can safely be moved to cpu.
-    """
-    cpu_indeg: Dict[fx.Node, int] = get_cpu_indeg_count(graph)
-
-    # which constructors cannot be moved to cuda
-    cannot_move_to_cuda: Set[fx.Node] = set()
-
-    # For any node in the graph, which constructors does it have a dependency on
-    constructor_dependencies: Dict[fx.Node, Set[fx.Node]] = defaultdict(set)
-
-    # if a cpu node has a dependency on two different cpu constructors,
-    # then if either constructor cannot be moved to cuda, the other cannot as well.
-    # In this case any node with a dependency on one will have a dependency on the other
-    equal_constructor_sets: Dict[fx.Node, Set[fx.Node]] = {c: {c} for c in constructors}
-
-    def make_dependencies_equivalent(
-        set1: Set[fx.Node], set2: Set[fx.Node]
-    ) -> Set[fx.Node]:
-        # could use union find but not worth complexity here
-        set1.update(set2)
-        for obj in set1:
-            equal_constructor_sets[obj] = set1
-        return set1
-
-    queue: List[fx.Node] = list(constructors)
-
-    for c in queue:
-        constructor_dependencies[c].add(c)
-
-    while queue:
-        node = queue.pop()
-        dependencies = constructor_dependencies[node]
-
-        for user in node.users:
-            if cannot_be_moved_to_cuda(user):
-                cannot_move_to_cuda.update(dependencies)
-                break
-
-            # this node was used on a op which takes in multiple devices and output a cuda
-            # tensor. we can convert its cpu input to cuda without making further changes
-            node_device = get_node_device(user)
-            if (
-                allows_mixed_devices(user.target)
-                and node_device
-                and node_device.type == "cuda"
-            ):
-                del cpu_indeg[user]
-            else:
-                # otherwise, we should continue look at its downstream uses
-                cpu_indeg[user] -= 1
-                if cpu_indeg[user] == 0:
-                    del cpu_indeg[user]
-                    queue.append(user)
-
-            unioned_set = make_dependencies_equivalent(
-                dependencies, constructor_dependencies[user]
-            )
-            constructor_dependencies[user] = unioned_set
-
-    for node in cpu_indeg:
-        if constructor_dependencies[node]:
-            cannot_move_to_cuda.update(constructor_dependencies[node])
-
-    all_cannot_move_to_cuda = cannot_move_to_cuda.copy()
-    for constructor in cannot_move_to_cuda:
-        all_cannot_move_to_cuda.update(equal_constructor_sets[constructor])
-
-    return set(constructors) - all_cannot_move_to_cuda
+    ConstructorMoverPass("cuda")(graph)
