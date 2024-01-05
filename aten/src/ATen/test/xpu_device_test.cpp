@@ -3,6 +3,7 @@
 #include <aten/src/ATen/xpu/XPUContext.h>
 #include <aten/src/ATen/xpu/XPUDevice.h>
 #include <c10/xpu/XPUFunctions.h>
+#include <torch/torch.h>
 
 #define ASSERT_EQ_XPU(X, Y) \
   {                         \
@@ -11,6 +12,7 @@
   }
 
 TEST(XpuDeviceTest, getDeviceProperties) {
+  ASSERT_EQ_XPU(at::xpu::is_available(), torch::xpu::is_available());
   if (!at::xpu::is_available()) {
     return;
   }
