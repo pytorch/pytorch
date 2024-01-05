@@ -222,6 +222,12 @@ enforce_cond_guards_match = True
 # about optimize_ddp behavior.
 optimize_ddp = True
 
+# If True, delays DDPOptimizer submodule compilation to 1st run of the model,
+# so that real tensor strides are used in all submodules
+# (instead of using FakeTensor strides which can differ from real tensor strides and causes error in some cases).
+# This feature is not hardened yet and it's known to cause issues to some models, so False by default.
+optimize_ddp_lazy_compile = False
+
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
 
@@ -313,6 +319,9 @@ capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
 capture_func_transforms = False
+
+# If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
+log_compilation_metrics = True
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing

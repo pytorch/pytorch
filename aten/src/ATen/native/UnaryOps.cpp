@@ -170,9 +170,7 @@
 
 #include <cmath>
 
-namespace at {
-
-namespace meta {
+namespace at::meta {
 
 // Unary float operations always produce floating point
 // outputs for floating point and integral types
@@ -292,9 +290,9 @@ TORCH_META_FUNC(ceil) (const Tensor& self) {
   build_borrowing_unary_op(maybe_get_output(), self);
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 // NOTE: These are helper functions that reduce redundant code in implementing the most typical kind of unary operators.
 // YOU ARE NOT OBLIGED TO USE THESE HELPERS---if you're writing something more specialized, please don't try to make
 // them work for your case, but just write something new instead. Here we use helper functions instead of a flat fat
@@ -1050,5 +1048,4 @@ DEFINE_DISPATCH(special_scaled_modified_bessel_k0_stub); // NOLINT(cppcoreguidel
 DEFINE_DISPATCH(special_scaled_modified_bessel_k1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(special_spherical_bessel_j0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
-} // namespace native
-} // namespace at
+} // namespace at::native
