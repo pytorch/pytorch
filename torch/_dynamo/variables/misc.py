@@ -425,7 +425,7 @@ class AutogradFunctionVariable(VariableTracker):
             ).call_function(tx, args, kwargs)
 
         if self.source:
-            source = AttrSource(self.source, "forward")
+            source = AttrSource(AttrSource(self.source, "__class__"), "forward")
         else:
             source = None
         fn = self.fn_cls.forward
