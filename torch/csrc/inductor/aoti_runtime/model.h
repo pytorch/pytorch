@@ -293,7 +293,7 @@ class AOTInductorModelBase {
       bytes_read += data_size;
 
       // Create at::Tensor from copied memory.
-      auto dtype = this->constant_type(i);
+      auto dtype = this->constant_dtype(i);
       auto ndim = this->constant_ndim(i);
       auto size = this->constant_shape(i);
       auto stride = this->constant_stride(i);
@@ -412,7 +412,7 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).stride.data();
   }
 
-  int32_t constant_type(int64_t idx) const {
+  int32_t constant_dtype(int64_t idx) const {
     return constants_info_.at(idx).dtype;
   }
 
@@ -422,6 +422,10 @@ class AOTInductorModelBase {
 
   size_t constant_data_size(int64_t idx) const {
     return constants_info_.at(idx).data_size;
+  }
+
+  const char* constant_original_fqn(int64_t idx) const {
+    return constants_info_.at(idx).original_fqn;
   }
 
   const char* get_in_spec() const {
@@ -514,6 +518,7 @@ class AOTInductorModelBase {
     int32_t dtype;
     int64_t offset;
     size_t data_size;
+    const char* original_fqn = nullptr;
   };
 
   std::vector<ParamInfo> inputs_info_;
