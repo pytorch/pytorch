@@ -148,7 +148,7 @@ class UnflattenedModule(torch.nn.Module):
         _outline_submodules(export_graph, self)
 
         self.range_constraints = export_module.range_constraints
-        self.equality_constraints = export_module.equality_constraints
+        self.equality_constraints: List = []
 
         state_dict = export_module.state_dict
         for name in self.graph_signature.parameters:

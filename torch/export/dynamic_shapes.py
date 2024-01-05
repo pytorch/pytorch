@@ -484,7 +484,7 @@ def _process_constraints(
     graph_module: torch.fx.GraphModule,
     num_lifted_params_buffers: int,
     example_inputs: List[torch.Tensor],
-) -> Tuple[Dict, List[Tuple[Any, Any]]]:
+) -> Dict:
     """
     Process the constraints stored in the graph module to return something more readable.
 
@@ -500,9 +500,6 @@ def _process_constraints(
             symbols (from SymInts) appearing in the fake tensors in
             node.meta["val"] to their range constraints, which are a tuple
             containing (lower, upper) constraints.
-
-        equality_constraints (List[Tuple[InputDim, InputDim]]): List of tuples
-            of (node, dim) to mark that these dimensions are equal.
     """
     from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
         InputDim,
@@ -529,8 +526,6 @@ def _process_constraints(
             tensor_id_to_nodes[id(example_input)].append(node.name)
             placeholder_nodes[node.name] = node
 
-    # Create list of (node name, dim) tuples to mark that they are equal
-    equality_constraints: List[Tuple[InputDim, InputDim]] = []
     # Create dict mapping (node name, dim) a list of range (lower, upper)
     # constraints
     multi_range_constraints: Dict[InputDim, List[ValueRanges]] = defaultdict(list)
@@ -542,12 +537,6 @@ def _process_constraints(
             multi_range_constraints[node_dim].append(
                 ValueRanges(constraint["min"], constraint["max"])
             )
-
-            # Accumulate equality constraints
-            if shared := constraint.get("shared", None):
-                for other_node in tensor_id_to_nodes[shared["t_id"]]:
-                    other_node_dim = InputDim(other_node, shared["dim"])
-                    equality_constraints.append((node_dim, other_node_dim))
 
     # Create dict mapping symbol to a singular range (lower, upper)
     range_constraints: Dict[Any, ValueRanges] = {}
@@ -577,4 +566,4 @@ def _process_constraints(
         symbol = symint.node._expr
         range_constraints[symbol] = ValueRanges(min_val, max_val)
 
-    return range_constraints, equality_constraints
+    return range_constraints
