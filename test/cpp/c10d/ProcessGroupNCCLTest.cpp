@@ -767,7 +767,7 @@ class ProcessGroupNCCLTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    // Reset NCCL_BLOCKING_WAIT environment variable after each run.
+    // Reset TORCH_NCCL_BLOCKING_WAIT environment variable after each run.
     ASSERT_TRUE(setenv(c10d::TORCH_NCCL_BLOCKING_WAIT[0].c_str(), "0", 1) == 0);
   }
 

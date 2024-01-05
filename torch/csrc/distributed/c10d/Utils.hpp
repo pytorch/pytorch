@@ -33,6 +33,8 @@ typedef SSIZE_T ssize_t;
 
 namespace c10d {
 
+TORCH_API size_t getTensorsNumel(const std::vector<at::Tensor>& tensors);
+
 // Retrieve tensor shapes from a given tensor.
 TORCH_API std::vector<at::Tensor> getTensorShapes(
     const std::vector<at::Tensor>& tensors);
@@ -185,10 +187,6 @@ inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
   }
 
   return ret;
-}
-
-inline bool parseEnvVarFlag(const char* envVarName) {
-  return getCvarBool({envVarName}, false);
 }
 
 inline void assertSameSizes(

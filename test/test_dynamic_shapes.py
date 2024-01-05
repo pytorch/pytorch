@@ -27,7 +27,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
     ShapeEnv,
     is_symbolic,
-    FreshCreateSymbolicPolicy,
+    StatelessSymbolicContext,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -137,7 +137,7 @@ def create_symbolic_tensor(name, arg, shape_env):
         shape_env.create_symbolic_sizes_strides_storage_offset(
             arg,
             source=ConstantSource(name),
-            policy=FreshCreateSymbolicPolicy(
+            symbolic_context=StatelessSymbolicContext(
                 dynamic_sizes=dynamic_dims,
                 constraint_sizes=constraint_dims
             ),
@@ -497,7 +497,7 @@ def forward(self, x_1):
         self.assertTrue(expect_true(i0 <= s0))
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[i0 <= s0]"""
+            """[i0 - s0 <= 0]"""
         )
         self.assertTrue(i0 <= s0)
         self.assertFalse(i0 > s0)
@@ -735,7 +735,7 @@ class TestSymNumberMagicMethods(TestCase):
         if fn not in sym_node.bool_magic_methods or fn == "sym_ite":
             self.skipTest(f"{fn} is non-bool")
 
-        is_unary_fn = fn in sym_node.unary_magic_methods
+        is_unary_fn = fn in sym_node.unary_methods
         shape_env = ShapeEnv()
         self._do_test(fn, True, False, shape_env, is_unary_fn)
 
@@ -748,7 +748,10 @@ class TestSymNumberMagicMethods(TestCase):
             # TODO: Hmm, this looks like we skip all floats
             self.skipTest(f"{fn} is not a float magic method")
 
-        is_unary_fn = fn in sym_node.unary_magic_methods
+        if (first_type == "int" or second_type == "int") and fn in sym_node.only_float_magic_methods:
+            self.skipTest(f"{fn} is not an int method")
+
+        is_unary_fn = fn in sym_node.unary_methods or fn == "round"
         # Second argument is ignored for unary function. So only run for one type
         if is_unary_fn and second_type == "float":
             self.skipTest(f"{fn} is unary and already tested")

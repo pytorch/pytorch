@@ -1,3 +1,4 @@
+import operator
 import sys
 from abc import abstractmethod
 from copy import copy
@@ -179,14 +180,10 @@ class TestPrioritizations:
             self._test_priorities[new_relevance.value].append(upgraded_tests)
 
     def set_test_relevance(self, test_run: TestRun, new_relevance: Relevance) -> None:
-        return self._update_test_relevance(
-            test_run, new_relevance, lambda curr, new: curr == new
-        )
+        return self._update_test_relevance(test_run, new_relevance, operator.eq)
 
     def raise_test_relevance(self, test_run: TestRun, new_relevance: Relevance) -> None:
-        return self._update_test_relevance(
-            test_run, new_relevance, lambda curr, new: curr >= new
-        )
+        return self._update_test_relevance(test_run, new_relevance, operator.ge)
 
     def validate_test_priorities(self) -> None:
         # Union all TestRuns that contain include/exclude pairs

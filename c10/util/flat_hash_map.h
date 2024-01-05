@@ -494,9 +494,9 @@ class sherwood_v3_table : private EntryAlloc,
     // otherwise.
     template <
         class target_type = const value_type,
-        class = typename std::enable_if<
-            std::is_same<target_type, const value_type>::value &&
-            !std::is_same<target_type, value_type>::value>::type>
+        class = std::enable_if_t<
+            std::is_same_v<target_type, const value_type> &&
+            !std::is_same_v<target_type, value_type>>>
     operator templated_iterator<target_type>() const {
       return {current};
     }
@@ -726,7 +726,7 @@ class sherwood_v3_table : private EntryAlloc,
     rehash_for_other_container(*this);
   }
 
-  void swap(sherwood_v3_table& other) {
+  void swap(sherwood_v3_table& other) noexcept {
     using std::swap;
     swap_pointers(other);
     swap(static_cast<ArgumentHash&>(*this), static_cast<ArgumentHash&>(other));
