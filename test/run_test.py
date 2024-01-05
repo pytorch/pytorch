@@ -1670,9 +1670,7 @@ def main():
         if IS_CI:
             # downloading test cases configuration to local environment
             get_test_case_configs(dirpath=test_directory)
-            aggregated_heuristics = get_test_prioritizations(
-                selected_tests, print_fn=f.write
-            )
+            aggregated_heuristics = get_test_prioritizations(selected_tests, file=f)
 
         test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
 
