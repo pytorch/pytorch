@@ -745,17 +745,17 @@ class TestLazyScheduler(TestCase):
 
 """
 TODO:
-1. Support user calling a method multiple times and only tag a specific call as segment (i.e. make `nth_call=X` work)
-2. Support graph break within segment
-3. Unit test: in-place op in named segment
-4. Integration with DDPOptimizer
-5. Integration with compiled autograd
-6. For named segments, show its segment ID (prefix + fwd/bwd + nth_call) in profiler annotation in GPU trace
+- Support user calling a method multiple times and only tag a specific call as segment (i.e. make `nth_call=X` work)
+- Unit test: graph break within segment (i.e. multiple graphs per segment)
+- Unit test: in-place op in named segment
+- For named segments, show its segment ID (prefix + fwd/bwd + nth_call) in profiler annotation in GPU trace
+- Integration with DDPOptimizer
+- Integration with compiled autograd
 
 AsyncTensor specific:
-1. Support kwargs in AsyncTensor ops
-2. Support tuple / list / etc. in AsyncTensor op args
-3. Support all factory functions in AsyncTensor dispatch
+- Support kwargs in AsyncTensor ops
+- Support tuple / list / etc. in AsyncTensor op args
+- Support all factory functions in AsyncTensor dispatch
 """
 
 if __name__ == "__main__":
