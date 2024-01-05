@@ -1676,7 +1676,7 @@ def main():
 
         test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
 
-        f.write(aggregated_heuristics.get_info_str())
+        f.write(test_prioritizations.get_info_str())
 
     test_file_times_dict = load_test_file_times()
     test_class_times_dict = load_test_class_times()
