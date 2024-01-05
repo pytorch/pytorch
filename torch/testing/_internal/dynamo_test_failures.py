@@ -220,18 +220,8 @@ FIXME_default_non_strict = {
     "test_model_dump",
     "test_model_exports_to_core_aten",
     "test_modules",
-    "test_monitor",
-    "test_multiprocessing",
-    "test_multiprocessing_spawn",
     "test_namedtensor",
     "test_namedtuple_return_api",
-    "test_native_functions",
-    "test_native_mha",
-    "test_nestedtensor",
-    "test_nn",
-    "test_numba_integration",
-    "test_numpy_interop",
-    "test_openmp",
     "test_ops",
     "test_ops_fwd_gradients",
     "test_ops_gradients",
@@ -2054,6 +2044,60 @@ dynamo_expected_failures = {
     "TestPythonPytree.test_treespec_equality",  # test_pytree
     "TestOutDtypeOp.test_out_dtype_non_op_overload",  # test_out_dtype_op
     "TestOutDtypeOp.test_out_dtype_wrong_output",  # test_out_dtype_op
+    "TestOpenMP_ParallelFor.test_one_thread",  # test_openmp
+    "TestNumPyInteropCPU.test_numpy_non_writeable_cpu",  # test_numpy_interop
+    "TestNN.test_Sequential_append",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_False_mode_bicubic_memory_format0_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_all_ignored_cpu",  # test_nn
+    "TestNN.test_ParameterList_replication",  # test_nn
+    "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_none_use_module_form_False_cpu",  # test_nn
+    "TestNN.test_interpolate_buffer_overflow",  # test_nn
+    "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_mean_use_module_form_False_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_hardsigmoid_grad_cpu",  # test_nn
+    "TestNN.test_batchnorm_raises_error_if_running_var_or_running_mean_have_forward_grad",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_byte_target_matches_long_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_module_to_empty_cpu_float32",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_none_cpu",  # test_nn
+    "TestNN.test_Sequential_extend",  # test_nn
+    "TestNN.test_overwrite_module_params_on_conversion",  # test_nn
+    "TestNNDeviceTypeCPU.test_GRU_grad_and_gradgrad_cpu_float64",  # test_nn
+    "TestNN.test_ModuleList",  # test_nn
+    "TestNNDeviceTypeCPU.test_hardswish_grad_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_threshold_inplace_overlap_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_module_to_empty_cpu_float64",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_True_mode_bicubic_memory_format1_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_True_mode_bicubic_memory_format0_cpu",  # test_nn
+    "TestNN.test_Sequential_imul",  # test_nn
+    "TestNN.test_upsampling_bfloat16",  # test_nn
+    "TestNNDeviceTypeCPU.test_triplet_margin_with_distance_loss_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_sum_use_module_form_False_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_sum_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_LSTM_grad_and_gradgrad_cpu_float64",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_False_mode_bicubic_memory_format1_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_batchnorm_grad_cpu",  # test_nn
+    "TestNN.test_interpolate",  # test_nn
+    "TestNN.test_register_state_dict_pre_hook",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_True_cpu",  # test_nn
+    "TestNN.test_fb_fc_packed",  # test_nn
+    "TestFusionEval.test_fuse_module_eval_numerics",  # test_nn
+    "TestNNDeviceTypeCPU.test_invalid_reduction_strings_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_total_weight_is_zero_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_mean_cpu",  # test_nn
+    "TestNN.test_register_state_dict_pre_hook_lazy_module",  # test_nn
+    "TestNN.test_ParameterDict_replication",  # test_nn
+    "TestNN.test_Sequential_iadd",  # test_nn
+    "TestNN.test_upsamplingLinear1d",  # test_nn
+    "TestNativeFunctions.test_symintlist_error_with_overload",  # test_native_functions
+    "TestNativeFunctions.test_vararg_symintlist_error",  # test_native_functions
+    "TestNativeFunctions.test_optional_intlist_invalid",  # test_native_functions
+    "TestNativeFunctions.test_symintlist_error",  # test_native_functions
+    "TestNativeFunctions.test_optional_floatlist_invalid",  # test_native_functions
+    "TestMultiprocessing.test_empty_shared",  # test_multiprocessing
+    "TestMultiprocessing.test_inherit_tensor",  # test_multiprocessing
+    "TestMultiprocessing.test_is_shared",  # test_multiprocessing
+    "TestMultiprocessing.test_fs_is_shared",  # test_multiprocessing
+    "TestMonitorTensorboard.test_event_handler",  # test_monitor
 }
 
 dynamo_skips = {
@@ -2147,4 +2191,6 @@ dynamo_skips = {
     "TestSWAUtils.test_averaged_model_all_devices_ema_True",  # flaky
     "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_False",  # flaky
     "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_True",  # flaky
+    "TestOpenMP_ParallelFor.test_n_threads",  # known py311 fail
+    "TestNativeFunctions.test_intlist_error_with_overload",  # known py311 fail
 }
