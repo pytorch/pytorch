@@ -272,40 +272,6 @@ inline bool check_for_attn_mask(sdp_params const& params, bool debug) {
   return true;
 }
 
-inline bool check_attn_mask_shape(sdp_params const& params, bool debug) {
-  auto attn_mask = params.attn_mask;
-  if (!attn_mask.has_value()) {
-    return true;
-  }
-  if (attn_mask.value().requires_grad()) {
-    return false;
-  }
-  auto batchSize = params.query.sym_size(0);
-  auto qSize = params.query.sym_size(2);
-  auto kvSize = params.key.sym_size(2);
-  auto num_head = params.query.sym_size(1);
-  if (attn_mask.value().sym_size(-2) != qSize && attn_mask.value().sym_size(-2) != 1) {
-    return false;
-  }
-  if (attn_mask.value().sym_size(-1) != kvSize && attn_mask.value().sym_size(-1) != 1) {
-    return false;
-  }
-  if (attn_mask.value().dim() == 2) {
-    return true;
-  } else if (attn_mask.value().dim() == 4) {
-    if ((attn_mask.value().sym_size(0) == 1 || attn_mask.value().sym_size(0) == batchSize)
-        && (attn_mask.value().sym_size(1) == 1 || attn_mask.value().sym_size(1) == num_head)) {
-      return true;
-    }
-  }
-  if (debug) {
-    TORCH_WARN("Please use the following attn mask shapes: ",
-        "2d - ({Q_seq_len, 1}  x {KV_seq_len, 1}); ",
-        "4d - ({Batch, 1} x {Num_heads, 1} x {Q_seq_len, 1}  x {KV_seq_len, 1})");
-  }
-  return false;
-}
-
 inline bool check_tensor_shapes(sdp_params const& params, bool debug) {
   auto query_dim = params.query.dim();
   if (!(query_dim == params.key.dim() && query_dim == params.value.dim() &&
