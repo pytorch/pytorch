@@ -18,7 +18,7 @@ from torch.testing import FileCheck
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, make_global
-from torch.testing._internal.common_utils import skipIfTorchDynamo
+from torch.testing._internal.common_utils import skipIfTorchDynamo, TEST_CUDA
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -1329,12 +1329,9 @@ class TestList(JitTestCase):
                 (torch.ones(5, dtype=torch.long),),
             )
 
-
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_to_list_gpu(self):
         """GPU tests for Tensor.tolist() function."""
-        if not torch.cuda.is_available() or torch.cuda.device_count() == 0:
-            self.skipTest("CUDA is not available")
-
         def to_list_bool_1D(x: torch.Tensor) -> List[bool]:
             li = torch.jit.annotate(List[bool], x.tolist())
             return li
@@ -2629,7 +2626,7 @@ class TestScriptList(JitTestCase):
                 return self
 
             def __next__(self):
-                if self.value == limit:
+                if self.value == limit:  # noqa: F821
                     raise StopIteration()
 
                 ret = self.value

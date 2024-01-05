@@ -10,7 +10,7 @@ Result Variables
 
 This will define the following variables:
 
-``SYCL_FOUND``
+``SYCLTOOLKIT_FOUND``
   True if the system has the SYCL library.
 ``SYCL_COMPILER``
   SYCL compiler executable.
@@ -24,17 +24,22 @@ This will define the following variables:
   The SYCL language spec version by Compiler.
 
 ``SYCL::SYCL_CXX``
-  Target for using Intel SYCL compiler (DPC++).  The following properties are
+  Interface target for using SYCL compiler.  The following properties are
   defined for the target: ``INTERFACE_COMPILE_OPTIONS``,
   ``INTERFACE_LINK_OPTIONS``, ``INTERFACE_INCLUDE_DIRECTORIES``, and
   ``INTERFACE_LINK_DIRECTORIES``
 
 #]=======================================================================]
 
-set(SYCL_FOUND False)
+set(SYCLTOOLKIT_FOUND False)
 include(${CMAKE_ROOT}/Modules/FindPackageHandleStandardArgs.cmake)
 
-set(SYCL_ROOT $ENV{CMPLR_ROOT})
+set(SYCL_ROOT "")
+if(DEFINED ENV{SYCL_ROOT})
+  set(SYCL_ROOT $ENV{SYCL_ROOT})
+elseif(DEFINED ENV{CMPLR_ROOT})
+  set(SYCL_ROOT $ENV{CMPLR_ROOT})
+endif()
 if(NOT SYCL_ROOT)
   execute_process(
     COMMAND which icpx
@@ -42,7 +47,7 @@ if(NOT SYCL_ROOT)
     OUTPUT_STRIP_TRAILING_WHITESPACE)
 
   if(NOT EXISTS "${SYCL_CMPLR_FULL_PATH}")
-    message("Cannot find ENV{CMPLR_ROOT} or icpx, please setup Intel SYCL compiler Tool kit enviroment before building!!")
+    message("Cannot find ENV{CMPLR_ROOT} or icpx, please setup SYCL compiler Tool kit enviroment before building!!")
     return()
   endif()
 
@@ -50,15 +55,55 @@ if(NOT SYCL_ROOT)
   set(SYCL_ROOT ${SYCL_BIN_DIR}/..)
 endif()
 
-set(SYCL_COMPILER ${SYCL_ROOT}/bin/icpx)
-set(SYCL_INCLUDE_DIR ${SYCL_ROOT}/include ${SYCL_ROOT}/include/sycl)
-set(SYCL_LIBRARY_DIR ${SYCL_ROOT}/lib)
+find_file(
+  SYCL_COMPILER
+  NAMES icpx
+  HINTS ${SYCL_ROOT}/bin
+  NO_DEFAULT_PATH
+  )
 
 string(COMPARE EQUAL "${SYCL_COMPILER}" "" nocmplr)
 if(nocmplr)
-  set(SYCL_FOUND False)
+  set(SYCLTOOLKIT_FOUND False)
   set(SYCL_REASON_FAILURE "SYCL: CMAKE_CXX_COMPILER not set!!")
   set(SYCL_NOT_FOUND_MESSAGE "${SYCL_REASON_FAILURE}")
+endif()
+
+find_file(
+  SYCL_INCLUDE_DIR
+  NAMES include
+  HINTS ${SYCL_ROOT}
+  NO_DEFAULT_PATH
+  )
+
+find_file(
+  SYCL_INCLUDE_SYCL_DIR
+  NAMES sycl
+  HINTS ${SYCL_ROOT}/include
+  NO_DEFAULT_PATH
+  )
+
+list(APPEND SYCL_INCLUDE_DIR ${SYCL_INCLUDE_SYCL_DIR})
+
+find_file(
+  SYCL_LIBRARY_DIR
+  NAMES lib lib64
+  HINTS ${SYCL_ROOT}
+  NO_DEFAULT_PATH
+  )
+
+find_library(
+  SYCL_LIBRARY
+  NAMES sycl
+  HINTS ${SYCL_LIBRARY_DIR}
+  NO_DEFAULT_PATH
+)
+
+if((NOT SYCL_INCLUDE_DIR) OR (NOT SYCL_LIBRARY_DIR) OR (NOT SYCL_LIBRARY))
+  set(SYCLTOOLKIT_FOUND False)
+  set(SYCL_REASON_FAILURE "SYCL sdk is incomplete!!")
+  set(SYCL_NOT_FOUND_MESSAGE "${SYCL_REASON_FAILURE}")
+  return()
 endif()
 
 # Function to write a test case to verify SYCL features.
@@ -125,7 +170,7 @@ function(SYCL_CMPLR_TEST_RUN error TEST_EXE)
     )
 
   if(test_result)
-    set(SYCL_FOUND False)
+    set(SYCLTOOLKIT_FOUND False)
     set(SYCL_REASON_FAILURE "SYCL: feature test execution failed!!")
   endif()
 
@@ -187,7 +232,7 @@ SYCL_CMPLR_TEST_EXTRACT(${test_output})
 # define macro  SYCL_LANGUAGE_VERSION
 string(COMPARE EQUAL "${SYCL_LANGUAGE_VERSION}" "" nosycllang)
 if(nosycllang)
-  set(SYCL_FOUND False)
+  set(SYCLTOOLKIT_FOUND False)
   set(SYCL_REASON_FAILURE "SYCL: It appears that the ${SYCL_COMPILER} does not support SYCL")
   set(SYCL_NOT_FOUND_MESSAGE "${SYCL_REASON_FAILURE}")
 endif()
@@ -207,9 +252,9 @@ set_property(TARGET SYCL::SYCL_CXX PROPERTY
   INTERFACE_LINK_DIRECTORIES ${SYCL_LIBRARY_DIR})
 
 find_package_handle_standard_args(
-  SYCL
-  FOUND_VAR SYCL_FOUND
-  REQUIRED_VARS SYCL_INCLUDE_DIR SYCL_LIBRARY_DIR SYCL_FLAGS
+  SYCLToolkit
+  FOUND_VAR SYCLTOOLKIT_FOUND
+  REQUIRED_VARS SYCL_INCLUDE_DIR SYCL_LIBRARY_DIR SYCL_LIBRARY SYCL_FLAGS
   VERSION_VAR SYCL_LANGUAGE_VERSION
   REASON_FAILURE_MESSAGE "${SYCL_REASON_FAILURE}")
 

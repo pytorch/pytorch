@@ -373,7 +373,7 @@ macro(SYCL_LINK_DEVICE_OBJECTS output_file sycl_target sycl_objects)
       OUTPUT ${output_file}
       DEPENDS ${object_files}
       COMMAND ${SYCL_EXECUTABLE} -fsycl ${SYCL_device_link_flags} -fsycl-link ${object_files} -o ${output_file}
-      COMMENT "Building SYCL link file ${output_file_relative_path}"
+      COMMENT "Building SYCL device link file ${output_file_relative_path}"
       )
   endif()
 endmacro()

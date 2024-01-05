@@ -22,13 +22,13 @@ endif()
 set(SYCL_cmake_included true)
 
 # SYCL compiler and runtime setup
-include(${CMAKE_CURRENT_LIST_DIR}/../Modules/FindSYCLToolkit.cmake)
-if(NOT SYCL_FOUND)
+find_package(SYCLToolkit REQUIRED)
+if(NOT SYCLTOOLKIT_FOUND)
   message("Cannot find SYCL compiler tool kit!")
   return()
 endif()
 
-# Try to find Intel SYCL compiler version.hpp header
+# Try to find SYCL compiler version.hpp header
 find_file(SYCL_VERSION
     NAMES version.hpp
     PATHS
@@ -59,7 +59,7 @@ if(${ver_line_num} EQUAL 1)
   string(REGEX MATCHALL "[0-9]+" SYCL_COMPILER_VERSION "${VERSION_LINE}")
 endif()
 
-# offline compiler of Intel SYCL compiler
+# offline compiler of SYCL compiler
 set(IGC_OCLOC_VERSION)
 find_program(OCLOC_EXEC ocloc)
 if(OCLOC_EXEC)

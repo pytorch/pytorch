@@ -36,7 +36,7 @@ set(SYCL_host_compiler_flags "-fsycl-host-compiler-options=")
 set(SYCL_include_args)
 
 foreach(dir ${SYCL_include_dirs})
-  # Extra quotes are added around each flag to help Intel SYCL parse out flags with spaces.
+  # Extra quotes are added around each flag to help SYCL parse out flags with spaces.
   list(APPEND SYCL_include_args "-I${dir}")
   string(APPEND SYCL_host_compiler_flags "-I${dir} ")
 endforeach()
@@ -52,7 +52,7 @@ endforeach()
 
 list(REMOVE_DUPLICATES CMAKE_HOST_FLAGS)
 foreach(flag ${CMAKE_HOST_FLAGS})
-  # Extra quotes are added around each flag to help Intel SYCL parse out flags with spaces.
+  # Extra quotes are added around each flag to help SYCL parse out flags with spaces.
   string(APPEND SYCL_host_compiler_flags "${flag} ")
 endforeach()
 foreach(def ${SYCL_compile_definitions})

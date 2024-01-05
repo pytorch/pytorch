@@ -2,6 +2,7 @@
 
 #ifdef USE_C10D_NCCL
 
+#include <atomic>
 #include <chrono>
 #include <future>
 #include <iostream>
@@ -550,9 +551,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void enableCollectivesTiming() override;
 
-  // Provide an API for users to define their own ways to store NCCL debug info.
-  void registerDebugInfoWriter(std::unique_ptr<DebugInfoWriter> writer);
-
   // Helper function for iteratively aborting communicators in the provided map
   void abortCommsFromMap(
       std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
@@ -717,7 +715,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Generates a prefix that is unique to this process group and rank, for
   // disambiguating logs
+  std::string createLogPrefix() const;
+
+  // Returns the unique prefix created in createLogPrefix
   const std::string& logPrefix() const;
+
+  // Returns the global rank of the device. This function assumes that users
+  // always create a default global process group(PG) which includes all
+  // devices. It is called in the constructor of ProcessGroupNCCL, so it always
+  // return the rank_ of the the very first PG created, aka, default global PG.
+  const int& globalRank() const;
 
  protected:
   // Function that runs as part of a separate thread aside from watchdog
@@ -810,7 +817,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::mutex mutex_;
 
   // Heartbeat of watchdog thread.
-  uint64_t heartbeat_;
+  std::atomic_uint64_t heartbeat_;
 
   // The time interval used for deciding whether there is no watchdog heartbeat.
   int heartbeatTimeoutInSec_;
@@ -959,15 +966,20 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   std::exception_ptr watchDogException_ = nullptr;
 
-  // The callback function to store NCCL debug info.
-  std::unique_ptr<DebugInfoWriter> debugInfoWriter_ = nullptr;
-
   size_t uid_;
+
+  std::string logPrefix_;
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
 };
 
 TORCH_API std::string dump_nccl_trace();
+
+// Gets a mutable reference to a global optional function.  Heartbeat Monitor
+// will query this function and if available, call it to dump traces. Inside
+// fbcode, we store a function here that uses an internal tool for process
+// tracing
+TORCH_API c10::optional<std::function<std::string()>>& get_cpp_trace_dumper();
 
 } // namespace c10d
 
