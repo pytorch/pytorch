@@ -167,39 +167,14 @@ FIXME_default_non_strict = {
     "test_cpp_api_parity",
     "test_cpp_extensions_aot_ninja",
     "test_cpp_extensions_aot_no_ninja",
-    "test_cpp_extensions_jit",
-    "test_cpp_extensions_open_device_registration",
-    "test_cuda",
-    "test_cuda_expandable_segments",
-    "test_cuda_multigpu",
-    "test_cuda_nvml_based_avail",
-    "test_cuda_primary_ctx",
-    "test_cuda_sanitizer",
-    "test_cuda_trace",
     "test_custom_ops",
     "test_dataloader",
-    "test_datapipe",
     "test_decomp",
-    "test_deploy",
-    "test_dispatch",
-    "test_dlpack",
-    "test_dynamic_shapes",
-    "test_expanded_weights",
-    "test_fake_tensor",
-    "test_flop_counter",
     "test_foreach",
-    "test_function_schema",
-    "test_functional_autograd_benchmark",
-    "test_functionalization",
-    "test_functionalization_of_rng_ops",
-    "test_futures",
     "test_fx",
     "test_fx_experimental",
     "test_fx_passes",
     "test_fx_reinplace_pass",
-    "test_hub",
-    "test_import_stats",
-    "test_itt",
     "test_jit",
     "test_jit_autocast",
     "test_jit_disabled",
@@ -207,32 +182,11 @@ FIXME_default_non_strict = {
     "test_jit_llga_fuser",
     "test_jiterator",
     "test_legacy_vmap",
-    "test_license",
-    "test_logging",
     "test_masked",
     "test_maskedtensor",
-    "test_matmul_cuda",
-    "test_meta",
-    "test_mkl_verbose",
-    "test_mkldnn",
-    "test_mkldnn_fusion",
-    "test_mkldnn_verbose",
-    "test_mobile_optimizer",
-    "test_model_dump",
-    "test_model_exports_to_core_aten",
     "test_modules",
-    "test_monitor",
-    "test_multiprocessing",
-    "test_multiprocessing_spawn",
     "test_namedtensor",
     "test_namedtuple_return_api",
-    "test_native_functions",
-    "test_native_mha",
-    "test_nestedtensor",
-    "test_nn",
-    "test_numba_integration",
-    "test_numpy_interop",
-    "test_openmp",
     "test_ops",
     "test_ops_fwd_gradients",
     "test_ops_gradients",
@@ -1991,12 +1945,154 @@ dynamo_expected_failures = {
     "TestPythonPytree.test_treespec_equality",  # test_pytree
     "TestOutDtypeOp.test_out_dtype_non_op_overload",  # test_out_dtype_op
     "TestOutDtypeOp.test_out_dtype_wrong_output",  # test_out_dtype_op
+    "TestNumPyInteropCPU.test_numpy_non_writeable_cpu",  # test_numpy_interop
+    "TestNN.test_Sequential_append",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_False_mode_bicubic_memory_format0_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_all_ignored_cpu",  # test_nn
+    "TestNN.test_ParameterList_replication",  # test_nn
+    "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_none_use_module_form_False_cpu",  # test_nn
+    "TestNN.test_interpolate_buffer_overflow",  # test_nn
+    "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_mean_use_module_form_False_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_hardsigmoid_grad_cpu",  # test_nn
+    "TestNN.test_batchnorm_raises_error_if_running_var_or_running_mean_have_forward_grad",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_byte_target_matches_long_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_module_to_empty_cpu_float32",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_none_cpu",  # test_nn
+    "TestNN.test_Sequential_extend",  # test_nn
+    "TestNN.test_overwrite_module_params_on_conversion",  # test_nn
+    "TestNNDeviceTypeCPU.test_GRU_grad_and_gradgrad_cpu_float64",  # test_nn
+    "TestNN.test_ModuleList",  # test_nn
+    "TestNNDeviceTypeCPU.test_hardswish_grad_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_threshold_inplace_overlap_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_module_to_empty_cpu_float64",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_True_mode_bicubic_memory_format1_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_True_mode_bicubic_memory_format0_cpu",  # test_nn
+    "TestNN.test_Sequential_imul",  # test_nn
+    "TestNN.test_upsampling_bfloat16",  # test_nn
+    "TestNNDeviceTypeCPU.test_triplet_margin_with_distance_loss_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_sum_use_module_form_False_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_sum_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_LSTM_grad_and_gradgrad_cpu_float64",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_False_mode_bicubic_memory_format1_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_batchnorm_grad_cpu",  # test_nn
+    "TestNN.test_interpolate",  # test_nn
+    "TestNN.test_register_state_dict_pre_hook",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_True_cpu",  # test_nn
+    "TestNN.test_fb_fc_packed",  # test_nn
+    "TestFusionEval.test_fuse_module_eval_numerics",  # test_nn
+    "TestNNDeviceTypeCPU.test_invalid_reduction_strings_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_total_weight_is_zero_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_mean_cpu",  # test_nn
+    "TestNN.test_register_state_dict_pre_hook_lazy_module",  # test_nn
+    "TestNN.test_ParameterDict_replication",  # test_nn
+    "TestNN.test_Sequential_iadd",  # test_nn
+    "TestNN.test_upsamplingLinear1d",  # test_nn
+    "TestNativeFunctions.test_symintlist_error_with_overload",  # test_native_functions
+    "TestNativeFunctions.test_vararg_symintlist_error",  # test_native_functions
+    "TestNativeFunctions.test_optional_intlist_invalid",  # test_native_functions
+    "TestNativeFunctions.test_symintlist_error",  # test_native_functions
+    "TestNativeFunctions.test_optional_floatlist_invalid",  # test_native_functions
+    "TestMultiprocessing.test_empty_shared",  # test_multiprocessing
+    "TestMultiprocessing.test_inherit_tensor",  # test_multiprocessing
+    "TestMultiprocessing.test_is_shared",  # test_multiprocessing
+    "TestMultiprocessing.test_fs_is_shared",  # test_multiprocessing
+    "TestMkldnnCPU.test_resnext50_32x4d_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_resnet18_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_add_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_linear_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_prelu_bf16_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_prelu_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_batch_norm_2d_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_mul_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_conv1d_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_linear_lowp_cpu_float16",  # test_mkldnn
+    "TestMkldnnCPU.test_sigmoid_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_conv3d_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_reshape_blocked_format_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_copy_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_tanh_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_conv2d_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_batch_norm_3d_cpu",  # test_mkldnn
+    "TestFunctionalAutogradBenchmark.test_fast_tasks",  # test_functional_autograd_benchmark
+    "TestFunctionSchema.test_serialize_and_deserialize",  # test_function_schema
+    "FakeTensorOperatorInvariants.test_like_ops",  # test_fake_tensor
+    "FakeTensorConverterTest.test_memoized_conversion_from_meta",  # test_fake_tensor
+    "FakeTensorOperatorInvariants.test_non_kwarg_only_device",  # test_fake_tensor
+    "FakeTensorOperatorInvariants.test_tensor_constructors_all_have_kwarg_device",  # test_fake_tensor
+    "TestExpandedWeightModuleCPU.test_Conv1d_reflect_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv2d_zeros_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Embedding_discontiguous_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_conv1d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_instance_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Conv2d_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv2d_reflect_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv2d_replicate_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_conv3d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_instance_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightHelperFunctionCPU.test_unpack_expanded_weight_or_tensor_with_custom_function_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv1d_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightHelperFunctionCPU.test_unpack_expanded_weight_or_tensor_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_conv1d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Conv1d_pad1_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_per_sample_api_compute_batch_size_not_pytreeable_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_linear_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_group_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_group_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_conv3d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Conv2d_dilated_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_conv2d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Conv1d_replicate_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv3d_replicate_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv1d_pad2size1_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv1d_stride_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_conv2d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_embedding_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_per_sample_api_compute_batch_size_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_layer_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_linear_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_embedding_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_linear_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Conv2d_padding_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv3d_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv3d_zeros_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv3d_1x1x1_no_bias_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv3d_no_bias_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightHelperFunctionCPU.test_set_grad_sample_if_exists_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Linear_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_group_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Linear_no_bias_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Embedding_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_layer_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_conv3d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_embedding_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_instance_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_conv1d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Conv1d_circular_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv1d_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv1d_pad1size1_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv2d_strided_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv3d_circular_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv3d_stride_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv2d_no_bias_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv3d_stride_padding_multiple_inputs_cpu",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_layer_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Conv1d_zeros_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_conv2d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Conv2d_circular_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestTorchDlPackCPU.test_dlpack_export_non_strided_cpu",  # test_dlpack
+    "TestIterDataPipeGraphFastForward.test_simple_snapshot_custom_self_next",  # test_datapipe
+    "TestIterDataPipeGraphFastForward.test_simple_snapshot_custom_non_generator",  # test_datapipe
+    "TestGraph.test_traverse_circular_datapipe",  # test_datapipe
+    "TestGraph.test_traverse_unhashable_datapipe",  # test_datapipe
+    "TestCppExtensionJIT.test_cpp_frontend_module_has_same_output_as_python",  # test_cpp_extensions_jit
 }
 
 dynamo_skips = {
     "TestMatmulOperator.test_matmul_raises",
     "TestMatmulOperator.test_exceptions",
     "TestMatmulOperator.test_matmul_inplace",
+    "TestMonitorTensorboard.test_event_handler",  # weird
     "TestMethods.test_diagonal",
     "TestMethods.test_searchsorted_complex",
     "TestMethods.test_round",
@@ -2057,6 +2153,8 @@ dynamo_skips = {
     "WeakTest.test_make_weak_keyed_dict_from_dict",  # known py311 fail
     "TestViewOpsCPU.test_as_strided_gradients_cpu",  # known py311 fail
     "TestViewOpsLAZY.test_as_strided_gradients_lazy",  # known py311 fail
+    "LoggingTest.testApiUsage",  # flaky?
+    "TestOpenMP_ParallelFor.test_one_thread",  # test_openmp
     "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape3_cpu",  # known py38 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape0_cpu",  # known py38 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape1_cpu",  # known py38 fail
@@ -2074,6 +2172,7 @@ dynamo_skips = {
     "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape2_cpu",  # known py311 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape1_cpu",  # known py311 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_2_shape1_cpu",  # known py311 fail
+    "TestFunctionalAutogradBenchmark.test_fast_tasks",  # flaky?
     "TestFrameworkUtils.test_filtering_env_var",  # known py38 fail
     "TestAsArrayCPU.test_default_device_cpu",  # known py38 fail
     "TestAsArrayCPU.test_astensor_consistency_cpu",  # known py311 fail
@@ -2084,4 +2183,9 @@ dynamo_skips = {
     "TestSWAUtils.test_averaged_model_all_devices_ema_True",  # flaky
     "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_False",  # flaky
     "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_True",  # flaky
+    "TestOpenMP_ParallelFor.test_n_threads",  # known py311 fail
+    "TestNativeFunctions.test_intlist_error_with_overload",  # known py311 fail
+    "TestMkldnnFusion.test_single_conv",  # known py311 fail
+    "TestTorchDlPackCPU.test_dlpack_export_is_conj_cpu",  # known py311 fail
+    "TestPythonDispatcher.test_quantized_structured_not_implemented",  # known py38 fail
 }
