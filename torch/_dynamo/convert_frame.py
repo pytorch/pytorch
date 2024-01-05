@@ -454,6 +454,7 @@ def _compile(
     )
 
     output: Optional[OutputGraph] = None
+    tracer: Optional[InstructionTranslator] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
     fail_type: Optional[str] = None
@@ -465,6 +466,7 @@ def _compile(
     @preserve_global_state
     def transform(instructions, code_options):
         nonlocal output
+        nonlocal tracer
         speculation_log.restart()
         tracer = InstructionTranslator(
             instructions,
@@ -669,6 +671,9 @@ def _compile(
                 e.__traceback__
             ) from None
         finally:
+            if tracer:
+                tracer.output.local_scope = {}
+
             from .utils import curr_frame
 
             frame_key = str(curr_frame)
