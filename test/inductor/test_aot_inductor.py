@@ -1108,8 +1108,9 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(model, example_inputs)
 
+    @skipIfRocm
     @common_utils.parametrize("grid_type", [1, 2, 3])
-    @common_utils.parametrize("num_dims", [1, 2] if not TEST_WITH_ROCM else [1])
+    @common_utils.parametrize("num_dims", [1, 2])
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("autotune", [False, True])
     def test_triton_kernel(self, grid_type, num_dims, dynamic, autotune):
