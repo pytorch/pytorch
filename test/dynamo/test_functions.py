@@ -135,6 +135,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return v
 
     @make_test
+    def test_itertools_chain_from_iterable(a, b):
+        v = a
+        for x in itertools.chain.from_iterable([[a, b], [1, 2]]):
+            v = v + x
+        return v
+
+    @make_test
     def test_itertools_combinations(a, b):
         combs = []
         for size in itertools.combinations((1, 2, 3, 4), 2):

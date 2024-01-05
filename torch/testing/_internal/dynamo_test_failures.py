@@ -152,12 +152,10 @@ FIXME_default_non_strict = {
     "nn/test_parametrization",
     "nn/test_pooling",
     "nn/test_pruning",
-    "optim/test_lrscheduler",
-    "optim/test_optim",
-    "optim/test_swa_utils",
     "profiler/test_memory_profiler",
     "profiler/test_profiler",
     "profiler/test_profiler_tree",
+    "test_schema_check",  # nb: times out
     "test_ao_sparsity",
     "test_autograd",
     "test_binary_ufuncs",
@@ -239,28 +237,18 @@ FIXME_default_non_strict = {
     "test_ops_fwd_gradients",
     "test_ops_gradients",
     "test_ops_jit",
-    "test_optim",
-    "test_out_dtype_op",
     "test_overrides",
     "test_package",
-    "test_per_overload_api",
     "test_prims",
     "test_proxy_tensor",
-    "test_pruning_op",
     "test_public_bindings",
     "test_python_dispatch",
-    "test_pytree",
     "test_quantization",
     "test_reductions",
-    "test_scatter_gather_ops",
-    "test_schema_check",
-    "test_segment_reductions",
-    "test_serialization",
     "test_sparse",
     "test_sparse_csr",
     "test_sparse_semi_structured",
     "test_spectral_ops",
-    "test_sympy_utils",
     "test_tensorexpr",
     "test_tensorexpr_pybind",
     "test_torch",
@@ -522,7 +510,6 @@ dynamo_expected_failures = {
     "TestModuleInitCPU.test_nn_LSTM_cpu_float32",
     "TestModuleInitCPU.test_qat_Conv1d_cpu_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc10_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc14_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc9_out_dtype_float64",
     "TestUnaryUfuncs.test_x_and_out_casting_casting_same_kind_ufunc0_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc8_out_dtype_complex128",
@@ -538,11 +525,9 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc14_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc8_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc1_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc12_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc5",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc14_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc2_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc5_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc15_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc0_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc12_out_dtype_float64",
@@ -561,7 +546,6 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc4_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc9_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc12_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc12_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc0_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc11_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc15_out_dtype_float32",
@@ -592,11 +576,9 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc9_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc8_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc7_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc7_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc14_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc10_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc9_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc14_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc4_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc8_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc8_out_dtype_complex128",
@@ -607,23 +589,17 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc12_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc11_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc1_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc15_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc0_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc2_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc15",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc16_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc12_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc16_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc15_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc16_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc7_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc1_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc2_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc3_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc6_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc6_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc3",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc13_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc5_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc3_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc7_out_dtype_float64",
@@ -633,18 +609,14 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc2_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc10_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc10",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc11_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc16_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc11_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc5_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc9_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc2_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc5_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc3_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc7_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc15_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc5_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc10_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc15_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc11_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc14_out_dtype_float64",
@@ -652,7 +624,6 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc2_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc11_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc12_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc14_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc8_out_dtype_float64",
     "TestUnaryUfuncs.test_x_and_out_casting_casting_same_kind_ufunc0_out_dtype_float64",
     "TestUfuncDtypeKwd.test_binary_ufunc_dtype_and_out",
@@ -663,7 +634,6 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc13_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc5_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc14_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc9_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc9_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc14_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc13_out_dtype_float32",
@@ -672,18 +642,14 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc11",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc7_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc13_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc5_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc6_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc1",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc8_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc13_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc0_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc9_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc16_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc16_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc5_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc12",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc6_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc3_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc6_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc14_out_dtype_float32",
@@ -691,8 +657,6 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc13_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc7_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc14_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc10_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc11_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc4_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc6_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc4_out_dtype_float64",
@@ -703,7 +667,6 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc3_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc11_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc15_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc13_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc14",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc15_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc6",
@@ -716,14 +679,10 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc6_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc11_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc13_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc15_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc7_out_dtype_float32",
     "TestUnaryUfuncs.test_x_and_out_casting_casting_unsafe_ufunc0_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc14_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc15_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc15_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc10_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc12_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc4_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc14_out_dtype_complex128",
     "TestUnaryUfuncs.test_x_and_out_casting_casting_no_ufunc0_out_dtype_float64",
@@ -735,11 +694,9 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc16_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc13_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc5_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc9_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc8_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc3_out_dtype_complex128",
     "TestUnaryUfuncs.test_x_and_out_casting_casting_safe_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc16_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc15_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc12_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc6_out_dtype_complex128",
@@ -750,22 +707,18 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc10_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc7_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc11_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc8_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc9_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc10_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc8_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc16_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc9_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc1_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc3_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc10_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc7_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc6_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc7_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc0_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc8",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc11_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc16_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc13_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc13_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc2_out_dtype_float64",
@@ -775,7 +728,6 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc4_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc6_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc13",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc5_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc2_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc2",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc10_out_dtype_complex128",
@@ -1276,49 +1228,29 @@ dynamo_expected_failures = {
     "TestOneArr.test_asarray_list_func1",
     "TestOneArr.test_asarray_list_func46",
     "TestSequenceOfArrays.test_single_list_func0",
-    "TestCholesky.test_basic_property_shape3_dtype1",
     "TestCond.test_sq_cases",
     "TestNormInt64.test_bad_args",
     "TestQR.test_qr_empty_m_0_n_3",
     "TestMultiDot.test_dynamic_programming_optimization_and_out",
     "TestNormDouble.test_bad_args",
-    "TestCholesky.test_basic_property_shape4_dtype1",
-    "TestCholesky.test_basic_property_shape3_dtype2",
-    "TestCholesky.test_basic_property_shape4_dtype0",
-    "TestCholesky.test_basic_property_shape3_dtype0",
     "TestCond.test_empty_sq_cases",
-    "TestCholesky.test_basic_property_shape1_dtype3",
     "TestQR.test_qr_empty_m_0_n_0",
     "TestQR.test_mode_raw",
     "TestMultiDot.test_two_arguments_and_out",
-    "TestCholesky.test_basic_property_shape1_dtype2",
     "TestMultiDot.test_three_arguments_and_out",
     "TestNormDouble.test_axis",
-    "TestCholesky.test_basic_property_shape1_dtype1",
-    "TestCholesky.test_basic_property_shape2_dtype1",
     "TestMisc.test_generalized_raise_multiloop",
     "TestEigvalsh.test_invalid",
     "TestNormDouble.test_matrix_2x2",
-    "TestCholesky.test_basic_property_shape0_dtype0",
     "TestMisc.test_byteorder_check",
-    "TestCholesky.test_basic_property_shape4_dtype3",
-    "TestCholesky.test_basic_property_shape2_dtype2",
-    "TestCholesky.test_basic_property_shape3_dtype3",
     "TestNormInt64.test_axis",
-    "TestCholesky.test_basic_property_shape2_dtype0",
-    "TestCholesky.test_basic_property_shape0_dtype3",
     "TestQR.test_qr_empty_m_3_n_0",
     "TestEigh.test_invalid",
     "TestNormSingle.test_bad_args",
     "TestNormSingle.test_matrix_2x2",
     "TestNormSingle.test_axis",
-    "TestCholesky.test_basic_property_shape1_dtype0",
-    "TestCholesky.test_basic_property_shape4_dtype2",
     "TestMultiDot.test_too_few_input_arrays",
-    "TestCholesky.test_basic_property_shape0_dtype2",
-    "TestCholesky.test_basic_property_shape0_dtype1",
     "TestNormInt64.test_matrix_2x2",
-    "TestCholesky.test_basic_property_shape2_dtype3",
     "TestFliplr.test_basic",
     "TestHistogram2d.test_binparameter_combination",
     "TestHistogram2d.test_all_outliers",
@@ -1404,16 +1336,9 @@ dynamo_expected_failures = {
     "TestPercentile.test_keepdims_out_q_7_axis_1",
     "TestPercentile.test_api",
     "TestQuantile.test_quantile_monotonic_method_normal_unbiased",
-    "TestSetOps.test_in1d_mixed_dtype_dtype11_dtype21_kind_table",
-    "TestSetOps.test_in1d_mixed_dtype_dtype10_dtype20_kind0",
-    "TestSetOps.test_in1d_mixed_dtype_dtype10_dtype20_kind_table",
-    "TestSetOps.test_ediff1d_forbidden_type_casts_ary1_prepend1_append1_expected_to_begin",
-    "TestSetOps.test_in1d_mixed_dtype_dtype11_dtype21_kind0",
-    "TestSetOps.test_in1d_mixed_dtype_dtype11_dtype21_kind_sort",
     "TestSetOps.test_in1d_table_timedelta_fails",
     "TestUnique.test_unique_axis_errors",
     "TestSetOps.test_setdiff1d",
-    "TestSetOps.test_in1d_mixed_dtype_dtype10_dtype20_kind_sort",
     "TestSetOps.test_in1d_timedelta_kind_sort",
     "TestSetOps.test_in1d_timedelta_kind0",
     "TestUnique.test_unique_axis",
@@ -1475,12 +1400,10 @@ dynamo_expected_failures = {
     "TestScalarTypeNames.test_names_reflect_attributes_t7",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t5",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t9",  # torch_np/numpy_tests/core/test_numerictypes
-    "TestIsSubDType.test_both_abstract",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t6",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t2",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t8",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t0",  # torch_np/numpy_tests/core/test_numerictypes
-    "TestIsSubDType.test_nondtype_nonscalartype",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t3",  # torch_np/numpy_tests/core/test_numerictypes
     "TestClip.test_clip_inplace_array",  # torch_np/numpy_tests/core/test_numeric
     "TestRequire.test_require_each",  # torch_np/numpy_tests/core/test_numeric
@@ -1544,6 +1467,7 @@ dynamo_expected_failures = {
     "TestEinsum.test_different_paths_dtype_l",  # torch_np/numpy_tests/core/test_einsum
     "TestEinsum.test_different_paths_dtype_h",  # torch_np/numpy_tests/core/test_einsum
     "TestEinsum.test_einsum_misc",  # torch_np/numpy_tests/core/test_einsum
+    "TestMisc.test_f16_on_cuda",
     "TestMisc.test_overlap",  # torch_np/numpy_tests/core/test_einsum
     "TestEinsum.test_einsum_sums_int64",  # torch_np/numpy_tests/core/test_einsum
     "TestEinsum.test_einsum_failed_on_p9_and_s390x",  # torch_np/numpy_tests/core/test_einsum
@@ -2020,6 +1944,53 @@ dynamo_expected_failures = {
     "TestShapeOpsCPU.test_clamp_propagates_nans_cpu",  # test_shape_ops
     "TestShapeOpsCPU.test_flip_cpu_bfloat16",  # test_shape_ops
     "TestShapeOpsCPU.test_clamp_cpu_float32",  # test_shape_ops
+    "TestSubclassSerialization.test_tensor_subclass_deepcopy",  # test_serialization
+    "TestOldSerialization.test_save_different_dtype_unallocated",  # test_serialization
+    "TestSubclassSerialization.test_tensor_subclass_getstate_overwrite",  # test_serialization
+    "TestSerialization.test_save_different_dtype_unallocated",  # test_serialization
+    "TestSubclassSerialization.test_tensor_subclass_wrapper_serialization",  # test_serialization
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_float32",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_bfloat16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_complex64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_float64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_bfloat16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_complex128",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_float16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter__reductions_cpu_float16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int32",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_int32",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_float32",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_float16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter__reductions_cpu_float32",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_uint8",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_uint8",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_int16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_complex128",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_int8",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_float64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_complex64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_int64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int8",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter__reductions_cpu_complex64",  # test_scatter_gather_ops
+    "TestCxxPytree.test_pytree_serialize_spec8",  # test_pytree
+    "TestGenericPytree.test_flatten_unflatten_namedtuple_py",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec9",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec3",  # test_pytree
+    "TestGenericPytree.test_flatten_unflatten_deque_py",  # test_pytree
+    "TestGenericPytree.test_flatten_unflatten_deque_cxx",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec2",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec5",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_namedtuple",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec0",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec6",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec4",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec7",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec1",  # test_pytree
+    "TestPythonPytree.test_treespec_equality",  # test_pytree
+    "TestOutDtypeOp.test_out_dtype_non_op_overload",  # test_out_dtype_op
+    "TestOutDtypeOp.test_out_dtype_wrong_output",  # test_out_dtype_op
 }
 
 dynamo_skips = {
@@ -2110,4 +2081,7 @@ dynamo_skips = {
     "TestTensorCreationCPU.test_vander_types_cpu_complex64",  # known py311 fail
     "TestTensorCreationCPU.test_torch_polar_cpu_float32",  # known py311 fail
     "TestTensorCreationCPU.test_torch_polar_cpu_float64",  # known py311 fail
+    "TestSWAUtils.test_averaged_model_all_devices_ema_True",  # flaky
+    "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_False",  # flaky
+    "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_True",  # flaky
 }
