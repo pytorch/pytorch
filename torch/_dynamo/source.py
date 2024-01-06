@@ -337,6 +337,20 @@ class GetItemSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class ConstDictKeySource(GetItemSource):
+    def reconstruct(self, codegen):
+        return [
+            *codegen.create_load_import_from(utils.__name__, "dict_keys_getitem"),
+            *self.base.reconstruct(codegen),
+            codegen.create_load_const(self.index),
+            *create_call_function(2, True),
+        ]
+
+    def name(self):
+        return f"___dict_keys_getitem({self.base.name()}, {self.index!r})"
+
+
+@dataclasses.dataclass(frozen=True)
 class TupleIteratorGetItemSource(GetItemSource):
     def reconstruct(self, codegen):
         codegen.load_import_from(utils.__name__, "tuple_iterator_getitem")
