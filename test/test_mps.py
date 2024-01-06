@@ -325,6 +325,7 @@ def mps_ops_modifier(ops):
         'acos',
         'acosh',
         'all',
+        'any',
         'argwhere',
         'asin',
         'atan',
