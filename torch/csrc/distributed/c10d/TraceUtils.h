@@ -495,7 +495,12 @@ struct NCCLTraceBuffer {
     return result;
   }
 
-  void retire_id(c10::optional<size_t> id) {
+  // Don't set compute_duration=True from inside dump API,
+  // becuase getDurationFromFirstEvent may hang and block dumping.
+  // OK to call from inside watchdog thread, which is probably going to hang
+  // anyway in cases where eventQuery will hang. (Then we fall back to rely on
+  // monitor thread to kill and dump, and rely on dump not hanging)
+  void retire_id(c10::optional<size_t> id, bool compute_duration = false) {
     if (!enabled_ || !id) {
       return;
     }
@@ -503,6 +508,13 @@ struct NCCLTraceBuffer {
     auto& entry = entries_.at(*id % max_entries_);
     if (entry.id_ == *id) {
       update_state(entry);
+
+      if (compute_duration) {
+        if (strcmp(entry.state_, "completed") == 0 && entry.start_ && entry.end_) {
+          entry.duration_ = getDurationFromFirstEvent(*entry.start_, *entry.end_);
+        }
+      }
+
       entry.retired_ = true;
       entry.start_ = entry.end_ = nullptr;
     }

@@ -3837,11 +3837,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
     def test_trace_while_stuck(self, timing_enabled):
-        if timing_enabled:
-            self.skipTest(
-                "This test is expected to hang with timing enabled,"
-                " becuase gather_trace()->dump() ends up calling cudaEventQuery which hangs."
-            )
         if self.rank == self.MAIN_PROCESS_RANK:
             for c in self.children_pipes:
                 self.assertEqual(c.recv(), 'next')
