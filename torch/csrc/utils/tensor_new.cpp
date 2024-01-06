@@ -7,7 +7,7 @@
 #include <torch/csrc/Size.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/utils/cuda_lazy_init.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -60,12 +60,6 @@ TensorOptions build_options(
   return options;
 }
 
-void maybe_initialize_cuda(const Device& device) {
-  if (device.is_cuda()) {
-    torch::utils::cuda_lazy_init();
-  }
-}
-
 // NB: It appears there is some consistency invariant between options and
 // device, where if device is non-empty, its type must be consistent with the
 // device type in options.
@@ -76,7 +70,7 @@ Tensor new_with_sizes(
     at::ScalarType scalar_type,
     const optional<Device>& device,
     c10::SymIntArrayRef sizes) {
-  maybe_initialize_cuda(options.device());
+  maybe_initialize_device(options.device());
   pybind11::gil_scoped_release no_gil;
   return at::empty_symint(sizes, build_options(options, scalar_type, device));
 }
@@ -311,7 +305,7 @@ Tensor internal_new_from_data(
         type_inference ? var.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : var.device();
     pybind11::gil_scoped_release no_gil;
-    maybe_initialize_cuda(device);
+    maybe_initialize_device(device);
     return var.to(
         device,
         inferred_scalar_type,
@@ -329,7 +323,7 @@ Tensor internal_new_from_data(
         type_inference ? tensor.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : options.device();
     pybind11::gil_scoped_release no_gil;
-    maybe_initialize_cuda(device);
+    maybe_initialize_device(device);
     return tensor.to(
         device,
         inferred_scalar_type,
@@ -345,7 +339,7 @@ Tensor internal_new_from_data(
         type_inference ? tensor.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : options.device();
     pybind11::gil_scoped_release no_gil;
-    maybe_initialize_cuda(device);
+    maybe_initialize_device(device);
     return tensor.to(
         device,
         inferred_scalar_type,
@@ -441,7 +435,7 @@ Tensor internal_new_from_data(
       }
     }
     pybind11::gil_scoped_release no_gil;
-    maybe_initialize_cuda(device);
+    maybe_initialize_device(device);
     // However, it is VERY important that we trace the to() call here (even
     // though the reason this is important is a hack).  Without *some* factory
     // function call that is traced at construction time, we will consider
@@ -1631,9 +1625,7 @@ Tensor tensor_fromDLPack(PyObject* data) {
   // because cuda ATen types have not been registered in Python yet.
   // so if we have a cuda tensor, then we need to make sure
   // we have called _lazy_init here
-  if (atensor.is_cuda()) {
-    py::module::import("torch.cuda").attr("init")();
-  }
+  maybe_initialize_device(atensor.device());
   return atensor;
 }
 

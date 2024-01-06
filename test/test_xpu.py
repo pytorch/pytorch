@@ -4,7 +4,14 @@ import sys
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import NoTest, run_tests, TEST_XPU, TestCase
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    NoTest,
+    run_tests,
+    TEST_WITH_TSAN,
+    TEST_XPU,
+    TestCase,
+)
 
 if not TEST_XPU:
     print("XPU not available, skipping tests", file=sys.stderr)
@@ -37,6 +44,33 @@ class TestXpu(TestCase):
         device_name = torch.xpu.get_device_name(current_device)
         self.assertEqual(device_name, torch.xpu.get_device_name(None))
         self.assertEqual(device_name, torch.xpu.get_device_name())
+
+    @unittest.skipIf(
+        TEST_WITH_TSAN,
+        "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+    )
+    @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
+    def test_wrong_xpu_fork(self):
+        stderr = TestCase.runWithPytorchAPIUsageStderr(
+            """\
+import torch
+from torch.multiprocessing import Process
+def run(rank):
+    torch.xpu.set_device(rank)
+if __name__ == "__main__":
+    size = 2
+    processes = []
+    for rank in range(size):
+        # it would work fine without the line below
+        torch.xpu.set_device(0)
+        p = Process(target=run, args=(rank,))
+        p.start()
+        processes.append(p)
+    for p in processes:
+        p.join()
+"""
+        )
+        self.assertRegex(stderr, "Cannot re-initialize XPU in forked subprocess.")
 
 
 if __name__ == "__main__":

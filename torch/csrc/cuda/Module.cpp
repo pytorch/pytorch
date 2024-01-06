@@ -39,7 +39,7 @@
 #include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/python_headers.h>
-#include <torch/csrc/utils/cuda_lazy_init.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -62,7 +62,7 @@ static bool in_bad_fork = false; // True for children forked after cuda init
 // Called in the forked child if cuda has already been initialized
 static void forked_child() {
   in_bad_fork = true;
-  torch::utils::set_requires_cuda_init(true);
+  torch::utils::set_requires_device_init(at::kCUDA, true);
 }
 #endif
 
@@ -89,7 +89,7 @@ PyObject* THCPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to setDevice");
   int64_t device = THPUtils_unpackLong(arg);
 
-  torch::utils::cuda_lazy_init();
+  torch::utils::device_lazy_init(at::kCUDA);
   THCPModule_setDevice(device);
 
   Py_RETURN_NONE;
@@ -104,7 +104,7 @@ PyObject* THCPModule_exchangeDevice(PyObject* self, PyObject* arg) {
     return THPUtils_packInt32(-1);
   }
 
-  torch::utils::cuda_lazy_init();
+  torch::utils::device_lazy_init(at::kCUDA);
   int current_device = c10::cuda::ExchangeDevice(device);
 
   return THPUtils_packInt32(current_device);
@@ -119,7 +119,7 @@ PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
     return THPUtils_packInt32(-1);
   }
 
-  torch::utils::cuda_lazy_init();
+  torch::utils::device_lazy_init(at::kCUDA);
   int current_device = c10::cuda::MaybeExchangeDevice(device);
 
   return THPUtils_packInt32(current_device);
@@ -128,7 +128,7 @@ PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
 
 PyObject* THCPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  torch::utils::cuda_lazy_init();
+  torch::utils::device_lazy_init(at::kCUDA);
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   auto device = static_cast<int32_t>(c10::cuda::current_device());
   return THPUtils_packInt32(device);
@@ -155,7 +155,7 @@ PyObject* THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args) {
   int64_t device = THPUtils_unpackLong(arg1);
   int64_t peer_device = THPUtils_unpackLong(arg2);
 
-  torch::utils::cuda_lazy_init();
+  torch::utils::device_lazy_init(at::kCUDA);
   auto can_access = at::cuda::canDeviceAccessPeer(device, peer_device);
   return PyBool_FromLong(can_access);
   END_HANDLE_TH_ERRORS

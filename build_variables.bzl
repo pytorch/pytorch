@@ -867,7 +867,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/init.cpp",
     "torch/csrc/utils/throughput_benchmark.cpp",
     "torch/csrc/utils.cpp",
-    "torch/csrc/utils/cuda_lazy_init.cpp",
+    "torch/csrc/utils/device_lazy_init.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/nested.cpp",
     "torch/csrc/utils/object_ptr.cpp",
