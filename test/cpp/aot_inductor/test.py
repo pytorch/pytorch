@@ -10,7 +10,7 @@ class Net(torch.nn.Module):
         self.w_pre = torch.randn(4, 4, device=device)
         self.w_add = torch.randn(4, device=device)
 
-    def forward(self, x, y):
+    def forward(self, x):
         w_transpose = torch.transpose(self.w_pre, 0, 1)
         w_relu = torch.nn.functional.relu(w_transpose)
         w = w_relu + self.w_add
@@ -20,24 +20,21 @@ data = {}
 
 for device in ["cpu", "cuda"]:
     model = Net(device).to(device=device)
-    x = torch.randn((32, 64), device=device)
-    y = torch.randn((32, 64), device=device)
+    x = torch.randn((4, 4), device=device)
     with torch.no_grad():
-        ref_output = model(x, y)
+        ref_output = model(x)
 
     torch._dynamo.reset()
     with torch.no_grad():
         constraints = [
             dynamic_dim(x, 0) >= 1,
             dynamic_dim(x, 0) <= 1024,
-            dynamic_dim(x, 0) == dynamic_dim(y, 0),
         ]
-        model_so_path = aot_compile(model, (x, y), constraints=constraints)
+        model_so_path = aot_compile(model, (x,), constraints=constraints)
 
-    params = dict(model.named_parameters())
     data.update({
         f"model_so_path_{device}": model_so_path,
-        f"inputs_{device}": [x, y],
+        f"inputs_{device}": [x],
         f"outputs_{device}": [ref_output],
         f"const_1_{device}": model.w_pre,
         f"const_2_{device}": model.w_add,
