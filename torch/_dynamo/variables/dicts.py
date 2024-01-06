@@ -118,6 +118,7 @@ def is_hashable(x):
             ),
         )
 
+
 class ConstDictVariable(VariableTracker):
     class _HashableTracker:
         """
