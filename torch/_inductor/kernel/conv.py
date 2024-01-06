@@ -351,7 +351,7 @@ def convolution(
     autotuning_gemm = config.max_autotune or config.max_autotune_gemm
 
     if (
-        (config.conv_1x1_as_mm or (autotuning_gemm and channels_last_conv()))
+        (config.conv_1x1_as_mm)
         and is_ones(kernel_shape)
         and is_ones(stride)
         and is_zeros(padding)
