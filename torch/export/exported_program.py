@@ -584,18 +584,6 @@ class ExportedProgram:
     def _validate(self):
         self.verifier().check(self)
 
-    # TODO This hack is necessary until executorch can update their pin in pytorch CI.
-    def __getattribute__(self, name):
-        if name == "_transform":
-            import os
-
-            if (
-                os.environ.get("CI", None) == "true"
-                and os.environ.get("GITHUB_ACTIONS", None) == "true"
-            ):
-                return self._transform_do_not_use
-        return super().__getattribute__(name)
-
 
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
