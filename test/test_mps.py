@@ -324,6 +324,7 @@ def mps_ops_modifier(ops):
         '__rdiv__',
         'acos',
         'acosh',
+        'all',
         'argwhere',
         'asin',
         'atan',
