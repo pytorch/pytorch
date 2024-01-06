@@ -131,7 +131,12 @@ if(USE_CUDA)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDNN)
     endif()
 
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtoolsext)
+    # CUDA SDK >= 12 doesn't include NVTX anymore, so use the nvToolsExt included in third_party/nccl.
+    if(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
+      list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${TORCH_ROOT}/third_party/nccl/nccl/src/include/nvtx3)
+    else()
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtoolsext)
+    endif()
 endif()
 
 if(USE_ROCM)
