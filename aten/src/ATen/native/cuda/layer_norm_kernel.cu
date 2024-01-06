@@ -1017,11 +1017,11 @@ void LayerNormKernelImplInternal(
   }
 }
 
-inline bool use_cudnn_layernorm(const Tensor& gamma, const Tensor& beta) {
+inline bool use_cudnn_layernorm(bool gamma, bool beta) {
   static bool enabled = (c10::utils::check_env("TORCH_CUDNN_LAYERNORM_ENABLED") == true);
-  bool ok = enabled && gamma.numel() && beta.numel();
+  bool ok = enabled && gamma && beta;
   if (ok) {
-    TORCH_WARN("USING EXPERIMENTAL CUDNN LAYERNORM");
+    TORCH_WARN_ONCE("USING EXPERIMENTAL CUDNN LAYERNORM");
   }
   return ok;
 }
@@ -1036,7 +1036,7 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  if (use_cudnn_layernorm(gamma, beta)) {
+  if (use_cudnn_layernorm(gamma.numel(), beta.numel())) {
     at::native::raw_cudnn_layernorm_forward_out(X, gamma, beta, eps, mean, rstd, Y, M, N);
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -1512,15 +1512,19 @@ void LayerNormBackwardKernelImpl(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
-      X.scalar_type(),
-      "LayerNormBackwardKernelImpl",
-      [&]() {
-        LayerNormBackwardKernelImplInternal<scalar_t>(
-            dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
-      });
+  if (use_cudnn_layernorm(gamma.numel(), dbeta)) {
+    at::native::raw_cudnn_layernorm_backward_out(dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        X.scalar_type(),
+        "LayerNormBackwardKernelImpl",
+        [&]() {
+          LayerNormBackwardKernelImplInternal<scalar_t>(
+              dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+        });
+  }
 }
 
 } // namespace
