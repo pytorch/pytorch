@@ -133,9 +133,16 @@ class Verifier(metaclass=_VerifierMeta):
         try:
             _verify_exported_program_signature(ep)
         except SpecViolationError as e:
-            # TODO Remove this branch.
+            # TODO This hack is necessary until executorch can update their pin in pytorch CI.
             if ep.dialect == "EDGE":  # !!! Don't change this allowlist. !!!
-                pass
+                import os
+                if (
+                    os.environ.get("CI", None) == "true"
+                    and os.environ.get("GITHUB_ACTIONS", None) == "true"
+                ):
+                    pass
+                else:
+                    raise e
             else:
                 raise e
 
@@ -166,6 +173,8 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.sym_min,
                 torch.sym_not,
                 torch.sym_sqrt,
+                # Predispatch export is able to contain autograd ops.
+                torch._C._set_grad_enabled
             )
 
             if not isinstance(op, _allowed_op_types()):
