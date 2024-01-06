@@ -1922,7 +1922,6 @@ dynamo_expected_failures = {
     "TestCxxPytree.test_pytree_serialize_spec0",  # test_pytree
     "TestCxxPytree.test_pytree_serialize_spec6",  # test_pytree
     "TestCxxPytree.test_pytree_serialize_spec4",  # test_pytree
-    "TestCxxPytree.test_pytree_serialize_spec7",  # test_pytree
     "TestCxxPytree.test_pytree_serialize_spec1",  # test_pytree
     "TestPythonPytree.test_treespec_equality",  # test_pytree
     "TestOutDtypeOp.test_out_dtype_non_op_overload",  # test_out_dtype_op
