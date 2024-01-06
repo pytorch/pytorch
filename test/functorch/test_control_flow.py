@@ -366,21 +366,21 @@ def forward(self, out_iter_1, it_1, y_1):
     return [getitem, getitem_1, getitem_2]
     """)  # noqa: B950
         self.assertExpectedInline(graphs[0].while_loop_cond_graph_0.code.strip("\n"), """\
-def forward(self, out_iter_1, it_1, y_1):
-    sum_1 = torch.ops.aten.sum.default(out_iter_1);  out_iter_1 = None
+def forward(self, arg0_1, arg1_1, arg2_1):
+    sum_1 = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
     lt = torch.ops.aten.lt.Scalar(sum_1, 2);  sum_1 = None
     return lt
     """)
         self.assertExpectedInline(graphs[0].while_loop_body_graph_0.code.strip("\n"), """\
-def forward(self, out_iter_1, it_1, y_1):
+def forward(self, arg0_1, arg1_1, arg2_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, [out_iter_1, it_1, y_1]);  while_loop_cond_graph_0 = while_loop_body_graph_0 = out_iter_1 = it_1 = y_1 = None
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, [arg1_1, arg0_1, arg2_1]);  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg1_1 = arg0_1 = arg2_1 = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
     getitem_2 = while_loop[2];  while_loop = None
     add = torch.ops.aten.add.Tensor(getitem, 1);  getitem = None
-    return [add, getitem_1, getitem_2]
+    return (add, getitem_1, getitem_2)
     """)  # noqa: B950
 
     def _wrap_with_functionalize(self, fn, func_type):
@@ -412,8 +412,8 @@ def forward(self, x_1):
     return [getitem]
     """)  # noqa: B950
             self.assertExpectedInline(graphs[0].while_loop_cond_graph_0.code.strip("\n"), """\
-def forward(self, x_1):
-    clone = torch.ops.aten.clone.default(x_1);  x_1 = None
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
     add_ = torch.ops.aten.add_.Tensor(clone, 1);  clone = None
     add__1 = torch.ops.aten.add_.Tensor(add_, -1);  add_ = None
     sum_1 = torch.ops.aten.sum.default(add__1);  add__1 = None
@@ -421,12 +421,12 @@ def forward(self, x_1):
     return lt
     """)
             self.assertExpectedInline(graphs[0].while_loop_body_graph_0.code.strip("\n"), """\
-def forward(self, x_1):
-    clone = torch.ops.aten.clone.default(x_1);  x_1 = None
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
     add_ = torch.ops.aten.add_.Tensor(clone, 1);  clone = None
     add__1 = torch.ops.aten.add_.Tensor(add_, -1);  add_ = None
     add = torch.ops.aten.add.Tensor(add__1, 1);  add__1 = None
-    return [add]
+    return (add,)
     """)
         elif func_type == "python":
             self.assertExpectedInline(graphs[0].code.strip("\n"), """\
@@ -452,7 +452,7 @@ def forward(self, arg0_1):
     add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
     add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
     add_2 = torch.ops.aten.add.Tensor(add_1, 1);  add_1 = None
-    return [add_2]
+    return (add_2,)
     """)
         else:
             self.assertExpectedInline(graphs[0].code.strip("\n"), """\
@@ -464,8 +464,8 @@ def forward(self, x_1):
     return [getitem]
     """)  # noqa: B950
             self.assertExpectedInline(graphs[0].while_loop_cond_graph_0.code.strip("\n"), """\
-def forward(self, x_1):
-    clone = torch.ops.aten.clone.default(x_1);  x_1 = None
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
     add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
     add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
     sum_1 = torch.ops.aten.sum.default(add_1);  add_1 = None
@@ -473,12 +473,12 @@ def forward(self, x_1):
     return lt
     """)
             self.assertExpectedInline(graphs[0].while_loop_body_graph_0.code.strip("\n"), """\
-def forward(self, x_1):
-    clone = torch.ops.aten.clone.default(x_1);  x_1 = None
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
     add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
     add_1 = torch.ops.aten.add.Tensor(add, -1);  add = None
     add_2 = torch.ops.aten.add.Tensor(add_1, 1);  add_1 = None
-    return [add_2]
+    return (add_2,)
     """)
 
     @parametrize("func_type", ["no", "cpp", "python", "functorch"])
