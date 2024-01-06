@@ -94,9 +94,9 @@ macro(SYCL_GET_SOURCES_AND_OPTIONS _sycl_sources _cxx_sources _cmake_options)
   set(_found_cpp_sources FALSE)
   foreach(arg ${ARGN})
     if("x${arg}" STREQUAL "xOPTIONS")
-      set( _found_options TRUE )
-      set( _found_sycl_sources FALSE )
-      set( _found_cpp_sources FALSE )
+      set(_found_options TRUE)
+      set(_found_sycl_sources FALSE)
+      set(_found_cpp_sources FALSE)
     elseif(
         "x${arg}" STREQUAL "xEXCLUDE_FROM_ALL" OR
         "x${arg}" STREQUAL "xSTATIC" OR
