@@ -1,9 +1,5 @@
 # tests in this list will run without Dynamo strict mode by default.
 FIXME_default_non_strict = {
-    "backends/xeon/test_launch",
-    "benchmark_utils/test_benchmark_utils",
-    "distributions/test_constraints",
-    "distributions/test_distributions",
     "dynamo/test_activation_checkpointing",
     "dynamo/test_after_aot",
     "dynamo/test_aot_autograd",
@@ -66,15 +62,7 @@ FIXME_default_non_strict = {
     "export/test_upgrade",
     "export/test_verifier",
     "functorch/test_aotdispatch",
-    "functorch/test_control_flow",
-    "functorch/test_dims",
-    "functorch/test_eager_transforms",
-    "functorch/test_logging",
-    "functorch/test_memory_efficient_fusion",
-    "functorch/test_minifier",
     "functorch/test_ops",
-    "functorch/test_parsing",
-    "functorch/test_rearrange",
     "functorch/test_vmap",
     "functorch/test_vmap_registrations",
     "inductor/test_aot_inductor",
@@ -132,26 +120,7 @@ FIXME_default_non_strict = {
     "inductor/test_triton_heuristics",
     "inductor/test_triton_wrapper",
     "inductor/test_unbacked_symints",
-    "lazy/test_bindings",
-    "lazy/test_debug_util",
-    "lazy/test_extract_compiled_graph",
-    "lazy/test_functionalization",
-    "lazy/test_generator",
-    "lazy/test_meta_kernel",
-    "lazy/test_reuse_ir",
-    "lazy/test_step_closures",
     "lazy/test_ts_opinfo",
-    "nn/test_convolution",
-    "nn/test_dropout",
-    "nn/test_embedding",
-    "nn/test_init",
-    "nn/test_lazy_modules",
-    "nn/test_module_hooks",
-    "nn/test_multihead_attention",
-    "nn/test_packed_sequence",
-    "nn/test_parametrization",
-    "nn/test_pooling",
-    "nn/test_pruning",
     "profiler/test_memory_profiler",
     "profiler/test_profiler",
     "profiler/test_profiler_tree",
@@ -159,14 +128,7 @@ FIXME_default_non_strict = {
     "test_ao_sparsity",
     "test_autograd",
     "test_binary_ufuncs",
-    "test_bundled_inputs",
-    "test_comparison_utils",
-    "test_compile_benchmark_util",
-    "test_complex",
     "test_content_store",
-    "test_cpp_api_parity",
-    "test_cpp_extensions_aot_ninja",
-    "test_cpp_extensions_aot_no_ninja",
     "test_custom_ops",
     "test_dataloader",
     "test_decomp",
@@ -2086,6 +2048,334 @@ dynamo_expected_failures = {
     "TestGraph.test_traverse_circular_datapipe",  # test_datapipe
     "TestGraph.test_traverse_unhashable_datapipe",  # test_datapipe
     "TestCppExtensionJIT.test_cpp_frontend_module_has_same_output_as_python",  # test_cpp_extensions_jit
+    "TestPoolingNN.test_quantized_max_pool1d_empty_kernel",  # nn/test_pooling
+    "TestPoolingNN.test_MaxUnpool2d_output_size",  # nn/test_pooling
+    "TestNNParametrization.test_deepcopy_after_parametrization",  # nn/test_parametrization
+    "TestNNParametrization.test_new_spectral_norm_dim",  # nn/test_parametrization
+    "TestNNParametrization.test_new_spectral_norm_forward",  # nn/test_parametrization
+    "TestNNParametrization.test_weight_norm_state_dict_compat",  # nn/test_parametrization
+    "TestNNParametrization.test_new_spectral_norm",  # nn/test_parametrization
+    "TestNNParametrization.test_weight_norm_deepcopy",  # nn/test_parametrization
+    "PackedSequenceTest.test_to",  # nn/test_packed_sequence
+    "PackedSequenceTest.test_type_casts",  # nn/test_packed_sequence
+    "PackedSequenceTest.test_pack_sequence",  # nn/test_packed_sequence
+    "PackedSequenceTest.test_total_length",  # nn/test_packed_sequence
+    "TestModuleHooks.test_forward_pre_hooks_named_tuple_True",  # nn/test_module_hooks
+    "TestModuleHooks.test_full_backward_pre_hooks_named_tuple_True",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_submodule_registration",  # nn/test_module_hooks
+    "TestModuleHooks.test_forward_hooks_named_tuple_False",  # nn/test_module_hooks
+    "TestModuleHooks.test_full_backward_hooks_named_tuple_False",  # nn/test_module_hooks
+    "TestModuleHooks.test_forward_hooks_named_tuple_True",  # nn/test_module_hooks
+    "TestStateDictHooks.test_pickled_hook",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_inplace",  # nn/test_module_hooks
+    "TestModuleGlobalHooks.test_module_backward_global_hook_writeable",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_buffer_registration",  # nn/test_module_hooks
+    "TestModuleHooks.test_full_backward_hooks_named_tuple_True",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_no_requires_grad",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_backward_writeable",  # nn/test_module_hooks
+    "TestModuleHooks.test_forward_pre_hooks_named_tuple_False",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_parameter_registration",  # nn/test_module_hooks
+    "TestModuleHooks.test_full_backward_pre_hooks_named_tuple_False",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_cpp",  # nn/test_module_hooks
+    "TestStateDictHooks.test_load_state_dict_pre_hook",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_invalid_outputs",  # nn/test_module_hooks
+    "TestModuleHookNN.test_backward_hooks_interaction",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hooks",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_last_arg_requires_grad",  # nn/test_module_hooks
+    "TestModuleGlobalHooks.test_module_global_hook_invalid_outputs",  # nn/test_module_hooks
+    "TestLazyModules.test_lazy_module_parameter",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_batchnorm2d_state",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv3d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv_transposed1d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv2d",  # nn/test_lazy_modules
+    "TestLazyModules.test_optimizer_pass",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_instancenorm3d_state",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_batchnorm3d_state",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv_transpose1d_pickle",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_instancenorm2d",  # nn/test_lazy_modules
+    "TestLazyModules.test_invalid_functions",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_instancenorm2d_state",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv3d_pickle",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_batchnorm2d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_instancenorm1d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_batchnorm1d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_instancenorm1d_state",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv_transpose3d_pickle",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_instancenorm3d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_batchnorm3d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv2d_pickle",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv1d_pickle",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_module_jit_buffer",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv1d",  # nn/test_lazy_modules
+    "TestLazyModules.test_linear",  # nn/test_lazy_modules
+    "TestLazyModules.test_materialize_dtype",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_module_buffer",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_batchnorm1d_state",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_module_jit_param",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_batchnorm_with_dict_input",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv_transpose2d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv_transpose2d_pickle",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv_transpose3d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_linear_pickle",  # nn/test_lazy_modules
+    "TestNNInit.test_kaiming_normal_errors_on_inputs_smaller_than_2d",  # nn/test_init
+    "TestNNInit.test_xavier_normal_errors_on_inputs_smaller_than_2d",  # nn/test_init
+    "TestNNInit.test_ones_and_zeros",  # nn/test_init
+    "TestNNInit.test_eye",  # nn/test_init
+    "TestNNInit.test_kaiming_uniform_errors_on_inputs_smaller_than_2d",  # nn/test_init
+    "TestNNInit.test_dirac_only_works_on_3_4_5d_inputs",  # nn/test_init
+    "TestNNInit.test_sparse_only_works_on_2d_inputs",  # nn/test_init
+    "TestNNInit.test_constant",  # nn/test_init
+    "TestNNInit.test_xavier_uniform_errors_on_inputs_smaller_than_2d",  # nn/test_init
+    "TestNNInit.test_xavier_uniform",  # nn/test_init
+    "TestNNInit.test_eye_only_works_on_2d_inputs",  # nn/test_init
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_bfloat16_cpu_int32_int64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int64_bfloat16",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_EmbeddingBag_per_sample_weights_and_no_offsets_cpu_int32_float32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int64_float32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_dimension_errors_cpu",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_EmbeddingBag_per_sample_weights_and_no_offsets_cpu_int64_float64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_bfloat16_cpu_int64_int64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int32_bfloat16",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int64_float32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_half_cpu_int64_int64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int32_float16",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int64_bfloat16",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int32_float32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_EmbeddingBag_per_sample_weights_and_no_offsets_cpu_int64_float32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_EmbeddingBag_per_sample_weights_and_no_offsets_cpu_int32_float64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int64_float64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_half_cpu_int32_int32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int32_float16",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int32_float64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_half_cpu_int64_int32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int64_float16",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int32_float64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int64_float64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int32_float32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_half_cpu_int32_int64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_bfloat16_cpu_int64_int32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_bfloat16_cpu_int32_int32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int64_float16",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int32_bfloat16",  # nn/test_embedding
+    "TestDropoutNN.test_invalid_dropout_p",  # nn/test_dropout
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNN.test_Conv2d_missing_argument",  # nn/test_convolution
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestDistributionShapes.test_mixture_same_family_shape",  # distributions/test_distributions
+    "TestFunctors.test_cat_transform",  # distributions/test_distributions
+    "TestFunctors.test_cat_transform_non_uniform",  # distributions/test_distributions
+    "TestRearrange.test_ellipsis_ops",  # functorch/test_rearrange
+    "TestRearrange.test_concatenations_and_stacking",  # functorch/test_rearrange
+    "TestRearrange.test_rearrange_permutations",  # functorch/test_rearrange
+    "TestRearrange.test_collapsed_ellipsis_errors_out",  # functorch/test_rearrange
+    "TestRearrange.test_rearrange_consistency",  # functorch/test_rearrange
+    "TestRearrange.test_unsqueeze",  # functorch/test_rearrange
+    "TestRearrange.test_squeeze",  # functorch/test_rearrange
+    "TestMin.test_manual_stuff",  # functorch/test_dims
+    "TestMin.test_dim_args",  # functorch/test_dims
+    "TestMin.test_dims_with_size",  # functorch/test_dims
+    "TestMin.test_functorch",  # functorch/test_dims
+    "TestMin.test_eq",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_adapt",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_monkey",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_network",  # functorch/test_dims
+    "TestMin.test_doc",  # functorch/test_dims
+    "TestMin.test_c",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_index_placement",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_dims_with_size",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_with_dims_split",  # functorch/test_dims
+    "TestMin.test_index",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_softmax_split",  # functorch/test_dims
+    "TestMin.test_mm_fuse",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_simple",  # functorch/test_dims
+    "TestMin.test_seg",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_doc",  # functorch/test_dims
+    "TestMin.test_attn",  # functorch/test_dims
+    "TestMin.test_mask",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_mm",  # functorch/test_dims
+    "TestMin.test_index_placement",  # functorch/test_dims
+    "TestMin.test_dir",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_hello",  # functorch/test_dims
+    "TestMin.test_network",  # functorch/test_dims
+    "TestMin.test_permute_orig",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_parse",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_order_keyword",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_seg",  # functorch/test_dims
+    "TestMin.test_diag",  # functorch/test_dims
+    "TestMin.test_monkey",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_embed",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_stack",  # functorch/test_dims
+    "TestMin.test_hello",  # functorch/test_dims
+    "TestMin.test_expand",  # functorch/test_dims
+    "TestMin.test_time_mm_fuse",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_compare_dims",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_manual_stuff",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_max",  # functorch/test_dims
+    "TestMin.test_adapt",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_dir",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_order",  # functorch/test_dims
+    "TestMin.test_mm",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_index",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_permute_orig",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_functorch",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_dim_args",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_eq",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_mask",  # functorch/test_dims
+    "TestMin.test_big_split",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_attn",  # functorch/test_dims
+    "TestMin.test_max",  # functorch/test_dims
+    "TestMin.test_compare_dims",  # functorch/test_dims
+    "TestMin.test_parse",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_big_split",  # functorch/test_dims
+    "TestMin.test_simple",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_mm_fuse",  # functorch/test_dims
+    "TestMin.test_order_keyword",  # functorch/test_dims
+    "TestMin.test_inplace",  # functorch/test_dims
+    "TestMin.test_with_dims_split",  # functorch/test_dims
+    "TestMin.test_softmax_split",  # functorch/test_dims
+    "TestMin.test_order",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_c",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_inplace",  # functorch/test_dims
+    "TestMin.test_embed",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_diag",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_expand",  # functorch/test_dims
+    "TestMin.test_stack",  # functorch/test_dims
+    "TestControlFlowTraced.test_tracing_map_symbolic_simple",  # functorch/test_control_flow
+    "TestControlFlow.test_map_list_in_out",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_nested_cond_map_cond_symbolic",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_autograd_aot_functionalized",  # functorch/test_control_flow
+    "TestControlFlow.test_map_autograd_nested_list",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_autograd_symbolic_simple",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_real",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_map_functionalized_aot_func",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_symbolic_list",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_symbolic_dict",  # functorch/test_control_flow
+    "TestControlFlow.test_map_dict_in_out",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_autograd_symbolic_list",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_autograd_symbolic_dict",  # functorch/test_control_flow
+    "TestControlFlow.test_map_autograd_no_grad_output",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_map_functionalized",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_nested_map_cond_symbolic",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_nested_map_cond_real",  # functorch/test_control_flow
+    "TestMetaKernel.test_addmm_invalid_dtype",  # lazy/test_meta_kernel
 }
 
 dynamo_skips = {
@@ -2154,7 +2444,9 @@ dynamo_skips = {
     "TestViewOpsCPU.test_as_strided_gradients_cpu",  # known py311 fail
     "TestViewOpsLAZY.test_as_strided_gradients_lazy",  # known py311 fail
     "LoggingTest.testApiUsage",  # flaky?
+    "TestPruningNN.test_global_pruning_importance_scores",  # flaky
     "TestOpenMP_ParallelFor.test_one_thread",  # test_openmp
+    "TestTorchrun.test_multi_threads",  # backends/xeon/test_launch
     "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape3_cpu",  # known py38 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape0_cpu",  # known py38 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape1_cpu",  # known py38 fail
@@ -2188,4 +2480,8 @@ dynamo_skips = {
     "TestMkldnnFusion.test_single_conv",  # known py311 fail
     "TestTorchDlPackCPU.test_dlpack_export_is_conj_cpu",  # known py311 fail
     "TestPythonDispatcher.test_quantized_structured_not_implemented",  # known py38 fail
+    "TestLazyReuseIr.testAdd",  # known py311 fail
+    "TestLazyReuseIr.testAddSubFallback",  # known py311 fail
+    "TestLazyReuseIr.testBatchNorm",  # known py311 fail
+    "TestLazyReuseIr.testAddSub",  # known py311 fail
 }
