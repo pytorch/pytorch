@@ -242,11 +242,11 @@ void raw_cudnn_layernorm_backward_out(const Tensor& dY, const Tensor& X, const T
     auto X_fe = layernorm_graph->tensor(fe::graph::Tensor_attributes()
                              .set_name("X")
                              .set_dim(std::vector<int64_t>(X_reshaped.sizes().begin(), X_reshaped.sizes().end()))
-                             .set_stride(std::vector<int64_t>(X_reshaped.strides().begin(), X_reshaped.strides().end())));
+                             .set_stride({M, 1, M, M}));
     auto DY_fe = layernorm_graph->tensor(fe::graph::Tensor_attributes()
                              .set_name("DY")
                              .set_dim(std::vector<int64_t>(DY_reshaped.sizes().begin(), DY_reshaped.sizes().end()))
-                             .set_stride(std::vector<int64_t>(DY_reshaped.strides().begin(), DY_reshaped.strides().end())));
+                             .set_stride({M, 1, M, M}));
     auto scale_fe = layernorm_graph->tensor(fe::graph::Tensor_attributes()
                                   .set_name("scale")
                                   .set_dim({1, N, 1, 1})

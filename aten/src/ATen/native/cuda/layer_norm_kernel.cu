@@ -1512,7 +1512,7 @@ void LayerNormBackwardKernelImpl(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  if (use_cudnn_layernorm(gamma.numel(), dbeta)) {
+  if (use_cudnn_layernorm(gamma.numel(), dbeta->numel())) {
     at::native::raw_cudnn_layernorm_backward_out(dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
