@@ -1082,6 +1082,8 @@ def const_repr(x, *, local) -> str:
         return enum_repr(x, local=local).replace("'", "")
     elif is_builtin_callable(x):
         return x.__name__
+    elif isinstance(x, type):
+        return x.__name__
     else:
         return f"{x!r}"
 
