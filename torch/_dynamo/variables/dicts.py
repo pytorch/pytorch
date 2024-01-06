@@ -63,7 +63,7 @@ def is_hashable(x):
                 variables.EnumVariable,
                 variables.user_defined.UserDefinedClassVariable,
                 variables.misc.SkipFilesVariable,
-                variables.misc.NumpyVariable
+                variables.misc.NumpyVariable,
             ),
         )
 
