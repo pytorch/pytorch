@@ -172,6 +172,7 @@ class TestControlFlow(TestCase):
         expected = _fake_map(f, xs, y)
         self.assertEqual(expected, res)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_while_loop_gpu(self):
         def cond_fn(x):
             return x.sum() < 10
