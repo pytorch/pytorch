@@ -104,6 +104,49 @@ AOTIRuntimeError AOTInductorModelContainerRun(
   })
 }
 
+AOTIRuntimeError AOTInductorModelContainerGetNumConstants(
+    AOTInductorModelContainerHandle container_handle,
+    size_t* num_constants) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE(
+    { *num_constants = container->num_constants(); })
+}
+
+AOTIRuntimeError AOTInductorModelContainerGetConstantName(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    const char** name) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE(
+    { *name = container->constant_name(idx); })
+}
+
+AOTIRuntimeError AOTInductorModelContainerGetConstantOriginalFQN(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    const char** original_fqn) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE(
+    { *original_fqn = container->constant_original_fqn(idx); })
+}
+
+AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    int32_t* dtype) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE(
+    { *dtype = container->constant_dtype(idx); })
+}
+
 AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
