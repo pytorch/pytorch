@@ -18,6 +18,7 @@ from ..source import AttrSource, GetItemSource
 from ..utils import istype, iter_contains, specialize_symnode
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
+<<<<<<< HEAD
 
 
 # Note: [Adding a new supported class the keys of ConstDictVarialble]
@@ -66,7 +67,56 @@ def is_hashable(x):
                 variables.misc.NumpyVariable,
             ),
         )
+=======
+>>>>>>> b51525f6518 (Re-pr #111196)
 
+
+# Note: [Adding a new supported class the keys of ConstDictVarialble]
+# You'll need to add it to:
+# - `is_hashable_python_var` in this file
+# - `is_hashable` in this file
+# - `const_repr` in util.py, and perhaps modify DICT_KEYS in guards.py
+
+
+def is_hashable_python_var(x):
+    from torch import Tensor
+
+    # Note: Keep me in sync with is_hashable!
+    # Even better, we should have a map of functions connecting the two
+    from ..trace_rules import is_builtin_callable, is_numpy
+
+    return (
+        ConstantVariable.is_literal(x)
+        or isinstance(x, (Tensor, enum.Enum, type))
+        or is_builtin_callable(x)
+        or (isinstance(x, tuple) and all(is_hashable_python_var(e) for e in x))
+        or is_numpy(x)
+    )
+
+
+def is_hashable(x):
+    # Keep me in sync with is_hashable_python_var!
+    # Even better, we should have a map of functions connecting the two
+    if isinstance(x, variables.TensorVariable):
+        # Tensors are hashable if they have an example_value (a fake tensor)
+        # Most VT's should have one.
+        # It'd be nice if at some point we could assert that they all have one
+        return x.as_proxy().node.meta.get("example_value") is not None
+    elif isinstance(x, variables.TupleVariable):
+        return all(is_hashable(e) for e in x.items)
+    else:
+        return isinstance(
+            x,
+            (
+                variables.BuiltinVariable,
+                variables.SymNodeVariable,
+                variables.ConstantVariable,
+                variables.EnumVariable,
+                variables.user_defined.UserDefinedClassVariable,
+                variables.misc.SkipFilesVariable,
+                variables.misc.NumpyVariable,
+            ),
+        )
 
 class ConstDictVariable(VariableTracker):
     class _HashableTracker:
