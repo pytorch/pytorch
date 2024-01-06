@@ -40,7 +40,7 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import EventVariable, StreamVariable
-from .dicts import ConstDictVariable, DefaultDictVariable, is_hashable, SetVariable
+from .dicts import ConstDictVariable, DefaultDictVariable, SetVariable
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -922,14 +922,15 @@ class BuiltinVariable(VariableTracker):
                     ListIteratorVariable,
                 ),
             ):
-                items = dict(
-                    x.unpack_var_sequence(tx) for x in arg.unpack_var_sequence(tx)
-                )
+                items = user_cls()
+                for x in arg.unpack_var_sequence(tx):
+                    k, v = x.unpack_var_sequence(tx)
+                    k = ConstDictVariable.get_key(k)
+                    items.update({k: v})
                 return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
         elif not args and kwargs:
-            items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
             return variables.ConstDictVariable(
-                items, user_cls=user_cls, mutable_local=MutableLocal()
+                dict(kwargs), user_cls=user_cls, mutable_local=MutableLocal()
             )
         unimplemented(f"{user_cls.__name__}(): {args} {kwargs}")
 
@@ -952,14 +953,19 @@ class BuiltinVariable(VariableTracker):
         )
 
         if isinstance(arg, dict):
-            arg = [ConstantVariable.create(k) for k in arg.keys()]
             return DictVariableType(
                 dict.fromkeys(arg, value), user_cls, mutable_local=MutableLocal()
             )
-        elif arg.has_unpack_var_sequence(tx) and all(
-            is_hashable(v) for v in arg.unpack_var_sequence(tx)
+        elif isinstance(
+            arg,
+            (
+                ConstDictVariable,
+                ListVariable,
+                TupleVariable,
+                ListIteratorVariable,
+            ),
         ):
-            keys = arg.unpack_var_sequence(tx)
+            keys = [DictVariableType.get_key(x) for x in arg.unpack_var_sequence(tx)]
             return DictVariableType(
                 dict.fromkeys(keys, value), user_cls, mutable_local=MutableLocal()
             )
