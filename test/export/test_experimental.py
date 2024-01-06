@@ -5,7 +5,7 @@ import unittest
 import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._export.wrappers import _mark_strict_DO_NOT_USE
+from torch._export.wrappers import _mark_strict_experimental
 
 from torch._functorch.aot_autograd import aot_export_module
 
@@ -15,7 +15,7 @@ from torch.testing import FileCheck
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestExperiment(TestCase):
     def test_with_buffer_as_submodule(self):
-        @_mark_strict_DO_NOT_USE
+        @_mark_strict_experimental
         class B(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -83,7 +83,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertTrue(torch.allclose(graph_res_1, eager_res_1))
 
     def test_mark_strict_with_container_type(self):
-        @_mark_strict_DO_NOT_USE
+        @_mark_strict_experimental
         class B(torch.nn.Module):
             def __init__(self):
                 super().__init__()

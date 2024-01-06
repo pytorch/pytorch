@@ -103,7 +103,7 @@ def _wrap_submodules(f, preserve_signature, module_call_signatures):
             del submodule.__dict__["forward"]
 
 
-def _mark_strict_DO_NOT_USE(cls):
+def _mark_strict_experimental(cls):
     def call(self, *args):
         return strict_mode(self, args)
 
