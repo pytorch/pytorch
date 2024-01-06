@@ -148,14 +148,18 @@ class SuperVariable(VariableTracker):
             return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
                 collections.OrderedDict.__getitem__(self.objvar.value, key)
             )
-        elif inner_fn in (
-            collections.OrderedDict.__setitem__,
-            object.__setattr__,
-        ) and isinstance(self.objvar, variables.CustomizedDictVariable):
+        elif (
+            inner_fn in (collections.OrderedDict.__setitem__, object.__setattr__)
+            and isinstance(self.objvar, variables.CustomizedDictVariable)
+            and args
+            and variables.ConstDictVariable.is_valid_key(args[0])
+            and self.objvar.mutable_local
+        ):
             assert not kwargs and len(args) == 2
-            return super(variables.CustomizedDictVariable, self.objvar).call_method(
-                tx, "__setitem__", args, kwargs
-            )
+            k = variables.ConstDictVariable.get_key(args[0])
+            tx.output.side_effects.mutation(self)
+            self.objvar.items[k] = args[1]
+            return variables.ConstantVariable.create(None)
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
 
@@ -275,7 +279,7 @@ class InspectSignatureVariable(VariableTracker):
         if name == "parameters":
             return variables.ConstDictVariable(
                 {
-                    variables.ConstantVariable.create(name): InspectParameterVariable()
+                    name: InspectParameterVariable()
                     for name in self.inspected.inspect_parameter_names()
                 },
                 user_cls=dict,
@@ -977,9 +981,10 @@ class StringFormatVariable(VariableTracker):
         codegen.extend_output(
             variables.TupleVariable(self.sym_args).reconstruct(codegen)
         )
-        kwargs = {
-            variables.ConstantVariable.create(k): v for k, v in self.sym_kwargs.items()
-        }
-        codegen.extend_output(variables.ConstDictVariable(kwargs).reconstruct(codegen))
+        codegen.extend_output(
+            variables.ConstDictVariable(self.sym_kwargs, user_cls=dict).reconstruct(
+                codegen
+            )
+        )
         codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=1))
         return []
