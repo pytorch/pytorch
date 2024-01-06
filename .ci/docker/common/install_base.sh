@@ -61,12 +61,12 @@ install_ubuntu() {
     ${maybe_libiomp_dev} \
     libyaml-dev \
     libz-dev \
+    libjemalloc2 \
     libjpeg-dev \
     libasound2-dev \
     libsndfile-dev \
     ${maybe_libomp_dev} \
     ${maybe_libnccl_dev} \
-    jemalloc2 \
     software-properties-common \
     wget \
     sudo \
