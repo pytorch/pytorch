@@ -200,6 +200,107 @@ def validate_args_and_maybe_create_graph_inputs(
         return args
 
 
+# This helper function is used to make sure two graphs share the same input signature. For example,
+# in torch.cond, two branches might lift different set of tensors as inputs. This function helps to
+# dedup the inputs and modify the graphs to take the same set of inputs.
+def _merge_graph_inputs(
+    l_graph, l_lifted_freevars, l_name, r_graph, r_lifted_freevars, r_name
+):
+    def dedup_and_sort_lifted_freevars(l_lifted_freevars, r_lifted_freevars):
+        # The nn module attributes are guaranteed to be registered into the top-level graph module during
+        # higher order op speculation. Therefore, get_attr nodes in two branches with the same
+        # target refer to the same attribute and we can safely deduplicate them with their target.
+        #
+        # Note: ideally, dynamo should just create a single proxy for the same attribute of a nn module. But
+        # true_branch and false_branch belong to two separate tracing contexts, they may register the same
+        # attribute to top level seperately. This creates two get_attr proxies for the same attribute
+        # that have different meta data such as stack_trace (one stack trace for the true_branch,
+        # and the other for false_branch). It seems better to discard the proxy explicitly in cond
+        # than make dynamo create a single proxy for the same get_attr target.
+        def shared_getattrs(l_lifted_proxies, r_lifted_proxies):
+            true_targets = {
+                proxy.node.target: proxy
+                for proxy in l_lifted_proxies
+                if proxy.node.op == "get_attr"
+            }
+            l_shared_getattrs = {}
+            r_shared_getattrs = {}
+
+            for false_proxy in r_lifted_proxies:
+                if (
+                    false_proxy.node.op == "get_attr"
+                    and false_proxy.node.target in true_targets
+                ):
+                    true_proxy = true_targets[false_proxy.node.target]
+                    l_shared_getattrs[true_proxy] = true_proxy
+                    r_shared_getattrs[false_proxy] = true_proxy
+            return l_shared_getattrs, r_shared_getattrs
+
+        l_shared_getattrs, r_shared_getattrs = shared_getattrs(
+            l_lifted_freevars.keys(), r_lifted_freevars.keys()
+        )
+
+        l_shared_freevars = (l_lifted_freevars.keys() & r_lifted_freevars.keys()).union(
+            l_shared_getattrs.keys()
+        )
+        r_shared_freevars = (l_lifted_freevars.keys() & r_lifted_freevars.keys()).union(
+            r_shared_getattrs.keys()
+        )
+        unique_l_freevars = l_lifted_freevars.keys() - l_shared_freevars
+        unique_r_freevars = r_lifted_freevars.keys() - r_shared_freevars
+
+        def _sort_by_name(vars):
+            return sorted(vars, key=lambda var: var.node.name)
+
+        return (
+            list(_sort_by_name(list(l_shared_freevars))),
+            list(_sort_by_name(list(r_shared_freevars))),
+            list(_sort_by_name(list(unique_l_freevars))),
+            list(_sort_by_name(list(unique_r_freevars))),
+        )
+
+    (l_shared, r_shared, unique_l, unique_r) = dedup_and_sort_lifted_freevars(
+        l_lifted_freevars, r_lifted_freevars
+    )
+
+    # Let's say we capture cond(pred, true_fn, false_fn, (x,))
+    # With set_graph_input set to automatic,
+    # true_fn has lifted variables x, a, b, c
+    # false_fn has lifted variables x, a, b, d
+    # Then fixup_branch_inps make sure both branches have the same signature, i.e.:
+    # - true_fn(x, a, b, c_true_branch, d_false_branch)
+    # - false_fn(x, a, b, c_true_branch, d_false_branch)
+    #
+    # More formally, the signature has three parts in the following order:
+    # 1. used in both branches: x, a, b
+    # 2. only used in true branches: c, suffixed with _true_branch
+    # 3. only used in false branches: d, suffixed with _false_branch
+    # Within each part, we re-order the nodes by name to have a derterministic ordering for testing.
+    def fixup_branch_inps(graph, lifted_freevars, shared, unique_l, unique_r):
+        def _insert_or_replace_phs(new_args, name_suffix):
+            for arg in new_args:
+                new_ph = graph.placeholder(arg.node.name + name_suffix)
+                # Override with new_ph if there exists a old placeholder.
+                if arg in lifted_freevars:
+                    old_ph = lifted_freevars[arg].node
+                    old_ph.replace_all_uses_with(new_ph)
+                    # replace_all_uses_with doesn't clean users. Clean it mannually so that we could erase it.
+                    old_ph.users = {}
+                    graph.erase_node(old_ph)
+
+        first_not_ph_node = next(
+            node for node in graph.nodes if node.op != "placeholder"
+        )
+        with graph.inserting_before(first_not_ph_node):
+            _insert_or_replace_phs(shared, "")
+            _insert_or_replace_phs(unique_l, "_" + l_name)
+            _insert_or_replace_phs(unique_r, "_" + r_name)
+
+    fixup_branch_inps(l_graph, l_lifted_freevars, l_shared, unique_l, unique_r)
+    fixup_branch_inps(r_graph, r_lifted_freevars, r_shared, unique_l, unique_r)
+    return l_graph, r_graph, l_shared, r_shared, unique_l, unique_r
+
+
 # See NOTE [HigherOrderOperator tracing design] for details of the design
 def speculate_subgraph(
     tx,
@@ -588,106 +689,20 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Expected branches to return tensors with same metadata. [(tensor_pair, difference)...]:{diffs}"
             )
 
-        def dedup_and_sort_lifted_freevars(true_lifted_freevars, false_lifted_freevars):
-            # The nn module attributes are guaranteed to be registered into the top-level graph module during
-            # higher order op speculation. Therefore, get_attr nodes in two branches with the same
-            # target refer to the same attribute and we can safely deduplicate them with their target.
-            #
-            # Note: ideally, dynamo should just create a single proxy for the same attribute of a nn module. But
-            # true_branch and false_branch belong to two separate tracing contexts, they may register the same
-            # attribute to top level seperately. This creates two get_attr proxies for the same attribute
-            # that have different meta data such as stack_trace (one stack trace for the true_branch,
-            # and the other for false_branch). It seems better to discard the proxy explicitly in cond
-            # than make dynamo create a single proxy for the same get_attr target.
-            def shared_getattrs(true_lifted_proxies, false_lifted_proxies):
-                true_targets = {
-                    proxy.node.target: proxy
-                    for proxy in true_lifted_proxies
-                    if proxy.node.op == "get_attr"
-                }
-                true_fn_shared_getattrs = {}
-                false_fn_shared_getattrs = {}
-
-                for false_proxy in false_lifted_proxies:
-                    if (
-                        false_proxy.node.op == "get_attr"
-                        and false_proxy.node.target in true_targets
-                    ):
-                        true_proxy = true_targets[false_proxy.node.target]
-                        true_fn_shared_getattrs[true_proxy] = true_proxy
-                        false_fn_shared_getattrs[false_proxy] = true_proxy
-                return true_fn_shared_getattrs, false_fn_shared_getattrs
-
-            true_fn_shared_getattrs, false_fn_shared_getattrs = shared_getattrs(
-                true_lifted_freevars.keys(), false_lifted_freevars.keys()
-            )
-
-            true_shared_freevars = (
-                true_lifted_freevars.keys() & false_lifted_freevars.keys()
-            ).union(true_fn_shared_getattrs.keys())
-            false_shared_freevars = (
-                true_lifted_freevars.keys() & false_lifted_freevars.keys()
-            ).union(false_fn_shared_getattrs.keys())
-            unique_true_freevars = true_lifted_freevars.keys() - true_shared_freevars
-            unique_false_freevars = false_lifted_freevars.keys() - false_shared_freevars
-
-            def _sort_by_name(vars):
-                return sorted(vars, key=lambda var: var.node.name)
-
-            return (
-                list(_sort_by_name(list(true_shared_freevars))),
-                list(_sort_by_name(list(false_shared_freevars))),
-                list(_sort_by_name(list(unique_true_freevars))),
-                list(_sort_by_name(list(unique_false_freevars))),
-            )
-
         (
+            true_graph,
+            false_graph,
             true_shared,
             false_shared,
             unique_true,
             unique_false,
-        ) = dedup_and_sort_lifted_freevars(true_lifted_freevars, false_lifted_freevars)
-
-        # Let's say we capture cond(pred, true_fn, false_fn, (x,))
-        # With set_graph_input set to automatic,
-        # true_fn has lifted variables x, a, b, c
-        # false_fn has lifted variables x, a, b, d
-        # Then fixup_branch_inps make sure both branches have the same signature, i.e.:
-        # - true_fn(x, a, b, c_true_branch, d_false_branch)
-        # - false_fn(x, a, b, c_true_branch, d_false_branch)
-        #
-        # More formally, the signature has three parts in the following order:
-        # 1. used in both branches: x, a, b
-        # 2. only used in true branches: c, suffixed with _true_branch
-        # 3. only used in false branches: d, suffixed with _false_branch
-        # Within each part, we re-order the nodes by name to have a derterministic ordering for testing.
-        def fixup_branch_inps(
-            graph, lifted_freevars, shared, unique_true, unique_false
-        ):
-            def _insert_or_replace_phs(new_args, name_suffix):
-                for arg in new_args:
-                    new_ph = graph.placeholder(arg.node.name + name_suffix)
-                    # Override with new_ph if there exists a old placeholder.
-                    if arg in lifted_freevars:
-                        old_ph = lifted_freevars[arg].node
-                        old_ph.replace_all_uses_with(new_ph)
-                        # replace_all_uses_with doesn't clean users. Clean it mannually so that we could erase it.
-                        old_ph.users = {}
-                        graph.erase_node(old_ph)
-
-            first_not_ph_node = next(
-                node for node in graph.nodes if node.op != "placeholder"
-            )
-            with graph.inserting_before(first_not_ph_node):
-                _insert_or_replace_phs(shared, "")
-                _insert_or_replace_phs(unique_true, "_true_branch")
-                _insert_or_replace_phs(unique_false, "_false_branch")
-
-        fixup_branch_inps(
-            true_graph, true_lifted_freevars, true_shared, unique_true, unique_false
-        )
-        fixup_branch_inps(
-            false_graph, false_lifted_freevars, false_shared, unique_true, unique_false
+        ) = _merge_graph_inputs(
+            true_graph,
+            true_lifted_freevars,
+            "true_branch",
+            false_graph,
+            false_lifted_freevars,
+            "false_branch",
         )
 
         true_name = add_subgraph(
