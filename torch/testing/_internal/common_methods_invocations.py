@@ -12136,7 +12136,7 @@ op_db: List[OpInfo] = [
     OpInfo('logaddexp2',
            dtypes=floating_types_and(torch.bfloat16, torch.half),
            dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
-           dtypesIfROCM=floating_types_and(torch.bfloat16),
+           dtypesIfROCM=floating_types_and(torch.bfloat16, torch.half),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_logaddexp),
