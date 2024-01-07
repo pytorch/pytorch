@@ -13803,7 +13803,6 @@ op_db: List[OpInfo] = [
            # vmap does not support random operations
            check_batched_forward_grad=False,
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
-           dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
            test_neg_view=False,
            sample_inputs_func=sample_inputs_fractional_max_pool2d,
            decorators=(
@@ -13823,8 +13822,7 @@ op_db: List[OpInfo] = [
                wrapper_set_seed(torch.nn.functional.fractional_max_pool3d, input, *args, **kwargs),
            # vmap does not support random operations
            check_batched_forward_grad=False,
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
            test_neg_view=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_fractional_max_pool3d,
