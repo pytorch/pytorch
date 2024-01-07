@@ -556,6 +556,7 @@ id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEnco
   const IntArrayRef& iterShape = iter.shape();
   std::vector<uint32_t> iterShapeData(iterShape.size());
   std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == nOffsets);
 
   for (const auto i : c10::irange(iterShape.size())) {
     TORCH_CHECK(i <= UINT32_MAX);
