@@ -15,12 +15,18 @@
 
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <initializer_list>
 #include <iterator>
+#include <ostream>
+#include <type_traits>
 #include <vector>
 
 namespace c10 {
@@ -92,9 +98,9 @@ class ArrayRef final {
 
   template <
       typename Container,
-      typename = std::enable_if_t<std::is_same<
+      typename = std::enable_if_t<std::is_same_v<
           std::remove_const_t<decltype(std::declval<Container>().data())>,
-          T*>::value>>
+          T*>>>
   /* implicit */ ArrayRef(const Container& container)
       : Data(container.data()), Length(container.size()) {
     debugCheckNullptrInvariant();
@@ -231,16 +237,16 @@ class ArrayRef final {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  typename std::enable_if<std::is_same<U, T>::value, ArrayRef<T>>::type&
-  operator=(U&& Temporary) = delete;
+  std::enable_if_t<std::is_same_v<U, T>, ArrayRef<T>>& operator=(
+      U&& Temporary) = delete;
 
   /// Disallow accidental assignment from a temporary.
   ///
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  typename std::enable_if<std::is_same<U, T>::value, ArrayRef<T>>::type&
-  operator=(std::initializer_list<U>) = delete;
+  std::enable_if_t<std::is_same_v<U, T>, ArrayRef<T>>& operator=(
+      std::initializer_list<U>) = delete;
 
   /// @}
   /// @name Expensive Operations
