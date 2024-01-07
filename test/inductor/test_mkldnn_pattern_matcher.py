@@ -1122,19 +1122,22 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_check_fn=matcher_check_fn,
         )
 
-    def _qlinear_cpu_test_helper(self, inputs, int8_mixed_bf16=False):
+    def _qlinear_cpu_test_helper(self, inputs, int8_mixed_bf16=False, do_permute=False):
         class M(torch.nn.Module):
-            def __init__(self, use_bias):
+            def __init__(self, use_bias, do_permute=False):
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4, use_bias)
                 self.linear2 = torch.nn.Linear(4, 4, use_bias)
+                self.do_permute = do_permute
 
             def forward(self, x):
+                if self.do_permute:
+                    x = torch.reshape(torch.permute(x, (0, 2, 3, 1)), (2, 12, 4))
                 return self.linear2(self.linear(x))
 
         bias_list = [True, False]
         for bias in bias_list:
-            mod = M(bias).eval()
+            mod = M(bias, do_permute=do_permute).eval()
 
             def matcher_check_fn():
                 self.assertEqual(
@@ -1186,6 +1189,17 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
         """
         self._qlinear_cpu_test_helper((torch.randn((2, 3, 4)),), int8_mixed_bf16=True)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_input_dim_exceeds_2_and_not_contiguous(self):
+        r"""
+        This testcase will quantize a single Linear Module.
+        * Input dim exceeds 2
+        * Input not contiguous
+        """
+        self._qlinear_cpu_test_helper((torch.randn((2, 4, 3, 4)),), do_permute=True)
 
     def _qlinear_unary_cpu_test_helper(self, inputs, int8_mixed_bf16=False):
         class M(torch.nn.Module):
