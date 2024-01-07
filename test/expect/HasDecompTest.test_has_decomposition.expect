@@ -467,6 +467,8 @@ aten::_sample_dirichlet.out
 aten::_scaled_dot_product_efficient_attention
 aten::_scaled_dot_product_efficient_attention_backward
 aten::_scaled_dot_product_flash_attention_backward
+aten::_scaled_dot_product_flash_attention_for_cpu
+aten::_scaled_dot_product_flash_attention_for_cpu_backward
 aten::_scaled_mm
 aten::_scaled_mm.out
 aten::_segment_reduce_backward
