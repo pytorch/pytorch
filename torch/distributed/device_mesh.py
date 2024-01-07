@@ -156,11 +156,6 @@ else:
         DeviceMesh could be used to describe the layout of devices across the cluster,
         and serves as a proxy for communication among the device lists within the cluster.
 
-        We use the default ProcessGroup in this DeviceMesh class to implement proper
-        communications. Note that we also add collective wrappers in this class. This is
-        used to decouple detailed communication backend with the underlying
-        DTensor implementation.
-
         DeviceMesh can be used as a context manager.
 
         .. note::
@@ -177,18 +172,19 @@ else:
         Returns:
             DeviceMesh: A :class:`DeviceMesh` object representing the device layout.
 
-        Example (2 host with 4 GPUs each):
-            The following program runs on each process/rank in an SPMD manner:
+        The following program runs on each process/rank in an SPMD manner. In this example, we have 2
+        hosts with 4 GPUs each.
+        A reduction over the first dimension of mesh will reduce across
+        columns (0, 4), .. and (3, 7), a reduction over the second dimension
+        of mesh reduces across rows (0, 1, 2, 3) and (4, 5, 6, 7).
+
+        Example::
             >>> # xdoctest: +SKIP("no rank")
+            >>> from torch.distributed.device_mesh import DeviceMesh
             >>>
-            >>> from torch.distributed import DeviceMesh
             >>> # Initialize device mesh as (2, 4) to represent the topology
             >>> # of cross-host(dim 0), and within-host (dim 1).
             >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
-
-            A reduction over the first dimension of mesh will reduce across
-            columns (0, 4), .. and (3, 7), a reduction over the second dimension
-            of mesh reduces across rows (0, 1, 2, 3) and (4, 5, 6, 7).
         """
 
         device_type: str
@@ -345,15 +341,8 @@ else:
             Returns:
                 A :class:`DeviceMesh` object
 
-            Example (2 host with 4 GPUs each):
-                The following program runs on each process/rank in an SPMD manner:
-                >>> # xdoctest: +SKIP("no rank")
-                >>>
-                >>> from torch.distributed import DeviceMesh
-                >>> # Initialize device mesh as (2, 4) to represent the topology
-                >>> # of cross-host(dim 0), and within-host (dim 1).
-                >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
-
+            The following program runs on each process/rank in an SPMD manner. In this example, we have 2
+            hosts with 4 GPUs each.
             Calling mesh["tp"] on rank 0, 1, 2, 3 would return a 1D child DeviceMesh:([0, 1, 2, 3]).
             Calling mesh["tp"] on rank 4, 5, 6, 7 would return a 1D child DeviceMesh:([4, 5, 6, 7]).
             Calling mesh["dp"] on rank 0, 4 would return a 1D child DeviceMesh:([0, 4]).
@@ -361,6 +350,13 @@ else:
             Calling mesh["dp"] on rank 2, 6 would return a 1D child DeviceMesh:([2, 6]).
             Calling mesh["dp"] on rank 3, 7 would return a 1D child DeviceMesh:([3, 7]).
 
+            Example::
+                >>> # xdoctest: +SKIP("no rank")
+                >>> from torch.distributed.device_mesh import DeviceMesh
+                >>>
+                >>> # Initialize device mesh as (2, 4) to represent the topology
+                >>> # of cross-host(dim 0), and within-host (dim 1).
+                >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
             """
             if self.mesh.ndim <= 1:
                 raise RuntimeError(
@@ -438,22 +434,22 @@ else:
             Returns:
                 An integer denotes the local rank.
 
-            Example (2 host with 4 GPUs each):
-                The following program runs on each process/rank in an SPMD manner:
+            The following program runs on each process/rank in an SPMD manner. In this example, we have 2
+            hosts with 4 GPUs each.
+            Calling mesh_2d.get_local_rank(mesh_dim=0) on rank 0, 1, 2, 3 would return 0.
+            Calling mesh_2d.get_local_rank(mesh_dim=0) on rank 4, 5, 6, 7 would return 1.
+            Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 0, 4 would return 0.
+            Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 1, 5 would return 1.
+            Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 2, 6 would return 2.
+            Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 3, 7 would return 3.
+
+            Example::
                 >>> # xdoctest: +SKIP("no rank")
+                >>> from torch.distributed.device_mesh import DeviceMesh
                 >>>
-                >>> from torch.distributed import DeviceMesh
                 >>> # Initialize device mesh as (2, 4) to represent the topology
                 >>> # of cross-host(dim 0), and within-host (dim 1).
                 >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
-
-                Calling mesh_2d.get_local_rank(mesh_dim=0) on rank 0, 1, 2, 3 would return 0.
-                Calling mesh_2d.get_local_rank(mesh_dim=0) on rank 4, 5, 6, 7 would return 1.
-                Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 0, 4 would return 0.
-                Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 1, 5 would return 1.
-                Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 2, 6 would return 2.
-                Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 3, 7 would return 3.
-
             """
             if self.ndim > 1 and mesh_dim is None:
                 raise RuntimeError(
@@ -508,9 +504,9 @@ else:
         Returns:
             DeviceMesh: A :class:`DeviceMesh` object representing the device layout.
 
-        Example:
+        Example::
             >>> # xdoctest: +SKIP("no rank")
-            >>> from torch.distributed import init_device_mesh
+            >>> from torch.distributed.device_mesh import init_device_mesh
             >>>
             >>> mesh_1d = init_device_mesh("cuda", mesh_shape=(8,))
             >>> mesh_2d = init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))
