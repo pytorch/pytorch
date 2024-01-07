@@ -9,7 +9,8 @@
 #include <cstdint>
 #include <memory>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 using Variable = at::Tensor;
 struct Node;
@@ -118,4 +119,5 @@ class TORCH_API SavedVariable {
       std::unique_ptr<SavedVariableHooks>&& hooks,
       const Variable& data);
 };
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch
