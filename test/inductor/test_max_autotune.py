@@ -1348,7 +1348,7 @@ class TestMaxAutotune(TestCase):
             parser = AutotuningLogParser(example_input)
             records = list(parser.get_records())
             assert len(records) == 3
-            expected_json_records = '[{"backend": "extern", "name": "ATen", "problem_hash": "ef279ba8a6739a088efd1fdca60f0c31", "kernel_schedule": "", "tile_shape": "[]", "benchmark_result": 0.0147141041931385, "device": "unknown", "cuda_device_name": "NVIDIA H100", "problem_shape_MNK": [1024, 512, 72], "A_size": [6, 1024, 72], "A_stride": [73728, 72, 1], "A_type": "row_major", "A_dtype": "float32", "A_shape": ["6", "1024", "!72"], "B_size": [6, 72, 512], "B_stride": [36864, 512, 1], "B_type": "row_major", "B_dtype": "float32", "B_shape": ["6", "72", "!512"], "M": 1024, "N": 512, "K": 72}, {"backend": "Triton", "name": "ATen", "problem_hash": "ef279ba8a6739a088efd1fdca60f0c31", "kernel_schedule": "", "tile_shape": "(64, 32, 64)", "benchmark_result": 0.01217997465145754, "device": "unknown", "cuda_device_name": "NVIDIA H100", "problem_shape_MNK": [1024, 512, 72], "A_size": [6, 1024, 72], "A_stride": [73728, 72, 1], "A_type": "row_major", "A_dtype": "float32", "A_shape": ["6", "1024", "!72"], "B_size": [6, 72, 512], "B_stride": [36864, 512, 1], "B_type": "row_major", "B_dtype": "float32", "B_shape": ["6", "72", "!512"], "M": 1024, "N": 512, "K": 72}, {"backend": "Triton", "name": "ATen", "problem_hash": "ef279ba8a6739a088efd1fdca60f0c31", "kernel_schedule": "", "tile_shape": "(64, 32, 128)", "benchmark_result": 0.01012531017369727, "device": "unknown", "cuda_device_name": "NVIDIA H100", "problem_shape_MNK": [1024, 512, 72], "A_size": [6, 1024, 72], "A_stride": [73728, 72, 1], "A_type": "row_major", "A_dtype": "float32", "A_shape": ["6", "1024", "!72"], "B_size": [6, 72, 512], "B_stride": [36864, 512, 1], "B_type": "row_major", "B_dtype": "float32", "B_shape": ["6", "72", "!512"], "M": 1024, "N": 512, "K": 72}]'  # noqa: B950
+            expected_json_records = '[{"backend": "extern", "name": "ATen", "problem_hash": "ef279ba8a6739a088efd1fdca60f0c31", "kernel_schedule": "", "tile_shape": "[]", "benchmark_result": 0.0147141041931385, "device": "unknown", "cuda_device_name": "NVIDIA H100", "problem_shape_MNK": [1024, 512, 72], "A_size": [6, 1024, 72], "A_stride": [73728, 72, 1], "A_type": "row_major", "A_dtype": "float32", "A_shape": ["6", "1024", "!72"], "B_size": [6, 72, 512], "B_stride": [36864, 512, 1], "B_type": "row_major", "B_dtype": "float32", "B_shape": ["6", "72", "!512"], "BATCHSIZE": 6, "M": 1024, "N": 512, "K": 72}, {"backend": "Triton", "name": "ATen", "problem_hash": "ef279ba8a6739a088efd1fdca60f0c31", "kernel_schedule": "", "tile_shape": "(64, 32, 64)", "benchmark_result": 0.01217997465145754, "device": "unknown", "cuda_device_name": "NVIDIA H100", "problem_shape_MNK": [1024, 512, 72], "A_size": [6, 1024, 72], "A_stride": [73728, 72, 1], "A_type": "row_major", "A_dtype": "float32", "A_shape": ["6", "1024", "!72"], "B_size": [6, 72, 512], "B_stride": [36864, 512, 1], "B_type": "row_major", "B_dtype": "float32", "B_shape": ["6", "72", "!512"], "BATCHSIZE": 6, "M": 1024, "N": 512, "K": 72}, {"backend": "Triton", "name": "ATen", "problem_hash": "ef279ba8a6739a088efd1fdca60f0c31", "kernel_schedule": "", "tile_shape": "(64, 32, 128)", "benchmark_result": 0.01012531017369727, "device": "unknown", "cuda_device_name": "NVIDIA H100", "problem_shape_MNK": [1024, 512, 72], "A_size": [6, 1024, 72], "A_stride": [73728, 72, 1], "A_type": "row_major", "A_dtype": "float32", "A_shape": ["6", "1024", "!72"], "B_size": [6, 72, 512], "B_stride": [36864, 512, 1], "B_type": "row_major", "B_dtype": "float32", "B_shape": ["6", "72", "!512"], "BATCHSIZE": 6, "M": 1024, "N": 512, "K": 72}]'  # noqa: B950
             assert json.dumps(records) == expected_json_records, "Record parser failed"
             pd = None
             # The rest of this test requires pandas, which might not be installed.
@@ -1362,43 +1362,45 @@ class TestMaxAutotune(TestCase):
                 df = parser.get_dataframe()
                 assert len(df) == 3
                 assert set(df.columns) == {
-                    "backend",
-                    "name",
-                    "problem_hash",
-                    "kernel_schedule",
-                    "tile_shape",
-                    "benchmark_result",
-                    "device",
-                    "cuda_device_name",
-                    "problem_shape_MNK",
+                    "A_dtype",
+                    "A_shape",
                     "A_size",
                     "A_stride",
                     "A_type",
-                    "A_dtype",
-                    "A_shape",
+                    "BATCHSIZE",
+                    "B_dtype",
+                    "B_shape",
                     "B_size",
                     "B_stride",
                     "B_type",
-                    "B_dtype",
-                    "B_shape",
                     "Bias_shape",
+                    "K",
                     "M",
                     "N",
-                    "K",
+                    "backend",
+                    "benchmark_result",
+                    "cuda_device_name",
+                    "device",
+                    "kernel_schedule",
+                    "name",
+                    "problem_hash",
+                    "problem_shape_MNK",
+                    "tile_shape",
                 }
                 analysis = parser.get_analysis()
                 assert set(analysis.columns) == {
-                    "problem_hash",
-                    "M",
-                    "N",
-                    "K",
                     "A_shape",
+                    "BATCHSIZE",
                     "B_shape",
                     "Bias_shape",
-                    "tile_shape",
+                    "K",
+                    "M",
+                    "N",
                     "backend",
-                    "kernel_schedule",
                     "benchmark_result",
+                    "kernel_schedule",
+                    "problem_hash",
+                    "tile_shape",
                 }
         finally:
             if example_input:
