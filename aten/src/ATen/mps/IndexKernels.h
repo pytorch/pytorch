@@ -211,7 +211,6 @@ kernel void kernel_index_offsets(constant packed_uint3 * strides         [[buffe
                                  device uint3          * data_offsets    [[buffer(1)]],
                                  constant uint         * iter_shape      [[buffer(2)]],
                                  constant uint         & num_dimensions  [[buffer(3)]],
-                                 constant uint         & num_offsets     [[buffer(4)]],
                                  uint thread_index [[thread_position_in_grid]]) {
     data_offsets[thread_index] = 0;
     uint32_t idx = thread_index;

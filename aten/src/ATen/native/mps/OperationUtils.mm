@@ -577,7 +577,6 @@ id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEnco
   [commandEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
   [commandEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
   [commandEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
-  [commandEncoder setBytes:&nOffsets length:sizeof(uint32_t) atIndex:4];
 
   mtl_dispatch1DJob(commandEncoder, kernelDataOffsetsPSO, numThreads);
 
