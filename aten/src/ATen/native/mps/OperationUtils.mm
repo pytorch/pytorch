@@ -1,5 +1,4 @@
 //  Copyright © 2022 Apple Inc.
-#include <limits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
@@ -557,17 +556,16 @@ id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEnco
   const IntArrayRef& iterShape = iter.shape();
   std::vector<uint32_t> iterShapeData(iterShape.size());
   std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == nOffsets);
+  TORCH_CHECK(iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
 
   for (const auto i : c10::irange(iterShape.size())) {
-    TORCH_CHECK(iterShape[i] <= std::numeric_limits<uint32_t>::max());
     iterShapeData[i] = static_cast<uint32_t>(iterShape[i]);
   }
 
   for (const auto i : c10::irange(nDim)) {
     for (const auto offset : c10::irange(nOffsets)) {
-      const auto stride_val = iter.strides(offset)[i];
-      TORCH_CHECK(stride_val <= std::numeric_limits<uint32_t>::max());
-      strides[i][offset] = stride_val;
+      strides[i][offset] = static_cast<uint32_t>(iter.strides(offset)[i]);
     }
   }
 
