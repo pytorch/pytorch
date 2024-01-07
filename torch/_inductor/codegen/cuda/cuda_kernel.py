@@ -362,6 +362,8 @@ class CUDATemplateCaller(ChoiceCaller):
             return {
                 "backend": "CUDA",
                 "op_type": type(op).__name__,
+                "op_conf_name" : str(op.configuration_name()),
+                "op_arch": str(op.arch),
                 "tile_shape": str(op.tile_description.tile_shape),
                 "epilogue_schedule": str(op.epilogue_schedule),
                 "kernel_schedule": str(op.kernel_schedule),

@@ -768,7 +768,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # generating a random torch.Tensor for benchmarking.
         input_gen_fns: Optional[Dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
         return_selection_result_details=False,
-        precompilation_timeout_seconds: int = 60 * 15,
+        precompilation_timeout_seconds: int = 60 * 60,
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
