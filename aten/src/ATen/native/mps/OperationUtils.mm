@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
@@ -547,5 +548,40 @@ class MPSGraphCacheCallback : public IMpsAllocatorCallback {
 };
 
 REGISTER_MPS_ALLOCATOR_CALLBACK("mps_graph_cache_callback", MPSGraphCacheCallback);
+
+id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder, const TensorIteratorBase& iter) {
+  constexpr uint32_t nOffsets = 3;
+  uint32_t numThreads = iter.numel();
+  const uint32_t nDim = iter.ndim();
+  const IntArrayRef& iterShape = iter.shape();
+  std::vector<uint32_t> iterShapeData(iterShape.size());
+  std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
+  TORCH_INTERNAL_ASSERT(iter.ntensors() >= nOffsets);
+
+  for (const auto i : c10::irange(iterShape.size())) {
+    TORCH_CHECK(i <= UINT32_MAX);
+    iterShapeData[i] = (uint32_t)(iterShape[i]);
+  }
+
+  for (const auto i : c10::irange(nDim)) {
+    for (const auto offset : c10::irange(nOffsets)) {
+      strides[i][offset] = iter.strides(offset)[i];
+    }
+  }
+
+  id<MTLComputePipelineState> kernelDataOffsetsPSO = MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offsets");
+  id<MTLBuffer> kernelDataOffsets = (id<MTLBuffer>)getIMPSAllocator()->allocate(numThreads * sizeof(simd_uint3)).get();
+
+  [commandEncoder setComputePipelineState:kernelDataOffsetsPSO];
+  [commandEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
+  [commandEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
+  [commandEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
+  [commandEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
+  [commandEncoder setBytes:&nOffsets length:sizeof(uint32_t) atIndex:4];
+
+  mtl_dispatch1DJob(commandEncoder, kernelDataOffsetsPSO, numThreads);
+
+  return kernelDataOffsets;
+}
 
 } // namespace at::native::mps
