@@ -615,7 +615,7 @@ def gather_docstrs() -> Dict[str, str]:
 def add_docstr_to_hint(docstr: str, hint: str) -> str:
     if "..." in hint:  # function or method
         assert hint.endswith("..."), f"Hint `{hint}` does not end with '...'"
-        hint = hint.rstrip("...")
+        hint = hint[:-3]  # remove "..."
         return "\n    ".join([hint, 'r"""'] + docstr.split("\n") + ['"""', "..."])
     else:  # attribute or property
         return f'{hint}\nr"""{docstr}"""\n'
