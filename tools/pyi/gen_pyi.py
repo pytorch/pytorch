@@ -584,27 +584,39 @@ def gen_nn_functional(fm: FileManager) -> None:
     )
 
 
+"""
+We gather the docstrings for torch with the following steps:
+1. Mock torch and torch._C, which are the only dependencies of the docs files
+2. Mock the _add_docstr function to save the docstrings
+3. Import the docs files to trigger mocked _add_docstr and collect docstrings
+"""
+
+
 def gather_docstrs() -> Dict[str, str]:
     docstrs = {}
 
     def mock_add_docstr(func: Mock, docstr: str) -> None:
         docstrs[func._extract_mock_name()] = docstr.strip()
 
-    with patch.dict(
-        sys.modules,
-        {"torch": Mock(name="torch"), "torch._C": Mock(_add_docstr=mock_add_docstr)},
-    ):
-        sys.path.append("torch")  # allows submodules of `torch` to be imported
-        _torch_docs = importlib.import_module("_torch_docs")
-        with patch.dict(sys.modules, {"torch._torch_docs": _torch_docs}):
-            importlib.import_module("_tensor_docs")
+    # sys.modules and sys.path are restored after the context manager exits
+    with patch.dict(sys.modules), patch.object(sys, "path", sys.path + ["torch"]):
+        # mock the torch module and torch._C._add_docstr
+        sys.modules["torch"] = Mock(name="torch")
+        sys.modules["torch._C"] = Mock(_add_docstr=mock_add_docstr)
+
+        # manually import torch._torch_docs and torch._tensor_docs to trigger
+        # the mocked _add_docstr and collect docstrings
+        sys.modules["torch._torch_docs"] = importlib.import_module("_torch_docs")
+        sys.modules["torch._tensor_docs"] = importlib.import_module("_tensor_docs")
+
     return docstrs
 
 
 def add_docstr_to_hint(docstr: str, hint: str) -> str:
     if "..." in hint:  # function or method
         assert hint.endswith("..."), f"Hint `{hint}` does not end with '...'"
-        return "\n    ".join([hint[:-3], 'r"""'] + docstr.split("\n") + ['"""', "..."])
+        hint = hint.rstrip("...")
+        return "\n    ".join([hint, 'r"""'] + docstr.split("\n") + ['"""', "..."])
     else:  # attribute or property
         return f'{hint}\nr"""{docstr}"""\n'
 
