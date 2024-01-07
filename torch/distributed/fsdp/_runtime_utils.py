@@ -250,8 +250,6 @@ def _share_state_and_init_handle_attrs(
         fsdp_state._default_stream = root_state._default_stream
         fsdp_state._exec_order_data = root_state._exec_order_data
         fsdp_state._free_event_queue = root_state._free_event_queue
-        if fsdp_state._fsdp_extension is not None:
-            fsdp_state._fsdp_extension.compute_stream = root_state._default_stream
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
@@ -281,10 +279,6 @@ def _init_streams(
     high_priority = -1 if state.limit_all_gathers and uses_hybrid_sharding else 0
     # Default stream for computation
     state._default_stream = state._device_handle.current_stream()
-    if state._fsdp_extension is not None:
-        # set the compute stream to the FSDP extension
-        state._fsdp_extension.compute_stream = state._default_stream
-
     # Stream for unshard logic, including allocating the all-gather destination
     # tensors and the all-gathers themselves
     state._unshard_stream = state._device_handle.Stream(priority=high_priority)
