@@ -62,12 +62,13 @@ def _generate_linear_t_pattern(
     _dequant_per_channel_pattern,
     dtype,
 ):
+    assert dtype in [torch.float32, torch.bfloat16]
     t_pattern = CallFunction(
         aten.permute.default,
         _may_generate_pattern_with_dtype_convert(
             _dequant_per_channel_pattern,
             KeywordArg("autocast_wgt_dtype"),
-            dtype != torch.float32,
+            dtype == torch.bfloat16,
         ),
         KeywordArg("permute_axes"),
     )
@@ -236,7 +237,7 @@ def generate_pattern_with_output_quant(computation_call, dtype=torch.float32):
                             _may_generate_pattern_with_dtype_convert(
                                 computation_call,
                                 KeywordArg("autocast_output_quant_dtype"),
-                                dtype != torch.float32,
+                                dtype == torch.bfloat16,
                             ),
                             KeywordArg("o_inv_scale"),
                         ),
@@ -1346,7 +1347,7 @@ def _generate_dequant_convolution_node_pattern(
         _may_generate_pattern_with_dtype_convert(
             dequantize_per_tensor_activation_pattern,
             KeywordArg("autocast_act_dtype"),
-            dtype != torch.float32,
+            dtype == torch.bfloat16,
         ),
         _dequant_per_channel_pattern,
         KeywordArg("b"),
@@ -1425,7 +1426,11 @@ def _get_linear_dq_mul_node(
             # bmm pattern decomposed from linear when input dim exceeds 2 and not contiguous
             act_expand_node = linear_node.args[input_index]
             assert act_expand_node.target is aten.expand.default
-            mul_node = act_expand_node.args[0]
+            if dtype == torch.float32:
+                mul_node = act_expand_node.args[0]
+            else:
+                activation_to_bf16_node = act_expand_node.args[0]
+                mul_node = activation_to_bf16_node.args[0]
     else:
         if dtype == torch.float32:
             # pattern: linear -> mul
@@ -1682,6 +1687,7 @@ def _register_qlinear_weight_prepack_pass(
 def _generate_dequant_linear_node_pattern(
     _dequant_per_channel_pattern, dtype=torch.float32, input_dim_exceeds_two=False
 ):
+    assert dtype in [torch.float32, torch.bfloat16]
     t_pattern = _generate_linear_t_pattern(_dequant_per_channel_pattern, dtype)
     dequant_linear_bias_pattern = _may_generate_pattern_with_reshape(
         CallFunction(
@@ -1691,7 +1697,7 @@ def _generate_dequant_linear_node_pattern(
                 _may_generate_pattern_with_dtype_convert(
                     dequantize_per_tensor_activation_pattern,
                     KeywordArg("autocast_act_dtype"),
-                    dtype != torch.float32,
+                    dtype == torch.bfloat16,
                 ),
                 KeywordArg("act_reshape_size"),
                 input_dim_exceeds_two,
@@ -1708,7 +1714,7 @@ def _generate_dequant_linear_node_pattern(
                 _may_generate_pattern_with_dtype_convert(
                     dequantize_per_tensor_activation_pattern,
                     KeywordArg("autocast_act_dtype"),
-                    dtype != torch.float32,
+                    dtype == torch.bfloat16,
                 ),
                 KeywordArg("act_reshape_size"),
                 input_dim_exceeds_two,
@@ -1729,11 +1735,16 @@ def _generate_dequant_bmm_node_pattern(
     # When activation of linear dim exceed 2 and not contiguous
     t_pattern = _generate_linear_t_pattern(_dequant_per_channel_pattern, dtype)
 
+    assert dtype in [torch.float32, torch.bfloat16]
     dequant_bmm_pattern = CallFunction(
         aten.bmm.default,
         CallFunction(
             aten.expand.default,
-            dequantize_per_tensor_activation_pattern,
+            _may_generate_pattern_with_dtype_convert(
+                dequantize_per_tensor_activation_pattern,
+                KeywordArg("autocast_act_dtype"),
+                dtype == torch.bfloat16,
+            ),
             KeywordArg("act_expand_size"),
         ),
         CallFunction(
@@ -1804,7 +1815,7 @@ def _register_dequant_promotion():
                 _may_generate_pattern_with_dtype_convert(
                     dequantize_per_tensor_activation_pattern,
                     KeywordArg("autocast_act_dtype"),
-                    dtype != torch.float32,
+                    dtype == torch.bfloat16,
                 ),
                 KeywordArg("act_reshape_size"),
                 with_reshape=input_dim_exceeds_two,
@@ -1883,9 +1894,11 @@ def _register_qlinear_weight_prepack():
     # https://github.com/pytorch/pytorch/blob/
     # 80c07df659362a95da7cd4f3ec367abfdace38c4/torch/_decomp/decompositions.py#L3965-L3968
     # in this case, we can convert it back to qlinear
-    for with_bias in [True, False]:
+    for dtype, with_bias in itertools.product(
+        [torch.float32, torch.bfloat16], [True, False]
+    ):
         bmm_pattern = _generate_qlinear_weight_prepack_patterns(
-            dtype=torch.float32,
+            dtype=dtype,
             input_dim_exceeds_two=True,
             input_contiguous=False,
             with_bias=with_bias,
@@ -1895,7 +1908,7 @@ def _register_qlinear_weight_prepack():
             pass_number=1
             if with_bias
             else 2,  # if with_bias, there is an output add, so we should try to match it firstly
-            dtype=torch.float32,
+            dtype=dtype,
             input_dim_exceeds_two=True,
             input_contiguous=False,
         )
