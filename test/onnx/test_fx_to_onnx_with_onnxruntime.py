@@ -546,6 +546,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((x2,),)],
         )
 
+    @pytorch_test_common.skipIfNoCuda
     def test__scaled_dot_product_flash_attention(self):
         def func(x):
             (
@@ -561,7 +562,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             ) = torch.ops.aten._scaled_dot_product_flash_attention(x, x, x)
             return output
 
-        x = torch.randn(1, 1, 1, 32)
+        x = torch.randn(1, 1, 1, 32, device=torch.device("cuda"))
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (x,))
 
     # NOTE:The test was meant to test the empty bounding box case, but it is not
