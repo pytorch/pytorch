@@ -557,15 +557,15 @@ id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEnco
   std::vector<uint32_t> iterShapeData(iterShape.size());
   std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
   TORCH_INTERNAL_ASSERT(iter.ntensors() >= nOffsets);
+  TORCH_CHECK(iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
 
   for (const auto i : c10::irange(iterShape.size())) {
-    TORCH_CHECK(i <= UINT32_MAX);
-    iterShapeData[i] = (uint32_t)(iterShape[i]);
+    iterShapeData[i] = static_cast<uint32_t>(iterShape[i]);
   }
 
   for (const auto i : c10::irange(nDim)) {
     for (const auto offset : c10::irange(nOffsets)) {
-      strides[i][offset] = iter.strides(offset)[i];
+      strides[i][offset] = static_cast<uint32_t>(iter.strides(offset)[i]);
     }
   }
 
