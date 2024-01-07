@@ -293,13 +293,6 @@ def _share_state_and_init_handle_attrs(
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
-    # Ensure that all unshard streams wait on the default computation stream
-    for _, pg_unshard_stream in fsdp_pg_unshard_streams.items():
-        _wait_for_computation_stream(
-            root_state._device_handle.current_stream(),
-            pg_unshard_stream,
-            root_state._pre_unshard_stream,
-        )
     for attr_name, attr_values in attr_name_to_values.items():
         if len(attr_values) != 1:
             raise ValueError(
@@ -645,7 +638,7 @@ def _root_pre_forward(
         
         _wait_for_computation_stream(
             state._device_handle.current_stream(),
-            state._unshard_stream,
+            state,
             state._pre_unshard_stream,
         )
         _reset_flat_param_grad_info_if_needed(state._all_handles)
@@ -1580,7 +1573,7 @@ def _register_post_backward_final_callback(
 
 def _wait_for_computation_stream(
     computation_stream: torch.Stream,
-    unshard_stream: torch.Stream,
+    root_state: _FSDPState,
     pre_unshard_stream: torch.Stream,
 ):
     """
@@ -1591,7 +1584,12 @@ def _wait_for_computation_stream(
     # Tracing does not need to wait
     if torch.distributed._functional_collectives.is_torchdynamo_compiling():
         return
-    unshard_stream.wait_stream(computation_stream)  # type: ignore[attr-defined]
+    # Ensure all unshard streams wait for the computation stream.
+    unshard_streams = set()
+    for fsdp_state in root_state._all_fsdp_states:
+        unshard_streams.add(fsdp_state._unshard_stream)
+    for unshard_stream in unshard_streams:
+        unshard_stream.wait_stream(computation_stream)  # type: ignore[attr-defined]
     # Having the pre-all-gather stream wait for the current stream even if we
     # do not leverage the pre-all-gather stream is tolerable since this only
     # runs once per iteration
