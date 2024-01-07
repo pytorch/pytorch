@@ -61,7 +61,6 @@ id<MTLComputePipelineState> MPSDevice::metalIndexingPSO(const std::string& kerne
       [[indexing_lib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]] autorelease];
   TORCH_CHECK(indexFunction, "Can't find function ", kernel);
 
-
   state = [_mtl_device newComputePipelineStateWithFunction:indexFunction error:&error];
   TORCH_CHECK(state, error.localizedDescription.UTF8String);
   psoCache[kernel] = state;
