@@ -66,12 +66,14 @@ Default is 1.
 
 Assuming you specified a filename, you'll end up with a CSV file with contents like so:
 
+```
 Validator,PT_VERSION,2.2.0
 Validator,ROCM_VERSION,6.0.0.0-12969-1544e39
 Validator,HIPBLASLT_VERSION,0.6.0-a9c5cc7
 Validator,ROCBLAS_VERSION,4.0.0-72e57364-dirty
 GemmTunableOp_float_NT,nt_25088_4096_64,1219,1.262
 GemmTunableOp_float_NT,nt_4096_4096_64,1216,0.033
+```
 
 Note the "Validator" lines.  If you change a library verison, or rocm version, or pytorch version, TunableOp will detect
 this and not load the tunings because they are likely affected by other software changes.
