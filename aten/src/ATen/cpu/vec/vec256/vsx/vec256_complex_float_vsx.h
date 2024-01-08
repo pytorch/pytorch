@@ -490,7 +490,7 @@ class Vectorized<ComplexFlt> {
     // re + im*i = (a + bi)  / (c + di)
     // re = (ac + bd)/abs_2()
     // im = (bc - ad)/abs_2()
-    auto fabs_cd =  Vectorized<ComplexFlt>{
+    auto fabs_cd =  Vectorized{
       vec_andc(b._vec0, sign_mask),
       vec_andc(b._vec1, sign_mask)};          // |c|            |d|
     auto fabs_dc =  fabs_cd.el_swapped();     // |d|            |c|
