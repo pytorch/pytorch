@@ -1542,6 +1542,9 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
   set(BUILD_SHARED_LIBS OFF)
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
+  if(NOT BUILD_SHARED_LIBS)
+    set(ONNX_USE_MSVC_STATIC_RUNTIME OFF)
+  endif()
   set(ONNX_USE_LITE_PROTO ${CAFFE2_USE_LITE_PROTO})
   # If linking local protobuf, make sure ONNX has the same protobuf
   # patches as Caffe2 and Caffe proto. This forces some functions to
@@ -1598,6 +1601,16 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
+  if(NOT BUILD_SHARED_LIBS)
+    install(TARGETS onnx_proto ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+    install(TARGETS onnx ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+    if(USE_GLOO)
+      install(TARGETS gloo ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+      if(USE_CUDA)
+        install(TARGETS gloo_cuda ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+      endif()
+    endif()
+  endif()
 endif()
 
 # --[ TensorRT integration with onnx-trt

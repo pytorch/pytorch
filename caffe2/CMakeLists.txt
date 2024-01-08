@@ -623,7 +623,11 @@ endif()
 
 if(USE_CUDA)
   list(APPEND Caffe2_GPU_CU_SRCS ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
-  add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
+  if(BUILD_SHARED_LIBS)
+    add_library(caffe2_nvrtc SHARED  ${ATen_NVRTC_STUB_SRCS})
+  else()
+    add_library(caffe2_nvrtc STATIC  ${ATen_NVRTC_STUB_SRCS})
+  endif()
   if(MSVC)
     # Delay load nvcuda.dll so we can import torch compiled with cuda on a CPU-only machine
     set(DELAY_LOAD_FLAGS "-DELAYLOAD:nvcuda.dll;delayimp.lib")
@@ -1494,6 +1498,9 @@ if(MSVC AND NOT BUILD_SHARED_LIBS)
   # NB: This must be target_compile_definitions, not target_compile_options,
   # as the latter is not respected by nvcc
   target_compile_definitions(torch_cpu PUBLIC "AT_CORE_STATIC_WINDOWS=1")
+  if(NOT BUILD_SHARED_LIBS AND USE_FBGEMM)
+    target_compile_definitions(torch_cpu PUBLIC FBGEMM_STATIC)
+  endif()
 endif()
 if(MSVC AND BUILD_SHARED_LIBS)
   # ONNX is linked statically and needs to be exported from this library
