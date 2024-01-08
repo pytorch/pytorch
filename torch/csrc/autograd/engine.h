@@ -27,11 +27,14 @@
 #include <utility>
 #include <vector>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 struct ReadyQueue;
 }
+} // namespace torch
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 // Maximum reentrant backward depth before switching to a new thread
 // This limit is based on the TSAN's deadlock detector, where it will
@@ -288,4 +291,5 @@ struct TORCH_API Engine {
 using EngineStub = Engine& (*)();
 TORCH_API void set_default_engine_stub(EngineStub stub);
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch
