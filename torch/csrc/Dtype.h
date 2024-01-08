@@ -28,3 +28,5 @@ TORCH_API PyObject* THPDtype_New(
     const std::string& name);
 
 void THPDtype_init(PyObject* module);
+
+PyObject* THPDtype_pynew(PyObject* type, PyObject* args, PyObject* kwargs);
