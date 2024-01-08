@@ -28,6 +28,7 @@ TORCH_API void RegisterPrivateUse1HooksInterface(at::PrivateUse1HooksInterface* 
 
 TORCH_API at::PrivateUse1HooksInterface* GetPrivateUse1HooksInterface();
 
+// check whether PrivateUse1HooksInterface has been registered
 TORCH_API bool isPrivateUse1HooksRegistered();
 
 }
