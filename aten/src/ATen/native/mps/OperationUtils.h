@@ -28,7 +28,7 @@
 // Fwd declarations
 namespace at {
   struct TensorIteratorBase;
-};
+}
 using namespace at::mps;
 
 namespace at::native::mps {

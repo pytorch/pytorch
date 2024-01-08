@@ -215,7 +215,7 @@ kernel void index_ ## INDEX_OP_TYPE<DTYPE, IDX_DTYPE>(                          
 REGISTER_SINGLE_THREADED_INDEX_OP_ALL_DTYPES(put_serial);
 
 template<typename StridesT, typename DataT>
-kernel void kernel_index_offset(constant StridesT * strides         [[buffer(0)]],
+kernel void kernel_index_offsets(constant StridesT * strides         [[buffer(0)]],
                                 device DataT      * data_offsets    [[buffer(1)]],
                                 constant uint     * iter_shape      [[buffer(2)]],
                                 constant uint     & num_dimensions  [[buffer(3)]],
@@ -232,7 +232,7 @@ kernel void kernel_index_offset(constant StridesT * strides         [[buffer(0)]
 
 template
 [[host_name("kernel_index_offsets_32")]]
-kernel void kernel_index_offset<packed_uint3, uint3>(
+kernel void kernel_index_offsets<packed_uint3, uint3>(
                 constant packed_uint3 * strides         [[buffer(0)]],
                 device uint3          * data_offsets    [[buffer(1)]],
                 constant uint         * iter_shape      [[buffer(2)]],
@@ -241,21 +241,30 @@ kernel void kernel_index_offset<packed_uint3, uint3>(
 
 template
 [[host_name("kernel_index_offsets_64")]]
-kernel void kernel_index_offset<packed_uint3, ulong3>(
+kernel void kernel_index_offsets<packed_uint3, ulong3>(
                 constant packed_uint3 * strides         [[buffer(0)]],
                 device ulong3          * data_offsets    [[buffer(1)]],
                 constant uint         * iter_shape      [[buffer(2)]],
                 constant uint         & num_dimensions  [[buffer(3)]],
                 uint thread_index [[thread_position_in_grid]]);
 
-template
-[[host_name("kernel_index_offset")]]
-kernel void kernel_index_offset<uint, uint>(
-                constant uint         * strides         [[buffer(0)]],
-                device uint           * data_offsets    [[buffer(1)]],
-                constant uint         * iter_shape      [[buffer(2)]],
-                constant uint         & num_dimensions  [[buffer(3)]],
-                uint thread_index [[thread_position_in_grid]]);
+
+
+kernel void kernel_index_offset(constant uint         * strides         [[buffer(0)]],
+                                device uint           * data_offsets    [[buffer(1)]],
+                                constant uint         * iter_shape      [[buffer(2)]],
+                                constant uint         & num_dimensions  [[buffer(3)]],
+                                uint thread_index [[thread_position_in_grid]]) {
+    data_offsets[thread_index] = 0;
+    uint32_t idx = thread_index;
+    for (uint32_t dim = 0; dim < num_dimensions; dim++) {
+        uint32_t reversed_dim = num_dimensions - dim -1;
+        uint32_t remainder = idx % iter_shape[reversed_dim];
+        idx /= iter_shape[reversed_dim];
+
+        data_offsets[thread_index] += remainder * strides[reversed_dim];
+    }
+}
 
 template<typename T, typename E, typename OffsetsT>
 kernel void index_put_accumulate_native_dtypes(
