@@ -46,7 +46,7 @@ inline void _vec_log_softmax_lastdim(
       1,
       at::internal::GRAIN_SIZE / (sizeof(scalar_t) * dim_size));
   int64_t CHUNK_SIZE = std::min<int64_t>(MAX_CHUNK_SIZE, outer_size);
-  
+
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
 
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
