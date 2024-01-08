@@ -58,6 +58,7 @@ class Stream:
     """
 
     def __init__(self, priority: int = -1):
+        self.priority = priority
         pass
 
     def wait_stream(self, stream) -> None:

@@ -255,6 +255,8 @@ def _share_state_and_init_handle_attrs(
             )
             attr_name_to_values[attr_name].add(getattr(fsdp_state, attr_name))
         if fsdp_state is root_state:
+            root_state_pg_ranks = tuple(range(dist.get_world_size()))
+            fsdp_pg_unshard_streams[root_state_pg_ranks] = root_state._unshard_stream
             continue
         # Relax the assert for non-root FSDP instances in case the nested
         # initialized module is wrapped again in FSDP later (e.g. after
@@ -293,6 +295,7 @@ def _share_state_and_init_handle_attrs(
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
+    root_state._all_unshard_streams = set(fsdp_pg_unshard_streams.values())
     for attr_name, attr_values in attr_name_to_values.items():
         if len(attr_values) != 1:
             raise ValueError(
@@ -1585,10 +1588,7 @@ def _wait_for_computation_stream(
     if torch.distributed._functional_collectives.is_torchdynamo_compiling():
         return
     # Ensure all unshard streams wait for the computation stream.
-    unshard_streams = set()
-    for fsdp_state in root_state._all_fsdp_states:
-        unshard_streams.add(fsdp_state._unshard_stream)
-    for unshard_stream in unshard_streams:
+    for unshard_stream in root_state._all_unshard_streams:
         unshard_stream.wait_stream(computation_stream)  # type: ignore[attr-defined]
     # Having the pre-all-gather stream wait for the current stream even if we
     # do not leverage the pre-all-gather stream is tolerable since this only
