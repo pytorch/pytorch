@@ -9,8 +9,8 @@
 /// If you are writing a compute bound kernel, you can use the CUDA half
 /// intrinsics directly on the Half type from device code.
 
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/complex.h>
 #include <c10/util/floating_point_utils.h>
@@ -18,25 +18,18 @@
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>
-#include <cstdint>
 #elif !defined(__OPENCL_VERSION__)
 #include <math.h>
-#include <stdint.h>
 #endif
 
 #ifdef _MSC_VER
 #include <intrin.h>
 #endif
 
-#include <complex>
 #include <cstdint>
 #include <cstring>
 #include <iosfwd>
 #include <limits>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <utility>
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
@@ -51,8 +44,6 @@
 #elif defined(SYCL_LANGUAGE_VERSION)
 #include <sycl/sycl.hpp> // for SYCL 2020
 #endif
-
-#include <typeinfo> // operator typeid
 
 namespace c10 {
 
@@ -350,7 +341,7 @@ struct alignas(2) Half {
   Half() = default;
 #endif
 
-  constexpr C10_HOST_DEVICE Half(unsigned short bits, from_bits_t) : x(bits){};
+  constexpr C10_HOST_DEVICE Half(unsigned short bits, from_bits_t) : x(bits) {}
   inline C10_HOST_DEVICE Half(float value);
   inline C10_HOST_DEVICE operator float() const;
 
