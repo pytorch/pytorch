@@ -1,3 +1,4 @@
+import itertools
 import logging
 import operator
 import os
@@ -84,10 +85,9 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
         torch.bool,
         torch.bfloat16,
         torch.complex64,
-        # torch.float16, # TODO: implement this
+        torch.float16,
     }
     if cuda:
-        supported_dtype.add(torch.float16)
         supported_dtype.add(torch.float8_e4m3fn)
         supported_dtype.add(torch.float8_e5m2)
 
@@ -258,6 +258,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.disable_cudagraphs = False
         self.disable_cudagraphs_reason = ""
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
+        self.dynamo_flat_name_to_original_fqn = self.module.meta.get(
+            "dynamo_flat_name_to_original_fqn", {}
+        )
         self.init_backend_registration()
 
     @staticmethod
@@ -1039,9 +1042,23 @@ class GraphLowering(torch.fx.Interpreter):
                     ), "Unknown type when creating real inputs" + str(type(x))
                     return x
 
+            if tracing_context := torch._guards.TracingContext.try_get():
+                if tracing_context.output_strides:
+                    tracing_context.output_strides.clear()
+
+                params_flat = [
+                    param
+                    for param in tracing_context.params_flat  # type: ignore[union-attr]
+                    if param is not None
+                ]
+                real_inputs = [
+                    materialize(x) for x in itertools.chain(params_flat, V.real_inputs)
+                ]
+            else:
+                real_inputs = [materialize(x) for x in V.real_inputs]
+
             with torch.utils._python_dispatch._disable_current_modes():
                 assert self.example_inputs is not None
-                real_inputs = [materialize(x) for x in self.example_inputs]
                 compiled(real_inputs)
             del real_inputs
 
