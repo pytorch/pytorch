@@ -100,7 +100,7 @@ public:
     if (count == size()) {
       return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
     } else {
-      __mmask8 mask = (1 << count) - 1;
+      __mmask8 mask = (1ULL << count) - 1;
       return _mm512_maskz_loadu_epi64(mask, ptr);
     }
   }
@@ -110,7 +110,7 @@ public:
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm512-storeu-si512.html
       _mm512_storeu_si512(reinterpret_cast<__m512i*>(ptr), values);
     } else if (count > 0) {
-      __mmask8 mask = (1 << count) - 1;
+      __mmask8 mask = (1ULL << count) - 1;
       _mm512_mask_storeu_epi64(ptr, mask, values);
     }
   }
@@ -248,7 +248,7 @@ public:
     if (count == size()) {
       return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
     } else {
-      __mmask16 mask = (1 << count) - 1;
+      __mmask16 mask = (1ULL << count) - 1;
       return _mm512_maskz_loadu_epi32(mask, ptr);
     }
   }
@@ -258,7 +258,7 @@ public:
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm512-storeu-si512.html
       _mm512_storeu_si512(reinterpret_cast<__m512i*>(ptr), values);
     } else if (count > 0) {
-      __mmask16 mask = (1 << count) - 1;
+      __mmask16 mask = (1ULL << count) - 1;
       _mm512_mask_storeu_epi32(ptr, mask, values);
     }
   }
@@ -475,7 +475,7 @@ public:
     if (count == size()) {
       return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
     } else {
-      __mmask32 mask = (1 << count) - 1;
+      __mmask32 mask = (1ULL << count) - 1;
       return _mm512_maskz_loadu_epi16(mask, ptr);
     }
   }
@@ -485,7 +485,7 @@ public:
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm512-storeu-si512.html
       _mm512_storeu_si512(reinterpret_cast<__m512i*>(ptr), values);
     } else if (count > 0) {
-      __mmask32 mask = (1 << count) - 1;
+      __mmask32 mask = (1ULL << count) - 1;
       _mm512_mask_storeu_epi16(ptr, mask, values);
     }
   }
@@ -756,7 +756,7 @@ public:
       // Fast path if only load element number of 16
       return loadu_one_fourth(ptr);
     } else {
-      __mmask64 mask = (1 << count) - 1;
+      __mmask64 mask = (1ULL << count) - 1;
       return _mm512_maskz_loadu_epi8(mask, ptr);
     }
   }
@@ -772,7 +772,7 @@ public:
           reinterpret_cast<__m128i*>(ptr),
           _mm512_castsi512_si128(values));
       } else {
-        __mmask64 mask = (1 << count) - 1;
+        __mmask64 mask = (1ULL << count) - 1;
         _mm512_mask_storeu_epi8(ptr, mask, values);
       }
     }

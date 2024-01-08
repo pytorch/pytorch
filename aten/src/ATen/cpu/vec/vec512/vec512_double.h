@@ -90,7 +90,7 @@ public:
     if (count == size()) {
       _mm512_storeu_pd(reinterpret_cast<double*>(ptr), values);
     } else if (count > 0) {
-      __mmask8 mask = (1 << count) - 1;
+      __mmask8 mask = (1ULL << count) - 1;
       _mm512_mask_storeu_pd(reinterpret_cast<double*>(ptr), mask, values);
     }
   }
