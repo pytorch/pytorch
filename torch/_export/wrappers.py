@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import torch
 import torch._custom_ops
 from torch._C import DispatchKey
+from torch._higher_order_ops.strict_mode import strict_mode
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -100,3 +101,11 @@ def _wrap_submodules(f, preserve_signature, module_call_signatures):
     finally:
         for submodule in tasks:
             del submodule.__dict__["forward"]
+
+
+def _mark_strict_experimental(cls):
+    def call(self, *args):
+        return strict_mode(self, args)
+
+    cls.__call__ = call
+    return cls
