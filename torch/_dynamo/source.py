@@ -384,13 +384,7 @@ class ODictGetItemSource(ChainedSource):
         return self.base.guard_source()
 
     def name(self):
-        if isinstance(self.index, type):
-            rep = f'__load_module("{self.index.__module__}").{self.index.__qualname__}'
-            return f"___odict_getitem({self.base.name()}, {rep})"
-        elif isinstance(self.index, Source):
-            return f"___odict_getitem({self.base.name()}, {self.index.name()})"
-        else:
-            return f"___odict_getitem({self.base.name()}, {self.index!r})"
+        return f"___odict_getitem({self.base.name()}, {self.index!r})"
 
 
 @dataclasses.dataclass(frozen=True)

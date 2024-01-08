@@ -433,7 +433,11 @@ class GuardBuilder(GuardBuilderBase):
         # TODO: It feels like it would be better to just implement our own
         # equality test in C that handles all of the necessary type checking
         # and NaN tests
-        code.append(f"{ref} == {val!r}")
+        if isinstance(val, type):
+            loaded_val = f'__load_module("{val.__module__}").{val.__qualname__}'
+            code.append(f"{ref} == {loaded_val}")
+        else:
+            code.append(f"{ref} == {val!r}")
         self._produce_guard_code(guard, code)
 
     def CONSTANT_MATCH(self, guard: Guard):

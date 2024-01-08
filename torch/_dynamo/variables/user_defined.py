@@ -40,7 +40,7 @@ from ..utils import (
 )
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
-from .dicts import ConstDictVariable, DefaultDictVariable
+from .dicts import DefaultDictVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -842,11 +842,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
 
-        index = (
-            key.source
-            if ConstDictVariable.is_valid_key(key) and key.source is not None
-            else key.as_python_constant()
-        )
+        if key.source is not None:
+            install_guard(key.source.make_guard(GuardBuilder.CONSTANT_MATCH))
+
+        index = key.as_python_constant()
 
         return VariableBuilder(
             tx,
