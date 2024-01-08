@@ -72,6 +72,7 @@ class NullKernelHandler(NullHandler):
         super().__init__()
         self.removed_buffers = set()
         self.inplaced_to_remove = set()
+        self.index_dtype = "tl.int64"
 
 
 def _arg_str(a) -> str:

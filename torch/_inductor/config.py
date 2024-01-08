@@ -522,7 +522,7 @@ class triton:
 
     # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
-    max_block = {"X": 2048, "Y": 1024, "Z": 1024}
+    max_block = {"X": 2048, "Y": 1024, "Z": 1024, "R": 4096}
 
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False
