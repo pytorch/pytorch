@@ -133,9 +133,8 @@ struct TORCH_API OperandInfo {
   C10_ALWAYS_INLINE OperandInfo& operator=(OperandInfo&&) noexcept = default;
   C10_ALWAYS_INLINE ~OperandInfo() = default;
 
-  /// The data pointer. This may be different from tensor->data_ptr() if the
-  /// iterator is split.
-  void* data = nullptr;
+  void set_data(void* data);
+  void* mutable_data() const;
 
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
   StrideVector stride_bytes;
@@ -218,6 +217,10 @@ struct TORCH_API OperandInfo {
   // object in these `_storage_` variables.
   internal::OpaqueOptionalTensorRef tensor_storage_;
   internal::OpaqueOptionalTensorRef original_tensor_storage_;
+
+  /// The data pointer. This may be different from tensor->data_ptr() if the
+  /// iterator is split.
+  void* data_ = nullptr;
 };
 
 struct SplitUntil32Bit;
@@ -370,7 +373,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   template <typename T>
   T scalar_value(int arg) {
     auto& op = operands_[arg];
-    return c10::fetch_and_cast<T>(op.tensor_base().scalar_type(), op.data);
+    return c10::fetch_and_cast<T>(op.tensor_base().scalar_type(), op.mutable_data());
   }
 
   /// Return scalar value from original_tensor_base if it is defined. When
@@ -466,7 +469,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
     operands_[arg].stride_bytes = strides;
   }
   void _unsafe_set_arg_data(const int arg, void* data) {
-    operands_[arg].data = data;
+    operands_[arg].set_data(data);
   }
 
   /// true if the stride computation can use 32-bit arithmetic. Used by GPU

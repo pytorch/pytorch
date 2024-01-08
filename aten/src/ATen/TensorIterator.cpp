@@ -40,7 +40,7 @@ namespace {
 
 inline void get_base_ptrs(char** ptrs, ArrayRef<OperandInfo> operands) {
   std::transform(operands.begin(), operands.end(), ptrs, [](const OperandInfo& op) {
-    return static_cast<char*>(op.data);
+    return static_cast<char*>(op.mutable_data());
   });
 }
 
@@ -83,6 +83,14 @@ const Tensor& OpaqueOptionalTensorRef::getTensor() const {
   return get()->getTensorRef();
 }
 
+}
+
+void* OperandInfo::mutable_data() const {
+  return data_;
+}
+
+void OperandInfo::set_data(void* data) {
+  data_ = data;
 }
 
 void OperandInfo::tensor(c10::MaybeOwned<TensorBase> &&tensor) {
@@ -827,7 +835,7 @@ void TensorIteratorBase::cast_outputs() {
 }
 
 void* TensorIteratorBase::data_ptr(int arg) const {
-  return operands_[arg].data;
+  return operands_[arg].mutable_data();
 }
 
 void TensorIteratorBase::remove_operand(int arg) {
@@ -835,7 +843,7 @@ void TensorIteratorBase::remove_operand(int arg) {
 }
 
 void TensorIteratorBase::unsafe_replace_operand(int arg, void* data) {
-  operands_[arg].data = data;
+  operands_[arg].set_data(data);
 }
 
 void TensorIteratorBase::narrow(int dim, int64_t start, int64_t size) {
@@ -843,7 +851,7 @@ void TensorIteratorBase::narrow(int dim, int64_t start, int64_t size) {
   shape_[dim] = size;
   view_offsets_[dim] += start;
   for (auto& op : operands_) {
-    op.data = ((char*)op.data) + op.stride_bytes[dim] * start;
+    op.set_data(((char*)op.mutable_data()) + op.stride_bytes[dim] * start);
   }
   if (size == 1 && !is_reduction_) {
     coalesce_dimensions();
@@ -854,7 +862,7 @@ void TensorIteratorBase::select_all_keeping_dim(int start_dim, IntArrayRef indic
   TORCH_INTERNAL_ASSERT(start_dim <= ndim());
   for (const auto i : c10::irange(start_dim, ndim())) {
     for (auto& op : operands_) {
-      op.data = ((char*)op.data) + op.stride_bytes[i] * indices[i - start_dim];
+      op.set_data(((char*)op.mutable_data()) + op.stride_bytes[i] * indices[i - start_dim]);
     }
     shape_[i] = 1;
   }
@@ -1518,7 +1526,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor_base().defined());
-    op.data = op.tensor_base().data_ptr();
+    op.set_data(op.tensor_base().data_ptr());
   }
 
   // zero out offsets
