@@ -91,7 +91,7 @@ public:
       _mm512_storeu_pd(reinterpret_cast<double*>(ptr), values);
     } else if (count > 0) {
       __mmask8 mask = (1 << count) - 1;
-      _mm512_mask_storeu_ps(reinterpret_cast<double*>(ptr), mask, values);
+      _mm512_mask_storeu_pd(reinterpret_cast<double*>(ptr), mask, values);
     }
   }
   const double& operator[](int idx) const  = delete;
