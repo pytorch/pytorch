@@ -639,7 +639,7 @@ AOTITorchError aoti_torch_scatter_reduce_out(
   });
 }
 
-ITorchError aoti_torch_index_put_out(
+AOTITorchError aoti_torch_index_put_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
     const AtenTensorHandle* indices,
