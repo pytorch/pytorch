@@ -59,7 +59,11 @@ id<MTLComputePipelineState> MPSDevice::metalIndexingPSO(const std::string& kerne
 
   id<MTLFunction> indexFunction =
       [[indexing_lib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]] autorelease];
-  TORCH_CHECK(indexFunction, "Can't find function ", kernel);
+  TORCH_CHECK(indexFunction,
+              "Failed to create specialized function state object: ",
+              kernel,
+              ", error: ",
+              [[error description] UTF8String]);
 
   state = [_mtl_device newComputePipelineStateWithFunction:indexFunction error:&error];
   TORCH_CHECK(state, error.localizedDescription.UTF8String);
