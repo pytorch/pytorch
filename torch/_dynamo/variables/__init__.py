@@ -5,6 +5,7 @@ from .ctx_manager import (
     ContextWrappingVariable,
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
+    VmapCtxManagerVariable,
     GradModeVariable,
     InferenceModeVariable,
     StreamContextVariable,
