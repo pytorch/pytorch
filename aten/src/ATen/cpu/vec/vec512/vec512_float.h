@@ -102,14 +102,14 @@ public:
     if (count == size())
       return _mm512_loadu_ps(reinterpret_cast<const float*>(ptr));
 
-    __mmask16 mask = (1 << count) - 1;
+    __mmask16 mask = (1ULL << count) - 1;
     return _mm512_maskz_loadu_ps(mask, ptr);
   }
   void store(void* ptr, int64_t count = size()) const {
     if (count == size()) {
       _mm512_storeu_ps(reinterpret_cast<float*>(ptr), values);
     } else if (count > 0) {
-      __mmask16 mask = (1 << count) - 1;
+      __mmask16 mask = (1ULL << count) - 1;
       _mm512_mask_storeu_ps(reinterpret_cast<float*>(ptr), mask, values);
     }
   }
