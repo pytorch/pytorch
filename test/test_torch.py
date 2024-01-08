@@ -9742,6 +9742,13 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(t1_moved, new_t2_moved)
         self.assertEqual(t2_moved, new_t1_moved)
 
+        # tests that PyObject slots on TensorImpl are correctly swapped by
+        # checking that when the function applied on a swapped tensor is
+        # a no-op, the returned value (which is given by returning the reference
+        # to the PyObject in the TensorImpl's PyObjectSlot) is still correct
+        self.assertEqual(id(t1.to(t1.dtype)), id(t1))
+        self.assertEqual(id(t2.to(t2.dtype)), id(t2))
+
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
     def test_swap_basic(self):
         ts = [

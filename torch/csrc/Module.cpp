@@ -348,8 +348,40 @@ PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
 
   // Swap the Tensor Impl
   c10::MaybeOwned<at::Tensor> tmp = a->cdata;
+
+  // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
+  // associated with the TensorImpl. Swap this field as well.
+  c10::optional<PyObject*> mb_obj_a =
+      at::get_tensor_base(*(a->cdata))
+          .unsafeGetTensorImpl()
+          ->pyobj_slot()
+          ->check_pyobj(getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+  c10::optional<PyObject*> mb_obj_b =
+      at::get_tensor_base(*(b->cdata))
+          .unsafeGetTensorImpl()
+          ->pyobj_slot()
+          ->check_pyobj(getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+  TORCH_INTERNAL_ASSERT(
+      mb_obj_a.has_value() && mb_obj_b.has_value(),
+      "Both tensors should have PyObjects tagged by the current python interpreter");
+
   a->cdata = b->cdata;
   b->cdata = tmp;
+
+  at::get_tensor_base(*(a->cdata))
+      .unsafeGetTensorImpl()
+      ->pyobj_slot()
+      ->init_pyobj(
+          getPyInterpreter(),
+          mb_obj_a.value(),
+          c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+  at::get_tensor_base(*(b->cdata))
+      .unsafeGetTensorImpl()
+      ->pyobj_slot()
+      ->init_pyobj(
+          getPyInterpreter(),
+          mb_obj_b.value(),
+          c10::impl::PyInterpreterStatus::TAGGED_BY_US);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
