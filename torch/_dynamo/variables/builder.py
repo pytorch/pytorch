@@ -696,7 +696,12 @@ class VariableBuilder:
             # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
             # type(torch.ops) -> <class 'torch._ops._Ops'>
             or isinstance(
-                value, (torch.backends.cudnn, torch.ops, torch._ops._OpNamespace)
+                value,
+                (
+                    torch.backends.cudnn.CudnnModule,
+                    torch._ops._Ops,
+                    torch._ops._OpNamespace,
+                ),
             )
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
