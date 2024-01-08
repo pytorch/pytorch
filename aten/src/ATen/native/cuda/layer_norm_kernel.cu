@@ -334,17 +334,17 @@ __device__ __inline__ void compute_gI(
     for (; l+unroll - 1 < N; l += blockDim.x * unroll){
       #pragma unroll
       for (int k=0; k< unroll; k++){
-          auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l+k]) : T_ACC(1);
-          auto c_h = static_cast<T_ACC>(X_i[l+k]);
-          auto c_loss = static_cast<T_ACC>(dY_i[l+k]);
+          const auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l+k]) : T_ACC(1);
+          const auto c_h = static_cast<T_ACC>(X_i[l+k]);
+          const auto c_loss = static_cast<T_ACC>(dY_i[l+k]);
           stats_x1 += c_loss * gamma_val;
           stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
       }
     }
     for (;  l < N; l ++) {
-          auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
-          auto c_h = static_cast<T_ACC>(X_i[l]);
-          auto c_loss = static_cast<T_ACC>(dY_i[l]);
+          const auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+          const auto c_h = static_cast<T_ACC>(X_i[l]);
+          const auto c_loss = static_cast<T_ACC>(dY_i[l]);
           stats_x1 += c_loss * gamma_val;
           stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
     }
@@ -362,9 +362,9 @@ __device__ __inline__ void compute_gI(
     T_ACC term1 = (T_ACC(1) / fH) * rstd_val;
 
     for (int l = threadIdx.x; l < N; l += blockDim.x){
-        auto x = X_i[l];
-        auto dy = dY_i[l];
-        auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+        const auto x = X_i[l];
+        const auto dy = dY_i[l];
+        const auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
 
         T_ACC f_grad_input = fH * gamma_val * dy;
         f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
@@ -438,9 +438,9 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
     dY_i_vec_reg = dY_i_vec_ptr[vec_idx];
 
     for (int k = 0; k < vec_size; ++k) {
-      auto gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
-      auto c_h = static_cast<T_ACC>(X_i_vec_reg.val[k]);
-      auto c_loss = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
+      const auto gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
+      const auto c_h = static_cast<T_ACC>(X_i_vec_reg.val[k]);
+      const auto c_loss = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
       stats_x1 += c_loss * gamma_val;
       stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
     }
@@ -448,9 +448,9 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
 
   // Tail Loop
   for (; l < N; l++) {
-    auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
-    auto c_h = static_cast<T_ACC>(X_i[l]);
-    auto c_loss = static_cast<T_ACC>(dY_i[l]);
+    const auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+    const auto c_h = static_cast<T_ACC>(X_i[l]);
+    const auto c_loss = static_cast<T_ACC>(dY_i[l]);
     stats_x1 += c_loss * gamma_val;
     stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
   }
@@ -480,9 +480,9 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
     dY_i_vec_reg = dY_i_vec_ptr[vec_idx];
 
     for (int k = 0; k < vec_size; ++k) {
-      auto gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
-      auto x = static_cast<T_ACC>(X_i_vec_reg.val[k]);
-      auto dy = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
+      const auto gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
+      const auto x = static_cast<T_ACC>(X_i_vec_reg.val[k]);
+      const auto dy = static_cast<T_ACC>(dY_i_vec_reg.val[k]);
 
       T_ACC f_grad_input = fH * gamma_val * dy;
       f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
@@ -496,9 +496,9 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
 
   // Tail Loop
   for (; l < N; l += blockDim.x) {
-    auto x = X_i[l];
-    auto dy = dY_i[l];
-    auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+    const auto x = X_i[l];
+    const auto dy = dY_i[l];
+    const auto gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
 
     T_ACC f_grad_input = fH * gamma_val * dy;
     f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
