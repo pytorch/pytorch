@@ -22,8 +22,7 @@
 #include <cstdint>
 #include <utility>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 using SymIntSmallVec = c10::SmallVector<c10::SymInt, c10::kDimVectorStaticSize>;
 using MetadataShape = std::variant<SymIntSmallVec, at::Tensor>;
@@ -109,5 +108,4 @@ struct TORCH_API InputMetadata {
   bool is_nested_ = false;
   bool was_default_constructed_ = true;
 };
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
