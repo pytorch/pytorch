@@ -125,14 +125,14 @@ int8_platform_configs = tuple(
     if config["cond"]
 )
 
-# On ROCm convert num_stages to 1 as pipelining provides no benefit
+# On ROCm convert num_stages to 0 to enable stream pipelining
 if torch.version.hip:
     mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 1, config[4])
+        (config[0], config[1], config[2], inductor_config.default_num_stages, config[4])
         for config in mm_platform_configs
     )
     int8_platform_configs = tuple(
-        (config[0], config[1], config[2], 1, config[4])
+        (config[0], config[1], config[2], inductor_config.default_num_stages, config[4])
         for config in mm_platform_configs
     )
 

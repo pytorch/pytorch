@@ -64,10 +64,10 @@ platform_configs = tuple(
     if config["cond"]
 )
 
-# On ROCm convert num_stages to 1 as pipelining provides no benefit
+# On ROCm convert num_stages to 0 to enable stream pipelining
 if torch.version.hip:
     platform_configs = tuple(
-        (config[0], config[1], config[2], 1, config[4]) for config in platform_configs
+        (config[0], config[1], config[2], config.default_num_stages, config[4]) for config in platform_configs
     )
 
 conv_configs = functools.partial(

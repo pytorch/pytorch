@@ -545,6 +545,11 @@ class triton:
     # Valid values: "compile_error", "runtime_error", "accuracy"
     inject_relu_bug_TESTING_ONLY = None
 
+    # Use a default num_stages for the majority of triton configs in PyTorch.
+    # This is mostly useful for ROCm as num_stages=0 is more performant
+    # as this enables stream pipeline mode for ROCm triton.
+    default_num_stages = 1 if not torch.version.hip else 0
+
 
 class aot_inductor:
     # AOTInductor output path
