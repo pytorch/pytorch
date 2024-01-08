@@ -958,6 +958,9 @@ class ExportedProgramSerializer:
         Args:
             exported_program: Exported Program to serialize
         """
+        if type(self) == ExportedProgramSerializer:
+            exported_program._validate()
+
         gm_serializer = GraphModuleSerializer(
             exported_program.graph_signature,
             exported_program.module_call_graph
@@ -1664,7 +1667,6 @@ def serialize(
     exported_program: ep.ExportedProgram,
     opset_version: Optional[Dict[str, int]] = None,
 ) -> SerializedArtifact:
-    exported_program._validate()
     serialized_artifact = (
         ExportedProgramSerializer(opset_version).serialize(exported_program)
     )
