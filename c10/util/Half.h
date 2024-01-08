@@ -18,10 +18,8 @@
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>
-#include <cstdint>
 #elif !defined(__OPENCL_VERSION__)
 #include <math.h>
-#include <stdint.h>
 #endif
 
 #ifdef _MSC_VER
@@ -448,7 +446,7 @@ overflows(From f, bool strict_unsigned = false) {
     // For example, with uint8, this allows for `a - b` to be treated as
     // `a + 255 * b`.
     return greater_than_max<To>(f) ||
-        (c10::is_negative(f) && -static_cast<uint64_t>(f) > limit::max());
+        (c10::is_negative(f) && -static_cast<uint64_t>(f) > static_cast<uint64_t>(limit::max()));
   } else {
     return c10::less_than_lowest<To>(f) || greater_than_max<To>(f);
   }
