@@ -101,8 +101,8 @@ VkImageLayout vk_layout(
 //
 
 PipelineLayout::PipelineLayout(
-    const VkDevice device,
-    const VkDescriptorSetLayout descriptor_layout)
+    VkDevice device,
+    VkDescriptorSetLayout descriptor_layout)
     : device_(device), handle_{VK_NULL_HANDLE} {
   // TODO: Enable push constants
   const VkPipelineLayoutCreateInfo pipeline_layout_create_info{
@@ -148,11 +148,12 @@ void swap(PipelineLayout& lhs, PipelineLayout& rhs) noexcept {
 //
 
 ComputePipeline::ComputePipeline(
-    const VkDevice device,
+    VkDevice device,
     const ComputePipeline::Descriptor& descriptor,
-    const VkPipelineCache pipeline_cache)
+    VkPipelineCache pipeline_cache)
     : device_(device), handle_{VK_NULL_HANDLE} {
-  constexpr VkSpecializationMapEntry specialization_map_entires[3]{
+  // NOLINTNEXTLINE
+  constexpr VkSpecializationMapEntry specialization_map_entries[3]{
       // X
       {
           0u,
@@ -175,7 +176,7 @@ ComputePipeline::ComputePipeline(
 
   const VkSpecializationInfo specialization_info{
       3u, // mapEntryCount
-      specialization_map_entires, // pMapEntries
+      specialization_map_entries, // pMapEntries
       sizeof(descriptor.local_work_group), // dataSize
       &descriptor.local_work_group, // pData
   };
@@ -246,13 +247,12 @@ bool operator==(
 // PipelineLayoutCache
 //
 
-PipelineLayoutCache::PipelineLayoutCache(const VkDevice device)
+PipelineLayoutCache::PipelineLayoutCache(VkDevice device)
     : cache_mutex_{}, device_(device), cache_{} {}
 
 PipelineLayoutCache::PipelineLayoutCache(PipelineLayoutCache&& other) noexcept
-    : cache_mutex_{}, device_(other.device_) {
+    : cache_mutex_{}, device_(other.device_), cache_(std::move(other.cache_)) {
   std::lock_guard<std::mutex> lock(other.cache_mutex_);
-  cache_ = std::move(other.cache_);
 }
 
 PipelineLayoutCache::~PipelineLayoutCache() {
@@ -280,7 +280,7 @@ void PipelineLayoutCache::purge() {
 // ComputePipelineCache
 //
 
-ComputePipelineCache::ComputePipelineCache(const VkDevice device)
+ComputePipelineCache::ComputePipelineCache(VkDevice device)
     : cache_mutex_{},
       device_(device),
       pipeline_cache_{VK_NULL_HANDLE},
@@ -301,9 +301,9 @@ ComputePipelineCache::ComputePipelineCache(
     ComputePipelineCache&& other) noexcept
     : cache_mutex_{},
       device_(other.device_),
-      pipeline_cache_(other.pipeline_cache_) {
+      pipeline_cache_(other.pipeline_cache_),
+      cache_(std::move(other.cache_)) {
   std::lock_guard<std::mutex> lock(other.cache_mutex_);
-  cache_ = std::move(other.cache_);
 
   other.pipeline_cache_ = VK_NULL_HANDLE;
 }
