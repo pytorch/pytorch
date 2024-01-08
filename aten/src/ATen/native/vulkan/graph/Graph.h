@@ -1,5 +1,7 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Context.h>
@@ -13,7 +15,7 @@ namespace at {
 namespace native {
 namespace vulkan {
 
-typedef int32_t ValueRef;
+using ValueRef = int32_t;
 class ComputeGraph;
 
 /*
@@ -28,7 +30,7 @@ class OpNode {
   friend class ComputeGraph;
 
  public:
-  virtual ~OpNode() {}
+  virtual ~OpNode() = default;
 
  protected:
   std::vector<ValueRef> inputs_;
