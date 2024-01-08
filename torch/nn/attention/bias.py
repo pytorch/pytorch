@@ -207,9 +207,7 @@ class CausalBias:
                 scale=scale,
             )
         elif attn_mask.variant == CausalVariant.LOWER_RIGHT:
-            _validate_sdpa_input(
-                query, key, value, attn_mask, dropout_p, is_causal, scale
-            )
+            _validate_sdpa_input(query, key, value, None, dropout_p, is_causal, scale)
             sdpa_params = SDPAParams(query, key, value, None, dropout_p, is_causal)
             if can_use_flash_attention(sdpa_params):
                 needs_padding = query.size(-1) % 8 != 0
@@ -272,16 +270,9 @@ class CausalBias:
         if kwargs is None:
             kwargs = {}
         if func != torch.nn.functional.scaled_dot_product_attention:
-            # Needed for method access and torch.compile Support
-            if (
-                isinstance(func, py_types.MethodWrapperType)
-                or func.__objclass__ == torch._C.TensorBase
-            ):
-                return super().__torch_function__(func, types, *args, **kwargs)
-            else:
-                raise NotImplementedError(
-                    "CausalBias only supports scaled_dot_product_attention"
-                )
+            raise NotImplementedError(
+                "CausalBias only supports scaled_dot_product_attention"
+            )
         return cls._dispatch(*args, **kwargs)
 
     def __repr__(self):

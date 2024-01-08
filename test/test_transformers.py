@@ -3284,7 +3284,7 @@ class TestAttnBias(NNTestCase):
     @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
     @parametrize(
         "shape",
-        [(16, 16, 128, 128, 16), ],
+        [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
     )
     def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
         make_tensor = partial(
