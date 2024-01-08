@@ -12,7 +12,7 @@ import unittest
 from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
     IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
-from torch.testing._internal.common_utils import skipIfRocm, runOnRocm, xfailIfTorchDynamo
+from torch.testing._internal.common_utils import skipIfRocm, runOnRocm
 import torch
 from torch import Tensor
 import functools
@@ -1633,7 +1633,6 @@ class TestOperators(TestCase):
     def _arg_and_kwarg_options(self, args_options, kwargs_options):
         return itertools.product(*args_options, kwargs_options)
 
-    @xfailIfTorchDynamo
     def test_extremal_numerics_nll_loss(self, device):
         N, C = 3, 4
         d1, d2, d3 = 5, 6, 7
@@ -1659,7 +1658,6 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(fn, (cotangents, input))
 
-    @xfailIfTorchDynamo
     def test_extremal_numerics_l1_loss(self, device):
         N, C, H, W = 3, 4, 5, 6
         shapes = ((N, C), (N, C, H), (N, C, H, W))
@@ -1672,7 +1670,6 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(torch.nn.functional.l1_loss, (cotangents, input, target))
 
-    @xfailIfTorchDynamo
     def test_extremal_numerics_mse_loss(self, device):
         N, C, H, W = 3, 4, 5, 6
         shapes = ((N, C), (N, C, H), (N, C, H, W))
@@ -1685,7 +1682,6 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(torch.nn.functional.mse_loss, (cotangents, input, target))
 
-    @xfailIfTorchDynamo
     def test_extremal_numerics_softmax(self, device):
         N, C, H, W = 3, 4, 5, 6
         shapes = ((N, C), (N, C, H), (N, C, H, W))
@@ -1697,7 +1693,6 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(torch.nn.functional.softmax, (cotangents, input))
 
-    @xfailIfTorchDynamo
     def test_extremal_numerics_log_softmax(self, device):
         N, C, H, W = 3, 4, 5, 6
         shapes = ((N, C), (N, C, H), (N, C, H, W))
@@ -1709,7 +1704,6 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(torch.nn.functional.log_softmax, (cotangents, input))
 
-    @xfailIfTorchDynamo
     def test_extremal_numerics_cross_entropy(self, device):
         N, C = 3, 4
         d1, d2, d3 = 5, 6, 7
@@ -1751,7 +1745,6 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(fn, (cotangents, input), atol_rtol=(1e-4, 1e-5))
 
-    @xfailIfTorchDynamo
     def test_extremal_numerics_binary_cross_entropy(self, device):
         N, C, H, W = 3, 4, 5, 6
         shapes = ((N, C), (N, C, H), (N, C, H, W))

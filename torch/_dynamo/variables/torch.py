@@ -26,6 +26,7 @@ from ..guards import GuardBuilder
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    guard_if_dyn,
     has_torch_function,
     product,
     proxy_args_kwargs,
@@ -212,6 +213,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
+            VmapCtxManagerVariable,
         )
 
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
@@ -319,6 +321,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             assert len(args) == 1
             return DisabledSavedTensorsHooksVariable.create(
                 tx, args[0].as_python_constant()
+            )
+        elif self.value is torch._functorch.vmap.vmap_nesting:
+            assert len(args) == 2
+            return VmapCtxManagerVariable.create(
+                tx, [guard_if_dyn(x) for x in args],
             )
         elif self.value is torch._C._is_torch_function_enabled:
             assert not (args or kwargs)
