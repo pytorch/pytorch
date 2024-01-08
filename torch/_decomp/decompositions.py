@@ -2210,22 +2210,6 @@ def _avg_poolnd(
     assert len(x.shape) in (dim + 1, dim + 2)
 
     window_size = functools.reduce(operator.mul, kernel_size)
-    if window_size < 25:
-        # For small window sizes, to generate optimized code,
-        # we need higher thresholds in `torch._inductor.config`.
-        # In particular, `realize_reads_threshold`, `realize_bytes_threshold`
-        # and `unroll_reductions_threshold`. Since the thresholds are global
-        # ones, we unroll manually here to get better performance.
-        return _avg_poolnd_unrolled(
-            x,
-            kernel_size,
-            stride,
-            padding,
-            ceil_mode,
-            count_include_pad,
-            divisor_override,
-            dim,
-        )
 
     batch = x.shape[:-dim]
     dhw = x.shape[-dim:]
@@ -2298,76 +2282,6 @@ def _avg_poolnd(
             .to(torch.int32),
             dim=[len(batch) + 1 + 2 * i for i in range(dim)],
         )
-
-
-def _avg_poolnd_unrolled(
-    x: Tensor,
-    kernel_size: Tuple[int, ...],
-    stride: Tuple[int, ...],
-    padding: Tuple[int, ...],
-    ceil_mode: bool,
-    count_include_pad: bool,
-    divisor_override: Optional[int],
-    dim: int,
-):
-    window_size = functools.reduce(operator.mul, kernel_size)
-    batch = x.shape[:-dim]
-    dhw = x.shape[-dim:]
-    h_out, ceil_modes = zip(
-        *[
-            pooling_size(dhw[i], i, kernel_size, stride, padding, ceil_mode)
-            for i in range(dim)
-        ]
-    )
-
-    had_padding = any(padding) or any(ceil_modes)
-
-    def get_cond(padding, out_indices):
-        conds = []
-        for i in range(dim):
-            view_shape = [1] * x.dim()
-            view_shape[len(batch) + i] = out_indices[i].shape[0]
-            idx = out_indices[i].view(view_shape)
-            conds.append(
-                torch.logical_and(idx >= -padding[i], idx < dhw[i] + padding[i])
-            )
-        return functools.reduce(torch.logical_and, conds)
-
-    out = 0
-    count = 0
-    for k in product(*[range(s) for s in kernel_size]):
-        out_indices = []
-        for i in range(dim):
-            h_range = torch.arange(h_out[i], device=x.device)
-            idx = h_range * stride[i] + k[i]
-            idx = idx - padding[i]
-            idx = idx.reshape(idx.shape[0], *[1] * (dim - 1 - i))
-            out_indices.append(idx)
-
-        if had_padding:
-            cond = get_cond([0] * dim, out_indices)
-            out = out + aten._masked_index(
-                x,
-                cond,
-                [*[None] * len(batch), *out_indices],
-                0,
-            )
-        else:
-            out = out + aten._unsafe_index(x, [*[None] * len(batch), *out_indices])
-            if not divisor_override:
-                cond = get_cond(
-                    padding if count_include_pad else [0] * dim, out_indices
-                )
-                count = count + cond.to(torch.int32)
-
-    if not had_padding or divisor_override:
-        if divisor_override:
-            scale = 1 / divisor_override
-        else:
-            scale = 1.0 / window_size
-        return out * scale
-    else:
-        return out / count
 
 
 @register_decomposition(aten._adaptive_avg_pool2d)
@@ -2538,6 +2452,33 @@ def _index_add(
         return x
     else:
         return out.squeeze(0) if zero_dim else out.contiguous()
+
+
+@register_decomposition(aten.pad_sequence.default)
+@aten.pad_sequence.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+def pad_sequence(sequences, batch_first=False, padding_value=0.0):
+    torch._check(len(sequences) > 0, lambda: "received an empty list of sequences")
+    sequences_size = len(sequences)
+    max_size = sequences[0].size()
+    trailing_dims = max_size[1:]
+    max_len = max(x.size(0) for x in sequences)
+    if batch_first:
+        out_dims = (sequences_size, max_len)
+    else:
+        out_dims = (max_len, sequences_size)
+    out_dims = out_dims + trailing_dims
+    out = sequences[0].new_full(out_dims, padding_value)
+    dim_paddings = (0, 0) * len(trailing_dims)
+    for i in range(sequences_size):
+        currseq = sequences[i]
+        row = aten.constant_pad_nd(
+            currseq, dim_paddings + (0, max_len - currseq.size(0)), padding_value
+        )
+        if batch_first:
+            out = aten.select_scatter(out, row, dim=0, index=i)
+        else:
+            out = aten.select_scatter(out, row, dim=1, index=i)
+    return out
 
 
 @register_decomposition(aten.index_copy_)

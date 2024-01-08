@@ -465,8 +465,8 @@ def forward(self, x_1):
         # TODO actually not decompose
         self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
-    mm = torch.ops.aten.mm.default(x_1, x_1)
-    add = torch.ops.aten.add.Tensor(mm, x_1);  mm = x_1 = None
+    matmul = torch.ops.aten.matmul.default(x_1, x_1)
+    add = torch.ops.aten.add.Tensor(matmul, x_1);  matmul = x_1 = None
     mul = torch.ops.aten.mul.Tensor(add, 5);  add = None
     return mul""")
 
@@ -491,9 +491,9 @@ def forward(self, x_1):
         # TODO actually not decompose
         self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
-    mm = torch.ops.aten.mm.default(x_1, x_1)
+    matmul = torch.ops.aten.matmul.default(x_1, x_1)
     transpose = torch.ops.aten.transpose.int(x_1, 1, 0);  x_1 = None
-    add = torch.ops.aten.add.Tensor(mm, transpose);  mm = transpose = None
+    add = torch.ops.aten.add.Tensor(matmul, transpose);  matmul = transpose = None
     view = torch.ops.aten.view.default(add, [2, 8]);  add = None
     return view""")
 

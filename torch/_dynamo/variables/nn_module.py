@@ -288,7 +288,9 @@ class NNModuleVariable(VariableTracker):
             # If we are tracing the higher order op, we want Dynamo to step
             # inside the module call so that Dynamo can see the underlying
             # parameters and buffers and raise them as inputs to the graph.
-            if tx.output.is_root_tracer() and mod.__module__.startswith("torch.nn."):
+            if tx.output.is_root_tracer() and mod.__module__.startswith(
+                ("torch.nn.", "torch.ao.")
+            ):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
@@ -576,7 +578,13 @@ class NNModuleVariable(VariableTracker):
                 )
                 return new_module_variable
 
-            key = args[0].as_python_constant()
+            from .tensor import SymNodeVariable
+
+            if isinstance(args[0], SymNodeVariable):
+                key = args[0].evaluate_expr(tx.output)
+            else:
+                key = args[0].as_python_constant()
+
             submod = module[key]
             return tx.output.register_attr_or_module(
                 submod,

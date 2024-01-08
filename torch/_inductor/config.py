@@ -25,7 +25,7 @@ verbose_progress = False
 fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
 # use cpp wrapper instead of python wrapper
-cpp_wrapper = False
+cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
 # dead code elimination
 dce = False
@@ -259,7 +259,7 @@ max_fusion_size = 64
 max_pointwise_cat_inputs = 4
 
 # replace small reductions with pointwise, disable with `= 1`
-unroll_reductions_threshold = 8
+unroll_reductions_threshold = 16
 
 # Add extra comments to output code (causes compile cache misses)
 comment_origin = False
