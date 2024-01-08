@@ -2494,6 +2494,33 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(fn(args2, x), opt_fn(args2, x))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_dict_order_keys_modules(self):
+        def fn(d, x):
+            return d[x](torch.ones(2, 2))
+
+        args1 = {}
+        x = torch.nn.Linear(2, 2)
+        y = torch.nn.Linear(2, 2)
+        z = torch.nn.Linear(2, 2)
+        args1[x] = y
+        args1[3] = z
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        self.assertEqual(fn(args1, x), opt_fn(args1, x))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Calling again doesn't recompile (same id and key order)
+        opt_fn(args1, x)
+        self.assertEqual(cnts.frame_count, 1)
+        args2 = {}
+        args2[3] = z
+        args2[x] = y
+
+        # Different order recompiles
+        self.assertEqual(fn(args2, x), opt_fn(args2, x))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_dunder_new_function_inlining(self):
         # https://github.com/pytorch/pytorch/issues/107460
 
