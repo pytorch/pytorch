@@ -1546,7 +1546,7 @@ CPU_TEST_FAILURES = {
 
 CUDA_TEST_FAILURES = {
     # test_failures, xfail by default, set is_skip=True to skip
-    "test_dup_unbacked_sym_decl": fail_cuda(),
+    "test_dup_unbacked_sym_decl": fail_abi_compatible_cuda(),
     # will add .item support later
     "test_dynamic_scalar": fail_abi_compatible_cuda(),
     "test_normal_functional": fail_abi_compatible_cuda(),
@@ -1557,6 +1557,7 @@ CUDA_TEST_FAILURES = {
 if TEST_WITH_ROCM:
     CUDA_TEST_FAILURES.update(
         {
+            "test_dup_unbacked_sym_decl": fail_cuda(is_skip=True),
             "test_addmm_multiple_dynamic": fail_cuda(is_skip=True),
             "test_bmm_multiple_dynamic": fail_cuda(is_skip=True),
             "test_convolution": fail_cuda(is_skip=True),
