@@ -29,6 +29,7 @@
 #include <ATen/ops/mm.h>
 #include <ATen/ops/nonzero.h>
 #include <ATen/ops/scatter.h>
+#include <ATen/ops/scatter_reduce.h>
 
 #endif
 
