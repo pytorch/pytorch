@@ -18,10 +18,8 @@
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>
-#include <cstdint>
 #elif !defined(__OPENCL_VERSION__)
 #include <math.h>
-#include <stdint.h>
 #endif
 
 #ifdef _MSC_VER

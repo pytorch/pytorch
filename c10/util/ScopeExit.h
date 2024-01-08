@@ -15,9 +15,7 @@ class scope_exit {
 
  public:
   template <typename Fp>
-  // constructor accepting a forwarding reference can hide the
-  // move constructor
-  // @lint-ignore CLANGTIDY
+  // NOLINTNEXTLINE(bugprone-forwarding-reference-overload)
   explicit scope_exit(Fp&& F) : ExitFunction(std::forward<Fp>(F)) {}
 
   scope_exit(scope_exit&& Rhs) noexcept
