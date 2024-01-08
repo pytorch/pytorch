@@ -507,6 +507,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(dot_prod_attention, check_train=False)
         self._check_common(checkpoint_wrapper(dot_prod_attention), check_train=False)
 
+    @skipIfRocm
     def _test_sdpa_prev_14(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
