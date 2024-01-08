@@ -12124,7 +12124,7 @@ op_db: List[OpInfo] = [
                     ], ),
     BinaryUfuncInfo('logaddexp',
                     dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
-                    dtypesIfCUDA=floating_and(torch.bfloat16, torch.float16),
+                    dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_rhs_python_scalar=False,
