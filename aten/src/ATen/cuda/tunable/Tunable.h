@@ -155,6 +155,9 @@ class TuningContext {
     void SetMaxWarmupIterations(int max_iter);
     int GetMaxWarmupIterations() const;
 
+    void SetBufferRotationCount(int count);
+    int GetBufferRotationCount() const;
+
     void EnableTunableOpAndTuning();
     void DisableTunableOpAndTuning();
 
@@ -180,6 +183,7 @@ class TuningContext {
     int max_tuning_iterations_;
     int max_warmup_duration_ms_;
     int max_warmup_iterations_;
+    int buffer_rotation_count_;
     mutable TuningResultsManager manager_;
     mutable c10::once_flag manager_init_once_;
     TuningResultsValidator validator_;

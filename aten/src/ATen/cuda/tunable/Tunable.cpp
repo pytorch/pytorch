@@ -296,6 +296,7 @@ TuningContext::TuningContext() :
     max_tuning_iterations_{0},
     max_warmup_duration_ms_{0},
     max_warmup_iterations_{0},
+    buffer_rotation_count_{1},
     filename_{},
     results_count_from_input_file_{0}
 {
@@ -399,6 +400,18 @@ int TuningContext::GetMaxWarmupIterations() const {
     return atoi(env);
   }
   return max_warmup_iterations_;
+}
+
+void TuningContext::SetBufferRotationCount(int count) {
+  buffer_rotation_count_ = count;
+}
+
+int TuningContext::GetBufferRotationCount() const {
+  static const char *env = std::getenv("PYTORCH_TUNABLEOP_BUFFER_ROTATION_COUNT");
+  if (env != nullptr) {
+    return atoi(env);
+  }
+  return buffer_rotation_count_;
 }
 
 void TuningContext::EnableTunableOpAndTuning() {

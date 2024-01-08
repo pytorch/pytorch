@@ -23,10 +23,6 @@
 
 namespace at::cuda::tunable {
 
-// Running tuning in a loop might cache inputs and impact result.
-// How many buffers should be used in rotation to avoid caching effects.
-constexpr int TuningRotationCount = 2;
-
 template <typename ParamsT>
 class Callable {
   public:
@@ -91,17 +87,17 @@ class TunableOp {
     }
 
   private:
-    static void WarmUp(Callable<ParamsT> *op, ParamsT* param[TuningRotationCount], int num_iter) {
+    static void WarmUp(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, int num_iter) {
       for (int i = 0; i < num_iter; i++) {
-        TORCH_CHECK(op->Call(param[i%TuningRotationCount]) == OK);
+        TORCH_CHECK(op->Call(param[i%param.size()]) == OK);
       }
     }
 
-    static double Profile(Callable<ParamsT> *op, ParamsT* param[TuningRotationCount], int num_iter) {
+    static double Profile(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, int num_iter) {
       TimerT timer{};
       timer.Start();
       for (int i = 0; i < num_iter; i++) {
-        TORCH_CHECK(op->Call(param[i%TuningRotationCount]) == OK);
+        TORCH_CHECK(op->Call(param[i%param.size()]) == OK);
       }
       timer.End();
       return timer.Duration() / num_iter;
@@ -129,8 +125,8 @@ class TunableOp {
       TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
 
       // need a copy of params to reuse
-      ParamsT* reusable_params[TuningRotationCount];
-      for (int i = 0; i < TuningRotationCount; i++) {
+      std::vector<ParamsT*> reusable_params(ctx->GetBufferRotationCount());
+      for (int i = 0; i < reusable_params.size(); i++) {
           reusable_params[i] = params->DeepCopy();
       }
 
@@ -144,9 +140,9 @@ class TunableOp {
 
         if (IsNumericsCheckEnabled()) {
           ParamsT* numerical_params = params->DeepCopy();
-          ParamsT* numerical_params_as_array[TuningRotationCount];
-          numerical_params_as_array[0] = numerical_params;
-          WarmUp(candidate, numerical_params_as_array, 1);
+          std::vector<ParamsT*> numerical_params_as_vector(1);
+          numerical_params_as_vector[0] = numerical_params;
+          WarmUp(candidate, numerical_params_as_vector, 1);
           status = reference_params->NumericalCheck(numerical_params);
           numerical_params->Delete();
           if (status != OK) {
@@ -215,7 +211,7 @@ class TunableOp {
       }
 
       // done with reusable_params and reference_params
-      for (int i = 0; i < TuningRotationCount; i++) {
+      for (int i = 0; i < reusable_params.size(); i++) {
         reusable_params[i]->Delete();
       }
       reference_params->Delete();

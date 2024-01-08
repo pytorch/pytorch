@@ -39,7 +39,11 @@ across many workloads by reusing the same file.
 Default is 1. Set to 0 to disable. Compare the results of each possible solution against the default solution and reject
 those with low accuracy.
 
-### Tuning Overhead
+#### PYTORCH_TUNABLEOP_BUFFER_ROTATION_COUNT
+Default is 1, must be >= 1. Running tuning iterations in a loop might cache inputs and impact results. This setting
+controls how many duplicates of the operator inputs to cycle through during tuning to avoid cache effects.
+
+### Tuning Iterations
 By default, each possible solution for a given operator will be run for 100 iterations and its average execution will be
 calculated. The fastest solution is chosen. In addition, a set of warm up iterations can optionally be run prior to the
 timed iterations. The following environment variables can be used to set either the maximum number of iterations to
