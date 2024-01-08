@@ -5,7 +5,6 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.testing import same
 
 try:
     from diffusers.models import unet_2d
@@ -41,7 +40,7 @@ class TestBaseOutput(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
         obj2 = opt_fn(*args)
-        self.assertTrue(same(obj1.sample, obj2.sample))
+        self.assertEqual(obj1.sample, obj2.sample)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
@@ -55,7 +54,7 @@ class TestBaseOutput(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
         obj2 = opt_fn(*args)
-        self.assertTrue(same(obj1, obj2))
+        self.assertEqual(obj1, obj2)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, op_count)
 

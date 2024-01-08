@@ -88,7 +88,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         random.seed(1)
         res2 = opt_fn(shape)
 
-        self.assertTrue(same(res1, res2))
+        self.assertEqual(res1, res2)
 
     def test_random_values_with_graph_break(self):
         def fn(x):
@@ -106,7 +106,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         random.seed(1)
         res2 = opt_fn(x)
-        self.assertTrue(same(res1, res2))
+        self.assertEqual(res1, res2)
 
     # Really annoying intersection of specialization and RandomValueSource
     # If we get a RandomValueSource with a single element tensor, we should return a ConstantVariable like other
@@ -131,7 +131,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         random.seed(1)
         res2 = opt_fn(x)
-        self.assertTrue(same(res1, res2))
+        self.assertEqual(res1, res2)
 
     def test_compiled_random_calls_are_random(self):
         # For compiled functions with random calls,
@@ -145,7 +145,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         for _ in range(5):
             res.append(fn(torch.ones(2)))
         for i in range(1, 5):
-            self.assertFalse(same(res[i - 1], res[i]))
+            self.assertNotEqual(res[i - 1], res[i])
 
     def test_random_call_with_while_loop(self):
         def fn(x):
@@ -161,13 +161,13 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager")(fn)
         random.seed(1)
         res2 = opt_fn(x)
-        self.assertTrue(same(res1, res2))
+        self.assertEqual(res1, res2)
 
         random.seed(10)
         res1 = fn(x)
         random.seed(10)
         res2 = opt_fn(x)
-        self.assertTrue(same(res1, res2))
+        self.assertEqual(res1, res2)
 
     def test_builtin_getitem(self):
         # builtin getitem args[0] is python list and args[1] is unspec
@@ -179,7 +179,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res = opt_fn(x, 48)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
 
     def test_use_and_specialize(self):
         cnt = CompileCounter()
@@ -192,10 +192,10 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             else:
                 return x + 1
 
-        self.assertTrue(same(fn(torch.tensor([5]), 2), 6))
-        self.assertTrue(same(fn(torch.tensor([6]), 2), 7))
-        self.assertTrue(same(fn(torch.tensor([5]), 3), 9))
-        self.assertTrue(same(fn(torch.tensor([4]), 3), 8))
+        self.assertEqual(fn(torch.tensor([5]), 2), 6)
+        self.assertEqual(fn(torch.tensor([6]), 2), 7)
+        self.assertEqual(fn(torch.tensor([5]), 3), 9)
+        self.assertEqual(fn(torch.tensor([4]), 3), 8)
         self.assertEqual(cnt.frame_count, 2)
 
     def test_no_recompiles(self):
@@ -205,10 +205,10 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return x + y
 
-        self.assertTrue(same(fn(torch.tensor([5]), 100), 105))
-        self.assertTrue(same(fn(torch.tensor([4]), 200), 204))
-        self.assertTrue(same(fn(torch.tensor([3]), 300), 303))
-        self.assertTrue(same(fn(torch.tensor([2]), 400), 402))
+        self.assertEqual(fn(torch.tensor([5]), 100), 105)
+        self.assertEqual(fn(torch.tensor([4]), 200), 204)
+        self.assertEqual(fn(torch.tensor([3]), 300), 303)
+        self.assertEqual(fn(torch.tensor([2]), 400), 402)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 
@@ -225,7 +225,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res = opt_fn(x, scaler)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
         self.assertEqual(ref.device, res.device)
 
     def test_unspec_float_precision(self):
@@ -247,7 +247,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res = opt_fn(x, scale_factor)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
 
     @unittest.expectedFailure  # fails as long as numpy scalars are 0D arrays
     def test_specializing_numpy_float_in_control_flow(self):
@@ -265,7 +265,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             y = t(1.23)
             ref = fn(x, y)
             res = opt_fn(x, y)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
 
     def test_shape_graph_break(self):
         from torch._dynamo.comptime import comptime

@@ -9,7 +9,6 @@ import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.testing import same
 from torch.testing._internal.common_utils import skipIfRocm, TEST_CUDA_GRAPH
 
 
@@ -117,7 +116,7 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
                 with self.subTest(i):
                     y_orig = y.clone()
                     loss = model(x, y).sum()
-                    self.assertTrue(same(y, y_orig + 3))
+                    self.assertEqual(y, y_orig + 3)
                     loss.backward()
 
         x = torch.randn(3, device="cuda", requires_grad=True)
@@ -136,7 +135,7 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
             for i in range(N_ITERS):
                 with self.subTest(i):
                     loss = model(x, y).sum()
-                    self.assertTrue(same(loss, torch.tensor(3.0, device="cuda")))
+                    self.assertEqual(loss, torch.tensor(3.0, device="cuda"))
                     loss.backward()
 
         x = torch.randn(1, device="cuda", requires_grad=True)
@@ -175,7 +174,7 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
             for i in range(N_ITERS):
                 with self.subTest(i):
                     rx = model(x)
-                    self.assertTrue(same(rx, torch.full((20,), 2.0, device="cuda:0")))
+                    self.assertEqual(rx, torch.full((20,), 2.0, device="cuda:0"))
 
         x = torch.empty(0, device="cuda:0")
         fn(x)
@@ -194,8 +193,8 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
             for i in range(N_ITERS):
                 with self.subTest(i):
                     rx, ry = model(x)
-                    self.assertTrue(same(rx, torch.full((20,), 2.0, device="cuda:0")))
-                    self.assertTrue(same(ry, torch.empty(0, device="cuda:0")))
+                    self.assertEqual(rx, torch.full((20,), 2.0, device="cuda:0"))
+                    self.assertEqual(ry, torch.empty(0, device="cuda:0"))
 
         x = torch.empty(20, device="cuda:0")
         fn(x)

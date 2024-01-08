@@ -6,7 +6,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
-from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
+from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
@@ -133,7 +133,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res = opt_fn(x)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
     def test_autograd_profiler(self):
@@ -153,7 +153,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res = opt_fn(x)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(res, res)
         self.assertEqual(cnts.frame_count, 2)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -240,7 +240,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         res = opt_fn(x)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 20)
 
@@ -280,7 +280,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         res = opt_fn(x)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 19)
 
@@ -300,13 +300,13 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         assert not torch.autograd._profiler_enabled()
         ref = fn(x)
         res = opt_fn(x)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
 
         with torch.autograd.profiler.profile():
             assert torch.autograd._profiler_enabled()
             ref = fn(x)
             res = opt_fn(x)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast(self):
@@ -376,7 +376,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         ref = fn(a, b)
         opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
         res = opt_fn(a, b)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION or TEST_WITH_ROCM,
@@ -665,8 +665,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         opt_f2 = torch.compile(backend="eager")(f2)
         res1 = opt_f1(x)
         res2 = opt_f2(x)
-        self.assertTrue(same(ref1, res1))
-        self.assertTrue(same(ref2, res2))
+        self.assertEqual(ref1, res1)
+        self.assertEqual(ref2, res2)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_decorator(self):
@@ -707,7 +707,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         ref = fn(a_float32, b_float32)
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         res = opt_fn(a_float32, b_float32)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
         self.assertTrue(res[0].dtype == torch.float16)
         self.assertTrue(res[1].dtype == torch.float16)
 
@@ -762,14 +762,14 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             ref = fn(x)
             res = opt_fn(x)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
             self.assertEqual(cnts.frame_count, 2)
             self.assertEqual(cnts.op_count, 2)
 
         with torch.enable_grad():
             ref = fn(x)
             res = opt_fn(x)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
             self.assertEqual(cnts.frame_count, 4)
             self.assertEqual(cnts.op_count, 4)
 
@@ -794,7 +794,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             ref = fn(x)
             res = opt_fn(x)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
             self.assertEqual(cnts.frame_count, 4)
             self.assertEqual(cnts.op_count, 4)
 
@@ -805,7 +805,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         with torch.enable_grad():
             ref = fn(x)
             res = opt_fn(x)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
             self.assertEqual(cnts.frame_count, 4)
             self.assertEqual(cnts.op_count, 4)
 

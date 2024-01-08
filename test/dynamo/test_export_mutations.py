@@ -16,7 +16,7 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
         real_result = mod(arg)
         graph, _ = torch._dynamo.export(mod)(arg)
         result = graph(arg)
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
 
     def test_module_attribute_mutation_violation_positive_1(self):
         # Mutating attribute with a Tensor type
@@ -126,7 +126,7 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
         arg = torch.Tensor(3, 2)
         real_result = mod(arg)
         opt_mod = torch._dynamo.optimize("eager", nopython=True)(mod)
-        self.assertTrue(torch._dynamo.utils.same(opt_mod(arg), real_result))
+        self.assertEqual(opt_mod(arg), real_result)
 
 
 if __name__ == "__main__":

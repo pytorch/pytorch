@@ -3,7 +3,6 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.testing import same
 
 try:
     from . import utils
@@ -57,7 +56,8 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res1 = opt_fn(x)
         res2 = fn(x)
-        self.assertTrue(same(res2 - res1, torch.ones(10)))
+        self.assertEqual(res2 - res1, torch.ones(10))
+        self.assertEqual(res2 - res1, torch.ones(10))
 
     def test_store_global_2(self):
         def fn(x):
@@ -74,7 +74,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         """Wrap the second call with torch._dynamo as well"""
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res2 = opt_fn(x)
-        self.assertTrue(same(res2 - res1, 2 * torch.ones(10)))
+        self.assertEqual(res2 - res1, 2 * torch.ones(10))
 
     def test_store_global_new(self):
         def fn(x):
@@ -87,7 +87,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res1 = opt_fn(x)
-        self.assertTrue(same(res1, x + x + 1))
+        self.assertEqual(res1, x + x + 1)
 
     def test_store_global_list(self):
         def fn(x):
@@ -105,7 +105,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res1 = opt_fn(x)
         res2 = fn(x)
-        self.assertTrue(same(res2 - res1, torch.ones(10)))
+        self.assertEqual(res2 - res1, torch.ones(10))
 
     def test_store_global_list_2(self):
         def fn(x):
@@ -119,7 +119,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res1 = opt_fn(x)
         res2 = fn(x)
-        self.assertTrue(same(res2 - res1, torch.ones(10)))
+        self.assertEqual(res2 - res1, torch.ones(10))
 
     def test_store_global_dict(self):
         def fn(x):
@@ -137,7 +137,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res1 = opt_fn(x)
         res2 = fn(x)
-        self.assertTrue(same(res2 - res1, torch.ones(10)))
+        self.assertEqual(res2 - res1, torch.ones(10))
 
     def test_store_global_dict_2(self):
         def fn(x):
@@ -151,7 +151,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res1 = opt_fn(x)
         res2 = fn(x)
-        self.assertTrue(same(res2 - res1, torch.ones(10)))
+        self.assertEqual(res2 - res1, torch.ones(10))
 
     def test_store_global_object(self):
         def fn(x):
@@ -165,7 +165,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res1 = opt_fn(x)
         res2 = fn(x)
-        self.assertTrue(same(res2 - res1, torch.ones(10)))
+        self.assertEqual(res2 - res1, torch.ones(10))
 
     def test_store_global_cross_file(self):
         def fn(x):
@@ -178,7 +178,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res1 = opt_fn(x)
         res2 = fn(x)
-        self.assertTrue(same(res2 - res1, torch.ones(10)))
+        self.assertEqual(res2 - res1, torch.ones(10))
 
     def test_store_global_inline_1(self):
         # Borrowed from test_python_autograd.py
