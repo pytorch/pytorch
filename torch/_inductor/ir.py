@@ -3433,13 +3433,9 @@ class ConcatKernel(NopKernel):
             )
             concat_kernel.inputs.append(input_buffer)
 
-            if isinstance(input.data, BaseView):
-                input_unwrapped = input.data.unwrap_view()
-            else:
-                input_unwrapped = input.data
-
             if (
-                copy_required and len(inputs) >= 10
+                copy_required
+                and len(inputs) >= 10
                 and input.get_device().type == "cuda"
                 and not is_dynamic(input_buffer)
             ):
@@ -3464,7 +3460,8 @@ class ConcatKernel(NopKernel):
         )
 
     @classmethod
-    def realize_into(cls, src, dst, with_copy=False):
+    def realize_into(cls, src, dst) -> (IRNode, bool):
+        copy_required = False
         # Attempt to turn this into a ReinterpretView rather than assert.
         # This has concessions around layout, as as_storage_and_layout
         # can cause us to go from flexible to fixed layout.
@@ -3475,15 +3472,16 @@ class ConcatKernel(NopKernel):
         assert isinstance(dst, ReinterpretView), dst
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
-            return cls.realize_into(src.data, dst, with_copy)
+            return cls.realize_into(src.data, dst)
         if isinstance(src, StorageBox):
             src.realize()
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
             assert hasattr(src.data, "layout")
             if cls.can_realize_into_without_copy(src):
                 src.data.layout = AliasedLayout(dst)
-                return src.data, with_copy
+                return src.data, copy_required
         # introduce a copy
+        copy_required = True
         pw = Pointwise.create(
             device=src.get_device(),
             dtype=src.get_dtype(),
@@ -3493,7 +3491,8 @@ class ConcatKernel(NopKernel):
                 for a, b in zip(src.get_size(), dst.get_size())
             ],
         )
-        return cls.realize_into(pw, dst, with_copy=True)
+        realized, _ = cls.realize_into(pw, dst)
+        return realized, copy_required
 
     def should_allocate(self):
         return True
