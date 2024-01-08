@@ -296,7 +296,7 @@
 
 - func: _shape_as_tensor(Tensor self) -> Tensor
 
-- func: dropout(Tensor input, float p, bool train) -> Tensor
+- func: dropout(Tensor(a) input, float p, bool train) -> Tensor(a)
   tags: nondeterministic_seeded
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
