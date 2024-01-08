@@ -10,6 +10,9 @@ DLDataType getDLDataType(const Tensor& t) {
   dtype.bits = t.element_size() * 8;
   switch (t.scalar_type()) {
     case ScalarType::Byte:
+    case ScalarType::UInt16:
+    case ScalarType::UInt32:
+    case ScalarType::UInt64:
       dtype.code = DLDataTypeCode::kDLUInt;
       break;
     case ScalarType::Char:

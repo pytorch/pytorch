@@ -51,6 +51,7 @@
 
 namespace {
 
+#ifdef USE_C10D_NCCL
 bool registerGilChecker() {
   c10d::get_gil_checker().emplace([]() {
     // basically if this function can acquire the gil, it will return quickly.
@@ -64,6 +65,7 @@ bool registerGilChecker() {
 }
 
 static bool registered = registerGilChecker();
+#endif // USE_C10D_NCCL
 
 // Wrapper to ensure GIL is released before destructing ProcessGroupGloo
 // TODO: move this somewhere more generally useful
