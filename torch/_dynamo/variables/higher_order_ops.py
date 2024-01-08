@@ -1,7 +1,6 @@
 import contextlib
 import functools
 import itertools
-import inspect
 import logging
 
 from typing import Dict, List, Optional
@@ -21,7 +20,6 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
 
 from ..exc import (
-    SkipFrame,
     UncapturedHigherOrderOpError,
     unimplemented,
     Unsupported,
@@ -444,9 +442,6 @@ class FunctorchVmapHigherOrderVariable(UserFunctionVariable):
             # trying to trace it again
             from torch._C._dynamo import eval_frame
             eval_frame.skip_code(args[0].get_code())
-
-            # call vmap decrement nesting in case of failure
-            torch._C._functorch._vmap_decrement_nesting()
 
             # Graph break
             raise
