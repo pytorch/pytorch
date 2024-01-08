@@ -43,13 +43,13 @@ api::GPUMemoryLayout get_gpu_memory_layout(
  * TensorImpl.h was used as a reference.
  */
 c10::SmallVector<int64_t, 6u> calc_contiguous_strides(const IntArrayRef sizes) {
-  int64_t ndim = sizes.size();
+  int64_t ndim = static_cast<int64_t>(sizes.size());
   c10::SmallVector<int64_t, 6u> strides(ndim);
 
   int64_t running_product = 1;
   if (ndim >= 1) {
     strides[ndim - 1] = running_product;
-    for (int i = sizes.size() - 2; i >= 0; --i) {
+    for (int i = static_cast<int>(sizes.size()) - 2; i >= 0; --i) {
       running_product *= sizes[i + 1];
       strides[i] = running_product;
     }

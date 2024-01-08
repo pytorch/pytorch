@@ -3080,7 +3080,7 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
 
   // because MAGMA's GEEV takes CPU inputs and returns CPU outputs
   // 'values' tensor that is on GPU device can't be used directly
-  values_tmp_needed |= values.is_cuda();
+  values_tmp_needed |= (!values.is_cpu());
 
   // determine the appropriate scalar_type for the temporary tensors
   ScalarType values_type = input.scalar_type();

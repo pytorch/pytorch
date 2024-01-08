@@ -12,6 +12,8 @@ on:
   push:
     tags:
       - ciflow/periodic/*
+    branches:
+      - release/*
   workflow_dispatch:
 
 concurrency:
@@ -155,34 +157,6 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "ubuntu-latest" },
         ]}
-
-  macos-12-py3-x86-64-build:
-    name: macos-12-py3-x86-64
-    if: github.event_name != 'schedule' || github.event.schedule == '45 4,12,20 * * 1-5' || github.event.schedule == '45 12 * * 0,6' || github.event.schedule == '29 8 * * *'
-
-    uses: ./.github/workflows/_mac-build.yml
-    with:
-      build-environment: macos-12-py3-x86-64
-      xcode-version: "13.3.1"
-      runner-type: macos-12-xl
-      build-generates-artifacts: true
-      sccache-use-gha: true
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "macos-12" },
-          { config: "default", shard: 2, num_shards: 4, runner: "macos-12" },
-          { config: "default", shard: 3, num_shards: 4, runner: "macos-12" },
-          { config: "default", shard: 4, num_shards: 4, runner: "macos-12" },
-        ]}
-
-  macos-12-py3-x86-64-test:
-    name: macos-12-py3-x86-64
-    uses: ./.github/workflows/_mac-test.yml
-    needs: macos-12-py3-x86-64-build
-    with:
-      build-environment: macos-12-py3-x86-64
-      test-matrix: ${{ needs.macos-12-py3-x86-64-build.outputs.test-matrix }}
-      arch: x86_64
 
   android-emulator-build-test:
     name: android-emulator-build-test
