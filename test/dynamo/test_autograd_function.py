@@ -625,7 +625,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
             @staticmethod
             def jvp(ctx, x_t):
-                if jvp_err:
+                if jvp_err:  # noqa: F821
                     return x_t
                 else:
                     return x_t.mul_(2)
@@ -641,7 +641,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
             @staticmethod
             def jvp(ctx, x_t, y_t):
-                return x_t + y_t, fn(x_t)
+                return x_t + y_t, fn(x_t)  # noqa: F821
 
         class MyFn3(torch.autograd.Function):
             @staticmethod
@@ -835,6 +835,26 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         foo(torch.randn(2, requires_grad=True))
         self.assertEqual(cnts.frame_count, 1)
+
+    def test_default_values(self):
+        from torch.autograd import Function
+
+        class Foo(Function):
+            @staticmethod
+            def forward(ctx, x, alpha=0.99):
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out
+
+        @torch.compile
+        def foo(x):
+            return Foo.apply(x)
+
+        # Make sure guards for default values do not crash
+        foo(torch.randn(2))
+        foo(torch.randn(2, requires_grad=True))
 
 
 if __name__ == "__main__":
