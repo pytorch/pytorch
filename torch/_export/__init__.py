@@ -156,11 +156,10 @@ def capture_pre_autograd_graph(
             _restore_state_dict(f, m)
 
         flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
-        range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
+        range_constraints = _process_constraints(m, 0, flat_args)
         module = _create_stateful_graph_module(
             m,
             range_constraints=range_constraints,
-            equality_constraints=equality_constraints,
         )
 
     def _train(self, mode: bool = True):
@@ -339,7 +338,10 @@ def aot_compile(
             args,
             kwargs,
             constraints,
-            disable_constraint_solver=disable_constraint_solver
+            disable_constraint_solver=disable_constraint_solver,
+            # Disabling this flag, because instead we can rely on the mapping
+            # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
+            restore_fqn=False,
         )
     flat_example_inputs = pytree.arg_tree_leaves(*args, **(kwargs or {}))
 
