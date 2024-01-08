@@ -72,7 +72,7 @@ def _inplace_generalized_scatter(inp, src, view_ops):
 
 def _generalized_scatter(inp, src, view_ops):
     out = inp.clone()
-    return _inplace_generalized_scatter(inp, src, view_ops)
+    return _inplace_generalized_scatter(out, src, view_ops)
 
 
 def _decompose_generalized_scatter(graph, node):

@@ -5644,6 +5644,34 @@ class CommonTemplate:
             ],
         )
 
+    def test_slice_scatter_reinplace(self):
+        class M(nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.linear1 = nn.Linear(64, 64, bias=False)
+                self.cache_k = torch.zeros((56, 384, 8, 64), device=device)
+
+            def forward(self, x, start_pos):
+                bsz, seqlen, _, _ = x.shape
+                xk = self.linear1(x)
+                with torch.no_grad():
+                    self.cache_k[:bsz, start_pos : start_pos + seqlen] = xk
+                keys = self.cache_k[:bsz, : start_pos + seqlen]
+                scores = torch.matmul(xk.transpose(1, 2), keys.transpose(1, 2).transpose(2, 3))
+                return scores
+
+        kv_cache_module = M(self.device)
+        inp = torch.randn(1, 32, 8, 64)
+
+        # Test that the cache update is reinplaced such that the cache is updated inplace
+        # rather than copy-scatter-copy-back.
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        with torch.no_grad():
+            self.common(kv_cache_module, (inp, 1), check_lowp=False)
+        assertGeneratedKernelCountEqual(self, 1)
+
+
     def test_scatter1(self):
         def fn(a, dim, index, b):
             return aten.scatter(a, dim, index, b)
@@ -7826,6 +7854,10 @@ class CommonTemplate:
     def test_scaled_dot_product_attention(self):
         if self.device == "cuda" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
             raise unittest.SkipTest("Can't run flash attention on this platform")
+        if self.device == "cuda" and TEST_WITH_ROCM:
+            raise unittest.SkipTest(
+                "Flash attention support is incomplete on this platform"
+            )
 
         def fn(q, k, v):
             return torch.nn.functional.scaled_dot_product_attention(
