@@ -746,7 +746,7 @@ void gemm_and_bias(
 #endif
   }
 
-  if (bias) {
+  if (bias != nullptr) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
   }

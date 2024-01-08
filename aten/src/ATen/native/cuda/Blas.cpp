@@ -322,43 +322,75 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
 #if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
   if (useLtInterface) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        at::ScalarType::Half,
-        at::ScalarType::BFloat16,
-        scalar_type,
-        "addmm_cuda_lt",
-        [&] {
-          at::cuda::blas::gemm_and_bias<scalar_t>(
-              args.transa == 't',
-              args.transb == 't',
-              args.m,
-              args.n,
-              args.k,
-              alpha.to<at::opmath_type<scalar_t>>(),
-              args.mata->data_ptr<scalar_t>(),
-              args.lda,
-              args.matb->data_ptr<scalar_t>(),
-              args.ldb,
-#if defined(USE_ROCM)
-              (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
-#else
-              self.const_data_ptr<scalar_t>(),
-#endif
-              args.result->data_ptr<scalar_t>(),
-              args.result_ld,
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11080) || defined(USE_ROCM)
-              activation_to_gemm_and_blas_arg(activation)
-#else
-              // GELU is not supported (and does not compile!) prior
-              // to CUDA 11.4. Have observed accuracy issues with
-              // GELU epilogue in 11.4; disabling the GELU epilogue
-              // path for CUDA version < 11.8.
-              activation != Activation::GELU
-              ? activation_to_gemm_and_blas_arg(activation)
-              : cuda::blas::GEMMAndBiasActivationEpilogue::None
-#endif
-          );
-        });
+    if (&result != &self) {
+        AT_DISPATCH_FLOATING_TYPES_AND2(
+            at::ScalarType::Half,
+            at::ScalarType::BFloat16,
+            scalar_type,
+            "addmm_cuda_lt",
+            [&] {
+              at::cuda::blas::gemm_and_bias<scalar_t>(
+                  args.transa == 't',
+                  args.transb == 't',
+                  args.m,
+                  args.n,
+                  args.k,
+                  alpha.to<at::opmath_type<scalar_t>>(),
+                  args.mata->data_ptr<scalar_t>(),
+                  args.lda,
+                  args.matb->data_ptr<scalar_t>(),
+                  args.ldb,
+                  self.const_data_ptr<scalar_t>(),
+                  args.result->data_ptr<scalar_t>(),
+                  args.result_ld,
+    #if (defined(CUDA_VERSION) && CUDA_VERSION >= 11080) || defined(USE_ROCM)
+                  activation_to_gemm_and_blas_arg(activation)
+    #else
+                  // GELU is not supported (and does not compile!) prior
+                  // to CUDA 11.4. Have observed accuracy issues with
+                  // GELU epilogue in 11.4; disabling the GELU epilogue
+                  // path for CUDA version < 11.8.
+                  activation != Activation::GELU
+                  ? activation_to_gemm_and_blas_arg(activation)
+                  : cuda::blas::GEMMAndBiasActivationEpilogue::None
+    #endif
+              );
+            });
+    } else {
+        AT_DISPATCH_FLOATING_TYPES_AND2(
+            at::ScalarType::Half,
+            at::ScalarType::BFloat16,
+            scalar_type,
+            "addmm_cuda_lt",
+            [&] {
+              at::cuda::blas::gemm_and_bias<scalar_t>(
+                  args.transa == 't',
+                  args.transb == 't',
+                  args.m,
+                  args.n,
+                  args.k,
+                  alpha.to<at::opmath_type<scalar_t>>(),
+                  args.mata->data_ptr<scalar_t>(),
+                  args.lda,
+                  args.matb->data_ptr<scalar_t>(),
+                  args.ldb,
+                  nullptr,
+                  args.result->data_ptr<scalar_t>(),
+                  args.result_ld,
+    #if (defined(CUDA_VERSION) && CUDA_VERSION >= 11080) || defined(USE_ROCM)
+                  activation_to_gemm_and_blas_arg(activation)
+    #else
+                  // GELU is not supported (and does not compile!) prior
+                  // to CUDA 11.4. Have observed accuracy issues with
+                  // GELU epilogue in 11.4; disabling the GELU epilogue
+                  // path for CUDA version < 11.8.
+                  activation != Activation::GELU
+                  ? activation_to_gemm_and_blas_arg(activation)
+                  : cuda::blas::GEMMAndBiasActivationEpilogue::None
+    #endif
+              );
+            });
+    }
   } else
 #endif
   {
