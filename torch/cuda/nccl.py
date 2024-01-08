@@ -32,9 +32,8 @@ def is_available(tensors):
 
 
 def version():
-    # check if nccl is supported. If not found
-    # return invalid version
-    if not (hasattr(torch._C, "_nccl_version")):
+    if not hasattr(torch._C, "_nccl_version"):
+        warnings.warn("PyTorch is not compiled with NCCL support")
         return (-1, -1, -1)
 
     ver = torch._C._nccl_version()
