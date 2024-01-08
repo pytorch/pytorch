@@ -439,6 +439,21 @@ class TestInductorDynamic(TestCase):
         actual = cfn(a, b)
         self.assertEqual(expect, actual)
 
+    def test_float_is_integer(self, device):
+        def fn(x, mul, dim=-1):
+            size = x.size(dim)
+            m = size / mul
+            if m.is_integer():
+                return m
+            return size
+
+        a = torch.randn((3, 6, 4, 2), device=device)
+        cfn = self.compile_fn(fn)
+
+        expect = fn(a, 2)
+        actual = cfn(a, 2)
+        self.assertEqual(expect, actual)
+
     @onlyCPU
     def test_arithmetic_constant_folding(self, device):
         def test(fn):

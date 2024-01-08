@@ -20,8 +20,7 @@
 #include <ATen/ops/_functional_sym_constrain_range_for_size_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void sym_constrain_range(
     const Scalar& size,
@@ -88,5 +87,4 @@ Tensor _make_dep_token_cpu(
       {}, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

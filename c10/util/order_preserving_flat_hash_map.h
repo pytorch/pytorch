@@ -8,6 +8,7 @@
 // - make sherwood_v3_table::convertible_to_iterator public because GCC5 seems
 // to have issues with it otherwise
 // - fix compiler warnings in operator templated_iterator<const value_type>
+// - make use of 'if constexpr' and eliminate AssignIfTrue template
 
 //          Copyright Malte Skarupke 2017.
 // Distributed under the Boost Software License, Version 1.0.
@@ -18,20 +19,18 @@
 
 #pragma once
 
-#include <c10/util/C++17.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <iterator>
+#include <memory>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
-
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
-#endif
 
 #ifdef _MSC_VER
 #define SKA_NOINLINE(...) __declspec(noinline) __VA_ARGS__
@@ -141,9 +140,11 @@ struct KeyOrValueEquality : functor_storage<bool, key_equal> {
 static constexpr int8_t min_lookups = 4;
 template <typename T>
 struct sherwood_v3_entry {
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   sherwood_v3_entry() {}
   sherwood_v3_entry(int8_t distance_from_desired)
       : distance_from_desired(distance_from_desired) {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~sherwood_v3_entry() {}
 
   bool has_value() const {
@@ -176,7 +177,7 @@ struct sherwood_v3_entry {
 };
 
 inline int8_t log2(uint64_t value) {
-  static constexpr int8_t table[64] = {
+  static constexpr std::array<int8_t, 64> table = {
       63, 0,  58, 1,  59, 47, 53, 2,  60, 39, 48, 27, 54, 33, 42, 3,
       61, 51, 37, 40, 49, 18, 28, 20, 55, 30, 34, 11, 43, 14, 22, 4,
       62, 57, 46, 52, 38, 26, 32, 41, 50, 36, 17, 19, 29, 10, 13, 21,
@@ -189,21 +190,6 @@ inline int8_t log2(uint64_t value) {
   value |= value >> 32;
   return table[((value - (value >> 1)) * 0x07EDD5E59A4E28C2) >> 58];
 }
-
-template <typename T, bool>
-struct AssignIfTrue {
-  void operator()(T& lhs, const T& rhs) {
-    lhs = rhs;
-  }
-  void operator()(T& lhs, T&& rhs) {
-    lhs = std::move(rhs);
-  }
-};
-template <typename T>
-struct AssignIfTrue<T, false> {
-  void operator()(T&, const T&) {}
-  void operator()(T&, T&&) {}
-};
 
 inline uint64_t next_power_of_two(uint64_t i) {
   --i;
@@ -385,15 +371,13 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
       return *this;
 
     clear();
-    if (AllocatorTraits::propagate_on_container_copy_assignment::value) {
+    if constexpr (AllocatorTraits::propagate_on_container_copy_assignment::
+                      value) {
       if (static_cast<EntryAlloc&>(*this) !=
           static_cast<const EntryAlloc&>(other)) {
         reset_to_empty_state();
       }
-      AssignIfTrue<
-          EntryAlloc,
-          AllocatorTraits::propagate_on_container_copy_assignment::value>()(
-          *this, other);
+      static_cast<EntryAlloc&>(*this) = other;
     }
     _max_load_factor = other._max_load_factor;
     static_cast<Hasher&>(*this) = other;
@@ -405,13 +389,11 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
   sherwood_v3_table& operator=(sherwood_v3_table&& other) noexcept {
     if (this == std::addressof(other))
       return *this;
-    else if (AllocatorTraits::propagate_on_container_move_assignment::value) {
+    else if constexpr (AllocatorTraits::propagate_on_container_move_assignment::
+                           value) {
       clear();
       reset_to_empty_state();
-      AssignIfTrue<
-          EntryAlloc,
-          AllocatorTraits::propagate_on_container_move_assignment::value>()(
-          *this, std::move(other));
+      static_cast<EntryAlloc&>(*this) = std::move(other);
       swap_pointers(other);
     } else if (
         static_cast<EntryAlloc&>(*this) == static_cast<EntryAlloc&>(other)) {
@@ -488,9 +470,9 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
     // otherwise.
     template <
         class target_type = const value_type,
-        class = typename std::enable_if<
-            std::is_same<target_type, const value_type>::value &&
-            !std::is_same<target_type, value_type>::value>::type>
+        class = std::enable_if_t<
+            std::is_same_v<target_type, const value_type> &&
+            !std::is_same_v<target_type, value_type>>>
     operator templated_iterator<target_type>() const {
       return {current};
     }
@@ -529,6 +511,7 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
     return end();
   }
   const_iterator find(const FindKey& key) const {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     return const_cast<sherwood_v3_table*>(this)->find(key);
   }
   uint64_t count(const FindKey& key) const {
@@ -599,8 +582,9 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
   void rehash(uint64_t num_buckets) {
     num_buckets = std::max(
         num_buckets,
-        static_cast<uint64_t>(
-            std::ceil(num_elements / static_cast<double>(_max_load_factor))));
+        static_cast<uint64_t>(std::ceil(
+            static_cast<double>(num_elements) /
+            static_cast<double>(_max_load_factor))));
     if (num_buckets == 0) {
       reset_to_empty_state();
       return;
@@ -742,7 +726,7 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
     rehash_for_other_container(*this);
   }
 
-  void swap(sherwood_v3_table& other) {
+  void swap(sherwood_v3_table& other) noexcept {
     using std::swap;
     swap_pointers(other);
     swap(static_cast<ArgumentHash&>(*this), static_cast<ArgumentHash&>(other));
@@ -824,7 +808,8 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
 
   uint64_t num_buckets_for_reserve(uint64_t num_elements_) const {
     return static_cast<uint64_t>(std::ceil(
-        num_elements_ / std::min(0.5, static_cast<double>(_max_load_factor))));
+        static_cast<double>(num_elements_) /
+        std::min(0.5, static_cast<double>(_max_load_factor))));
   }
   void rehash_for_other_container(const sherwood_v3_table& other) {
     rehash(
@@ -920,8 +905,9 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
       Args&&... args) {
     using std::swap;
     if (num_slots_minus_one == 0 || distance_from_desired == max_lookups ||
-        num_elements + 1 >
-            (num_slots_minus_one + 1) * static_cast<double>(_max_load_factor)) {
+        static_cast<double>(num_elements + 1) >
+            static_cast<double>(num_slots_minus_one + 1) *
+                static_cast<double>(_max_load_factor)) {
       grow();
       return emplace(std::forward<Key>(key), std::forward<Args>(args)...);
     } else if (current_entry->is_empty()) {
@@ -1601,6 +1587,7 @@ struct prime_number_hash_policy {
     // ClosestPrime(p * 2^(1/3)) and ClosestPrime(p * 2^(2/3)) and put those in
     // the gaps
     // 5. get PrevPrime(2^64) and put it at the end
+    // NOLINTNEXTLINE(*c-array*)
     static constexpr const uint64_t prime_list[] = {
         2llu,
         3llu,
@@ -1788,6 +1775,7 @@ struct prime_number_hash_policy {
         11493228998133068689llu,
         14480561146010017169llu,
         18446744073709551557llu};
+    // NOLINTNEXTLINE(*c-array*)
     static constexpr uint64_t (*const mod_functions[])(uint64_t) = {
         &mod0,
         &mod2,
@@ -2026,7 +2014,7 @@ struct fibonacci_hash_policy {
 
   int8_t next_size_over(uint64_t& size) const {
     size = std::max(uint64_t(2), detailv3::next_power_of_two(size));
-    return 64 - detailv3::log2(size);
+    return static_cast<int8_t>(64 - detailv3::log2(size));
   }
   void commit(int8_t shift_) {
     shift = shift_;
@@ -2137,9 +2125,7 @@ class order_preserving_flat_hash_map
       return false;
     for (const typename Table::value_type& value : lhs) {
       auto found = rhs.find(value.first);
-      if (found == rhs.end())
-        return false;
-      else if (value.second != found->second)
+      if (found == rhs.end() || value.second != found->second)
         return false;
     }
     return true;
@@ -2228,5 +2214,3 @@ struct power_of_two_std_hash : std::hash<T> {
 };
 
 } // namespace ska_ordered
-
-C10_CLANG_DIAGNOSTIC_POP()
