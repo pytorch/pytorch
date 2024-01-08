@@ -1583,6 +1583,18 @@ def forward(self, arg_0):
         ):
             _ = Constraint()
 
+    def test_predispatch_export_with_autograd_op(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                with torch.enable_grad():
+                    return x + x
+
+        with torch.no_grad():
+            ep = _export(Foo(), (torch.ones(10),), pre_dispatch=True)
+
     def test_train_eval_on_exported_preautograd_module(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2204,7 +2216,7 @@ def forward(self, l_x_):
     def test__scaled_dot_product_flash_attention(self):
         class Module(torch.nn.Module):
             def forward(self, q, k, v):
-                res = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v)
+                res = torch.nn.functional.scaled_dot_product_attention(q, k, v)
                 return res[0]
 
         m = Module()
