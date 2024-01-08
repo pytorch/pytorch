@@ -20,6 +20,7 @@ from typing import (
     Set,
     Tuple,
     Type,
+    TYPE_CHECKING,
 )
 
 import torch
@@ -43,6 +44,9 @@ from .api import (
     StateDictConfig,
     StateDictType,
 )
+
+if TYPE_CHECKING:
+    from ._flat_param import FlatParamHandle
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
