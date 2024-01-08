@@ -87,7 +87,7 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
-  dispatch_sync(mpsStream->queue(), ^() {
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       NSError* error = nil;
       constexpr uint32_t nOffsets = 3;
