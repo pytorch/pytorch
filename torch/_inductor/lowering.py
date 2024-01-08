@@ -3150,8 +3150,8 @@ def masked_scatter_with_index(self, mask, source_idx, source):
     return view(result_flat, self.get_size())
 
 
-@register_lowering(aten._masked_index, type_promotion_kind=None)
-def _masked_index(self, mask, indices, fill):
+@register_lowering(aten._unsafe_masked_index, type_promotion_kind=None)
+def _unsafe_masked_index(self, mask, indices, fill):
     ranges, _unsafe_index_fn = index_impl_helper(self, indices, check=False)
     mask_loader = mask.make_loader()
 

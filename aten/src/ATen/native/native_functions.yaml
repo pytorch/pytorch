@@ -3033,10 +3033,16 @@
 
 # Used by inductor to generate masked loads
 # Note that we don't support boolean indexing, to avoid dynamic output shapes
-- func: _masked_index(Tensor self, Tensor mask, Tensor?[] indices, Scalar fill) -> Tensor
+- func: _unsafe_masked_index(Tensor self, Tensor mask, Tensor?[] indices, Scalar fill) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: _masked_index
+    CompositeExplicitAutograd: _unsafe_masked_index
+
+- func: _unsafe_masked_index_put(Tensor self, Tensor mask, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _unsafe_masked_index_put
 
 - func: index_copy.out(Tensor self, int dim, Tensor index, Tensor source, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
