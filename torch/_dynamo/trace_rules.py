@@ -21,6 +21,7 @@ from .utils import hashable, is_function, NP_SUPPORTED_MODULES
 
 from .variables import (
     FunctorchVmapHigherOrderVariable,
+    UserFunctionVariable,
     SkipFilesVariable,
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
@@ -151,6 +152,9 @@ manual_torch_name_rule_map = {
     "torch._functorch.vmap.unwrap_batched": UserFunctionVariable,
     "torch._functorch.vmap.vmap_impl": FunctorchVmapHigherOrderVariable,
     "torch._functorch.vmap.wrap_batched": UserFunctionVariable,
+    # "torch._constrain_as_size": UserFunctionVariable,
+    # "torch._constrain_as_value": UserFunctionVariable,
+    "torch._tensor._convert": UserFunctionVariable,
 }
 
 
@@ -2978,26 +2982,29 @@ E.g, the lookup result of `torch.sin` is `TorchInGraphFunctionVariable`.
 """
 
 
-def lookup(obj):
-    if not hashable(obj):
-        return None
-    # Custom allow/disallow in graph takes precedence over the `torch_name_rule_map`.
-    if callable(obj) and is_callable_disallowed(obj):
-        return SkipFilesVariable
-    if callable(obj) and is_callable_allowed(obj):
-        return TorchInGraphFunctionVariable
-    # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
-    if isinstance(obj, functools._lru_cache_wrapper) or (
-        is_function(obj) and hasattr(obj, "__wrapped__")
-    ):
-        # TODO: Weird case, should not unwrap if it's wrapped as _VariableFunctionsClass.
-        if not (
-            hasattr(obj, "__qualname__")
-            and str(obj.__qualname__).startswith("_VariableFunctionsClass")
+def lookup(obj, filename=None, is_inlined_call=False):
+    if obj is not None:
+        if not hashable(obj):
+            return None
+        # Custom allow/disallow in graph takes precedence over the `torch_name_rule_map`.
+        if callable(obj) and is_callable_disallowed(obj):
+            return SkipFilesVariable
+        if callable(obj) and is_callable_allowed(obj):
+            return TorchInGraphFunctionVariable
+        # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
+        if isinstance(obj, functools._lru_cache_wrapper) or (
+            is_function(obj) and hasattr(obj, "__wrapped__")
         ):
-            obj = obj.__wrapped__
-    rule = get_torch_obj_rule_map().get(obj, None)
-    if rule is None and is_aten_op_or_tensor_method(obj):
-        return TorchInGraphFunctionVariable
+            # TODO: Weird case, should not unwrap if it's wrapped as _VariableFunctionsClass.
+            if not (
+                hasattr(obj, "__qualname__")
+                and str(obj.__qualname__).startswith("_VariableFunctionsClass")
+            ):
+                obj = obj.__wrapped__
+        rule = get_torch_obj_rule_map().get(obj, None)
+        if rule is None and is_aten_op_or_tensor_method(obj):
+            return TorchInGraphFunctionVariable
+    if torch._dynamo.skipfiles._check_file(filename):
+        return SkipFilesVariable
     else:
-        return rule
+        return UserFunctionVariable

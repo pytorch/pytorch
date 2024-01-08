@@ -36,6 +36,7 @@ import torch.distributed
 import torch.utils._content_store
 from .utils import getfile
 
+from .variables import SkipFilesVariable
 from .variables.functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
@@ -152,15 +153,6 @@ def _module_dir(m: types.ModuleType):
     return _strip_init_py(m.__file__)
 
 
-# TODO: Add a decoractor for easily adding functions to FUNC_INLINELIST
-# after resolving all circular import issues.
-FUNC_INLINELIST = {
-    "torch._constrain_as_size",
-    "torch._constrain_as_value",
-    "torch._tensor._convert",
-}
-
-
 # These are legacy workarounds, don't add new modules to this list.
 # Please use the MOD_INLINELIST instead to force inline functions under particular modules.
 LEGACY_MOD_INLINELIST = {
@@ -226,18 +218,6 @@ MOD_INLINELIST = {
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
     MOD_INLINELIST.add("torch.distributed._functional_collectives")
-
-
-# TODO: support adding bound method into this list
-@functools.lru_cache(None)
-def get_func_inlinelist():
-    inlinelist = set()
-    for f in FUNC_INLINELIST:
-        module_name, fn_name = f.rsplit(".", 1)
-        m = importlib.import_module(module_name)
-        fn = getattr(m, fn_name)
-        inlinelist.add(fn.__code__)
-    return inlinelist
 
 
 @functools.lru_cache(None)
@@ -328,6 +308,22 @@ def check_file(filename, is_inlined_call=False):
         return SkipResult(False, "inlined by default")
 
 
+def _check_file(filename, is_inlined_call=False):
+    """Should skip this file?"""
+    if filename is None:
+        return True
+    if any(filename.startswith(d) for d in get_legacy_mod_inlinelist()):
+        return False
+    if is_inlined_call and is_torch_inline_allowed(filename):
+        return False
+    if is_fbcode and bool(FBCODE_SKIP_DIRS_RE.match(filename)):
+        return True
+    if bool(SKIP_DIRS_RE.match(filename)):
+        return True
+    else:
+        return False
+
+
 @dataclasses.dataclass
 class FunctionInfo:
     py_obj: Optional[object]
@@ -387,20 +383,25 @@ def check_verbose(obj, is_inlined_call=False):
         )
     else:
         fi = FunctionInfo(obj, None, getfile(obj), None)
-    # Go through function based skip/inline rules.
-    if fi.code in get_func_inlinelist():
-        return SkipResult(
-            False,
-            "inlined according skipfiles.FUNC_INLINELIST",
-        )
+
     if is_inlined_call:
         if fi.name == "patched_init":
             return SkipResult(True, "patched init cannot be inlined.")
         elif fi.name == "__torch_function__":
             return SkipResult(False, "allow inlining __torch_function__")
-
-    # Go through file based skip/inline rules.
-    return check_file(fi.filename, is_inlined_call)
+    # Go through function based skip/inline rules.
+    rule = torch._dynamo.trace_rules.lookup(fi.py_obj, fi.filename)
+    if rule == UserFunctionVariable:
+        return SkipResult(
+            False,
+            "inlined according trace_rules.lookup",
+        )
+    else:
+        assert rule == SkipFilesVariable
+        return SkipResult(
+            True,
+            "skipped according trace_rules.lookup",
+        )
 
 
 def check(obj, is_inlined_call=False):
