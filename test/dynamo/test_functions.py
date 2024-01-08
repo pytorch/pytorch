@@ -1729,7 +1729,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out.size(), compiled_out.size())
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
- 
+
     def test_dataclass_factory(self):
         @dataclass
         class Output:
