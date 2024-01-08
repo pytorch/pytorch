@@ -2216,7 +2216,7 @@ def forward(self, l_x_):
     def test__scaled_dot_product_flash_attention(self):
         class Module(torch.nn.Module):
             def forward(self, q, k, v):
-                res = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v)
+                res = torch.nn.functional.scaled_dot_product_attention(q, k, v)
                 return res[0]
 
         m = Module()
@@ -2370,8 +2370,8 @@ def forward(self, l_x_):
             str(gm_unflat_non_strict.bar.leaf.linear.graph).strip(), """\
 graph():
     %arg3_1 : [num_users=1] = placeholder[target=arg3_1]
-    %bias : [num_users=1] = get_attr[target=bias]
     %weight : [num_users=1] = get_attr[target=weight]
+    %bias : [num_users=1] = get_attr[target=bias]
     %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
     %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %arg3_1, %t), kwargs = {})
     return addmm"""
@@ -2438,8 +2438,8 @@ graph():
             str(gm_unflat_non_strict.bar.leaf.linear.graph).strip(), """\
 graph():
     %arg5_1 : [num_users=1] = placeholder[target=arg5_1]
-    %bias : [num_users=1] = get_attr[target=bias]
     %weight : [num_users=1] = get_attr[target=weight]
+    %bias : [num_users=1] = get_attr[target=bias]
     %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
     %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %arg5_1, %t), kwargs = {})
     return addmm"""
@@ -2448,8 +2448,8 @@ graph():
             str(gm_unflat_non_strict.bar_different.leaf.linear.graph).strip(), """\
 graph():
     %add_2 : [num_users=1] = placeholder[target=add_2]
-    %bias : [num_users=1] = get_attr[target=bias]
     %weight : [num_users=1] = get_attr[target=weight]
+    %bias : [num_users=1] = get_attr[target=bias]
     %t_1 : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
     %addmm_1 : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %add_2, %t_1), kwargs = {})
     return addmm_1"""
