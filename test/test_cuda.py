@@ -1388,7 +1388,7 @@ torch.cuda.synchronize()
         scaler.scale(l).backward()
         scaler.step(optimizer)
         scaler.update()
-        assert(scaler._scale != float('inf') and scaler._scale != float('nan'))
+        assert scaler._scale != float('inf') and scaler._scale != float('nan')
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -1837,8 +1837,7 @@ torch.cuda.synchronize()
                     ('TORCH_CUDNN_V8_API_DISABLED' in os.environ and
                      int(os.environ['TORCH_CUDNN_V8_API_DISABLED']) or
                      torch.cuda.get_device_capability() < (8, 0))
-                should_error_from_not_implemented = should_error_from_cudnn or 'thnn' in op \
-                    or 'fused' in op or 'gru' in op or op == '_thnn_fused_lstm_cell' or op == 'lstm_cell'
+                should_error_from_not_implemented = should_error_from_cudnn
                 if not skip_test:
                     if should_error_from_not_implemented:
                         with self.assertRaises(RuntimeError, msg=str(op) + ' should not be supported for bfloat16!'):
@@ -2565,7 +2564,7 @@ exit(2)
             if not TEST_CUDAMALLOCASYNC:
                 # These stat checks are specific to the native allocator.
                 if share_mem != "Don't share":
-                    self.assertEqual(reserved_no_sharing - torch.cuda.memory_stats()["reserved_bytes.all.current"],
+                    self.assertEqual(reserved_no_sharing - torch.cuda.memory_stats()["reserved_bytes.all.current"],  # noqa: F821
                                      kSmallBuffer)
                 else:
                     reserved_no_sharing = torch.cuda.memory_stats()["reserved_bytes.all.current"]
@@ -3304,6 +3303,30 @@ exit(2)
 
         # Exception would Corrupt Process and make other tests fail
         # self.assertTrue(throws_on_cuda_event("global"))
+
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    def test_cuda_graph_allocator_propagates_stream(self):
+        segments = torch.cuda.memory_snapshot()
+        existing_pools = {s["segment_pool_id"] for s in segments}
+        x = torch.randn(10240000, device="cuda")
+        y = torch.rand_like(x)
+        g = torch.cuda.CUDAGraph()
+        s0 = torch.cuda.Stream()
+        s1 = torch.cuda.Stream()
+        s0.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s0):
+            g.capture_begin()
+            z = x + y
+        with torch.cuda.stream(s1):
+            s1.wait_stream(s0)
+            w = z + y
+        s0.wait_stream(s1)
+        with torch.cuda.stream(s0):
+            g.capture_end()
+        segments = torch.cuda.memory_snapshot()
+        x = [s["segment_pool_id"] for s in segments if s["segment_pool_id"] not in existing_pools]
+        self.assertEqual(len(x), 2)
+        self.assertEqual(x[0], x[1])
 
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
@@ -4169,7 +4192,7 @@ class TestBlockStateAbsorption(TestCase):
             try:
                 yield
             finally:
-                torch._C._cuda_endAllocateCurrentStreamToPool(device)
+                torch._C._cuda_endAllocateCurrentStreamToPool(device, mem_pool)
                 torch._C._cuda_releasePool(device, mem_pool)
                 stream_context.__exit__(None, None, None)
 

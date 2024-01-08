@@ -126,7 +126,6 @@ test_failures = {
     "test_isinf2_dynamic_shapes": TestFailure(("cpu",)),
     "test_linspace1_dynamic_shapes": TestFailure(("cpu",)),
     "test_masked_scatter_dynamic_shapes": TestFailure(("cpu",)),
-    "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_stack_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor2_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor3_dynamic_shapes": TestFailure(("cpu",)),

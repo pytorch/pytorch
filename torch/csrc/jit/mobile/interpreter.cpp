@@ -159,6 +159,15 @@ bool InterpreterState::run(Stack& stack) {
               static_cast<size_t>(inst.X) >= code.constants_.size()) {
             TORCH_CHECK(false, "Can't load constant with index: ", inst.X);
           }
+          if (inst.N == 0 || inst.N > stack.size()) {
+            TORCH_CHECK(
+                false,
+                "INTERFACE_CALL N=",
+                inst.N,
+                " not in range [1, ",
+                stack.size(),
+                "]");
+          }
           torch::jit::Function& method =
               peek(stack, 0, inst.N)
                   .toObject()

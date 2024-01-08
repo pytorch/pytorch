@@ -51,6 +51,22 @@
 
 namespace {
 
+#ifdef USE_C10D_NCCL
+bool registerGilChecker() {
+  c10d::get_gil_checker().emplace([]() {
+    // basically if this function can acquire the gil, it will return quickly.
+    // if not, it will hang forever.  The idea is to call this from a thread
+    // wrapped in a future, and then check the future after a timeout, to
+    // determine whether we're facing gil contention.
+    pybind11::gil_scoped_acquire gil;
+    return true;
+  });
+  return true;
+}
+
+static bool registered = registerGilChecker();
+#endif // USE_C10D_NCCL
+
 // Wrapper to ensure GIL is released before destructing ProcessGroupGloo
 // TODO: move this somewhere more generally useful
 template <typename T>
@@ -1034,6 +1050,29 @@ Example::
     >>> store.add("first_key", 6)
     >>> # Should return 7
     >>> store.get("first_key")
+)")
+          .def(
+              "check",
+              &::c10d::Store::check,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+The call to check whether a given list of ``keys`` have value stored in
+the store. This call immediately returns in normal cases but still suffers
+from some edge deadlock cases, e.g, calling check after TCPStore has been destroyed.
+Calling :meth:`~torch.distributed.store.check` with a list of keys that
+one wants to check whether stored in the store or not.
+
+Arguments:
+    keys (lisr[str]): The keys to query whether stored in the store.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> from datetime import timedelta
+    >>> # Using TCPStore as an example, other store types can also be used
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
+    >>> store.add("first_key", 1)
+    >>> # Should return 7
+    >>> store.check(["first_key"])
 )")
           .def(
               "delete_key",
@@ -2769,6 +2808,16 @@ such as `dist.all_reduce(tensor, async_op=True)`.
            )");
 
 #ifdef USE_C10D_NCCL
+  module.def(
+      "_hash_tensors",
+      [](const std::vector<at::Tensor>& tensors) {
+        return ::c10d::hashTensors(tensors);
+      },
+      py::arg("tensors"),
+      R"(
+        Arguments:
+          tensors(List[torch.Tensor]): List of tensors we want to hash.
+      )");
   module.def("_dump_nccl_trace", []() {
     return py::bytes(::c10d::dump_nccl_trace());
   });
