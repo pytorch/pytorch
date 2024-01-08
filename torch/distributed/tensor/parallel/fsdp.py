@@ -320,10 +320,6 @@ class DTensorExtensions(FSDPExtensions):
     This is the implementation for FSDPExtensions defined in
     https://github.com/pytorch/pytorch/blob/main/torch/distributed/fsdp/_fsdp_extensions.py
     """
-    def __init__(self, device_handle) -> None:
-        super().__init__()
-        self.compute_stream = None
-        self.device_handle = device_handle
 
     def pre_flatten_transform(
         self,
@@ -331,25 +327,12 @@ class DTensorExtensions(FSDPExtensions):
     ) -> Tuple[torch.Tensor, Optional[Any]]:
         return _flatten_tensor(tensor)
 
-    @torch._dynamo.disable
     def post_unflatten_transform(
         self, tensor: torch.Tensor, param_extension: Any
     ) -> torch.Tensor:
-        stream = self.compute_stream or self.device_handle.current_stream()
-        with self.device_handle.stream(stream):
-            # runtime we put the unflattened tensor call on the compute stream since
-            # the unflattened tensor might contain computations in fwd/bwd where we
-            # need to sync properly.
-            # TODO: this is a short term fix and we should make the get_unflat_views
-            # directly happen in the compute stream.
-            result = _unflatten_tensor(
-                tensor,
-                param_extension,
-                device_handle=self.device_handle,
-                compute_stream=self.compute_stream
-            )
-            _set_fsdp_flattened(result)
-            return result
+        result = _unflatten_tensor(tensor, param_extension)
+        _set_fsdp_flattened(result)
+        return result
 
     def chunk_tensor(
         self,
