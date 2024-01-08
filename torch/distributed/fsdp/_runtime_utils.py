@@ -638,7 +638,7 @@ def _root_pre_forward(
             for handle in handles:
                 handle._needs_pre_forward_unshard = True
                 handle._prefetched = False
-        
+
         _wait_for_computation_stream(
             state._device_handle.current_stream(),
             state,
