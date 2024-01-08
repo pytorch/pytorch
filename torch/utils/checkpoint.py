@@ -367,7 +367,7 @@ def checkpoint(
 
         If the :attr:`function` invocation during the backward pass differs
         from the forward pass, e.g., due to a global variable, the checkpointed
-        checkpointed version may not be equivalent, potentially causing an
+        version may not be equivalent, potentially causing an
         error being raised or leading to silently incorrect gradients.
 
     .. warning::
