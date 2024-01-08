@@ -540,6 +540,9 @@ class triton:
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 16
 
+    # Generate code containing the newer tl.make_block_ptr() API for loads/store
+    use_block_ptr = False
+
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
     # Valid values: "compile_error", "runtime_error", "accuracy"
