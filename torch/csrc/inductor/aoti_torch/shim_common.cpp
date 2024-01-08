@@ -614,22 +614,48 @@ AOTITorchError aoti_torch_scatter_out(
   });
 }
 
-AOTITorchError aoti_torch_index_put_(
+AOTITorchError aoti_torch_scatter_reduce_out(
+    AtenTensorHandle out,
     AtenTensorHandle self,
-    AtenTensorHandle* indices,
-    AtenTensorHandle values,
+    int64_t dim,
+    AtenTensorHandle index,
+    AtenTensorHandle src,
+    const char* reduce,
+    int32_t include_self) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* out_tensor = tensor_handle_to_tensor_pointer(out);
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor* index_tensor = tensor_handle_to_tensor_pointer(index);
+    at::Tensor* src_tensor = tensor_handle_to_tensor_pointer(src);
+    at::scatter_reduce_out(
+        *out_tensor,
+        *self_tensor,
+        dim,
+        *index_tensor,
+        *src_tensor,
+        reduce,
+        (bool)include_self);
+  });
+}
+
+ITorchError aoti_torch_index_put_out(
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    const AtenTensorHandle* indices,
+    const AtenTensorHandle values,
     bool accumulate,
     const uint32_t num_indices) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::List<std::optional<at::Tensor>> result;
-    result.reserve(num_indices);
+    c10::List<std::optional<at::Tensor>> indices_;
+    indices_.reserve(num_indices);
     for (size_t i = 0; i < num_indices; i++) {
-      result.emplace_back(*tensor_handle_to_tensor_pointer(indices[i]));
+      indices_.emplace_back(*tensor_handle_to_tensor_pointer(indices[i]));
     }
-
+    at::Tensor* out_tensor = tensor_handle_to_tensor_pointer(out);
     at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
     at::Tensor* values_tensor = tensor_handle_to_tensor_pointer(values);
-    at::index_put_(*self_tensor, result, *values_tensor, accumulate);
+    at::index_put_out(
+        *out_tensor, *self_tensor, indices_, *values_tensor, accumulate);
   });
 }
 
