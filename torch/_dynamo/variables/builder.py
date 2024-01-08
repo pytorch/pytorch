@@ -695,8 +695,9 @@ class VariableBuilder:
             istype(value, (types.ModuleType, replay_record.DummyModule))
             # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
             # type(torch.ops) -> <class 'torch._ops._Ops'>
-            or value in [torch.backends.cudnn, torch.ops]
-            or isinstance(value, torch._ops._OpNamespace)
+            or isinstance(
+                value, (torch.backends.cudnn, torch.ops, torch._ops._OpNamespace)
+            )
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonModuleVariable(
