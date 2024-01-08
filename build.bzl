@@ -24,7 +24,7 @@ def define_targets(rules):
             "CAFFE2_USE_CUDNN",
             "USE_MKLDNN",
             "CAFFE2_USE_ITT",
-            "TORCH_DISABLE_GPU_ASSERTS",
+            "USE_ROCM_KERNEL_ASSERT",
             "EIGEN_MPL2_ONLY",
         ],
     )

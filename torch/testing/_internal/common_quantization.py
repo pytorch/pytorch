@@ -206,7 +206,7 @@ def run_ddp(rank, world_size, prepared):
     prepared.to(rank)
     model_with_ddp = prepared
     optimizer = torch.optim.SGD(model_with_ddp.parameters(), lr=0.0001)
-    train_one_epoch(model_with_ddp, criterion, optimizer, dataset, rank, 1)
+    train_one_epoch(model_with_ddp, criterion, optimizer, dataset, rank, 1)  # noqa: F821
     ddp_cleanup()
 
 
@@ -2667,3 +2667,14 @@ class TestHelperModules:
             permute_out = torch.permute(x, (0, 2, 3, 1))
             linear_out = self.linear(permute_out)
             return linear_out
+
+    class GroupwiseConv2d(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(4, 4, 3, groups=2)
+
+        def forward(self, x):
+            return self.conv(x)
+
+        def example_inputs(self):
+            return (torch.randn(2, 4, 10, 10),)

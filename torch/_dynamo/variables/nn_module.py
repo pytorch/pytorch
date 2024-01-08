@@ -3,12 +3,11 @@ import inspect
 import itertools
 import types
 from contextlib import contextmanager, nullcontext
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import torch.nn
 
 from .. import skipfiles, variables
-from ..allowed_functions import is_allowed
 from ..exc import unimplemented, UnspecializeRestartAnalysis, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
@@ -289,7 +288,9 @@ class NNModuleVariable(VariableTracker):
             # If we are tracing the higher order op, we want Dynamo to step
             # inside the module call so that Dynamo can see the underlying
             # parameters and buffers and raise them as inputs to the graph.
-            if tx.output.is_root_tracer() and is_allowed(mod.__class__):
+            if tx.output.is_root_tracer() and mod.__module__.startswith(
+                ("torch.nn.", "torch.ao.")
+            ):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
@@ -577,7 +578,13 @@ class NNModuleVariable(VariableTracker):
                 )
                 return new_module_variable
 
-            key = args[0].as_python_constant()
+            from .tensor import SymNodeVariable
+
+            if isinstance(args[0], SymNodeVariable):
+                key = args[0].evaluate_expr(tx.output)
+            else:
+                key = args[0].as_python_constant()
+
             submod = module[key]
             return tx.output.register_attr_or_module(
                 submod,
@@ -779,8 +786,21 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
         ), "FSDPManagedNNModule depends on having an accurate source to control guarding."
 
         super().__init__(value=value, **kwargs)
-        if torch._dynamo.config.skip_fsdp_guards:
-            self.source = FSDPNNModuleSource(source)
+        self.source = source
+
+    @staticmethod
+    def _wrap_source(source):
+        if not isinstance(source, (FSDPNNModuleSource, NotNNModuleSource)):
+            if torch._dynamo.config.skip_fsdp_guards:
+                return FSDPNNModuleSource(source)
+            else:
+                # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
+                return NotNNModuleSource(source)
         else:
-            # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
-            self.source = NotNNModuleSource(source)
+            return source
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "source":
+            value = FSDPManagedNNModuleVariable._wrap_source(value)
+
+        return super().__setattr__(name, value)
