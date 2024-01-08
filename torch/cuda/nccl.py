@@ -32,6 +32,11 @@ def is_available(tensors):
 
 
 def version():
+    # check if nccl is supported. If not found
+    # return invalid version
+    if not (hasattr(torch._C, "_nccl_version")):
+        return (-1, -1, -1)
+
     ver = torch._C._nccl_version()
     major = ver >> 32
     minor = (ver >> 16) & 65535
