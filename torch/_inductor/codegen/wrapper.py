@@ -2171,6 +2171,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             )
             args = [x, indices_str, values, accumulate]
 
+        args.insert(0, x)  # set x as the output tensor, this fallback mutates x.
         self.writeline(self.wrap_kernel_call(kernel, args))
 
     def add_benchmark_harness(self, output):
