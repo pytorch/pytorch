@@ -1083,15 +1083,7 @@ def const_repr(x, *, local) -> str:
     elif is_builtin_callable(x):
         return x.__name__
     elif isinstance(x, type):
-
-        def fullname(o):
-            klass = o.__class__
-            module = klass.__module__
-            if module == "builtins":
-                return klass.__qualname__  # avoid outputs like 'builtins.str'
-            return module + "." + klass.__qualname__
-
-        return fullname(x)
+        return x.__name__
     else:
         return f"{x!r}"
 

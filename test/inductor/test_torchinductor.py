@@ -977,9 +977,9 @@ class CommonTemplate:
         actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
         self.assertEqual(expect, actual)
 
-    def test__masked_index(self):
+    def test__unsafe_masked_index(self):
         def fn(a, mask, idx):
-            return aten._masked_index(a, mask, idx, 1)
+            return aten._unsafe_masked_index(a, mask, idx, 1)
 
         self.common(
             fn,
