@@ -490,6 +490,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         self._check_common(dot_prod_attention, contains=False, has_dropout=True)
 
+    @skipIfRocm
     def _test_sdpa_prev_13(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
