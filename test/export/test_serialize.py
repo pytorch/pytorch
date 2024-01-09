@@ -541,8 +541,8 @@ class TestSchemaVersioning(TestCase):
         ep = export(f, (torch.randn(1, 3),))
 
         serialized_artifact = ExportedProgramSerializer().serialize(ep)
-        serialized_artifact.exported_program.schema_version = -1
-        with self.assertRaisesRegex(SerializeError, r"Serialized schema version -1 does not match our current"):
+        serialized_artifact.exported_program.schema_version.major = -1
+        with self.assertRaisesRegex(SerializeError, r"Serialized schema version .* does not match our current"):
             ExportedProgramDeserializer().deserialize(serialized_artifact)
 
 
@@ -657,9 +657,9 @@ class TestSaveLoad(TestCase):
 
             # Modify the version
             with zipfile.ZipFile(f, 'a') as zipf:
-                zipf.writestr('version', "-1")
+                zipf.writestr('version', "-1.1")
 
-            with self.assertRaisesRegex(RuntimeError, r"Serialized version -1 does not match our current"):
+            with self.assertRaisesRegex(RuntimeError, r"Serialized version .* does not match our current"):
                 f.seek(0)
                 load(f)
 

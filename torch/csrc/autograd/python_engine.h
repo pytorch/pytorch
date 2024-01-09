@@ -7,7 +7,9 @@
 
 bool THPEngine_initModule(PyObject* module);
 
-namespace torch::autograd::python {
+namespace torch {
+namespace autograd {
+namespace python {
 
 struct PythonEngine : public Engine {
   static Engine& get_python_engine();
@@ -41,4 +43,6 @@ struct PythonEngine : public Engine {
   PythonEngine();
 };
 
-} // namespace torch::autograd::python
+} // namespace python
+} // namespace autograd
+} // namespace torch
