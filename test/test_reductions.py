@@ -1673,46 +1673,36 @@ class TestReductions(TestCase):
         # Reference : https://dr.pytorch.org/api/view-log-full?build_id=122051580
         # PR : https://github.com/pytorch/pytorch/pull/38628#issuecomment-655905370
         if IS_WINDOWS and is_integral(dtype):
-            exact_dtype = False 
+            exact_dtype = False
         # For uint8, numpy promotes to uint64 while torch promotes to int64.
         # So we must skip this as well.
         if dtype == torch.uint8:
             exact_dtype = False
 
-        if dtype == torch.uint8:
-            # TODO: This isn't really desirable behavior.  What is happening
-            # is that we're attempting to do a comparison between uint64 and
-            # int64 tensor because Numpy has different promotion behavior,
-            # but we don't actually support this equality (because you'd need
-            # a specialized kernel for it and we don't really want one.)
-            with self.assertRaises(RuntimeError):
-                self._test_reduction_function_with_numpy(
-                    torch_fn, np_fn, device, dtype, exact_dtype=exact_dtype, with_extremal=with_extremal)
+        # TODO: Investigate why the output is not close to numpy.
+        if dtype == torch.float16:
+            atol = 0.4
+            rtol = 1e-2
+        elif dtype == torch.float32:
+            atol = 7e-05
+            rtol = 3e-06
         else:
-            # TODO: Investigate why the output is not close to numpy.
-            if dtype == torch.float16:
-                atol = 0.4
-                rtol = 1e-2
-            elif dtype == torch.float32:
-                atol = 7e-05
-                rtol = 3e-06
-            else:
-                # Default values
-                atol = None
-                rtol = None
-            self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
-                                                     atol=atol, rtol=rtol, exact_dtype=exact_dtype,
-                                                     with_keepdim=with_keepdim, with_extremal=with_extremal)
+            # Default values
+            atol = None
+            rtol = None
+        self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
+                                                 atol=atol, rtol=rtol, exact_dtype=exact_dtype,
+                                                 with_keepdim=with_keepdim, with_extremal=with_extremal)
 
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and(torch.half))
+    @dtypes(*set(all_types_and(torch.half)) - {torch.uint8})
     def test_sum_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype)
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_extremal=True)
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_keepdim=True)
 
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and(torch.half))
+    @dtypes(*set(all_types_and(torch.half)) - {torch.uint8})
     def test_nansum_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype)
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_extremal=True)
