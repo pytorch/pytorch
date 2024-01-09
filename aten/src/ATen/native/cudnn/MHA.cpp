@@ -6,7 +6,7 @@
 
 namespace at { namespace native {
 
-void run_cudnn_LLM_fprop(int64_t b,
+void run_cudnn_SDP_fprop(int64_t b,
                  int64_t h,
                  int64_t s_q,
                  int64_t s_kv,
@@ -72,12 +72,12 @@ using graph_and_tensors = std::tuple<
 struct MHAParams {
   c10::DeviceIndex device_id;
   fe::DataType_t dataType;
-  int q_dim[MAX_MHA_DIM];
-  int k_dim[MAX_MHA_DIM];
-  int v_dim[MAX_MHA_DIM];
-  int q_stride[MAX_MHA_DIM];
-  int k_stride[MAX_MHA_DIM];
-  int v_stride[MAX_MHA_DIM];
+  std::array<int, MAX_MHA_DIM> q_dim;
+  std::array<int, MAX_MHA_DIM> k_dim;
+  std::array<int, MAX_MHA_DIM> v_dim;
+  std::array<int, MAX_MHA_DIM> q_stride;
+  std::array<int, MAX_MHA_DIM> k_stride;
+  std::array<int, MAX_MHA_DIM> v_stride;
   int64_t b;
   int64_t h;
   int64_t s_q;
@@ -109,12 +109,12 @@ void setMHAParams(MHAParams& params, int64_t b, int64_t h, int64_t s_q, int64_t 
   TORCH_INTERNAL_ASSERT(k.strides().size() == MAX_MHA_DIM, "K tensor has unexpected number of dims, please report a bug to PyTorch.");
   TORCH_INTERNAL_ASSERT(v.sizes().size() == MAX_MHA_DIM, "V tensor has unexpected number of dims, please report a bug to PyTorch.");
   TORCH_INTERNAL_ASSERT(v.strides().size() == MAX_MHA_DIM, "V tensor has unexpected number of dims, please report a bug to PyTorch.");
-  std::copy(q.sizes().begin(), q.sizes().end(), params.q_dim);
-  std::copy(q.strides().begin(), q.strides().end(), params.q_stride);
-  std::copy(k.sizes().begin(), k.sizes().end(), params.k_dim);
-  std::copy(k.strides().begin(), k.strides().end(), params.k_stride);
-  std::copy(v.sizes().begin(), v.sizes().end(), params.v_dim);
-  std::copy(v.strides().begin(), v.strides().end(), params.v_stride);
+  std::copy(q.sizes().begin(), q.sizes().end(), params.q_dim.begin());
+  std::copy(q.strides().begin(), q.strides().end(), params.q_stride.begin());
+  std::copy(k.sizes().begin(), k.sizes().end(), params.k_dim.begin());
+  std::copy(k.strides().begin(), k.strides().end(), params.k_stride.begin());
+  std::copy(v.sizes().begin(), v.sizes().end(), params.v_dim.begin());
+  std::copy(v.strides().begin(), v.strides().end(), params.v_stride.begin());
 }
 
 struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
@@ -155,7 +155,7 @@ auto build_graph_and_tensors(int64_t b,
                                 int64_t d,
                                 float scaling_factor,
                                 bool return_softmaxstats,
-                                        bool is_causal,
+                                bool is_causal,
                                 double dropout_probability,
                                 const Tensor& q,
                                 const Tensor& k,
@@ -177,22 +177,23 @@ auto build_graph_and_tensors(int64_t b,
 
     auto Q = mha_graph->tensor(fe::graph::Tensor_attributes()
                                   .set_name("Q")
-                                  .set_dim(std::vector<int64_t>(params.q_dim, params.q_dim+MAX_MHA_DIM))
-                                  .set_stride(std::vector<int64_t>(params.q_stride, params.q_stride+MAX_MHA_DIM)));
+                                  .set_dim(std::vector<int64_t>(params.q_dim.begin(), params.q_stride.end()))
+                                  .set_stride(std::vector<int64_t>(params.q_stride.begin(), params.q_stride.end())));
     auto K = mha_graph->tensor(fe::graph::Tensor_attributes()
                                   .set_name("K")
-                                  .set_dim(std::vector<int64_t>(params.k_dim, params.k_dim+MAX_MHA_DIM))
-                                  .set_stride(std::vector<int64_t>(params.k_stride, params.k_stride+MAX_MHA_DIM)));
+                                  .set_dim(std::vector<int64_t>(params.k_dim.begin(), params.k_dim.end()))
+                                  .set_stride(std::vector<int64_t>(params.k_stride.begin(), params.k_stride.end())));
     auto V = mha_graph->tensor(fe::graph::Tensor_attributes()
                                   .set_name("V")
-                                  .set_dim(std::vector<int64_t>(params.v_dim, params.v_dim+MAX_MHA_DIM))
-                                  .set_stride(std::vector<int64_t>(params.v_stride, params.v_stride+MAX_MHA_DIM)));
+                                  .set_dim(std::vector<int64_t>(params.v_dim.begin(), params.v_dim.end()))
+                                  .set_stride(std::vector<int64_t>(params.v_stride.begin(), params.v_stride.end())));
     auto attn_scale = mha_graph->tensor(fe::graph::Tensor_attributes()
                                        .set_name("attn_scale")
                                        .set_dim({1, 1, 1, 1})
                                        .set_stride({1, 1, 1, 1})
                                        .set_is_pass_by_value(true)
                                        .set_data_type(fe::DataType_t::FLOAT));
+    // TODO(eqy): support bias in the future in a follow-up PR
     //auto bias = mha_graph->tensor(fe::graph::Tensor_attributes()
     //                         .set_name("bias")
     //                         .set_dim({b, 1, s_q, s_kv})
@@ -254,7 +255,7 @@ auto build_graph_and_tensors(int64_t b,
 }
 
 void
-run_cudnn_LLM_fprop(int64_t b,
+run_cudnn_SDP_fprop(int64_t b,
                     int64_t h,
                     int64_t s_q,
                     int64_t s_kv,
@@ -274,7 +275,7 @@ run_cudnn_LLM_fprop(int64_t b,
     cudnnHandle_t handle = getCudnnHandle();
     o = at::empty_strided({b, h, s_q, d}, {s_q * h * d, d, h * d, 1}, q.options());
     if (return_softmaxstats) {
-      // TODO(eqy): fix strides
+      // TODO(eqy): verify that this is correct
       softmaxstats = at::empty({b, h, s_q}, q.options().dtype(kFloat));
     }
 

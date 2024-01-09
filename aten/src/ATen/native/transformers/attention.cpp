@@ -26,7 +26,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_cudnn_mha.h>
 #include <ATen/ops/_fused_sdp_choice_native.h>
 #include <ATen/ops/_masked_softmax.h>
 #include <ATen/ops/_native_multi_head_attention_native.h>
@@ -38,6 +37,7 @@
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_backward_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_native.h>
+#include <ATen/ops/_scaled_dot_product_cudnn_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_backward.h>
@@ -650,7 +650,7 @@ Tensor scaled_dot_product_attention(
       bool compute_logsumexp =
           (query_.requires_grad() || key.requires_grad() ||
            value.requires_grad());
-      auto out_lse_softmax = at::_cudnn_mha(
+      auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
           query_, key, value, dropout_p, is_causal, compute_logsumexp, scale);
       return std::get<0>(out_lse_softmax);
     }

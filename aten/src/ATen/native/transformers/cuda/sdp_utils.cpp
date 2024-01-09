@@ -304,7 +304,7 @@ bool check_all_tensors_on_device(sdp_params const& params, bool debug) {
 
 } // namespace
 
-static bool check_cudnn_mha_shape(sdp_params params, bool debug) {
+static bool check_cudnnshape(sdp_params params, bool debug) {
   const auto num_heads{params.query.sym_size(1)},
       query_lengths{params.query.sym_size(2)},
       head_dim{params.query.sym_size(3)};
@@ -315,7 +315,7 @@ static bool check_cudnn_mha_shape(sdp_params params, bool debug) {
   return ok;
 }
 
-static bool check_cudnn_mha_layout(sdp_params params, bool debug) {
+static bool check_cudnn_layout(sdp_params params, bool debug) {
   const int64_t h = params.query.size(1);
   const int64_t s_q = params.query.size(2);
   const int64_t d = params.query.size(3);
@@ -342,20 +342,20 @@ static bool check_cudnn_mha_layout(sdp_params params, bool debug) {
   return query_layout_ok && key_layout_ok && value_layout_ok;
 }
 
-static bool check_cudnn_mha_compute_capability(sdp_params params, bool debug) {
+static bool check_cudnn_compute_capability(sdp_params params, bool debug) {
   auto dprops = at::cuda::getCurrentDeviceProperties();
   return dprops->minor == 0 && dprops->major >= 8;
 }
 
-inline bool use_cudnn_mha(sdp_params const& kernel_params, bool print_debug) {
+inline bool use_cudnn(sdp_params const& kernel_params, bool print_debug) {
   static bool supported = (c10::utils::check_env("TORCH_CUDNN_MHA_ENABLED") == true) &&
-                          check_cudnn_mha_compute_capability(kernel_params, print_debug);
+                          check_cudnn_compute_capability(kernel_params, print_debug);
   if (print_debug) {
     if (!supported) { TORCH_WARN("cuDNN MHA is only supported on sm80 and sm90"); }
     if (!kernel_params.is_causal) { TORCH_WARN("cuDNN MHA only supports is_causal=True"); }
   }
-  //const bool shape_ok = check_cudnn_mha_shape(kernel_params, print_debug);
-  //const bool layout_ok = check_cudnn_mha_layout(kernel_params, print_debug);
+  //const bool shape_ok = check_cudnn_shape(kernel_params, print_debug);
+  //const bool layout_ok = check_cudnn_layout(kernel_params, print_debug);
   const bool ok = supported && kernel_params.query.scalar_type() != c10::kFloat && !kernel_params.query.is_nested();// && kernel_params.is_causal && shape_ok && layout_ok;
   if (ok) {
     TORCH_WARN("USING EXPERIMENTAL CUDNN MHA");
@@ -493,7 +493,7 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
   for (auto& backend : ordering) {
     switch (backend) {
       case SDPBackend::cudnn:
-        if (use_cudnn_mha(kernel_params, print_debug)) {
+        if (use_cudnn(kernel_params, print_debug)) {
               return SDPBackend::cudnn;
         }
         break;

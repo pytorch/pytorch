@@ -3,7 +3,7 @@
 
 namespace at { namespace native {
 
-void run_cudnn_LLM_fprop(int64_t b,
+void run_cudnn_SDP_fprop(int64_t b,
              int64_t h,
              int64_t s_q,
              int64_t s_kv,

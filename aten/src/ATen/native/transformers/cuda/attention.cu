@@ -724,7 +724,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   return std::make_tuple(attention, logsumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
+std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -754,7 +754,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
   auto cudnn_offset = at::zeros({1}, query.options().dtype(kLong));
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
 
-  run_cudnn_LLM_fprop(batch_size/*int64_t b*/,
+  run_cudnn_SDP_fprop(batch_size/*int64_t b*/,
                       num_heads/*int64_t h*/,
                       max_seqlen_batch_q/*int64_t s_q*/,
                       max_seqlen_batch_k/*int64_t s_kv*/,
