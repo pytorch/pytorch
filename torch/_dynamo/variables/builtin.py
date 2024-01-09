@@ -676,6 +676,15 @@ class BuiltinVariable(VariableTracker):
     ) -> "VariableTracker":
         if self.fn == dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
+        if self.fn == itertools.chain and name == "from_iterable":
+            assert len(args) == 1
+            assert len(kwargs) == 0
+            obj = args[0]
+            items = []
+            for item in obj.unpack_var_sequence(tx):
+                items.extend(item.unpack_var_sequence(tx))
+            return variables.TupleVariable(items)
+
         return super().call_method(tx, name, args, kwargs)
 
     def _call_min_max(self, tx, *args):
@@ -1517,21 +1526,6 @@ class BuiltinVariable(VariableTracker):
         def _unimplemented():
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
 
-        def _resolve_getattr(get_attr_var):
-            # This comparison is going to access an attribute that was not initially
-            # there, but may be now. That is the only case when GetAttrVariable should
-            # be created. So, we need to resolve it first.
-            assert isinstance(get_attr_var, variables.GetAttrVariable)
-            try:
-                return get_attr_var.call_function(tx, [], {})
-            except Exception as e:
-                _unimplemented()
-
-        if isinstance(left, variables.GetAttrVariable):
-            left = _resolve_getattr(left)
-
-        if isinstance(right, variables.GetAttrVariable):
-            right = _resolve_getattr(right)
 
         if (
             all(
@@ -1544,10 +1538,8 @@ class BuiltinVariable(VariableTracker):
         ):
 
             def _get(element):
-                if isinstance(element, NNModuleVariable):
-                    return tx.output.get_submodule(element.module_key)
-                if isinstance(element, FSDPManagedNNModuleVariable):
-                    return element.value
+                if isinstance(element, (NNModuleVariable, FSDPManagedNNModuleVariable)):
+                    return element.module
                 else:
                     return element.as_python_constant()
 
@@ -1561,15 +1553,6 @@ class BuiltinVariable(VariableTracker):
             if not isinstance(right, UserFunctionVariable):
                 _unimplemented()
             return ConstantVariable.create(op(left.fn, right.fn))
-
-        if isinstance(left, variables.distributed.ProcessGroupVariable):
-            if op not in supported_const_comparison_ops.values():
-                _unimplemented()
-            if not isinstance(
-                right, (variables.distributed.ProcessGroupVariable, ConstantVariable)
-            ):
-                _unimplemented()
-            return ConstantVariable(op(left.value, right.value))
 
         # Note, we have a rare BaseListVariable subtype mismatch with valid comparison
         # x = torch.randn([3, 3])

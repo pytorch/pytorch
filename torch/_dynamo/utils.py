@@ -1085,6 +1085,16 @@ def const_repr(x, *, local) -> str:
         return enum_repr(x, local=local).replace("'", "")
     elif is_builtin_callable(x):
         return x.__name__
+    elif isinstance(x, type):
+
+        def fullname(o):
+            klass = o.__class__
+            module = klass.__module__
+            if module == "builtins":
+                return klass.__qualname__  # avoid outputs like 'builtins.str'
+            return module + "." + klass.__qualname__
+
+        return fullname(x)
     else:
         return f"{x!r}"
 
@@ -1578,11 +1588,17 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
-            unimplemented(f"data dependent operator: {cause.func}")
+            unimplemented(
+                f"data dependent operator: {cause.func}; "
+                "to enable, set torch._dynamo.config.capture_scalar_outputs = True"
+            )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
-            unimplemented(f"dynamic shape operator: {cause.func}")
+            unimplemented(
+                f"dynamic shape operator: {cause.func}; "
+                "to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True"
+            )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
         ):

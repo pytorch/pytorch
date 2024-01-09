@@ -253,11 +253,7 @@ class VariableBuilder:
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
-            UserDefinedObjectVariable,
             FSDPManagedNNModuleVariable,
-            UserDefinedClassVariable,
-            NumpyNdarrayVariable,
-            DeviceMeshVariable,
         ]:
             return True
         return False
@@ -561,9 +557,7 @@ class VariableBuilder:
             # handle aliased autograd function `apply` calls
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return GetAttrVariable(
-                AutogradFunctionVariable(
-                    value.__self__, source=AttrSource(self.source, member="__self__")
-                ),
+                AutogradFunctionVariable(value.__self__, source=self.source),
                 "apply",
             )
         elif np and isinstance(value, np.number):
@@ -1501,7 +1495,7 @@ def wrap_fx_proxy_cls(
             return ListVariable(unpacked, mutable_local=MutableLocal(), **options)
         elif istype(example_value, set):
             return SetVariable(
-                self.tx, unpacked, mutable_local=MutableLocal(), **options
+                unpacked, mutable_local=MutableLocal(), **options
             )
         else:
             assert example_value.__class__.__module__ == "torch.return_types" or hasattr(
@@ -1897,7 +1891,7 @@ class SourcelessBuilder:
             return ConstDictVariable(items, mutable_local=MutableLocal())
         elif isinstance(value, set):
             return SetVariable(
-                tx, [self(tx, x) for x in value], mutable_local=MutableLocal()
+                [self(tx, x) for x in value], mutable_local=MutableLocal()
             )
         elif isinstance(value, (tuple, list)):
             cls = BaseListVariable.cls_for(type(value))
