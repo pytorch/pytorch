@@ -706,6 +706,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self._check_for_getattribute()
         getattr_fn = self._check_for_getattr()
 
+        if any(type(value).__module__.startswith(x) for x in disallowed_modules):
+            unimplemented("ybliang debug 2")
+
         class NO_SUCH_SUBOBJ:
             pass
 
