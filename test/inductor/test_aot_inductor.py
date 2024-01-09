@@ -1362,7 +1362,7 @@ class AOTInductorTestsTemplate:
                 indices: Tuple[torch.Tensor],
                 values: torch.Tensor,
             ):
-                return self_tensor.index_put(indices, values, accumulate=True)
+                return torch.index_put(self_tensor, indices, values, accumulate=True)
 
         inputs = (
             torch.ones(4, device=self.device, dtype=torch.int64),
