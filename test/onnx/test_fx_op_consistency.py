@@ -1434,35 +1434,15 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="Flaky failure: https://github.com/pytorch/pytorch/issues/115106",
     ),
-    skip(
-        "nn.functional.conv_transpose1d",
-        matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
-        reason="String padding is not accepted by aten::conv1d",
-    ),
-    skip(
-        "nn.functional.conv_transpose2d",
-        matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
-        reason="String padding is not accepted by aten::conv2d",
-    ),
-    skip(
-        "nn.functional.conv_transpose3d",
-        matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
-        reason="String padding is not accepted by aten::conv3d",
-    ),
-    skip(
-        "nn.functional.conv1d",
-        matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
-        reason="String padding is not accepted by aten::conv1d",
-    ),
-    skip(
+    xfail(
         "nn.functional.conv2d",
-        matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
-        reason="String padding is not accepted by aten::conv2d",
+        matcher=lambda sample: sample.kwargs.get("padding") == "valid",
+        reason="fixme: https://github.com/pytorch/pytorch/issues/117054",
     ),
-    skip(
+    xfail(
         "nn.functional.conv3d",
-        matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
-        reason="String padding is not accepted by aten::conv3d",
+        matcher=lambda sample: sample.kwargs.get("padding") == "valid",
+        reason="fixme: https://github.com/pytorch/pytorch/issues/117054",
     ),
     skip(
         "nn.functional.cross_entropy",
