@@ -21,6 +21,7 @@ from typing import (
     List,
     Optional,
     overload,
+    Protocol,
     Tuple,
     Type,
     TypeVar,
@@ -46,12 +47,16 @@ __all__ = [
     "FromDumpableContextFn",
     "TreeSpec",
     "LeafSpec",
+    "keystr",
     "register_pytree_node",
     "tree_flatten",
+    "tree_flatten_with_path",
     "tree_unflatten",
     "tree_leaves",
+    "tree_leaves_with_path",
     "tree_structure",
     "tree_map",
+    "tree_map_with_path",
     "tree_map_",
     "tree_map_only",
     "tree_map_only_",
@@ -71,6 +76,14 @@ U = TypeVar("U")
 R = TypeVar("R")
 
 
+class PHashable(Protocol):
+    def __hash__(self) -> int:
+        ...
+
+    def __eq__(self, other: Any) -> bool:
+        ...
+
+
 Context = Any
 PyTree = Any
 TreeSpec = PyTreeSpec
@@ -80,6 +93,9 @@ OpTreeUnflattenFunc = Callable[[Context, Iterable[Any]], PyTree]
 DumpableContext = Any  # Any json dumpable text
 ToDumpableContextFn = Callable[[Context], DumpableContext]
 FromDumpableContextFn = Callable[[DumpableContext], Context]
+KeyEntry = PHashable
+KeyPath = Tuple[KeyEntry, ...]
+FlattenWithKeysFunc = Callable[[PyTree], Tuple[List[Tuple[KeyEntry, Any]], Any]]
 
 
 def _reverse_args(func: UnflattenFunc) -> OpTreeUnflattenFunc:
@@ -98,6 +114,7 @@ def register_pytree_node(
     serialized_type_name: Optional[str] = None,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    flatten_with_keys_fn: Optional[FlattenWithKeysFunc] = None,
 ) -> None:
     """Register a container-like type as pytree node.
 
@@ -130,6 +147,9 @@ def register_pytree_node(
         ...     lambda children, _: set(children),
         ... )
     """
+    if flatten_with_keys_fn is not None:
+        raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
+
     _private_register_pytree_node(
         cls,
         flatten_fn,
@@ -738,3 +758,60 @@ class LeafSpecMeta(type(TreeSpec)):  # type: ignore[misc]
 class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):
     def __new__(cls) -> "LeafSpec":
         return optree.treespec_leaf(none_is_leaf=True)  # type: ignore[return-value]
+
+
+def tree_flatten_with_path(tree: PyTree) -> Tuple[List[Tuple[KeyPath, Any]], TreeSpec]:
+    """Flattens a pytree like :func:`tree_flatten`, but also returns each leaf's key path.
+
+    Args:
+        tree: a pytree to flatten. If it contains a custom type, that type must be
+            registered with an appropriate `tree_flatten_with_path_fn` when registered
+            with :func:`register_pytree_node`.
+    Returns:
+        A tuple where the first element is a list of (key path, leaf) pairs, and the
+        second element is a :class:`TreeSpec` representing the structure of the flattened
+        tree.
+    """
+    raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
+
+
+def tree_leaves_with_path(tree: PyTree) -> List[Tuple[KeyPath, Any]]:
+    """Gets the leaves of a pytree like ``tree_leaves`` and returns each leaf's key path.
+
+    Args:
+        tree: a pytree. If it contains a custom type, that type must be
+            registered with an appropriate `tree_flatten_with_path_fn` when registered
+            with :func:`register_pytree_node`.
+    Returns:
+        A list of (key path, leaf) pairs.
+    """
+    raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
+
+
+def tree_map_with_path(
+    func: Callable[..., Any], tree: PyTree, *rests: PyTree
+) -> PyTree:
+    """Like :func:`tree_map`, but the provided callable takes an additional key path argument.
+
+    Args:
+        func: A function that takes ``2 + len(rests)`` arguments, to be applied at the
+            corresponding leaves of the pytrees. The first positional argument
+            to ``func`` is the key path of the leaf in question. The second
+            positional argument is the value of the leaf.
+        tree: A pytree to be mapped over, with each leaf providing the first positional
+            argument to function ``func``.
+        rests: A tuple of pytrees, each of which has the same structure as
+            ``tree`` or has ``tree`` as a prefix.
+
+    Returns
+        A new pytree with the same structure as ``tree`` but with the value at each leaf given by
+        ``func(keypath, x, *xs)`` where ``keypath`` is the key path at the
+        corresponding leaf in ``tree``, ``x`` is the value at that leaf, and
+        ``xs`` is the tuple of values at corresponding nodes in ``rests``.
+    """
+    raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
+
+
+def keystr(kp: KeyPath) -> str:
+    """Give a key path, return a pretty-printed representation."""
+    raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")

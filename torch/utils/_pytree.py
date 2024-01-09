@@ -36,6 +36,7 @@ from typing import (
     Optional,
     OrderedDict as GenericOrderedDict,
     overload,
+    Protocol,
     Tuple,
     Type,
     TypeVar,
@@ -53,12 +54,16 @@ __all__ = [
     "FromDumpableContextFn",
     "TreeSpec",
     "LeafSpec",
+    "keystr",
     "register_pytree_node",
     "tree_flatten",
+    "tree_flatten_with_path",
     "tree_unflatten",
     "tree_leaves",
+    "tree_leaves_with_path",
     "tree_structure",
     "tree_map",
+    "tree_map_with_path",
     "tree_map_",
     "tree_map_only",
     "tree_map_only_",
@@ -81,6 +86,15 @@ R = TypeVar("R")
 DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL = 1
 NO_SERIALIZED_TYPE_NAME_FOUND = "NO_SERIALIZED_TYPE_NAME_FOUND"
 
+
+class PHashable(Protocol):
+    def __hash__(self) -> int:
+        ...
+
+    def __eq__(self, other: Any) -> bool:
+        ...
+
+
 Context = Any
 PyTree = Any
 FlattenFunc = Callable[[PyTree], Tuple[List[Any], Context]]
@@ -90,7 +104,7 @@ ToDumpableContextFn = Callable[[Context], DumpableContext]
 FromDumpableContextFn = Callable[[DumpableContext], Context]
 ToStrFunc = Callable[["TreeSpec", List[str]], str]
 MaybeFromStrFunc = Callable[[str], Optional[Tuple[Any, Context, str]]]
-KeyEntry = Any  # Should be Hashable
+KeyEntry = PHashable
 KeyPath = Tuple[KeyEntry, ...]
 FlattenWithKeysFunc = Callable[[PyTree], Tuple[List[Tuple[KeyEntry, Any]], Any]]
 
@@ -322,7 +336,7 @@ class SequenceKey:
 
 
 @dataclasses.dataclass(frozen=True)
-class DictKey:
+class MappingKey:
     key: Hashable
 
     def __str__(self) -> str:
@@ -344,7 +358,7 @@ def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
 def _dict_flatten_with_keys(
     d: Dict[Any, Any]
 ) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
-    return list(zip(tuple(DictKey(k) for k in d.keys()), d.values())), d.keys()
+    return list(zip(tuple(MappingKey(k) for k in d.keys()), d.values())), d.keys()
 
 
 def _dict_unflatten(values: Iterable[Any], context: Context) -> Dict[Any, Any]:
@@ -413,7 +427,7 @@ def _ordereddict_flatten(d: GenericOrderedDict[Any, Any]) -> Tuple[List[Any], Co
 def _ordereddict_flatten_with_keys(
     d: GenericOrderedDict[Any, Any]
 ) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
-    return list(zip(tuple(DictKey(k) for k in d.keys()), d.values())), d.keys()
+    return list(zip(tuple(MappingKey(k) for k in d.keys()), d.values())), d.keys()
 
 
 def _ordereddict_unflatten(
@@ -436,7 +450,7 @@ def _defaultdict_flatten_with_keys(
     d: DefaultDict[Any, Any]
 ) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
     values, dict_context = _dict_flatten(d)
-    return list(zip(tuple(DictKey(k) for k in d.keys()), values)), [
+    return list(zip(tuple(MappingKey(k) for k in d.keys()), values)), [
         d.default_factory,
         dict_context,
     ]
