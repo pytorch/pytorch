@@ -108,4 +108,19 @@ c10::intrusive_ptr<Store> PrefixStore::getUnderlyingStore() {
   return store_;
 }
 
+c10::intrusive_ptr<Store> PrefixStore::getUnderlyingNonPrefixStore() {
+  c10::intrusive_ptr<Store> store = store_;
+
+  while (store) {
+    // Attempt to dynamically cast to PrefixStore
+    PrefixStore* asPrefixStore = dynamic_cast<PrefixStore*>(store.get());
+    if (asPrefixStore) {
+      store = asPrefixStore->getUnderlyingStore();
+    } else {
+      break; // We've reached a non-PrefixStore
+    }
+  }
+  return store;
+}
+
 } // namespace c10d
