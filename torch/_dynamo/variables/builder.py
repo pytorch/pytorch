@@ -703,7 +703,7 @@ class VariableBuilder:
             #         torch._ops._OpNamespace,
             #     ),
             # )
-            or value in [torch.backends.cudnn, torch.ops]
+            # or value in [torch.backends.cudnn, torch.ops]
             or isinstance(value, torch._ops._OpNamespace)
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
