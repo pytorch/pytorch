@@ -344,7 +344,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ]
         ):
             assert len(args) == 1
-            return StreamContextVariable.create(tx, args[0])
+            return StreamContextVariable.create_from_stream(tx, args[0])
         elif self.value is torch.from_numpy:
             if not config.trace_numpy:
                 unimplemented("torch.from_numpy. config.trace_numpy is False")
