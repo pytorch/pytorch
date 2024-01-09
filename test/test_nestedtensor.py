@@ -3187,6 +3187,39 @@ class TestNestedTensorSubclass(TestCase):
                 RuntimeError, "chunk.* not supported for NestedTensor on dim=0 or dim=1"):
             nt.chunk(2, dim=1)
 
+    def test_squeeze(self, device):
+        B = 4
+        D = 6
+        # squeeze middle dim
+        nt = random_nt_from_dims(
+            [B, None, 1, D], device=device, dtype=torch.float32, layout=torch.jagged)
+        j0 = nt.shape[1]
+
+        for dim_arg in [-2, 2]:
+            out = nt.squeeze(dim_arg)
+            self.assertEqual(out.shape, (B, j0, D))
+            self.assertEqual(out.unsqueeze(-2), nt)
+
+        # squeeze last dim
+        nt = random_nt_from_dims(
+            [B, None, 1], device=device, dtype=torch.float32, layout=torch.jagged)
+        j1 = nt.shape[1]
+
+        for dim_arg in [-1, 2]:
+            out = nt.squeeze(dim_arg)
+            self.assertEqual(out.shape, (B, j1))
+            self.assertEqual(out.unsqueeze(-1), nt)
+
+        # squeeze on batch dim not supported
+        with self.assertRaisesRegex(
+                RuntimeError, "squeeze.* not supported for NestedTensor on dim=0 or dim=1"):
+            nt.squeeze(0)
+
+        # squeeze on ragged dim not supported
+        with self.assertRaisesRegex(
+                RuntimeError, "squeeze.* not supported for NestedTensor on dim=0 or dim=1"):
+            nt.squeeze(1)
+
     def test_binary_pointwise_broadcasting(self, device):
         # (B, j0, 3, 4)
         ts = self._get_list_for_jagged_tensor(((2, 3, 4), 3, 4), device, requires_grad=True)
