@@ -668,7 +668,7 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
     } else {
       auto dtype = index->scalar_type();
       TORCH_CHECK(dtype == kLong || dtype == kInt,
-                  "_masked_index found unexpected index type ", dtype);
+                  "_unsafe_masked_index found unexpected index type ", dtype);
       clamped_indices.push_back(at::clamp(*index, -sizes[i], sizes[i] - 1));
     }
   }
@@ -678,7 +678,7 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
 }
 
 Tensor _unsafe_masked_index_put(const Tensor& self, const Tensor& mask, const torch::List<c10::optional<Tensor>>& indices, const Tensor& value, bool accumulate) {
-   // This is the backward of _masked_index.
+   // This is the backward of _unsafe_masked_index.
    // This function is not meant to be executed on eager mode.
    // We recompute the clamped indices and rely on inductor to CSE the computation
    auto clamp = [](const c10::optional<Tensor>& index, auto size) -> c10::optional<Tensor> {
@@ -688,7 +688,7 @@ Tensor _unsafe_masked_index_put(const Tensor& self, const Tensor& mask, const to
      // Disallow bool
      auto dtype = index->scalar_type();
      TORCH_CHECK(dtype == kLong || dtype == kInt,
-                 "_masked_index found unexpected index type ", dtype);
+                 "_unsafe_masked_index found unexpected index type ", dtype);
      return at::clamp(*index, -size, size - 1);
    };
 

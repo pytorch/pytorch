@@ -3398,8 +3398,29 @@ def _reshape_alias(x, shape, *args):
 
 
 @register_decomposition([aten._unsafe_index])
-def _index(x, indices):
+def _unsafe_index(x, indices):
     return aten.index(x, indices)
+
+
+@register_decomposition([aten._unsafe_masked_index])
+def _unsafe_masked_index(x, mask, indices, fill):
+    for i in range(len(indices)):
+        index = indices[i]
+        if index is not None:
+            indices[i] = index.clamp(min=0, max=x.size(i) - 1)
+
+    return torch.where(mask, torch._unsafe_index(x, indices), fill)
+
+
+@register_decomposition([aten._unsafe_masked_index_put])
+def _unsafe_masked_index_put(x, mask, indices, values, accumulate=False):
+    for i in range(len(indices)):
+        index = indices[i]
+        if index is not None:
+            indices[i] = index.clamp(min=0, max=x.size(i) - 1)
+
+    masked_value = torch.where(mask, values, 0)
+    return aten._unsafe_index_put(x, indices, masked_value, accumulate)
 
 
 def _nll_loss_forward(
