@@ -341,10 +341,9 @@ def _generate_seed(generator):
 
 
 def _non_default_cpu_generators():
-    return {
-        o for o in gc.get_objects()
-        if isinstance(o, torch.Generator) and
-        o is not torch.random.default_generator and
-        # We can't handle CUDA generators as the CUDA context may not be initialized.
-        o.device.type == "cpu"
-    }
+    out = {o for o in gc.get_objects()}
+    out = {o for o in out if isinstance(o, torch.Generator)}
+    out = {o for o in out if o is not torch.random.default_generator}
+    # We can't handle CUDA generators as the CUDA context may not be initialized.
+    out = {o for o in out if o.device.type == "cpu"}
+    return out
