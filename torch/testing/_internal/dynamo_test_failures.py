@@ -678,7 +678,6 @@ dynamo_expected_failures = {
     "TestFromBuffer.test_basic_little_dtype2",
     "TestArrayCreationCopyArgument.test_striding_not_ok",
     "TestArange.test_require_range",
-    "TestStats.test_dtype_from_input",
     "TestArange.test_nan_step",
     "TestWritebackIfCopy.test_argmin_with_out",
     "TestArrayAttributeDeletion.test_multiarray_not_writable_attributes_deletion",
