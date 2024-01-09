@@ -4691,7 +4691,7 @@ class TestLinalg(TestCase):
 
         # enable hipblaslt path via env variable.
         import os
-        DISABLE_ADDMM_HIP_LT="DISABLE_ADDMM_HIP_LT"
+        DISABLE_ADDMM_HIP_LT = "DISABLE_ADDMM_HIP_LT"
         prev_val = os.getenv(DISABLE_ADDMM_HIP_LT)
         try:
             os.environ[DISABLE_ADDMM_HIP_LT] = "0"
