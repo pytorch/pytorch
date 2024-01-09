@@ -30,8 +30,6 @@ from setuptools.command.build_ext import build_ext
 # Create a logger for this module
 log = logging.getLogger(__name__)
 
-# Set the default log level to WARNING to prevent info messages from being displayed
-log.setLevel(logging.WARNING)
 
 IS_WINDOWS = sys.platform == 'win32'
 IS_MACOS = sys.platform.startswith('darwin')
