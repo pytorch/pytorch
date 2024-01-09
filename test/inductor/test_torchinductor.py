@@ -49,6 +49,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     TEST_CUDNN,
+    TEST_MULTIGPU,
     with_tf32_off,
 )
 
@@ -98,7 +99,6 @@ from torch.testing._internal.inductor_utils import (
     skipCUDAIf,
 )
 
-HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
 _desired_test_bases = get_desired_device_type_test_bases()
 RUN_CPU = any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
@@ -107,7 +107,7 @@ RUN_CUDA = any(getattr(x, "device_type", "") == "cuda" for x in _desired_test_ba
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
-    unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
+    unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
 skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
@@ -115,6 +115,8 @@ skip_if_x86_mac = functools.partial(
 vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libfoo = None
+
+f32 = torch.float32
 
 
 def run_fw_bw_and_get_code(fn):
@@ -557,6 +559,12 @@ def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
     return result
 
 
+def assertGeneratedKernelCountEqual(self: TestCase, expected: int):
+    if config.cpp_wrapper:
+        expected *= 2
+    self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
+
+
 class SweepInputs2:
     input_gen_types1 = [
         "dense",
@@ -662,7 +670,9 @@ class CommonTemplate:
         y = torch.tensor([1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1])
 
         _, code = run_and_get_code(fn, x, y)
-        self.assertEqual(code[0].count("aten.view"), 3)
+        self.assertEqual(
+            code[0].count("::view_dtype" if config.cpp_wrapper else "aten.view"), 3
+        )
 
     def test_add_complex3(self):
         # fix https://github.com/pytorch/pytorch/issues/115071
@@ -804,7 +814,7 @@ class CommonTemplate:
                 torch.randn(26),
             ),
         )
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        assertGeneratedKernelCountEqual(self, 1)
 
     def test_forced_buffer_realize(self):
         # Test torch._test_inductor_realize forces a buffer to be realized
@@ -839,10 +849,7 @@ class CommonTemplate:
             ),
         )
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 5)
-        self.assertEqual(
-            torch._inductor.metrics.generated_kernel_count,
-            1 if self.device == "cuda" else 3,
-        )
+        assertGeneratedKernelCountEqual(self, 1 if self.device == "cuda" else 3)
 
     def test_index_propagation(self):
         def flip(x):
@@ -2674,6 +2681,7 @@ class CommonTemplate:
             check_lowp=False,  # cpu doesn't understand fp16, and there are explicit .cpu() calls
         )
 
+    @skipIfRocm
     @requires_multigpu()
     def test_multi_gpu_device(self):
         # TODO: https://github.com/pytorch/pytorch/issues/92627
@@ -2902,7 +2910,7 @@ class CommonTemplate:
             (torch.randn(2, 4, 21, 21),),
             check_lowp=False,
         )
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+        assertGeneratedKernelCountEqual(self, 0)
 
     def test_multi_threading(self):
         model = torch.nn.Linear(2, 3).eval()
@@ -3159,7 +3167,7 @@ class CommonTemplate:
             fn,
             (torch.randn([16, 64, 55, 55]),),
         )
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+        assertGeneratedKernelCountEqual(self, 0)
 
     # From https://github.com/pytorch/pytorch/issues/94775
     def test_max_pool2d7(self):
@@ -3185,7 +3193,7 @@ class CommonTemplate:
             fn,
             (torch.randn([2, 2, 3, 6]),),
         )
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+        assertGeneratedKernelCountEqual(self, 0)
 
     def test_avg_pool2d1(self):
         def fn(x):
@@ -3265,7 +3273,7 @@ class CommonTemplate:
             fn,
             (-torch.arange(1 * 24 * 24, dtype=torch.float32).view(1, 1, 24, 24),),
         )
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+        assertGeneratedKernelCountEqual(self, 0)
 
     def test_avg_pool2d8(self):
         # https://github.com/pytorch/pytorch/issues/100987
@@ -3569,7 +3577,7 @@ class CommonTemplate:
         with torch.no_grad():
             self.common(m, (torch.randn([16, 32]),), check_lowp=False)
         if self.device != "cpu":
-            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+            assertGeneratedKernelCountEqual(self, 1)
 
     def test_transpose_add(self):
         def fn(a, b):
@@ -3579,7 +3587,7 @@ class CommonTemplate:
             fn, (torch.randn([16, 32]), torch.randn([32, 16])), check_lowp=False
         )
         if self.device != "cpu":
-            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+            assertGeneratedKernelCountEqual(self, 1)
 
     @patch.object(config.triton, "persistent_reductions", True)
     def test_softmax_one_kernel_persist(self):
@@ -3592,7 +3600,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([16, 32]),), check_lowp=False)
         if self.device != "cpu":
-            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+            assertGeneratedKernelCountEqual(self, 1)
 
     @patch.object(config.triton, "persistent_reductions", False)
     def test_softmax_one_kernel_loop(self):
@@ -3604,7 +3612,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([16, 32]),), check_lowp=False)
         if self.device != "cpu":
-            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+            assertGeneratedKernelCountEqual(self, 1)
 
     def test_complex_fallback(self):
         def fn(x):
@@ -3614,7 +3622,7 @@ class CommonTemplate:
             fn,
             (torch.randn([1, 2, 4, 8]).to(dtype=torch.complex64),),
         )
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+        assertGeneratedKernelCountEqual(self, 0)
 
         class ToComplex(nn.Module):
             def forward(self, x):
@@ -3623,7 +3631,7 @@ class CommonTemplate:
         self.common(ToComplex(), (torch.rand([1, 2, 4, 8]),), check_lowp=False)
 
         if self.device != "cpu":
-            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+            assertGeneratedKernelCountEqual(self, 1)
 
     def test_view_as_complex(self):
         class Repro(torch.nn.Module):
@@ -3675,7 +3683,7 @@ class CommonTemplate:
             check_lowp=False,
         )
         if self.device != "cpu":
-            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+            assertGeneratedKernelCountEqual(self, 1)
 
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
@@ -3701,7 +3709,7 @@ class CommonTemplate:
             check_lowp=False,
         )
         if self.device != "cpu":
-            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+            assertGeneratedKernelCountEqual(self, 2)
 
     @config.patch(max_fusion_size=1)
     def test_no_mega_fusion_during_lowering(self):
@@ -3728,7 +3736,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([32]),), check_lowp=False)
         # if we have a copy there will be more than 1 kernel
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        assertGeneratedKernelCountEqual(self, 1)
 
     def test_leaky_relu(self):
         def fn(x):
@@ -6230,7 +6238,7 @@ class CommonTemplate:
                 indices,
             ],
         )
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        assertGeneratedKernelCountEqual(self, 1)
 
     def test_max_pool2d_with_indices_backward5(self):
         # Window size is too big. Should fallback
@@ -6257,7 +6265,7 @@ class CommonTemplate:
                 indices,
             ],
         )
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+        assertGeneratedKernelCountEqual(self, 0)
 
     # From https://github.com/pytorch/pytorch/issues/93384
     def test_max_pool2d_with_indices_backward6(self):
@@ -6285,7 +6293,7 @@ class CommonTemplate:
                 indices,
             ],
         )
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+        assertGeneratedKernelCountEqual(self, 0)
 
     def test_issue102546(self):
         def fn(x):
@@ -6356,7 +6364,7 @@ class CommonTemplate:
                 torch.randn([1, 2016, 21, 21]),
             ],
         )
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        assertGeneratedKernelCountEqual(self, 1)
 
     def test_avg_pool2d_backward4(self):
         def fn(a, b):
@@ -6380,7 +6388,7 @@ class CommonTemplate:
             ],
             check_lowp=False,
         )
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+        assertGeneratedKernelCountEqual(self, 0)
 
     @config.patch(search_autotune_cache=False)
     def test_mm_views(self):
@@ -7316,7 +7324,7 @@ class CommonTemplate:
         )
 
         # expanded dim should not cause copy in require_stride_order
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+        assertGeneratedKernelCountEqual(self, 0)
 
     @requires_cuda()
     @unittest.skipIf(
@@ -7807,6 +7815,10 @@ class CommonTemplate:
     def test_scaled_dot_product_attention(self):
         if self.device == "cuda" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
             raise unittest.SkipTest("Can't run flash attention on this platform")
+        if self.device == "cuda" and TEST_WITH_ROCM:
+            raise unittest.SkipTest(
+                "Flash attention support is incomplete on this platform"
+            )
 
         def fn(q, k, v):
             return torch.nn.functional.scaled_dot_product_attention(
@@ -7913,7 +7925,7 @@ class CommonTemplate:
 
         self.common(fn, (input, boundaries, add_value), check_lowp=False)
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        assertGeneratedKernelCountEqual(self, 1)
 
     def test_bucketize_computed_offsets(self):
         def fn(inp, offsets):
@@ -8533,9 +8545,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
 
             @torch.compile
             def wrapper(x):
-                x = x.numpy()
-                y = my_np(x)
-                return torch.as_tensor(y)
+                return torch.compiler.wrap_numpy(my_np)(x)
 
             @torch.compile
             def wrapper2(x):
