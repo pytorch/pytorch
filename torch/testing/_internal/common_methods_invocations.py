@@ -9145,6 +9145,28 @@ class foreach_lerp_sample_func(foreach_inputs_sample_func):
         raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
 
 
+class foreach_clamp_sample_func(foreach_inputs_sample_func):
+    def sample_zero_size_tensor_inputs(self, opinfo, device, dtype, requires_grad, **kwargs):
+        zero_size_foreach_inputs_kwargs = copy.deepcopy(_foreach_inputs_default_kwargs)
+        input = sample_inputs_foreach(None, device, dtype, NUM_SIZE0_TENSORS, **zero_size_foreach_inputs_kwargs)
+        args = np.random.uniform(size=(2,)).tolist()
+        kwargs = {"disable_fastpath": dtype in integral_types_and(torch.bool)}
+        yield ForeachSampleInput(input, *args, **kwargs)
+
+    def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
+        num_input_tensors_specified = "num_input_tensors" in kwargs
+        num_input_tensors = kwargs.pop("num_input_tensors") if num_input_tensors_specified else foreach_num_tensors
+        assert isinstance(num_input_tensors, list)
+        _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
+        _foreach_inputs_kwargs["requires_grad"] = requires_grad
+
+        for num_tensors, args in product(num_input_tensors, ((-1, 1), (-1, None), (None, 1), (3, 1))):
+            _foreach_inputs_kwargs["zero_size"] = False
+            input = sample_inputs_foreach(None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
+            kwargs = {"disable_fastpath": dtype in integral_types_and(torch.bool)}
+            yield ForeachSampleInput(input, *args, **kwargs)
+
+
 class foreach_pointwise_sample_func(foreach_inputs_sample_func):
 
     def __init__(
@@ -9487,6 +9509,12 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
                          dtypes=(torch.float16,), device_type='cpu'),
         ),
+    ),
+    ForeachFuncInfo(
+        "clamp",
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        sample_inputs_func=foreach_clamp_sample_func(2, True, True),
     ),
     ForeachFuncInfo(
         "clamp_min",
