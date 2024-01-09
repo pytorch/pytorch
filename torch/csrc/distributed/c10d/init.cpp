@@ -946,9 +946,6 @@ Inserts the key-value pair into the store based on the supplied ``key`` and
 ``value``. If ``key`` already exists in the store, it will overwrite the old
 value with the new supplied ``value``.
 
-Note: if the store is wrapped with PrefixStore, a prefix will be added to
-the key implicitly when performing set.
-
 Arguments:
     key (str): The key to be added to the store.
     value (str): The value associated with ``key`` to be added to the store.
@@ -960,24 +957,6 @@ Example::
     >>> store.set("first_key", "first_value")
     >>> # Should return "first_value"
     >>> store.get("first_key")
-)")
-          .def(
-              "_set_no_prefix",
-              [](::c10d::Store& store,
-                 const std::string& key,
-                 const std::string& value) {
-                std::vector<uint8_t> value_(value.begin(), value.end());
-                store.setNoPrefix(key, value_);
-              },
-              py::call_guard<py::gil_scoped_release>(),
-              R"(
-Inserts the key-value pair into the store based on the supplied ``key`` and
-``value`` like set. The only difference here is that no prefix will be added
-to the ``key`` when insert.
-
-Arguments:
-    key (str): The exact key to be added to the store.
-    value (str): The value associated with ``key`` to be added to the store.
 )")
           .def(
               "compare_set",
@@ -1083,9 +1062,6 @@ from some edge deadlock cases, e.g, calling check after TCPStore has been destro
 Calling :meth:`~torch.distributed.store.check` with a list of keys that
 one wants to check whether stored in the store or not.
 
-Note: if the store is wrapped with PrefixStore, a prefix will be added to
-keys implicitly when performing check.
-
 Arguments:
     keys (lisr[str]): The keys to query whether stored in the store.
 
@@ -1097,18 +1073,6 @@ Example::
     >>> store.add("first_key", 1)
     >>> # Should return 7
     >>> store.check(["first_key"])
-)")
-          .def(
-              "_check_no_prefix",
-              &::c10d::Store::checkNoPrefix,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(
-The call to check whether a given list of ``keys`` have value stored in
-the store like check. The only difference here is that no prefix will be
-added to keys when performing check.
-
-Arguments:
-    keys (lisr[str]): The exact keys to query whether stored in the store.
 )")
           .def(
               "delete_key",
@@ -1480,7 +1444,11 @@ Arguments:
       .def_property_readonly(
           "underlying_store",
           &::c10d::PrefixStore::getUnderlyingStore,
-          R"(Gets the underlying store object that PrefixStore wraps around.)");
+          R"(Gets the underlying store object that PrefixStore wraps around.)")
+      .def_property_readonly(
+          "_underlying_non_prefix_store",
+          &::c10d::PrefixStore::getUnderlyingNonPrefixStore,
+          R"(Recursively to get the store before layers of wrapping with PrefixStore.)");
 
   auto processGroup =
       py::class_<
