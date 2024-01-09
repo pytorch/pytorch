@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     IS_WINDOWS,
+    skipIfRocm,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -763,6 +764,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (a, b)
         self.check_model(Model(), example_inputs, constraints=constraints)
 
+    @skipIfRocm
     @requires_multigpu()
     def test_replicate_on_devices(self):
         if self.device != "cuda":
@@ -817,6 +819,7 @@ class AOTInductorTestsTemplate:
 
         self.check_model(M(), ({"x": torch.ones(5), "y": torch.ones(5)},))
 
+    @skipIfRocm
     @requires_multigpu()
     def test_non_default_cuda_device(self):
         if self.device != "cuda":
@@ -1426,6 +1429,59 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), inputs)
 
+    def test_constant_original_fqn_and_dtype(self):
+        class FooBarModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_parameter("0", torch.nn.Parameter(torch.randn(3, 4)))
+                self.register_buffer("test_buf", torch.randn(3, 4))
+                self.register_parameter(
+                    "test_param", torch.nn.Parameter(torch.randn(3, 4))
+                )
+
+            def forward(self, x):
+                return ((x + self.test_buf) * getattr(self, "0")) / self.test_param
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo_bar = FooBarModule()
+                self.register_parameter(
+                    "test_param", torch.nn.Parameter(torch.randn(3, 4))
+                )
+                self.register_buffer("test_buf", torch.randn(3, 4))
+
+            def forward(self, x):
+                return (self.foo_bar(x) + self.test_param) * self.test_buf
+
+        with torch.no_grad():
+            so_path = AOTIRunnerUtil.compile(
+                model=TestModule().to(device=self.device),
+                example_inputs=(torch.rand(3, 4, device=self.device),),
+            )
+
+        runner = AOTIRunnerUtil.load_runner(self.device, so_path)
+
+        expected_original_fqns = {
+            "L__self___test_param": "test_param",
+            "L__self___test_buf": "test_buf",
+            "getattr_L__self___foo_bar___0__": "foo_bar.0",
+            "L__self___foo_bar_test_param": "foo_bar.test_param",
+            "L__self___foo_bar_test_buf": "foo_bar.test_buf",
+        }
+        self.assertEqual(
+            expected_original_fqns, runner.get_constant_names_to_original_fqns()
+        )
+
+        expected_dtypes = {
+            "L__self___test_param": 6,
+            "L__self___test_buf": 6,
+            "getattr_L__self___foo_bar___0__": 6,
+            "L__self___foo_bar_test_param": 6,
+            "L__self___foo_bar_test_buf": 6,
+        }
+        self.assertEqual(expected_dtypes, runner.get_constant_names_to_dtypes())
+
     def test_fqn(self):
         class NestedChild(torch.nn.Module):
             def __init__(self):
@@ -1538,10 +1594,9 @@ CPU_TEST_FAILURES = {
     # the test segfaults
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
-    # Minimal arrayref interface doesn't support bfloat16 yet.
-    "test_sdpa": fail_minimal_arrayref_interface(is_skip=True),
-    # Minimal arrayref interface doesn't support bfloat16 yet.
-    "test_sdpa_2": fail_minimal_arrayref_interface(is_skip=True),
+    # C++ compile error, need for aoti_torch___scaled_dot_product_flash_attention_for_cpu
+    "test_sdpa": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_sdpa_2": fail_with_and_without_stack_allocation(is_skip=True),
     # error: could not find s0
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
