@@ -1505,7 +1505,8 @@
   src: grad.slice_symint(dim, start, end, step)
   result: auto_linear
 
-- name: select_scatter(Tensor self, Tensor src, int dim, SymInt index) -> Tensor
+# NB: select_scatter() inherits its derivative formula from select_inverse() in codegen
+- name: select_inverse(Tensor(a) self, Tensor src, int dim, SymInt index) -> Tensor(a)
   self: select_scatter_symint(grad, zeros_like(src), dim, index)
   src: grad.select_symint(dim, index)
   result: auto_linear
