@@ -100,7 +100,7 @@ C10_LAUNCH_BOUNDS_1(kBlockSize)
 __global__ void multi_tensor_apply_kernel(
     T tensorListMeta,
     U callable,
-    ArgTypes... args) {
+    [[maybe_unused]] ArgTypes... args) {
   // Hand the chunk information to the user-supplied functor to process however
   // it likes.
   callable(kChunkSize, tensorListMeta, args...);
