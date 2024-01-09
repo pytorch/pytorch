@@ -127,7 +127,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         when an intermediate result is being used / returned downstream
         """
 
-        @skipIfRocm
         @torch.compile(fullgraph=True)
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
