@@ -1254,7 +1254,10 @@ def forward(self, arg_0):
 
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
-        with self.assertRaisesRegex(RuntimeError, r"Deferred runtime assertion failed -i0 <= 0"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"(Deferred runtime assertion failed -i0 <= 0|_local_scalar_dense is outside of inline constraint \[0, inf\])"
+        ):
             _ = ep(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
