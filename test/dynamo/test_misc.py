@@ -7636,6 +7636,48 @@ def ___make_guard_fn():
         compiled_out = compiled_fn()
         self.assertTrue(same(fn_out, compiled_out))
 
+    def test_fn_hasattr__name__1(self):
+        def fn():
+            foo = lambda x: x + 1
+            return hasattr(foo, "__name__")
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        fn_out = fn()
+        compiled_out = compiled_fn()
+        self.assertEqual(fn_out, compiled_out)
+        self.assertTrue(fn_out)
+
+    def test_fn_hasattr__name__2(self):
+        def bar(x):
+            return torch.sin(x)
+
+        def fn():
+            return hasattr(bar, "__name__")
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        fn_out = fn()
+        compiled_out = compiled_fn()
+        self.assertEqual(fn_out, compiled_out)
+        self.assertTrue(fn_out)
+
+    def test_fn_hasattr__name__3(self):
+        def bar(x, y):
+            return torch.sin(x) + torch.cos(y)
+
+        baz = functools.partial(bar, y=4)
+
+        def fn():
+            return hasattr(baz, "__name__")
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        fn_out = fn()
+        compiled_out = compiled_fn()
+        self.assertEqual(fn_out, compiled_out)
+        self.assertFalse(fn_out)
+
     def test_torch_objects_as_keys(self):
         remap = {torch.float16: torch.float32}
 

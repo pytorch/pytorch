@@ -2689,7 +2689,6 @@ dynamo_expected_failures = {
     "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_none_cpu",  # test_nn
     "TestNN.test_Sequential_extend",  # test_nn
     "TestNN.test_overwrite_module_params_on_conversion",  # test_nn
-    "TestNNDeviceTypeCPU.test_GRU_grad_and_gradgrad_cpu_float64",  # test_nn
     "TestNN.test_ModuleList",  # test_nn
     "TestNNDeviceTypeCPU.test_hardswish_grad_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_threshold_inplace_overlap_cpu",  # test_nn
@@ -2702,7 +2701,6 @@ dynamo_expected_failures = {
     "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_sum_use_module_form_False_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_sum_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_cpu",  # test_nn
-    "TestNNDeviceTypeCPU.test_LSTM_grad_and_gradgrad_cpu_float64",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_False_mode_bicubic_memory_format1_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_batchnorm_grad_cpu",  # test_nn
     "TestNN.test_interpolate",  # test_nn
