@@ -388,8 +388,7 @@ class intrusive_ptr final {
     if (this == &rhs) {
       return *this;
     }
-    // NOLINTNEXTLINE(misc-unconventional-assign-operator,
-    // cppcoreguidelines-c-copy-assignment-signature)
+    // NOLINTNEXTLINE(*assign-operator, *assignment-signature)
     return operator= <TTarget, NullType>(rhs);
   }
 

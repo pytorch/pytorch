@@ -61,10 +61,11 @@ from torch._dynamo.testing import (
     reset_rng_state,
     same,
 )
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 
 try:
     from torch._dynamo.utils import clone_inputs, graph_break_reasons
-    from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
+    from torch._inductor.utils import fresh_inductor_cache
 except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
@@ -1113,14 +1114,12 @@ class AOTInductorModelCache:
 
             so_path = torch._export.aot_compile(model, example_args, example_kwargs)
 
-            module = torch.utils.cpp_extension.load_inline(
-                name="aot_inductor",
-                cpp_sources=[aot_inductor_launcher(so_path, device)],
-                functions=["run", "get_call_spec"],
-                with_cuda=(device == "cuda"),
+            runner = (
+                torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
+                if device == "cpu"
+                else torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1)
             )
-
-            cls.cache[key] = module
+            cls.cache[key] = runner
 
         return cls.cache[key]
 
@@ -1140,8 +1139,8 @@ def export(model, example_inputs):
 
 
 def export_aot_inductor(model, example_inputs, device):
-    module = AOTInductorModelCache.load(model, example_inputs, device)
-    call_spec = module.get_call_spec()
+    runner = AOTInductorModelCache.load(model, example_inputs, device)
+    call_spec = runner.get_call_spec()
     in_spec = pytree.treespec_loads(call_spec[0])
     out_spec = pytree.treespec_loads(call_spec[1])
 
@@ -1151,7 +1150,7 @@ def export_aot_inductor(model, example_inputs, device):
         flat_inputs = fx_pytree.tree_flatten_spec(
             (example_args, example_kwargs), in_spec
         )
-        flat_outputs = module.run(flat_inputs)
+        flat_outputs = runner.run(flat_inputs)
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
     return opt_aot_inductor
@@ -2311,6 +2310,7 @@ class BenchmarkRunner:
             # Collect the fp64 reference outputs to be used later for accuracy checking.
             fp64_outputs = None
             model_fp64 = None
+            inputs_fp64 = None
             try:
                 model_fp64, inputs_fp64 = cast_to_fp64(
                     self.deepcopy_and_maybe_ddp(model),
@@ -2882,9 +2882,6 @@ def parse_args(args=None):
         "--batch-size-file", type=str, help="String to load batch size from"
     )
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
-    parser.add_argument(
-        "--cpp-wrapper", action="store_true", help="turn on cpp/cuda wrapper codegen"
-    )
     parser.add_argument(
         "--freezing", action="store_true", help="turn on freezing", default=False
     )
@@ -3657,7 +3654,6 @@ def run(runner, args, original_dir=None):
         )
         inductor_config.split_reductions = not args.disable_split_reductions
         inductor_config.triton.divisible_by_16 = not args.disable_divisible_by_16
-        inductor_config.cpp_wrapper = args.cpp_wrapper
         if args.inference:
             inductor_config.freezing = args.freezing
 

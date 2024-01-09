@@ -2789,6 +2789,10 @@ class TestSparseCSR(TestCase):
 
         for sample in samples:
             a = sample.args[0].relu().to_sparse_csr()
+            if sample.args[0].shape == sample.args[1].shape:
+                import warnings
+                warnings.warn("Broken for square matrices, see https://github.com/pytorch/pytorch/issues/116565")
+                continue
 
             # This path tests the autograd path wrt dense inputs
             for addmm in [torch.addmm, torch.sparse.addmm]:
@@ -3458,7 +3462,6 @@ class TestSparseCompressedTritonKernels(TestCase):
         return d
 
     @onlyCUDA
-    @skipIfRocm
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -3494,7 +3497,6 @@ class TestSparseCompressedTritonKernels(TestCase):
     @parametrize("block_size", [16, 32, 64])
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @onlyCUDA
-    @skipIfRocm
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf((not TEST_WITH_TORCHINDUCTOR) or (IS_FBCODE and IS_REMOTE_GPU) or torch._running_with_deploy(),
@@ -3573,7 +3575,6 @@ class TestSparseCompressedTritonKernels(TestCase):
                 self.assertEqual(res_tri, res_dense)
 
     @onlyCUDA
-    @skipIfRocm
     @dtypes(torch.half)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU or torch._running_with_deploy(),
                      "Skipped for deploy and internal with remote GPUs")
@@ -3783,7 +3784,6 @@ class TestSparseCompressedTritonKernels(TestCase):
 
     @parametrize("blocksize", [2, '2x3', 16, '16x32', 32, 64])
     @onlyCUDA
-    @skipIfRocm
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")

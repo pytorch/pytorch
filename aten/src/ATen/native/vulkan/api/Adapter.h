@@ -1,5 +1,7 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Common.h>
@@ -30,12 +32,12 @@ struct PhysicalDevice final {
   bool has_timestamps;
   float timestamp_period;
 
-  explicit PhysicalDevice(const VkPhysicalDevice);
+  explicit PhysicalDevice(VkPhysicalDevice);
 };
 
 class DeviceHandle final {
  public:
-  explicit DeviceHandle(const VkDevice device);
+  explicit DeviceHandle(VkDevice device);
 
   DeviceHandle(const DeviceHandle&) = delete;
   DeviceHandle& operator=(const DeviceHandle&) = delete;
@@ -80,8 +82,8 @@ class DeviceHandle final {
 class Adapter final {
  public:
   explicit Adapter(
-      const VkInstance instance,
-      const PhysicalDevice& physical_device,
+      VkInstance instance,
+      PhysicalDevice physical_device,
       const uint32_t num_queues);
 
   Adapter(const Adapter&) = delete;
@@ -185,13 +187,13 @@ class Adapter final {
 
   void submit_cmd(
       const Queue&,
-      const VkCommandBuffer,
-      const VkFence fence = VK_NULL_HANDLE);
+      VkCommandBuffer,
+      VkFence fence = VK_NULL_HANDLE);
 
   void submit_cmds(
       const Adapter::Queue&,
       const std::vector<VkCommandBuffer>&,
-      const VkFence fence = VK_NULL_HANDLE);
+      VkFence fence = VK_NULL_HANDLE);
 
   // Miscellaneous
 

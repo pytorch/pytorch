@@ -25,7 +25,7 @@ verbose_progress = False
 fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
 # use cpp wrapper instead of python wrapper
-cpp_wrapper = False
+cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
 # dead code elimination
 dce = False
@@ -522,7 +522,7 @@ class triton:
 
     # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
-    max_block = {"X": 2048, "Y": 1024, "Z": 1024}
+    max_block = {"X": 2048, "Y": 1024, "Z": 1024, "R": 4096}
 
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False
@@ -539,6 +539,9 @@ class triton:
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 16
+
+    # Generate code containing the newer tl.make_block_ptr() API for loads/store
+    use_block_ptr = False
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.

@@ -20,7 +20,6 @@ import torch.nn
 import torch.onnx.operators
 
 from .. import config, polyfill, variables
-from ..allowed_functions import torch_get_name
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder
@@ -105,9 +104,12 @@ class BaseTorchVariable(VariableTracker):
         self.value = value
 
     def reconstruct(self, codegen):
-        name = torch_get_name(value, f"allowed_fn_{id(value)}")
+        try:
+            name = f"{self.value.__module__}.{self.value.__name__}"
+        except Exception:
+            name = f"torch_obj_{id(self.value)}"
         unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
-        return codegen.setup_globally_cached(unique_var_name, value, False)
+        return codegen.setup_globally_cached(unique_var_name, self.value, False)
 
     def as_proxy(self):
         return self.value
@@ -173,11 +175,11 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                     {},
                 ),
             )
-        elif self.value in [
+        elif self.value in (
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
-        ]:
+        ):
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
             torch.profiler.profile,
@@ -228,10 +230,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         elif self.value in tracing_state_functions:
             assert not args and not kwargs
             # See: https://github.com/pytorch/pytorch/issues/110765
-            if self.value in [
+            if self.value in (
                 torch._utils.is_compiling,
                 torch._dynamo.external_utils.is_compiling,
-            ]:
+            ):
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions[self.value])
         elif self.value in (
@@ -401,7 +403,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         # TODO: These special cases shouldn't be necessary; we should
         # generically support torch.ops that return int
         elif (
-            self.value in [torch.ops.aten.sym_size, torch.ops.aten.sym_size.int]
+            self.value in (torch.ops.aten.sym_size, torch.ops.aten.sym_size.int)
             and len(args) == 2
             and len(kwargs) == 0
             and isinstance(args[0], TensorVariable)
@@ -409,7 +411,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # we see this when retracing already traced code
             return args[0].call_method(tx, "size", [args[1]], {})
         elif (
-            self.value is [torch.ops.aten.sym_stride, torch.ops.aten.sym_stride.int]
+            self.value in (torch.ops.aten.sym_stride, torch.ops.aten.sym_stride.int)
             and len(args) == 2
             and len(kwargs) == 0
             and isinstance(args[0], TensorVariable)

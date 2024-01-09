@@ -1523,6 +1523,17 @@ def register_onednn_fusion_ops():
             unary_scalars,
             unary_algorithmm,
         ):
+            if (
+                binary_attr == "sum"
+                and output_dtype in [torch.float32, torch.bfloat16]
+                and accum.get_dtype() in [torch.float32, torch.bfloat16]
+                and accum.get_dtype() != output_dtype
+            ):
+                # For int8-mixed-bf16 quantization and inplace add,
+                # there is case when accum dtype is float32 but output dtype is bfloat16.
+                # Since the accum will be inplaced changed with post op sum,
+                # we will do accum dtype convertion here.
+                accum = to_dtype(accum, output_dtype)
             return TensorBox.create(
                 ir.QConvPointWiseBinaryPT2E.create(
                     x,
@@ -2116,6 +2127,16 @@ make_fallback(
 )
 make_fallback(
     aten._scaled_dot_product_flash_attention_backward.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_flash_attention_for_cpu.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_flash_attention_for_cpu_backward.default,
     sdpa_constraint,
     warn=False,
 )
@@ -3652,12 +3673,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     # if padding is a complicated expression, hoist it
     bounds_precomp: List[Tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
-        l_precomp = (
-            V.graph.sizevars.lookup_precomputed_size(l)
-            if isinstance(l, sympy.Expr) and not l.is_number
-            else l
-        )
-        bounds_precomp.append((l_precomp, h))
+        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))
 
     output_size = list(sizes[:n])
     mask_sizes = []
