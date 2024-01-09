@@ -160,7 +160,7 @@ static PyObject* THPIInfo_max(THPIInfo* self, void*) {
   HANDLE_TH_ERRORS
   if (at::isIntegralType(self->type, /*includeBool=*/false)) {
     return AT_DISPATCH_IINFO_TYPES(self->type, "max", [] {
-      if (std::is_unsigned<scalar_t>::value) {
+      if (std::is_unsigned_v<scalar_t>) {
         return THPUtils_packUInt64(std::numeric_limits<scalar_t>::max());
       } else {
         return THPUtils_packInt64(std::numeric_limits<scalar_t>::max());
@@ -178,7 +178,7 @@ static PyObject* THPIInfo_min(THPIInfo* self, void*) {
   HANDLE_TH_ERRORS
   if (at::isIntegralType(self->type, /*includeBool=*/false)) {
     return AT_DISPATCH_IINFO_TYPES(self->type, "min", [] {
-      if (std::is_unsigned<scalar_t>::value) {
+      if (std::is_unsigned_v<scalar_t>) {
         return THPUtils_packUInt64(std::numeric_limits<scalar_t>::lowest());
       } else {
         return THPUtils_packInt64(std::numeric_limits<scalar_t>::lowest());
