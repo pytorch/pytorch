@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
@@ -201,15 +202,14 @@ static void reduced_float_copy_kernel(TensorIteratorBase &iter, bool requires_ne
 
 #if !defined(C10_MOBILE)
 #define _AT_DISPATCH_ALL_TYPES(TYPE, NAME, ...)                                       \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND8(                                       \
-            ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool,              \
-            ScalarType::BFloat16, ScalarType::Float8_e5m2, ScalarType::Float8_e4m3fn, \
-            ScalarType::Float8_e5m2fnuz, ScalarType::Float8_e4m3fnuz,                 \
-            TYPE, NAME, __VA_ARGS__)
+        AT_DISPATCH_V2(TYPE, NAME, AT_WRAP(__VA_ARGS__),                                       \
+            kComplexHalf, kHalf, kBool,              \
+            kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
+            kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
 #define _AT_DISPATCH_ALL_TYPES_NO_CF(TYPE, NAME, ...)              \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND7(                    \
+        AT_DISPATCH_V2(TYPE, NAME, AT_WRAP(__VA_ARGS__),                    \
             kBool, kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
-            kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, TYPE, NAME, __VA_ARGS__)
+            kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
 #else
 #define _AT_DISPATCH_ALL_TYPES(TYPE, NAME, ...)                                               \
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                                               \
