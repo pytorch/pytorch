@@ -24,8 +24,8 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._higher_order_ops.wrap import wrap
-from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.common_utils import skipIfTorchDynamo
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
@@ -2282,71 +2282,6 @@ class GraphModule(torch.nn.Module):
 {'batched_output': ['add'], 'sum_1': ['sum_1'], 'sum_2': ['sum_2']}""",
         )
 
-    @config.patch(capture_func_transforms=True)
-    def test_vmap_with_graph_break(self):
-        counters.clear()
-
-        def g(x):
-            y = x.cos()
-            print('hi')
-            return y.sin()
-
-        def fn(x):
-            return torch.vmap(g)(x)
-
-        x = torch.randn(3, 4)
-        opt = torch.compile(fn, backend="aot_eager", fullgraph=False)
-        expected = fn(x)
-        got = opt(x)
-        self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(expected, got)
-
-    @skipIfTorchDynamo
-    @config.patch(capture_func_transforms=True)
-    def test_vmap_with_graph_break_2(self):
-        counters.clear()
-
-        def cos(x):
-            print('cos')
-            return x.cos()
-
-        def sin(x):
-            print('sin')
-            return x.sin()
-
-        def g(x):
-            y = cos(x)
-            return sin(y)
-
-        def fn(x):
-            return torch.vmap(g, randomness='same')(x)
-
-        x = torch.randn(3, 4)
-        opt = torch.compile(fn, backend="aot_eager", fullgraph=False)
-        expected = fn(x)
-        got = opt(x)
-        self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(expected, got)
-
-    @skipIfTorchDynamo
-    def test_vmap_with_graph_break_lambda(self):
-        counters.clear()
-
-        def sin(x):
-            print('sin')
-            return x.sin()
-
-        def fn(x):
-            return torch.vmap(lambda x: sin(x))(x)
-
-        x = torch.randn(3, 4)
-        opt = torch.compile(fn, backend="aot_eager", fullgraph=False)
-        expected = fn(x)
-        got = opt(x)
-        self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(expected, got)
-
-
     def test_cond_pytree_operands(self):
         def _construct_pytree():
             a = torch.randn(3, 3)
@@ -3011,6 +2946,114 @@ class GraphModule(torch.nn.Module):
             {"torch.func.grad: kwargs arguments are currently unsupported.": 2},
         )
         self.assertEqual(actual, expected)
+
+    @config.patch(capture_func_transforms=True)
+    def test_vmap_get_wrapped(self):
+        counters.clear()
+
+        def g(x):
+            return x.sin()
+
+        @torch.compile(backend="aot_eager")
+        def fn():
+            return torch.vmap(g)
+
+        x = torch.randn(3, 4)
+        expected = torch.vmap(g)(x)
+        wrapper = fn()
+        got = wrapper(x)
+        self.assertEqual(expected, got)
+
+    @config.patch(capture_func_transforms=True)
+    def test_vmap_with_conditional_graph_break(self):
+        def g(x):
+            if len(x.shape) < 2:
+                torch._dynamo.graph_break()
+                return x.sin()
+            else:
+                return x.cos()
+
+        @torch.compile(backend="aot_eager")
+        def fn(x):
+            return torch.vmap(g)(x)
+
+        counters.clear()
+        x = torch.randn(2, 3)
+        expected = x.sin()
+        got = fn(x)
+        self.assertEqual(expected, got)
+        self.assertEqual(len(counters["graph_break"]), 1)
+
+        counters.clear()
+        y = torch.randn(2, 3, 4)
+        expected = y.cos()
+        got = fn(y)
+        self.assertEqual(expected, got)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    @config.patch(capture_func_transforms=True)
+    def test_vmap_with_graph_break(self):
+        counters.clear()
+
+        def g(x):
+            y = x.cos()
+            print("hi")
+            return y.sin()
+
+        def fn(x):
+            return torch.vmap(g)(x)
+
+        x = torch.randn(3, 4)
+        opt = torch.compile(fn, backend="aot_eager", fullgraph=False)
+        expected = fn(x)
+        got = opt(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(expected, got)
+
+    @skipIfTorchDynamo
+    @config.patch(capture_func_transforms=True)
+    def test_vmap_with_graph_break_2(self):
+        counters.clear()
+
+        def cos(x):
+            print("cos")
+            return x.cos()
+
+        def sin(x):
+            print("sin")
+            return x.sin()
+
+        def g(x):
+            y = cos(x)
+            return sin(y)
+
+        def fn(x):
+            return torch.vmap(g, randomness="same")(x)
+
+        x = torch.randn(3, 4)
+        opt = torch.compile(fn, backend="aot_eager", fullgraph=False)
+        expected = fn(x)
+        got = opt(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(expected, got)
+
+    @skipIfTorchDynamo
+    def test_vmap_with_graph_break_lambda(self):
+        counters.clear()
+
+        def sin(x):
+            print("sin")
+            return x.sin()
+
+        def fn(x):
+            return torch.vmap(lambda x: sin(x))(x)
+
+        x = torch.randn(3, 4)
+        opt = torch.compile(fn, backend="aot_eager", fullgraph=False)
+        expected = fn(x)
+        got = opt(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(expected, got)
 
     @config.patch(capture_func_transforms=True)
     def test_vmap(self):
