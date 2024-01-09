@@ -6,10 +6,10 @@ import unittest
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 
 import torch
-import torch.utils._cxx_pytree as cxx_pytree
 import torch.utils._pytree as py_pytree
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
     run_tests,
     subtest,
@@ -17,6 +17,11 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+if IS_FBCODE:
+    # optree is not yet enabled in fbcode, so just re-test the python implementation
+    cxx_pytree = py_pytree
+else:
+    import torch.utils._cxx_pytree as cxx_pytree
 
 GlobalPoint = namedtuple("GlobalPoint", ["x", "y"])
 
@@ -1008,6 +1013,10 @@ TreeSpec(tuple, None, [*,
 
 
 class TestCxxPytree(TestCase):
+    def setUp(self):
+        if IS_FBCODE:
+            raise unittest.SkipTest("C++ pytree tests are not supported in fbcode")
+
     def test_treespec_equality(self):
         self.assertEqual(cxx_pytree.LeafSpec(), cxx_pytree.LeafSpec())
 
