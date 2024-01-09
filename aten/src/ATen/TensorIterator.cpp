@@ -44,6 +44,22 @@ inline void get_base_ptrs(char** ptrs, ArrayRef<OperandInfo> operands) {
   });
 }
 
+inline void get_mutable_base_ptrs(char** ptrs, ArrayRef<OperandInfo> operands) {
+  for (const auto arg : c10::irange(operands.size())) {
+    if (!operands[arg].is_const()) {
+      *ptrs++ = static_cast<char*>(operands[arg].mutable_data());
+    }
+  }
+}
+
+inline void get_const_base_ptrs(const char** ptrs, ArrayRef<OperandInfo> operands) {
+  for (const auto arg : c10::irange(operands.size())) {
+    if (operands[arg].is_const()) {
+      *ptrs++ = static_cast<const char*>(operands[arg].const_data());
+    }
+  }
+}
+
 inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_t ndim) {
   for (const auto dim : c10::irange(ndim)) {
     for (const auto arg : c10::irange(operands.size())) {
@@ -55,6 +71,32 @@ inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_
     const int64_t ntensors = operands.size();
     std::fill_n(strides, (2 - ndim) * ntensors, 0);
   }
+}
+
+inline void get_const_or_mutable_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_t ndim, bool get_const) {
+  int64_t ntensors = 0;
+  for (const auto dim : c10::irange(ndim)) {
+    for (const auto arg : c10::irange(operands.size())) {
+      if (operands[arg].is_const() == get_const) {
+        *strides++ = operands[arg].stride_bytes[dim];
+        if (dim == 0) {
+          ntensors++;
+        }
+      }
+    }
+  }
+  // Always at least 2d strides to support 2d for_each loops
+  if (ndim < 2) {
+    std::fill_n(strides, (2 - ndim) * ntensors, 0);
+  }
+}
+
+inline void get_const_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_t ndim) {
+  get_const_or_mutable_strides(strides, operands, ndim, true);
+}
+
+inline void get_mutable_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_t ndim) {
+  get_const_or_mutable_strides(strides, operands, ndim, false);
 }
 
 static OptionalTensorRef make_otr(const TensorBase &tensor) {
@@ -96,6 +138,14 @@ void* OperandInfo::mutable_data() const {
     void* operator()(const void*) { return nullptr; }
   };
   return std::visit(GetMutableVisitor(), data_);
+}
+
+const void* OperandInfo::const_data() const {
+  struct GetConstVisitor {
+    const void* operator()(void* data) { return data; }
+    const void* operator()(const void* data) { return data; }
+  };
+  return std::visit(GetConstVisitor(), data_);
 }
 
 void OperandInfo::set_data(std::variant<void*, const void*> data) {
@@ -794,6 +844,19 @@ void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
   }
 }
 
+void TensorIteratorBase::for_each(loop2d_with_const_t loop, int64_t grain_size) {
+  int64_t numel = this->numel();
+  if (numel == 0) {
+    return;
+  } else if (numel < grain_size || at::get_num_threads() == 1) {
+    return serial_for_each(loop, {0, numel});
+  } else {
+    at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
+      serial_for_each(loop, {begin, end});
+    });
+  }
+}
+
 StrideVector TensorIteratorBase::get_strides() const {
   const auto dim = ndim();
   StrideVector strides(std::max(dim, 2) * ntensors());
@@ -816,6 +879,34 @@ void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
   at::get_strides(strides.data(), operands_, ndim);
   at::internal::serial_for_each(
       shape_, strides, ptrs.data(), ptrs.size(), loop, range);
+}
+
+void TensorIteratorBase::serial_for_each(loop2d_with_const_t loop, Range range) const {
+  if (range.size() == 0) {
+    return;
+  }
+
+  const auto nmutabletensors = this->nmutabletensors();
+  const auto nconsttensors = this->nconsttensors();
+  const auto ndim = this->ndim();
+
+  c10::SmallBuffer<char*, 4> mutable_ptrs(nmutabletensors);
+  c10::SmallBuffer<int64_t, 8> mutable_strides(nmutabletensors * std::max(ndim, 2));
+
+  c10::SmallBuffer<const char*, 4> const_ptrs(nconsttensors);
+  c10::SmallBuffer<int64_t, 8> const_strides(nconsttensors * std::max(ndim, 2));
+
+  at::get_mutable_base_ptrs(mutable_ptrs.data(), operands_);
+  at::get_mutable_strides(mutable_strides.data(), operands_, ndim);
+
+  at::get_const_base_ptrs(const_ptrs.data(), operands_);
+  at::get_const_strides(const_strides.data(), operands_, ndim);
+
+  at::internal::serial_for_each(
+      shape_,
+      mutable_strides, mutable_ptrs.data(), mutable_ptrs.size(),
+      const_strides, const_ptrs.data(), const_ptrs.size(),
+      loop, range);
 }
 
 bool TensorIteratorBase::is_trivial_1d() const {
@@ -1192,6 +1283,7 @@ void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
     }
   }
   num_outputs_ = config.num_outputs_;
+  num_const_tensors_ = config.const_input_indices_.size();
 }
 
 void TensorIteratorBase::mark_outputs() {

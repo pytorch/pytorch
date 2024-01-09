@@ -135,6 +135,7 @@ struct TORCH_API OperandInfo {
 
   void set_data(std::variant<void*, const void*> data);
   void* mutable_data() const;
+  const void* const_data() const;
   bool is_const() const;
 
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
@@ -239,6 +240,7 @@ struct TensorIterator;
 struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   using DimMask = std::bitset<64>;
   using PtrVector = SmallVector<char*, 4>;
+  using ConstPtrVector = SmallVector<const char*, 4>;
   using StrideVector = SmallVector<int64_t, 6>;
 
   TensorIteratorBase();
@@ -256,6 +258,9 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   // parallelization of the inner loop.
   using loop2d_t = c10::function_ref<
       void(char** data, const int64_t* strides, int64_t size0, int64_t size1)>;
+
+  using loop2d_with_const_t = c10::function_ref<
+      void(char** mutable_data, const int64_t* mutable_strides, const char** const_data, const int64_t* const_strides, int64_t size0, int64_t size1)>;
 
   using loop_subiter_t = c10::function_ref<void(TensorIteratorBase& subiter)>;
 
@@ -276,6 +281,12 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   }
   int ninputs() const {
     return ntensors() - noutputs();
+  }
+  int nconsttensors() const {
+    return num_const_tensors_;
+  }
+  int nmutabletensors() const {
+    return ntensors() - nconsttensors();
   }
   IntArrayRef view_offsets() const {
     return view_offsets_;
@@ -413,6 +424,31 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
         };
   }
 
+  template <typename loop1d_with_const_t>
+  auto loop_2d_with_const_from_1d(const loop1d_with_const_t& loop) {
+    return
+        [loop, nmutabletensor = nmutabletensors(), nconsttensor = nconsttensors()](
+            char** mutable_base, const int64_t* mutable_strides,
+            const char** const_base, const int64_t* const_strides,
+            int64_t size0, int64_t size1) {
+          PtrVector mutable_data(mutable_base, mutable_base + nmutabletensor);
+          ConstPtrVector const_data(const_base, const_base + nconsttensor);
+          const int64_t* outer_mutable_strides = &mutable_strides[nmutabletensor];
+          const int64_t* outer_const_strides = &const_strides[nconsttensor];
+          for (const auto i : c10::irange(size1)) {
+            if (i > 0) {
+              for (const auto arg : c10::irange(nmutabletensor)) {
+                mutable_data[arg] += outer_mutable_strides[arg];
+              }
+              for (const auto arg : c10::irange(nconsttensor)) {
+                const_data[arg] += outer_const_strides[arg];
+              }
+            }
+            loop(mutable_data.data(), mutable_strides, const_data.data(), const_strides, size0);
+          }
+        };
+  }
+
  public:
   template <
       typename loop1d_t,
@@ -426,7 +462,21 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
     for_each(loop_2d_from_1d(loop), grain_size);
   }
 
+  template <
+      typename loop1d_t,
+      std::enable_if_t<
+          std::is_convertible<
+              loop1d_t,
+              c10::function_ref<
+                  void(char**, const int64_t*, const char**, const int64_t*, int64_t size)>>::value,
+          int> = 0>
+  void for_each(loop1d_t loop, int64_t grain_size = at::internal::GRAIN_SIZE) {
+    for_each(loop_2d_with_const_from_1d(loop), grain_size);
+  }
+
   void for_each(loop2d_t loop, int64_t grain_size = at::internal::GRAIN_SIZE);
+
+  void for_each(loop2d_with_const_t loop, int64_t grain_size = at::internal::GRAIN_SIZE);
 
   void parallel_reduce(loop2d_t loop);
 
@@ -442,7 +492,20 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
     serial_for_each(loop_2d_from_1d(loop), range);
   }
 
+  template <
+      typename loop1d_t,
+      std::enable_if_t<
+          std::is_convertible<
+              loop1d_t,
+              c10::function_ref<
+                  void(char**, const int64_t*, const char**, const int64_t*, int64_t)>>::value,
+          int> = 0>
+  void serial_for_each(loop1d_t loop, Range range) {
+    serial_for_each(loop_2d_with_const_from_1d(loop), range);
+  }
+
   void serial_for_each(loop2d_t loop, Range range) const;
+  void serial_for_each(loop2d_with_const_t loop, Range range) const;
 
   /// Create a strides array for a Tensor with shape of this iterator. The
   /// parameter `element_size` specifies the size of Tensor's data type in
@@ -680,6 +743,8 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   /// Number of outputs in operands_ (the length of the outputs prefix
   /// in operands_).
   int num_outputs_ = 0;
+
+  int num_const_tensors_ = 0;
 
   /// Whether or not all operands have the same shape and are 1d+. Having all
   /// the same shape affects whether or not the iterator is eligible for fast
