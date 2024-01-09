@@ -49,6 +49,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     TEST_CUDNN,
+    TEST_MULTIGPU,
     with_tf32_off,
 )
 
@@ -98,7 +99,6 @@ from torch.testing._internal.inductor_utils import (
     skipCUDAIf,
 )
 
-HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
 _desired_test_bases = get_desired_device_type_test_bases()
 RUN_CPU = any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
@@ -107,7 +107,7 @@ RUN_CUDA = any(getattr(x, "device_type", "") == "cuda" for x in _desired_test_ba
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
-    unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
+    unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
 skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
@@ -115,6 +115,8 @@ skip_if_x86_mac = functools.partial(
 vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libfoo = None
+
+f32 = torch.float32
 
 
 def run_fw_bw_and_get_code(fn):
@@ -668,7 +670,9 @@ class CommonTemplate:
         y = torch.tensor([1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1])
 
         _, code = run_and_get_code(fn, x, y)
-        self.assertEqual(code[0].count("aten.view"), 3)
+        self.assertEqual(
+            code[0].count("::view_dtype" if config.cpp_wrapper else "aten.view"), 3
+        )
 
     def test_add_complex3(self):
         # fix https://github.com/pytorch/pytorch/issues/115071
@@ -2677,6 +2681,7 @@ class CommonTemplate:
             check_lowp=False,  # cpu doesn't understand fp16, and there are explicit .cpu() calls
         )
 
+    @skipIfRocm
     @requires_multigpu()
     def test_multi_gpu_device(self):
         # TODO: https://github.com/pytorch/pytorch/issues/92627
@@ -7810,6 +7815,10 @@ class CommonTemplate:
     def test_scaled_dot_product_attention(self):
         if self.device == "cuda" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
             raise unittest.SkipTest("Can't run flash attention on this platform")
+        if self.device == "cuda" and TEST_WITH_ROCM:
+            raise unittest.SkipTest(
+                "Flash attention support is incomplete on this platform"
+            )
 
         def fn(q, k, v):
             return torch.nn.functional.scaled_dot_product_attention(
@@ -8536,9 +8545,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
 
             @torch.compile
             def wrapper(x):
-                x = x.numpy()
-                y = my_np(x)
-                return torch.as_tensor(y)
+                return torch.compiler.wrap_numpy(my_np)(x)
 
             @torch.compile
             def wrapper2(x):
