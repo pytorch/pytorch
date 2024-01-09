@@ -474,9 +474,6 @@ struct NCCLTraceBuffer {
       }
       if (completed) {
         r.state_ = "completed";
-        if (r.start_ != nullptr) {
-          r.duration_ = getDurationFromFirstEvent(*r.start_, *r.end_);
-        }
       }
     }
   }
