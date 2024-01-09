@@ -20,12 +20,14 @@ void SymInt::promote_to_negative() {
 }
 
 SymNode SymInt::toSymNode() const {
-  TORCH_CHECK(is_heap_allocated());
+  TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
+      is_heap_allocated(), "SymInt::toSymNode is_heap_allocated");
   return SymNode::reclaim_copy(toSymNodeImplUnowned());
 }
 
 SymInt::SymInt(SymNode sin_sp) {
-  TORCH_CHECK(sin_sp->is_int());
+  TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
+      sin_sp->is_int(), "SymInt::SymInt sin_sp->is_int()");
   auto ptr = static_cast<uint64_t>(
       reinterpret_cast<uintptr_t>(static_cast<void*>(sin_sp.release())));
   auto rep = (ptr & ~MASK) | IS_SYM;
@@ -132,7 +134,13 @@ bool SymInt::expect_size(const char* file, int64_t line) const {
 
 SymInt operator-(const SymInt& s) {
   if (auto ma = s.maybe_as_int()) {
-    return SymInt(-*ma);
+    const auto val = *ma;
+    // Note: Result of `-std::numeric_limits<decltype(val)>::min()` is undefined
+    // But on many platforms it equals to self + setting Carry/Overflow flags
+    // Which in opimized code affects results of `check_range` condition
+    // Workaround by using ternary that avoids alterning the flags
+    constexpr auto val_min = std::numeric_limits<decltype(val)>::min();
+    return SymInt(val != val_min ? -val : val_min);
   } else {
     return SymInt(s.toSymNodeImplUnowned()->neg());
   }

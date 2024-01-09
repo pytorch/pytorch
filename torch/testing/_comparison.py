@@ -570,7 +570,7 @@ class NumberPair(Pair):
         if NUMPY_AVAILABLE and isinstance(number_like, np.number):
             return number_like.item()
         elif isinstance(number_like, self._NUMBER_TYPES):
-            return number_like
+            return number_like  # type: ignore[return-value]
         else:
             raise ErrorMeta(
                 TypeError, f"Unknown number type {type(number_like)}.", id=id

@@ -1,7 +1,13 @@
-import os
+import os  # noqa: C101
 import sys
+from typing import Any, Dict, TYPE_CHECKING
 
 import torch
+
+
+def is_fbcode():
+    return not hasattr(torch.version, "git_version")
+
 
 # add some debug printouts
 debug = False
@@ -15,8 +21,11 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# use fx aot graph codegen cache
+fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
+
 # use cpp wrapper instead of python wrapper
-cpp_wrapper = False
+cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
 # dead code elimination
 dce = False
@@ -26,6 +35,7 @@ static_weight_shapes = True
 
 # put correctness assertions in generated code
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
+nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
 
 # enable loop reordering based on input orders
 pick_loop_orders = True
@@ -35,6 +45,16 @@ inplace_buffers = True
 
 # reuse a buffer for an unrelated purpose
 allow_buffer_reuse = True
+
+# Enable pooled allocations for non-output tensors
+memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
+
+# How to organize memory under memory_planning=True:
+# - "none": do not try to pool storage, just reuse
+# - "intermediates": all non-outputs share storage, outputs each get unique storage
+# - "outputs": two pools, one for intermediates (freed on return) and one for outputs
+# - "combined": a single pool for both intermediates and outputs
+memory_pool = os.environ.get("TORCHINDUCTOR_MEMORY_POOL", "intermediates")
 
 # codegen benchmark harness
 benchmark_harness = True
@@ -64,23 +84,50 @@ pattern_matcher = True
 post_grad_custom_pre_pass = None
 post_grad_custom_post_pass = None
 
+# Registers a custom pregrad pass. Note that the pre-grad IR is 1.
+# non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
+# use post-grad passes.
+pre_grad_custom_pass = None
+
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
 # Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
 efficient_conv_bn_eval_fx_passes = False
 
-# enable pattern match with group fusion (using fbgemm)
+# Enable predispatch aten IR for export
+is_predispatch = False
+
+# Deprecated
 group_fusion = False
 
-# enable pattern match with batch fusion (using torch op)
+# Deprecated
 batch_fusion = True
 
-# enable reordering pass
-reordering = True
+# Pre grad group/batch fusion and options in order, set to empty dict to disable fusion.
+# Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions()` to see available fusions.
+pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
+    "batch_linear": {},
+    "batch_linear_lhs": {},
+    "batch_layernorm": {},
+    "batch_tanh": {},
+    "batch_relu": {},
+    "batch_sigmoid": {},
+}
+
+# Post grad group/batch fusion and options, set to empty dict to disable fusion.
+# Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
+post_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
+
+# enable reordering pass for improving memory locality
+reorder_for_locality = True
 
 # Scale down RBLOCK for better occupancy
 dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
+
+# this forces fusion for int_mm with mul. Needed when you want to avoid realizing the int32
+# but the mul gets fused with other pointwise ops instead.
+force_fuse_int_mm_with_mul = False
 
 # for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
 # enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
@@ -93,8 +140,28 @@ use_mixed_mm = False
 # (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
 force_mixed_mm = False
 
-# TODO: capture whether the graph is from export
-from_export = False
+# enable reordering pass for increasing overlap between compute and communication
+reorder_for_compute_comm_overlap = False
+
+# passes (in execution order) for increasing overlap between compute and communication
+# for built-in passes, use string name; for user-defined passes, pass in the function handle
+reorder_for_compute_comm_overlap_passes = [
+    "reorder_compute_for_overlap",
+    "sink_waits",
+    "raise_comms",
+]
+
+# runtime estimation function for ops
+# for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
+estimate_op_runtime = "default"
+
+# unit: GB/s, uni-directional P2P bandwidth per card
+# default value is NVLink
+intra_node_bw = 300
+
+# unit: GB/s, uni-directional P2P bandwidth per node
+# default value is InfiniBand
+inter_node_bw = 25
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -105,6 +172,13 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
+# force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
+# when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
+# for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure
+# that triton does not use TF32 wherever cublas would not use TF32
+force_same_precision = (
+    True if is_fbcode() else os.environ.get("TORCHINDUCTOR_FORCE_SAME_PRECISION") == "1"
+)
 # Specify candidate backends for gemm autotune.
 # Possible choices are combinations of: ATen, Triton, CUTLASS.
 # ATen: default Pytorch ATen kernels.
@@ -113,6 +187,10 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
 ).upper()
+
+# the value used as a fallback for the unbacked SymInts
+# that can appear in the input shapes (e.g., in autotuning)
+unbacked_symint_fallback = 8192
 
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
@@ -136,6 +214,10 @@ coordinate_descent_search_radius = int(
 )
 
 layout_optimization = os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", "1") == "1"
+
+
+force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
+
 
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
@@ -167,9 +249,14 @@ aggressive_fusion = False
 # For each fused kernel in the wrapper, comment with the nodes that get fused.
 # Useful for debugging fusion.
 debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
+benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
+enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
+
+# max number of inputs to generate cat as a pointwise op with masked laods
+max_pointwise_cat_inputs = 4
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
@@ -189,10 +276,12 @@ benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 # Enable constant and index_expr folding
 constant_and_index_propagation = True
 
+# we always add constants into graph.constants without
+# performing any constant-inlining optimization
+always_keep_tensor_constants = False
 
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
-
+# assert that indirect indexing does not read / write out of bounds
+assert_indirect_indexing = True
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -236,7 +325,7 @@ compile_threads = decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
-    from libfb.py import parutil  # type: ignore[import]
+    from libfb.py import parutil
 
     try:
         if __package__:
@@ -278,6 +367,9 @@ _raise_error_for_testing = False
 _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
+# Specify a file where we print out the profiling results.
+# None means we do not dump results to a file.
+profile_bandwidth_output = os.environ.get("TORCHINDUCTOR_PROFILE_OUTPUT", None)
 
 # TODO: remove later
 disable_cpp_codegen = False
@@ -291,6 +383,21 @@ freezing: bool = os.environ.get("TORCHINDUCTOR_FREEZING", "0") == "1"
 # Make freezing invalidate the eager Parameters of nn modules, to avoid memory overhead
 # of potentially keeping multiple copies of weights.
 freezing_discard_parameters: bool = False
+
+# Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
+# should be run with this flag both on and off to make sure we have coverage.
+allow_stack_allocation: bool = True
+
+# Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
+# to maximize performance for use cases that it can accommodate at the expense of
+# generality. In brief:
+# - inputs and outputs are ArrayRefTensor<T> (note that strides are required, but the
+#   tensor must be contiguous)
+# - constant handling is unchanged because it is not a per-inference-iteration bottleneck
+#
+# When the DSO is generated in this mode, the usual interface will also be supported,
+# but performance for that interface may be degraded.
+use_minimal_arrayref_interface: bool = False
 
 
 # config specific to codegen/cpp.py
@@ -345,6 +452,9 @@ class cpp:
     # using atomic_add.
     fallback_scatter_reduce_sum = True
 
+    # Use funsafe-math-optimizations when compiling
+    enable_unsafe_math_opt_flag = False
+
 
 # config specific to codegen/triton.py
 class triton:
@@ -389,9 +499,6 @@ class triton:
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
 
-    # assert that indirect indexing does not read / write out of bounds
-    assert_indirect_indexing = True
-
     # should we give different names to kernels
     # Note: This is orthogonal to descriptive_names - this is deciding whether
     # our triton kernel names should all be `triton_` (to maximize caching) or
@@ -415,7 +522,7 @@ class triton:
 
     # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
-    max_block = {"X": 2048, "Y": 1024, "Z": 1024}
+    max_block = {"X": 2048, "Y": 1024, "Z": 1024, "R": 4096}
 
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False
@@ -433,6 +540,9 @@ class triton:
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 16
 
+    # Generate code containing the newer tl.make_block_ptr() API for loads/store
+    use_block_ptr = False
+
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
     # Valid values: "compile_error", "runtime_error", "accuracy"
@@ -443,11 +553,21 @@ class aot_inductor:
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;
     # If a relative path is specified, it will be used as a subdirectory under the default caching path;
-    # If not specified, a temp directory will be created under the default caching path
+    # If not specified, a temp directory will be created under the default caching path.
+    # If the specified path contains something like "model.so", the sub-string will be used
+    # to name the generated library.
     output_path = ""
+
+    debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
     # Wether to codegen abi compatible model.so
     abi_compatible = is_fbcode()
+
+    # Serialized tree spec for flattening inputs
+    serialized_in_spec = ""
+
+    # Serialized tree spec for flattening outputs
+    serialized_out_spec = ""
 
 
 class cuda:
@@ -498,11 +618,20 @@ class cuda:
     # 4) default system search PATH.
     cuda_cxx = None
 
+    # If set to True, it will ensure that only GEMM ops capable of
+    # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
+    # are enabled for the CUTLASS backend.
+    cutlass_only_evt_capable_ops: bool = False
+
 
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
+
+    # Save debug information to a temporary directory
+    # If not specified, a temp directory will be created by system
+    debug_dir = None
 
     # Save python logger call >=logging.DEBUG
     debug_log = False
@@ -531,6 +660,16 @@ class trace:
     # SVG figure showing fx with fusion
     draw_orig_fx_graph = os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
 
+    # We draw our fx graphs with the "record" shape attribute by default.
+    # Sometimes, when the graph is very complex, we may hit dot errors like below:
+    #   "flat edge between adjacent nodes one of which has a record shape -
+    #    replace records with HTML-like labels"
+    # and thus fail to generate a graph. So, let's give the user an option
+    # to specify the shape attribute for the dot graph. For example, passing
+    # INDUCTOR_DOT_GRAPH_SHAPE_SVG = "none" would let us generate HTML-like lables
+    # to workaround the above failure.
+    dot_graph_shape = os.environ.get("INDUCTOR_DOT_GRAPH_SHAPE_SVG", None)
+
     # Store cProfile (see snakeviz to view)
     compile_profile = False
 
@@ -544,8 +683,10 @@ _save_config_ignore = {
     "trace.upload_tar",
 }
 
+if TYPE_CHECKING:
+    from torch.utils._config_typing import *  # noqa: F401, F403
 
-from .._dynamo.config_utils import install_config_module
+from torch.utils._config_module import install_config_module
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])

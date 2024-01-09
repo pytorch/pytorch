@@ -3,12 +3,16 @@ import torch
 import torch.distributed.checkpoint as dist_cp
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
+from torch.distributed._state_dict_utils import _all_gather_sharded_tensor
 from torch.distributed._tensor import DTensor, init_device_mesh, Replicate
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp._shard_utils import _all_gather_sharded_tensor
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 
-from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+)
 from torch.testing._internal.common_utils import run_tests
 
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -49,7 +53,11 @@ class TestFsdpTpCheckpointConversion(DTensorTestBase):
         device_mesh = init_device_mesh(self.device_type, mesh_shape)
         model = MLPModule(self.device_type).cuda(self.rank)
         # Parallelize the module based on the given Parallel Style.
-        tp_model = parallelize_module(model, device_mesh, PairwiseParallel())
+        parallelize_plan = {
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+        }
+        tp_model = parallelize_module(model, device_mesh, parallelize_plan)
         optimizer = torch.optim.SGD(tp_model.parameters(), lr=0.25)
 
         # Update the parameters so tp_model.state_dict() will be different from fsdp_model.state_dict().

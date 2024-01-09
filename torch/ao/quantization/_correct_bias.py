@@ -17,13 +17,11 @@ _supported_modules = {nn.Linear, nn.Conv2d}
 _supported_modules_quantized = {nnq.Linear, nnq.Conv2d}
 
 def get_module(model, name):
-    ''' Given name of submodule, this function grabs the submodule from given model
-    '''
+    """Given name of submodule, this function grabs the submodule from given model."""
     return dict(model.named_modules())[name]
 
 def parent_child_names(name):
-    '''Splits full name of submodule into parent submodule's full name and submodule's name
-    '''
+    """Split full name of submodule into parent submodule's full name and submodule's name."""
     split_name = name.rsplit('.', 1)
     if len(split_name) == 1:
         return '', split_name[0]
@@ -31,9 +29,11 @@ def parent_child_names(name):
         return split_name[0], split_name[1]
 
 def get_param(module, attr):
-    ''' Sometimes the weights/bias attribute gives you the raw tensor, but sometimes
+    """Get the parameter given a module and attribute.
+
+    Sometimes the weights/bias attribute gives you the raw tensor, but sometimes
     gives a function that will give you the raw tensor, this function takes care of that logic
-    '''
+    """
     param = getattr(module, attr, None)
     if callable(param):
         return param()
@@ -41,10 +41,14 @@ def get_param(module, attr):
         return param
 
 class MeanShadowLogger(ns.Logger):
-    r"""A logger for a Shadow module whose purpose is to record the rolling mean
+    """Mean Logger for a Shadow module.
+
+    A logger for a Shadow module whose purpose is to record the rolling mean
     of the data passed to the floating point and quantized models
     """
+
     def __init__(self):
+        """Set up initial values for float and quantized stats, count, float sum, and quant sum."""
         super().__init__()
         self.stats["float"] = None
         self.stats["quantized"] = None
@@ -53,9 +57,11 @@ class MeanShadowLogger(ns.Logger):
         self.quant_sum = None
 
     def forward(self, x, y):
-        ''' The inputs x,y are output data from the quantized and floating-point modules.
+        """Compute the average of quantized and floating-point data from modules.
+
+        The inputs x,y are output data from the quantized and floating-point modules.
         x is for the quantized module, y is for the floating point module
-        '''
+        """
         if x.is_quantized:
             x = x.dequantize()
 
@@ -82,7 +88,9 @@ class MeanShadowLogger(ns.Logger):
         self.quant_sum = None
 
 def bias_correction(float_model, quantized_model, img_data, target_modules=_supported_modules_quantized, neval_batches=None):
-    ''' Using numeric suite shadow module, the expected output of the floating point and quantized modules
+    """Perform bias correction on a module.
+
+    Using numeric suite shadow module, the expected output of the floating point and quantized modules
     is recorded. Using that data the bias of supported modules is shifted to compensate for the drift caused
     by quantization
     Paper reference: https://arxiv.org/pdf/1906.04721.pdf (Section 4.2)
@@ -94,7 +102,7 @@ def bias_correction(float_model, quantized_model, img_data, target_modules=_supp
         target_modules: specifies what submodules in quantized_model need bias correction (can be extended to
                 unquantized submodules)
         neval_batches: a cap to the number of batches you want to be used for estimating the expected output
-    '''
+    """
     ns.prepare_model_with_stubs(float_model, quantized_model, _supported_modules, MeanShadowLogger)
 
     uncorrected_modules = {}

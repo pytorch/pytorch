@@ -16,9 +16,14 @@ Known limitations:
 """
 
 import argparse
+import json
 import os
+import pathlib
+import subprocess
+import sys
 import urllib
 from io import BytesIO
+from itertools import product
 from urllib.request import urlopen
 from zipfile import ZipFile
 
@@ -28,6 +33,10 @@ import requests
 # Note: the public query url targets this rockset lambda:
 # https://console.rockset.com/lambdas/details/commons.artifacts
 ARTIFACTS_QUERY_URL = "https://api.usw2a1.rockset.com/v1/public/shared_lambdas/4ca0033e-0117-41f5-b043-59cde19eff35"
+CSV_LINTER = str(
+    pathlib.Path(__file__).absolute().parent.parent.parent.parent
+    / "tools/linter/adapters/no_merge_conflict_csv_linter.py"
+)
 
 
 def query_job_sha(repo, sha):
@@ -57,7 +66,10 @@ S3_BASE_URL = "https://gha-artifacts.s3.amazonaws.com"
 def get_artifacts_urls(results, suites):
     urls = {}
     for r in results:
-        if "inductor" == r["workflowName"] and "test" in r["jobName"]:
+        if (
+            r["workflowName"] in ("inductor", "inductor-periodic")
+            and "test" in r["jobName"]
+        ):
             config_str, test_str = parse_job_name(r["jobName"])
             suite, shard_id, num_shards, machine, *_ = parse_test_str(test_str)
             workflowId = r["workflowId"]
@@ -74,7 +86,7 @@ def get_artifacts_urls(results, suites):
 
 def normalize_suite_filename(suite_name):
     strs = suite_name.split("_")
-    subsuite = strs[2] if strs[0] == "aot" else strs[1]
+    subsuite = strs[-1]
     if "timm" in subsuite:
         subsuite = subsuite.replace("timm", "timm_models")
 
@@ -111,6 +123,16 @@ def write_filtered_csvs(root_path, dataframes):
     for (suite, phase), df in dataframes.items():
         out_fn = os.path.join(root_path, f"{suite}_{phase}.csv")
         df.to_csv(out_fn, index=False, columns=["name", "accuracy", "graph_breaks"])
+        apply_lints(out_fn)
+
+
+def apply_lints(filename):
+    patch = json.loads(subprocess.check_output([sys.executable, CSV_LINTER, filename]))
+    if patch.get("replacement"):
+        with open(filename) as fd:
+            data = fd.read().replace(patch["original"], patch["replacement"])
+        with open(filename, "w") as fd:
+            fd.write(data)
 
 
 if __name__ == "__main__":
@@ -122,16 +144,22 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     repo = "pytorch/pytorch"
+
     suites = {
-        "aot_inductor_huggingface",
-        "inductor_huggingface",
-        "inductor_huggingface_dynamic",
-        "aot_inductor_timm",
-        "inductor_timm",
-        "inductor_timm_dynamic",
-        "aot_inductor_torchbench",
-        "inductor_torchbench",
-        "inductor_torchbench_dynamic",
+        f"{a}_{b}"
+        for a, b in product(
+            [
+                "aot_eager",
+                "aot_inductor",
+                "cpu_inductor",
+                "dynamic_aot_eager",
+                "dynamic_cpu_inductor",
+                "dynamic_inductor",
+                "dynamo_eager",
+                "inductor",
+            ],
+            ["huggingface", "timm", "torchbench"],
+        )
     }
 
     root_path = "benchmarks/dynamo/ci_expected_accuracy/"

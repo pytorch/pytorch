@@ -52,13 +52,13 @@ std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor() {
  */
 class TORCH_API RegisterOperators final {
 public:
-  RegisterOperators();
-  ~RegisterOperators();
+  RegisterOperators() = default;
+  ~RegisterOperators() = default;
 
   RegisterOperators(const RegisterOperators&) = delete;
   RegisterOperators& operator=(const RegisterOperators&) = delete;
-  RegisterOperators(RegisterOperators&&) noexcept;
-  RegisterOperators& operator=(RegisterOperators&&) noexcept;
+  RegisterOperators(RegisterOperators&&) noexcept = default;
+  RegisterOperators& operator=(RegisterOperators&&) noexcept = default;
 
   class TORCH_API Options final {
   public:
@@ -82,7 +82,7 @@ public:
     // internal only for registering caffe2 ops
     Options&& schema(FunctionSchema&& schema) {
         TORCH_CHECK(!schemaOrName_.has_value(), "You can only specify the schema once per operator registration.");
-        schemaOrName_ = c10::make_right<OperatorName, FunctionSchema>(std::move(schema));
+        schemaOrName_ = FunctionSchema(std::move(schema));
         return std::move(*this);
     }
 
@@ -163,7 +163,7 @@ public:
       static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
 
       return std::move(*this).kernel(
-        std::move(dispatch_key),
+        dispatch_key,
         KernelFunction::makeFromUnboxedFunctor<false, KernelFunctor>(std::make_unique<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...)),
         impl::CppSignature::make<KernelFunctor>(),
         detail::inferFunctionSchemaFromFunctor<KernelFunctor>()
@@ -243,7 +243,7 @@ public:
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
       return std::move(*this).kernel(
-        std::move(dispatch_key),
+        dispatch_key,
         KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernel_func)),
         impl::CppSignature::make<FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
@@ -287,7 +287,7 @@ public:
       TORCH_INTERNAL_ASSERT(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
       return std::move(*this).kernel(
-        std::move(dispatch_key),
+        dispatch_key,
         KernelFunction::makeFromUnboxedRuntimeFunction(kernel_func),
         impl::CppSignature::make<FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
@@ -343,7 +343,7 @@ public:
       static_assert(guts::is_stateless_lambda<std::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel only works for stateless lambdas (i.e. lambdas without captures). If you need a cache, please use the functor based API kernel<Functor>() instead.");
 
       return std::move(*this).kernel(
-        std::move(dispatch_key),
+        dispatch_key,
         KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(functor)),
         impl::CppSignature::make<Lambda>(),
         // TODO Do schema inference without relying on WrapFunctionIntoRuntimeFunctor
@@ -403,7 +403,7 @@ public:
       KernelRegistrationConfig config;
       config.dispatch_key = dispatch_key;
       config.func = std::move(func);
-      config.cpp_signature = std::move(cpp_signature);
+      config.cpp_signature = cpp_signature;
       config.inferred_function_schema = std::move(inferred_function_schema);
       kernels.push_back(std::move(config));
       return std::move(*this);
@@ -431,7 +431,7 @@ public:
       std::unique_ptr<FunctionSchema> inferred_function_schema;
     };
 
-    c10::optional<c10::either<OperatorName, FunctionSchema>> schemaOrName_;
+    c10::optional<std::variant<OperatorName, FunctionSchema>> schemaOrName_;
 
     std::vector<KernelRegistrationConfig> kernels;
     optional<AliasAnalysisKind> aliasAnalysisKind_;

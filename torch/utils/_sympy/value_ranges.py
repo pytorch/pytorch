@@ -10,6 +10,7 @@ from typing import Union, Dict, Optional, SupportsFloat
 
 from torch._prims_common import dtype_to_type
 from .interp import sympy_interp
+from .functions import Round, RoundDecimal
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ def simple_sympify(e):
             return sympy.oo if e > 0 else -sympy.oo
         return sympy.Float(e)
     elif isinstance(e, sympy.Expr):
-        assert e.is_constant(), e
+        assert e.is_number, e
         # NaNs can occur when doing things like 0 * sympy.oo, but it is better
         # if the operator notices this and takes care of it, because sometimes
         # the NaN is inappropriate (for example, for ints, the [-oo, oo] range
@@ -78,6 +79,14 @@ class ValueRanges:
         object.__setattr__(self, "is_bool", isinstance(lower, SympyBoolean))
         assert isinstance(upper, SympyBoolean) == self.is_bool
 
+    def boolify(self):
+        if self.is_bool:
+            return self
+        elif self == ValueRanges.unknown():
+            return ValueRanges.unknown_bool()
+        else:
+            raise AssertionError(f"not bool like {self}")
+
     def __contains__(self, x):
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
@@ -119,6 +128,10 @@ class ValueRanges:
         return cls(-sympy.oo, sympy.oo)
 
     @classmethod
+    def unknown_bool(cls):
+        return cls(sympy.false, sympy.true)
+
+    @classmethod
     def wrap(cls, arg):
         if isinstance(arg, ValueRanges):
             return arg
@@ -126,19 +139,19 @@ class ValueRanges:
 
     @classmethod
     def increasing_map(cls, x, fn):
-        """Increasing: x <= y => f(x) <= f(y)"""
+        """Increasing: x <= y => f(x) <= f(y)."""
         x = cls.wrap(x)
         return ValueRanges(fn(x.lower), fn(x.upper))
 
     @classmethod
     def decreasing_map(cls, x, fn):
-        """Decreasing: x <= y => f(x) >= f(y)"""
+        """Decreasing: x <= y => f(x) >= f(y)."""
         x = cls.wrap(x)
         return ValueRanges(fn(x.upper), fn(x.lower))
 
     @classmethod
     def monotone_map(cls, x, fn):
-        """It's increasing or decreasing"""
+        """It's increasing or decreasing."""
         x = cls.wrap(x)
         l = fn(x.lower)
         u = fn(x.upper)
@@ -146,7 +159,7 @@ class ValueRanges:
 
     @classmethod
     def convex_min_zero_map(cls, x, fn):
-        """fn is convex and has a minimum at 0"""
+        """Fn is convex and has a minimum at 0."""
         x = ValueRanges.wrap(x)
         if 0 in x:
             return ValueRanges(0, max(fn(x.lower), fn(x.upper)))
@@ -156,7 +169,9 @@ class ValueRanges:
     @classmethod
     def coordinatewise_increasing_map(cls, x, y, fn):
         """
-        Increasing on each coordinate. Mathematically:
+        It's increasing on each coordinate.
+
+        Mathematically:
         For every 1 <= i <= n and x_i <= y_i we have that
         f(x1, .., xn) <= f(x1, , yi, ..., xn)
         """
@@ -168,7 +183,7 @@ class ValueRanges:
 
     @classmethod
     def coordinatewise_monotone_map(cls, x, y, fn):
-        """It's increasing or decreasing on each coordinate"""
+        """It's increasing or decreasing on each coordinate."""
         x, y = cls.wrap(x), cls.wrap(y)
         products = [
             fn(a, b)
@@ -212,6 +227,7 @@ class SymPyValueRangeAnalysis:
     @staticmethod
     def not_(a):
         a = ValueRanges.wrap(a)
+        a = a.boolify()
         assert a.is_bool
         return ValueRanges.decreasing_map(a, sympy.Not)
 
@@ -322,6 +338,10 @@ class SymPyValueRangeAnalysis:
     @classmethod
     def modular_indexing(cls, a, b, c):
         return cls.mod(cls.floordiv(a, b), c)
+
+    @classmethod
+    def is_non_overlapping_and_dense_indicator(cls, *args):
+        return ValueRanges.unknown()
 
     @classmethod
     def pow(cls, a, b):
@@ -437,6 +457,19 @@ class SymPyValueRangeAnalysis:
     def ceil(cls, x):
         return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.ceiling)
 
+    @classmethod
+    def round(cls, number, ndigits=None):
+        if ndigits is None:
+            fn = Round
+        else:
+            assert ndigits.is_singleton()
+            ndigits = ndigits.lower
+            # We can't use functools.partial here since sympy doesn't support keyword arguments, but we have to bind
+            # the second parameter.
+            fn = lambda number: RoundDecimal(number, ndigits)  # noqa: E731
+
+        return ValueRanges.increasing_map(number, fn)
+
     # It's used in some models on symints
     @staticmethod
     def sqrt(x):
@@ -449,7 +482,7 @@ class SymPyValueRangeAnalysis:
     def where(a, b, c):
         b = ValueRanges.wrap(b)
         c = ValueRanges.wrap(c)
-        assert a.is_bool
+        a = a.boolify()
         assert b.is_bool == c.is_bool
         if b.is_bool:
             return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
@@ -461,7 +494,7 @@ class SymPyValueRangeAnalysis:
     # and defer the analysis to piecewise
     @staticmethod
     def expr_cond_pair(a, b):
-        assert b.is_bool, f"expect cond_expr's ValueRange to be a boolean range but got {b}"
+        b = b.boolify()
         return (a, b)
 
     # piecewise function can be used to convert a SymBool to SymInt:
@@ -585,7 +618,7 @@ def bound_sympy(expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRange
     ranges = ranges or {}
 
     # If there's a tracing context, augment available constrained ranges.
-    context = torch._guards.TracingContext.get()
+    context = torch._guards.TracingContext.try_get()
     if context and context.fake_mode.shape_env:
         ranges = {**ranges, **context.fake_mode.shape_env.var_to_range}
 

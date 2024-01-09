@@ -12,7 +12,7 @@ from dataclasses import is_dataclass, fields
 
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
-from typing import Tuple, Dict, OrderedDict, Optional, Iterable, Any, Iterator, Callable
+from typing import Tuple, Dict, OrderedDict, Optional, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
@@ -84,7 +84,7 @@ class ScopeContextManager:
         return
 
 
-_COPY_META_FIELDS = ["nn_module_stack", "source_fn_stack", "original_aten", "recompute", "from_node"]
+_COPY_META_FIELDS = ["nn_module_stack", "source_fn_stack", "original_aten", "recompute", "from_node", "quantization_tag"]
 
 
 @compatibility(is_backward_compatible=True)
@@ -107,7 +107,7 @@ class TracerBase:
     scope : Scope
 
     # Records the module call stack
-    module_stack: OrderedDict[str, str]
+    module_stack: OrderedDict[str, Tuple[str, Any]]
 
     # Mapping of node name to module scope
     node_name_to_scope: Dict[str, Tuple[str, type]]
@@ -392,7 +392,7 @@ class Proxy:
     def __call__(self, *args, **kwargs) -> 'Proxy':
         return self.tracer.create_proxy('call_method', '__call__', (self,) + args, kwargs)
 
-    def __iter__(self) -> Iterable['Proxy']:
+    def __iter__(self) -> Iterator['Proxy']:
         frame = inspect.currentframe()
         assert frame is not None
         calling_frame = frame.f_back
@@ -408,6 +408,9 @@ class Proxy:
             return (self[i] for i in range(inst.argval))  # type: ignore[index]
 
         return self.tracer.iter(self)
+
+    def __abs__(self):
+        return self.tracer.create_proxy('call_function', operator.abs, (self,), {})
 
     def __bool__(self) -> bool:
         if self.tracer.trace_asserts:
@@ -507,7 +510,7 @@ class ParameterProxy(Proxy):
     """
     def __init__(self, tracer: TracerBase, node: Node, name, param):
         super().__init__(node, tracer)
-        assert(isinstance(param, torch.nn.Parameter))
+        assert isinstance(param, torch.nn.Parameter)
         self.param = param
         self.name = name
 

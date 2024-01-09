@@ -646,7 +646,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
         with self.assertRaisesRegex(AttributeError, "TestModule (.*) does not have a field with name '_forward'"):
-            mf._forward(x)
+            mf._forward(x)  # noqa: F821
 
     def test_freeze_module_with_inplace_mutable(self):
         class FreezeMe(torch.jit.ScriptModule):
@@ -2691,9 +2691,9 @@ class TestFrozenOptimizations(JitTestCase):
         with set_default_dtype(torch.float):
             conv_bias = [True, False]
             conv_ops = [nn.Conv2d, nn.Conv3d]
-            add_z = [True, False]
+            use_add_z = [True, False]
             use_tracing = [True, False]
-            for use_bias, conv, add_z, tracing in product(conv_bias, conv_ops, add_z, use_tracing):
+            for use_bias, conv, add_z, tracing in product(conv_bias, conv_ops, use_add_z, use_tracing):
                 class Net(nn.Module):
                     def __init__(self, in_channels, out_channels, **kwargs):
                         super().__init__()
