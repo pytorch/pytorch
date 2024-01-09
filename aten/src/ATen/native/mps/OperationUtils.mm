@@ -1,7 +1,9 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -68,6 +70,14 @@ MPSDataType getMPSDataType(ScalarType scalar_type) {
       TORCH_CHECK_TYPE(false,
                        "Cannot convert a float64 Tensor to MPS as the MPS framework doesn't support float64. "
                        "Please use float32 instead.")
+    case ScalarType::ComplexHalf:
+      TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
+                       "MPS complex types are only supported on MacOS 14.0 or newer.");
+      return MPSDataTypeComplexFloat16;
+    case ScalarType::ComplexFloat:
+      TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
+                       "MPS complex types are only supported on MacOS 14.0 or newer.");
+      return MPSDataTypeComplexFloat32;
     default:
       TORCH_CHECK_TYPE(
           false, "Trying to convert ", scalar_type, " to the MPS backend but it does not have support for that dtype.")
@@ -134,6 +144,14 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
       return MPSDataTypeUInt8;
     case ScalarType::Bool:
       return MPSDataTypeBool;
+    case ScalarType::ComplexHalf:
+      TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
+                       "MPS complex types are only supported on MacOS 14.0 or newer.");
+      return MPSDataTypeComplexFloat16;
+    case ScalarType::ComplexFloat:
+      TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
+                       "MPS complex types are only supported on MacOS 14.0 or newer.");
+      return MPSDataTypeComplexFloat32;
     default:
       TORCH_CHECK_TYPE(
           false, "Trying to convert ", scalar_type, " to the MPS backend but it does not have support for that dtype.")
@@ -160,6 +178,10 @@ std::string getMPSTypeString(ScalarType scalar_type, bool short_name) {
       return short_name ? "u8" : "UInt8";
     case ScalarType::Bool:
       return short_name ? "b8" : "Bool";
+    case ScalarType::ComplexHalf:
+      return short_name ? "c16" : "ComplexFloat16";
+    case ScalarType::ComplexFloat:
+      return short_name ? "c32" : "ComplexFloat32";
     default:
       return "Undefined";
   }
@@ -526,5 +548,43 @@ class MPSGraphCacheCallback : public IMpsAllocatorCallback {
 };
 
 REGISTER_MPS_ALLOCATOR_CALLBACK("mps_graph_cache_callback", MPSGraphCacheCallback);
+
+id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder,
+                                        const TensorIteratorBase& iter,
+                                        bool use_64bit_index) {
+  constexpr uint32_t nOffsets = 3;
+  uint32_t numThreads = iter.numel();
+  const uint32_t nDim = iter.ndim();
+  const IntArrayRef& iterShape = iter.shape();
+  std::vector<uint32_t> iterShapeData(iterShape.size());
+  std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
+  TORCH_INTERNAL_ASSERT(iter.ntensors() >= nOffsets);
+  TORCH_CHECK(use_64bit_index || iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
+
+  for (const auto i : c10::irange(iterShape.size())) {
+    iterShapeData[i] = static_cast<uint32_t>(iterShape[i]);
+  }
+
+  for (const auto i : c10::irange(nDim)) {
+    for (const auto offset : c10::irange(nOffsets)) {
+      strides[i][offset] = static_cast<uint32_t>(iter.strides(offset)[i]);
+    }
+  }
+
+  id<MTLComputePipelineState> kernelDataOffsetsPSO = MPSDevice::getInstance()->metalIndexingPSO(
+      use_64bit_index ? "kernel_index_offsets_64" : "kernel_index_offsets_32");
+  const auto elementSize = use_64bit_index ? sizeof(simd_ulong3) : sizeof(simd_uint3);
+  id<MTLBuffer> kernelDataOffsets = (id<MTLBuffer>)getIMPSAllocator()->allocate(numThreads * elementSize).get();
+
+  [commandEncoder setComputePipelineState:kernelDataOffsetsPSO];
+  [commandEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
+  [commandEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
+  [commandEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
+  [commandEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
+
+  mtl_dispatch1DJob(commandEncoder, kernelDataOffsetsPSO, numThreads);
+
+  return kernelDataOffsets;
+}
 
 } // namespace at::native::mps

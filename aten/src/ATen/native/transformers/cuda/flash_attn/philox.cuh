@@ -2,7 +2,7 @@
 #pragma once
 // Philox CUDA.
 
-#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/PhiloxUtils.cuh>
 
 namespace pytorch_flash{
 

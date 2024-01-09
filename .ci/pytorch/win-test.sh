@@ -38,7 +38,7 @@ fi
 python -m pip install pytest-rerunfailures==10.3 pytest-cpp==2.3.0 tensorboard==2.13.0
 
 # Install Z3 optional dependency for Windows builds.
-python -m pip install z3-solver
+python -m pip install z3-solver==4.12.2.0
 
 run_tests() {
     # Run nvidia-smi if available

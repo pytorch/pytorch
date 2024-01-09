@@ -2,10 +2,8 @@
 
 #include <ATen/core/jit_type.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 
 namespace torch::jit {
