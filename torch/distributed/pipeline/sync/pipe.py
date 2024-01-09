@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 """The Pipe interface."""
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Union, Sequence, Tuple, cast
+from typing import TYPE_CHECKING, Any, Iterable, Iterator, List, Optional, Union, Sequence, Tuple, cast
 
 import torch
 from torch import Tensor, nn
@@ -379,7 +379,7 @@ class Pipe(Module):
 
         raise IndexError
 
-    def __iter__(self) -> Iterable[nn.Module]:
+    def __iter__(self) -> Iterator[nn.Module]:
         """Iterates over children of the underlying sequential module."""
         for partition in self.partitions:
             yield from partition

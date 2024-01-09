@@ -82,7 +82,7 @@ def format_flamegraph(flamegraph_lines, flamegraph_script=None):
         print(f"Downloading flamegraph.pl to: {flamegraph_script}")
         urllib.request.urlretrieve(
             'https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl', flamegraph_script)
-        subprocess.run(['chmod', '+x', flamegraph_script])
+        subprocess.check_call(['chmod', '+x', flamegraph_script])
     args = [flamegraph_script, '--countname', 'bytes']
     p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, encoding='utf-8')
     assert p.stdin is not None
@@ -200,13 +200,16 @@ Legend:
 """
 
 def segsum(data):
-    """" Visually reports how the allocator has filled its segments. This printout can help debug fragmentation issues
-    since free fragments will appear as gaps in this printout.  The amount of free space is reported for each segment.
-    We distinguish between internal free memory which occurs because the allocator rounds the allocation size, and
-    external free memory, which are the gaps between allocations in a segment.
+    r"""Visually reports how the allocator has filled its segments.
+
+    This printout can help debug fragmentation issues since free fragments
+    will appear as gaps in this printout.  The amount of free space is reported
+    for each segment.
+    We distinguish between internal free memory which occurs because the
+    allocator rounds the allocation size, and external free memory, which are
+    the gaps between allocations in a segment.
     Args:
         data: snapshot dictionary created from _snapshot()
-
     """
     segments = []
     out = io.StringIO()

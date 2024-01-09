@@ -1,4 +1,5 @@
-#if defined(__linux__) && defined(__x86_64__) && defined(__has_include) && \
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__)) && \
+    defined(__has_include) &&                                              \
     __has_include("ext/stdio_filebuf.h") && defined(FBCODE_CAFFE2)
 #include <c10/util/flat_hash_map.h>
 #include <llvm/DebugInfo/Symbolize/Symbolize.h>

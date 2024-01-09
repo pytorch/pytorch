@@ -98,6 +98,10 @@ class ProxyableClassMeta(type):
     def __call__(cls, *args, **kwargs):
         instance = cls.__new__(cls)  # type: ignore[call-overload]
 
+        if not is_fx_tracing():
+            cls.__init__(instance, *args, **kwargs)  # type: ignore[misc]
+            return instance
+
         found_proxies = []
 
         def check_proxy(a):
@@ -211,6 +215,17 @@ class PHWithMeta(PHBase):
 
         # Provide a hey for user to identify placeholder node during analysis
         self.ph_key = ph_key
+
+
+def _transfer_attrs(fr, to):
+    for attr_name in dir(fr):
+        attr_val = getattr(fr, attr_name)
+        if (
+            not callable(attr_val)
+            and not attr_name.startswith("__")
+            and not hasattr(to, attr_name)
+        ):
+            setattr(to, attr_name, attr_val)
 
 
 @compatibility(is_backward_compatible=True)
@@ -474,7 +489,7 @@ class Tracer(TracerBase):
         with ScopeContextManager(self.scope, Scope(module_qualified_name, type(m))) as _scope:
             # module_stack is an ordered dict so writing then deleting the
             # entry is equivalent to push/pop on a list
-            self.module_stack[_scope.module_path] = _scope.module_type
+            self.module_stack[_scope.module_path] = (module_qualified_name, _scope.module_type)
             if not self.is_leaf_module(m, module_qualified_name):
                 ret_val = forward(*args, **kwargs)
             else:
@@ -593,16 +608,6 @@ class Tracer(TracerBase):
                         "placeholder", f"{name}_{str(cnt)}", default, {}
                     )
                     if isinstance(x, PHBase):
-                        def transfer_attrs(fr, to):
-                            for attr_name in dir(fr):
-                                attr_val = getattr(fr, attr_name)
-                                if (
-                                    not callable(attr_val)
-                                    and not attr_name.startswith("__")
-                                    and not hasattr(to, attr_name)
-                                ):
-                                    setattr(to, attr_name, attr_val)
-
                         if x != PH:
                             # Transfer attrs in the case where you're using a placeholder other
                             # than the singleton PH (PH has no attributes to transfer).
@@ -611,7 +616,7 @@ class Tracer(TracerBase):
                             # attributes set by the user) from the placeholder to the
                             # underlying nodes (the proxy is unwrapped by the user, but
                             # the metadata should hold).
-                            transfer_attrs(fr=x, to=out.node)
+                            _transfer_attrs(fr=x, to=out.node)
 
                         return out
                     # Union[int, bool] == bool in Python <= 3.6
@@ -624,7 +629,7 @@ class Tracer(TracerBase):
                             out == x,
                             f"{name} has been specialized to have value {x} but got another value",
                         )
-                    elif type(x) == type(None):
+                    elif x is None:
                         args = (
                             out,
                             f"{name} has been specialized to have value None but got another value",
@@ -652,6 +657,30 @@ class Tracer(TracerBase):
                 {},
                 type_expr=fn_for_analysis.__annotations__.get(name, None)
             )
+
+        # This covers the very specific case where we are passing in flat
+        # concrete_args as a tuple, but our traced fn takes (*args, **kwargs).
+        # In this case, just take the concrete_args and pass them through.
+        name_idx = 0
+        if isinstance(concrete_args, tuple) and \
+                len(concrete_args) > 0 and \
+                (co.co_flags & HAS_VARSTUFF) and \
+                total_args == 1:
+            for concrete_arg in concrete_args:
+                out = self.create_proxy("placeholder", f"input_{name_idx}", (), {})
+                if isinstance(concrete_arg, PHBase):
+                    if concrete_arg != PH:
+                        # Transfer attrs in the case where you're using a placeholder other
+                        # than the singleton PH (PH has no attributes to transfer).
+                        # Proxies were created out of the placeholders.
+                        # Transfer any metadata (put on the placeholders in the form of
+                        # attributes set by the user) from the placeholder to the
+                        # underlying nodes (the proxy is unwrapped by the user, but
+                        # the metadata should hold).
+                        _transfer_attrs(fr=concrete_arg, to=out.node)
+                args.append(out)
+                name_idx += 1
+            return root_fn, args
 
         arg_names = [next(names_iter) for idx in range(skip_arg_idx, total_args)]
         if isinstance(concrete_args, tuple):
@@ -1004,7 +1033,7 @@ def _patch_wrapped_functions(patcher: _Patcher):
     Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
     the listed global functions in the `_create_wrapped_func` wrapper.
     """
-    for (_, name), frame_dict in _wrapped_fns_to_patch.items():
+    for (_, name), frame_dict in _wrapped_fns_to_patch.copy().items():
         if name not in frame_dict and hasattr(builtins, name):
             orig_fn = getattr(builtins, name)
         else:

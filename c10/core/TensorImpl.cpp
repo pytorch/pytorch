@@ -1,5 +1,6 @@
 #include <c10/core/TensorImpl.h>
 
+#include <c10/core/Contiguity.h>
 #include <c10/core/CopyBytes.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SymIntArrayRef.h>
@@ -224,74 +225,6 @@ void TensorImpl::HandleResize() {
   }
 }
 
-// base, sizes, strides
-static c10::optional<
-    std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>>
-normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
-  // Look for a SymNode to dispatch on
-  SymNode base;
-  bool all_hinted = true;
-  // NB: sizes/strides guaranteed to be positive, so only need
-  // is_heap_allocated
-  for (const auto& s : sizes) {
-    if (all_hinted && !s.has_hint()) {
-      all_hinted = false;
-    }
-    if (!base && s.is_heap_allocated()) {
-      base = s.toSymNode();
-    }
-  }
-  for (const auto& s : strides) {
-    if (all_hinted && !s.has_hint()) {
-      all_hinted = false;
-    }
-    if (!base && s.is_heap_allocated()) {
-      base = s.toSymNode();
-    }
-  }
-  if (!base || all_hinted) {
-    // Couldn't find.  Tell the caller to do the normal computation
-    // Alternately, if everything is hinted, we want the normal computation
-    // too
-    return c10::nullopt;
-  }
-  // Populate the SymNode array
-  std::vector<SymNode> size_nodes;
-  std::vector<SymNode> stride_nodes;
-  size_nodes.reserve(sizes.size());
-  stride_nodes.reserve(strides.size());
-  for (const auto& s : sizes) {
-    size_nodes.emplace_back(s.wrap_node(base));
-  }
-  for (const auto& s : strides) {
-    stride_nodes.emplace_back(s.wrap_node(base));
-  }
-  return c10::make_optional(
-      std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>(
-          std::move(base), std::move(size_nodes), std::move(stride_nodes)));
-}
-
-template <typename T>
-bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
-  bool is_contiguous = true;
-  if (numel == 0)
-    return is_contiguous;
-  T z = 1;
-  // NB: make sure we do signed arithmetic
-  for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
-    const auto& size_d = sizes[d];
-    if (size_d != 1) {
-      if (strides[d] == z) {
-        z *= size_d;
-      } else {
-        is_contiguous = false;
-        break;
-      }
-    }
-  }
-  return is_contiguous;
-}
-
 bool TensorImpl::compute_contiguous(identity<bool>) const {
   if (is_sparse()) {
     return false;
@@ -302,35 +235,6 @@ bool TensorImpl::compute_contiguous(identity<bool>) const {
       numel_);
 }
 
-template <typename T>
-bool _compute_channels_last_contiguous_2d(
-    ArrayRef<T> sizes,
-    ArrayRef<T> strides) {
-  // Please don't combine these code, constant array is used here to let
-  // compiler fully unroll the loop to get better performance
-  switch (sizes.size()) {
-    case 4: {
-      T expected = 1;
-      for (auto& d : {1, 3, 2, 0}) {
-        const auto& size_d = sizes[d];
-        if (size_d != 1) {
-          if (strides[d] != expected) {
-            return false;
-          }
-          expected *= size_d;
-        }
-      }
-      return true;
-    }
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    case 3:
-      // TODO dim == 3 case will be enabled once it is fully tested
-      return false;
-    default:
-      return false;
-  }
-}
-
 bool TensorImpl::compute_channels_last_contiguous_2d(identity<bool>) const {
   if (is_sparse()) {
     return false;
@@ -338,35 +242,6 @@ bool TensorImpl::compute_channels_last_contiguous_2d(identity<bool>) const {
   return _compute_channels_last_contiguous_2d<int64_t>(
       sizes_and_strides_.sizes_arrayref(),
       sizes_and_strides_.strides_arrayref());
-}
-
-template <typename T>
-bool _compute_channels_last_contiguous_3d(
-    ArrayRef<T> sizes,
-    ArrayRef<T> strides) {
-  // Please don't combine these code, constant array is used here to let
-  // compiler fully unroll the loop to get better performance
-  switch (sizes.size()) {
-    case 5: {
-      T expected = 1;
-      for (auto& d : {1, 4, 3, 2, 0}) {
-        const auto& size_d = sizes[d];
-        if (size_d != 1) {
-          if (strides[d] != expected) {
-            return false;
-          }
-          expected *= size_d;
-        }
-      }
-      return true;
-    }
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    case 4:
-      // TODO dim == 4 case will be enabled once it is fully tested
-      return false;
-    default:
-      return false;
-  }
 }
 
 bool TensorImpl::compute_channels_last_contiguous_3d(identity<bool>) const {
@@ -396,42 +271,6 @@ bool TensorImpl::compute_strides_like_channels_last_3d(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-template <typename T>
-bool _compute_non_overlapping_and_dense(
-    ArrayRef<T> sizes,
-    ArrayRef<T> strides) {
-  auto dim = sizes.size();
-  if (dim == 1) {
-    return sizes[0] < 2 || strides[0] == 1;
-  }
-  SmallVector<int64_t, 5> perm;
-  perm.resize(dim);
-  for (const auto i : c10::irange(dim)) {
-    perm[i] = i;
-  }
-  // Sort by strides, leaving 0 and 1 sized dims at the end of the array
-  std::sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
-    if (sizes[a] < 2) {
-      return false;
-    } else if (sizes[b] < 2) {
-      return true;
-    }
-    return strides[a] < strides[b];
-  });
-  T require_stride = 1;
-  for (const auto i : c10::irange(dim)) {
-    const auto& size_perm_i = sizes[perm[i]];
-    if (size_perm_i < 2) {
-      return true;
-    }
-    if (strides[perm[i]] != require_stride) {
-      return false;
-    }
-    require_stride *= size_perm_i;
-  }
-  return true;
-}
-
 bool TensorImpl::compute_non_overlapping_and_dense(identity<bool>) const {
   if (is_sparse()) {
     return false;
@@ -439,140 +278,6 @@ bool TensorImpl::compute_non_overlapping_and_dense(identity<bool>) const {
   return _compute_non_overlapping_and_dense<int64_t>(
       sizes_and_strides_.sizes_arrayref(),
       sizes_and_strides_.strides_arrayref());
-}
-
-// Special treatment because of numel
-SymBool TensorImpl::compute_contiguous(identity<SymBool>) const {
-  if (is_sparse()) {
-    return false;
-  }
-  auto& sym_shape_meta{symbolic_shape_meta()};
-  SymIntArrayRef sizes = sym_shape_meta.sizes_;
-  SymIntArrayRef strides = sym_shape_meta.strides_;
-  return _compute_contiguous(sizes, strides, sym_shape_meta.numel_);
-}
-
-// The rest of them
-#define DEFINE_EAGER_SYMBOOL_COMPUTE(name, nodeimpl, fallback) \
-  SymBool TensorImpl::name(identity<SymBool>) const {          \
-    if (is_sparse()) {                                         \
-      return false;                                            \
-    }                                                          \
-    auto& sym_shape_meta{symbolic_shape_meta()};               \
-    SymIntArrayRef sizes = sym_shape_meta.sizes_;              \
-    SymIntArrayRef strides = sym_shape_meta.strides_;          \
-    return fallback(sizes, strides);                           \
-  }
-
-#define DEFINE_SYMBOOL_COMPUTE(name, nodeimpl, fallback)        \
-  SymBool TensorImpl::name(identity<SymBool>) const {           \
-    if (is_sparse()) {                                          \
-      return false;                                             \
-    }                                                           \
-    auto& sym_shape_meta{symbolic_shape_meta()};                \
-    SymIntArrayRef sizes = sym_shape_meta.sizes_;               \
-    SymIntArrayRef strides = sym_shape_meta.strides_;           \
-    auto n = normalize_sym_sizes_strides(sizes, strides);       \
-    if (n.has_value()) {                                        \
-      SymNode base;                                             \
-      std::vector<SymNode> size_nodes;                          \
-      std::vector<SymNode> stride_nodes;                        \
-      std::tie(base, size_nodes, stride_nodes) = *n;            \
-      return SymBool(base->nodeimpl(size_nodes, stride_nodes)); \
-    } else {                                                    \
-      return fallback(sizes, strides);                          \
-    }                                                           \
-  }
-
-// clang-format off
-DEFINE_EAGER_SYMBOOL_COMPUTE(compute_channels_last_contiguous_2d, is_channels_last_contiguous_2d, _compute_channels_last_contiguous_2d)
-DEFINE_EAGER_SYMBOOL_COMPUTE(compute_channels_last_contiguous_3d, is_channels_last_contiguous_3d, _compute_channels_last_contiguous_3d)
-DEFINE_EAGER_SYMBOOL_COMPUTE(compute_strides_like_channels_last_2d, is_channels_last_strides_2d, is_channels_last_strides_2d)
-DEFINE_EAGER_SYMBOOL_COMPUTE(compute_strides_like_channels_last_3d, is_channels_last_strides_3d, is_channels_last_strides_3d)
-DEFINE_SYMBOOL_COMPUTE(compute_non_overlapping_and_dense, is_non_overlapping_and_dense, _compute_non_overlapping_and_dense)
-// clang-format on
-
-#undef DEFINE_SYMBOOL_COMPUTE
-
-// Glue compute
-// NB: this logic very intentionally short circuits if possible.  Without
-// short circuiting, it causes
-// python test/functorch/test_aotdispatch.py -k
-// test_aot_autograd_symbolic_exhaustive_nn_functional_unfold_cpu_float32 to run
-// very slowly.
-
-static bool definitely_true(const SymBool& b) {
-  return b.has_hint() && b.guard_bool(__FILE__, __LINE__);
-}
-
-SymBool TensorImpl::compute_is_non_overlapping_and_dense_dim4(
-    identity<SymBool> type_id) {
-  auto& sym_shape_meta{symbolic_shape_meta()};
-  if (definitely_true(sym_shape_meta.is_contiguous_)) {
-    return true;
-  }
-  if (definitely_true(sym_shape_meta.is_channels_last_contiguous_)) {
-    return true;
-  }
-  return sym_shape_meta.is_contiguous_ |
-      sym_shape_meta.is_channels_last_contiguous_ |
-      compute_non_overlapping_and_dense(type_id);
-}
-
-SymBool TensorImpl::compute_channels_last_contiguous_3d_dim5(
-    identity<SymBool> type_id) {
-  auto& sym_shape_meta{symbolic_shape_meta()};
-  if (definitely_true(sym_shape_meta.is_channels_last_contiguous_)) {
-    return false;
-  }
-  return ~sym_shape_meta.is_channels_last_contiguous_ &
-      compute_channels_last_contiguous_3d(type_id);
-}
-
-SymBool TensorImpl::compute_channels_last_2d_dim5(identity<SymBool> type_id) {
-  auto& sym_shape_meta{symbolic_shape_meta()};
-  if (definitely_true(sym_shape_meta.is_channels_last_3d_contiguous_)) {
-    return false;
-  }
-  return ~sym_shape_meta.is_channels_last_3d_contiguous_ &
-      compute_strides_like_channels_last_2d(type_id);
-}
-
-SymBool TensorImpl::compute_channels_last_3d_dim5(identity<SymBool> type_id) {
-  auto& sym_shape_meta{symbolic_shape_meta()};
-  if (definitely_true(sym_shape_meta.is_channels_last_)) {
-    return false;
-  }
-  return ~sym_shape_meta.is_channels_last_ &
-      compute_strides_like_channels_last_3d(type_id);
-}
-
-SymBool TensorImpl::compute_is_non_overlapping_and_dense_dim5(
-    identity<SymBool> type_id) {
-  auto& sym_shape_meta{symbolic_shape_meta()};
-  if (definitely_true(sym_shape_meta.is_contiguous_)) {
-    return true;
-  }
-  if (definitely_true(sym_shape_meta.is_channels_last_contiguous_)) {
-    return true;
-  }
-  if (definitely_true(sym_shape_meta.is_channels_last_3d_contiguous_)) {
-    return true;
-  }
-  return sym_shape_meta.is_contiguous_ |
-      sym_shape_meta.is_channels_last_contiguous_ |
-      sym_shape_meta.is_channels_last_3d_contiguous_ |
-      compute_non_overlapping_and_dense(type_id);
-}
-
-SymBool TensorImpl::compute_is_non_overlapping_and_dense_anydim(
-    identity<SymBool> type_id) {
-  auto& sym_shape_meta{symbolic_shape_meta()};
-  if (definitely_true(sym_shape_meta.is_contiguous_)) {
-    return true;
-  }
-  return sym_shape_meta.is_contiguous_ |
-      compute_non_overlapping_and_dense(type_id);
 }
 
 void TensorImpl::release_resources() {
@@ -596,6 +301,7 @@ void TensorImpl::throw_cannot_call_with_symbolic(const char* meth) const {
 
 void TensorImpl::throw_storage_access_error() const {
   if (extra_meta_ && extra_meta_->custom_storage_error_msg_) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     TORCH_CHECK(false, *extra_meta_->custom_storage_error_msg_);
   }
   TORCH_CHECK_NOT_IMPLEMENTED(
@@ -604,6 +310,7 @@ void TensorImpl::throw_storage_access_error() const {
 
 void TensorImpl::throw_data_ptr_access_error() const {
   if (extra_meta_ && extra_meta_->custom_data_ptr_error_msg_) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     TORCH_CHECK(false, *extra_meta_->custom_data_ptr_error_msg_);
   }
   TORCH_CHECK(
@@ -635,7 +342,9 @@ bool TensorImpl::is_non_overlapping_and_dense_custom() const {
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (C10_UNLIKELY(
+          matches_python_custom(SizesStridesPolicy::CustomSizes) ||
+          has_symbolic_sizes_strides_)) {
     return pyobj_slot_.load_pyobj_interpreter()->sizes(this);
   }
   return sizes_default();
@@ -670,7 +379,9 @@ c10::Device TensorImpl::device_custom() const {
 }
 
 IntArrayRef TensorImpl::strides_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+  if (C10_UNLIKELY(
+          matches_python_custom(SizesStridesPolicy::CustomStrides) ||
+          has_symbolic_sizes_strides_)) {
     return pyobj_slot_.load_pyobj_interpreter()->strides(this);
   }
   return strides_default();
@@ -685,8 +396,7 @@ int64_t TensorImpl::dim_custom() const {
 
 int64_t TensorImpl::numel_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
-    // TODO: fix this
-    return pyobj_slot_.load_pyobj_interpreter()->sym_numel(this).expect_int();
+    return pyobj_slot_.load_pyobj_interpreter()->numel(this);
   }
   return numel_default();
 }
@@ -706,7 +416,7 @@ int64_t TensorImpl::storage_offset_custom() const {
     // TODO: fix this
     return pyobj_slot_.load_pyobj_interpreter()
         ->sym_storage_offset(this)
-        .expect_int();
+        .guard_int(__FILE__, __LINE__);
   }
   return storage_offset_default();
 }
@@ -815,9 +525,6 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-
-  impl->refresh_numel();
-  impl->refresh_contiguous();
   return impl;
 }
 
@@ -867,6 +574,7 @@ void TensorImpl::copy_generic_tensor_metadata(
       src_impl->is_non_overlapping_and_dense_;
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
+  dest_impl->numel_ = src_impl->numel_;
   if (src_impl->extra_meta_ != nullptr) {
     dest_impl->extra_meta_ = src_impl->extra_meta_->clone();
   }
@@ -1161,6 +869,7 @@ void TensorImpl::set_sizes_and_strides(
     extra_meta_ = std::make_unique<ExtraMeta>();
     extra_meta_->symbolic_shape_meta_ =
         std::make_unique<c10::SymbolicShapeMeta>();
+    extra_meta_->symbolic_shape_meta_->strides_valid_ = !is_sparse();
     if (!storage_offset.has_value()) {
       extra_meta_->symbolic_shape_meta_->storage_offset_ = storage_offset_;
     }
@@ -1194,6 +903,7 @@ void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
   if (extra_meta.symbolic_shape_meta_ == nullptr) {
     extra_meta_->symbolic_shape_meta_ =
         std::make_unique<c10::SymbolicShapeMeta>();
+    extra_meta_->symbolic_shape_meta_->strides_valid_ = !is_sparse();
   }
 
   clone_symvec(sizes, symbolic_shape_meta().sizes_);
@@ -1209,7 +919,7 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
     case MemoryFormat::Contiguous: {
       // TODO: figure out if the non-symint version can also devirtualize;
       // the last time we tried it was probably a narrowing problem
-      const auto dim_ = static_cast<int64_t>(sym_shape_meta.sizes_.size());
+      const auto dim_ = sym_shape_meta.dim();
       sym_shape_meta.strides_.resize(dim_);
       if (dim_ > 0) {
         const auto last_idx = dim_ - 1;
@@ -1250,20 +960,20 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
   // TODO: avoid chundering into the guards for computing these
   switch (memory_format) {
     case MemoryFormat::Contiguous: {
-      sym_shape_meta.is_contiguous_ = true;
-      sym_shape_meta.is_non_overlapping_and_dense_ = true;
+      sym_shape_meta.assume_contiguous();
+      sym_shape_meta.assume_non_overlapping_and_dense();
       break;
     }
     case MemoryFormat::ChannelsLast: {
-      sym_shape_meta.is_channels_last_contiguous_ = true;
-      sym_shape_meta.is_channels_last_ = true;
-      sym_shape_meta.is_non_overlapping_and_dense_ = true;
+      sym_shape_meta.assume_channels_last_contiguous();
+      sym_shape_meta.assume_channels_last();
+      sym_shape_meta.assume_non_overlapping_and_dense();
       break;
     }
     case MemoryFormat::ChannelsLast3d: {
-      sym_shape_meta.is_channels_last_3d_contiguous_ = true;
-      sym_shape_meta.is_channels_last_3d_ = true;
-      sym_shape_meta.is_non_overlapping_and_dense_ = true;
+      sym_shape_meta.assume_channels_last_3d_contiguous();
+      sym_shape_meta.assume_channels_last_3d();
+      sym_shape_meta.assume_non_overlapping_and_dense();
       break;
     }
     default:

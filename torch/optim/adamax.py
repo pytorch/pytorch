@@ -2,7 +2,8 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
-                        _default_to_fused_or_foreach, _differentiable_doc, _maximize_doc, _foreach_doc)
+                        _default_to_fused_or_foreach, _get_scalar_dtype, _differentiable_doc,
+                        _maximize_doc, _foreach_doc, _view_as_real)
 from typing import List, Optional
 
 __all__ = ["Adamax", "adamax"]
@@ -55,12 +56,14 @@ class Adamax(Optimizer):
         )
         if not step_is_tensor:
             for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]))
+                s["step"] = torch.tensor(float(s["step"]), dtype=_get_scalar_dtype())
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_infs, state_steps):
+        has_complex = False
         for p in group["params"]:
             if p.grad is None:
                 continue
+            has_complex |= torch.is_complex(p)
             params_with_grad.append(p)
             if p.grad.is_sparse:
                 raise RuntimeError("Adamax does not support sparse gradients")
@@ -70,7 +73,7 @@ class Adamax(Optimizer):
 
             # State initialization
             if len(state) == 0:
-                state["step"] = torch.tensor(0.0)
+                state["step"] = torch.tensor(0.0, dtype=_get_scalar_dtype())
                 state["exp_avg"] = torch.zeros_like(
                     p, memory_format=torch.preserve_format
                 )
@@ -81,10 +84,11 @@ class Adamax(Optimizer):
             exp_avgs.append(state["exp_avg"])
             exp_infs.append(state["exp_inf"])
             state_steps.append(state["step"])
+        return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -110,7 +114,7 @@ class Adamax(Optimizer):
             maximize = group["maximize"]
             differentiable = group["differentiable"]
 
-            self._init_group(group, params_with_grad, grads, exp_avgs, exp_infs, state_steps)
+            has_complex = self._init_group(group, params_with_grad, grads, exp_avgs, exp_infs, state_steps)
 
             adamax(
                 params_with_grad,
@@ -126,6 +130,7 @@ class Adamax(Optimizer):
                 foreach=foreach,
                 maximize=maximize,
                 differentiable=differentiable,
+                has_complex=has_complex,
             )
 
         return loss
@@ -187,6 +192,7 @@ def adamax(
     foreach: Optional[bool] = None,
     maximize: bool = False,
     differentiable: bool = False,
+    has_complex: bool = False,
     *,
     eps: float,
     beta1: float,
@@ -198,7 +204,6 @@ def adamax(
 
     See :class:`~torch.optim.Adamax` for details.
     """
-
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"
@@ -228,6 +233,7 @@ def adamax(
         weight_decay=weight_decay,
         maximize=maximize,
         differentiable=differentiable,
+        has_complex=has_complex,
     )
 
 
@@ -245,6 +251,7 @@ def _single_tensor_adamax(
     weight_decay: float,
     maximize: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     for i, param in enumerate(params):
@@ -297,6 +304,7 @@ def _multi_tensor_adamax(
     eps: float,
     maximize: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     assert not differentiable, "_foreach ops don't support autograd"
@@ -309,17 +317,21 @@ def _multi_tensor_adamax(
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
 
-        grouped_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_params]
-        grouped_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_grads]
-        grouped_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_exp_avgs]
-        grouped_exp_infs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_exp_infs]
+        if has_complex:
+            _view_as_real(grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs)
 
         # Update steps
-        torch._foreach_add_(grouped_state_steps, 1)
+        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
+        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
+        # wrapped it once now. The alpha is required to assure we go to the right overload.
+        if grouped_state_steps[0].is_cpu:
+            torch._foreach_add_(grouped_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
+        else:
+            torch._foreach_add_(grouped_state_steps, 1)
 
         if weight_decay != 0:
             if maximize:
-                # Re-use the intermediate memory (device_grads) already allocated for maximize
+                # Re-use the intermediate memory (grouped_grads) already allocated for maximize
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
             else:
                 grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
