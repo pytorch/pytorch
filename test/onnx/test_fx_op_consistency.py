@@ -1087,6 +1087,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_script_does_not_support("Sign", "bool"),
     ),
     xfail(
+        "signal.windows.kaiser",
+        reason=onnx_test_common.reason_dynamo_does_not_support("functionalization"),
+    ),
+    xfail(
         "softmax",
         dtypes=(torch.float16,),
         reason="ORT error: https://github.com/microsoft/onnxruntime/issues/16438"
@@ -1166,6 +1170,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         ),
     ),
     xfail(
+        "take",
+        reason=onnx_test_common.reason_dynamo_does_not_support("data-dependent"),
+    ),
+    xfail(
         "tensor_split",
         reason=onnx_test_common.reason_dynamo_does_not_support("data-dependent"),
     ),
@@ -1238,6 +1246,18 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "zeros",
         dtypes=onnx_test_common.COMPLEX_TYPES,
         reason="fixme: kwargs dtpye=complex64 is not supported in ONNX."
+    ),
+    # SLOW TESTS
+    skip(
+        "max_pool2d_with_indices_backward",
+        reason="fixme: very slow",
+        enabled_if=not common_utils.TEST_WITH_SLOW
+    ),
+    skip(
+        "logspace",
+        variant_name="tensor_overload",
+        reason="fixme: very slow",
+        enabled_if=not common_utils.TEST_WITH_SLOW
     ),
 )
 # fmt: on
