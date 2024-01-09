@@ -175,6 +175,14 @@
     CPU: _assert_async_msg_cpu
     CUDA: _assert_async_msg_cuda
 
+- func: _assert_scalar(Scalar self, str assert_msg) -> ()
+  dispatch:
+    CompositeExplicitAutograd: _assert_scalar
+
+- func: _functional_assert_scalar(Scalar self, str assert_msg, Tensor dep_token) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: _functional_assert_scalar
+
 - func: _functional_assert_async.msg(Tensor self, str assert_msg, Tensor dep_token) -> Tensor
   dispatch:
     CPU: _functional_assert_async_msg_cpu
