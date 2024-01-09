@@ -49,10 +49,10 @@ if IS_WINDOWS and IS_CI:
 
 try:
     try:
-        from .test_aot_inductor_utils import AOTInductorModelRunner
+        from .test_aot_inductor_utils import AOTIRunnerUtil
         from .test_torchinductor import copy_tests, requires_multigpu, TestFailure
     except ImportError:
-        from test_aot_inductor_utils import AOTInductorModelRunner
+        from test_aot_inductor_utils import AOTIRunnerUtil
         from test_torchinductor import copy_tests, requires_multigpu, TestFailure
 except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
@@ -82,7 +82,7 @@ def check_model(
         expected = ref_model(*ref_inputs)
 
         torch.manual_seed(0)
-        actual = AOTInductorModelRunner.run(
+        actual = AOTIRunnerUtil.run(
             self.device,
             model,
             example_inputs,
@@ -114,7 +114,7 @@ def check_model_with_multiple_inputs(
         list_expected = [ref_model(*inputs) for inputs in ref_inputs]
 
         torch.manual_seed(0)
-        list_actual = AOTInductorModelRunner.run_multiple(
+        list_actual = AOTIRunnerUtil.run_multiple(
             self.device, model, list_example_inputs, options, constraints
         )
 
@@ -181,7 +181,7 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
         )
         expected_path = os.path.join(tempfile.mkdtemp(dir=cache_dir()), "model.so")
-        actual_path = AOTInductorModelRunner.compile(
+        actual_path = AOTIRunnerUtil.compile(
             model, example_inputs, options={"aot_inductor.output_path": expected_path}
         )
         self.assertTrue(actual_path == expected_path)
@@ -788,7 +788,7 @@ class AOTInductorTestsTemplate:
         with torch.cuda.device(0), config.patch(
             "aot_inductor.abi_compatible", self.abi_compatible
         ):
-            so_path = AOTInductorModelRunner.compile(
+            so_path = AOTIRunnerUtil.compile(
                 model=Model(w1.cuda(0), w2.cuda(0)),
                 example_inputs=tuple(t.cuda(0) for t in inputs),
             )
@@ -797,7 +797,7 @@ class AOTInductorTestsTemplate:
         for i in range(torch.cuda.device_count()):
             with torch.cuda.device(i):
                 example_inputs = tuple(t.cuda(i) for t in inputs)
-                optimized = AOTInductorModelRunner.load("cuda", so_path, example_inputs)
+                optimized = AOTIRunnerUtil.load("cuda", so_path)
                 result_cuda = optimized(example_inputs)
             self.assertTrue(same(result_cpu, result_cuda.cpu()))
 
@@ -837,14 +837,14 @@ class AOTInductorTestsTemplate:
         with torch.cuda.device(0), torch.no_grad(), config.patch(
             "aot_inductor.abi_compatible", self.abi_compatible
         ):
-            result_cuda_0 = AOTInductorModelRunner.run(
+            result_cuda_0 = AOTIRunnerUtil.run(
                 "cuda", Model(weight.cuda(0)), tuple(t.cuda(0) for t in inputs)
             )
 
         with torch.cuda.device(1), torch.no_grad(), config.patch(
             "aot_inductor.abi_compatible", self.abi_compatible
         ):
-            result_cuda_1 = AOTInductorModelRunner.run(
+            result_cuda_1 = AOTIRunnerUtil.run(
                 "cuda", Model(weight.cuda(1)), tuple(t.cuda(1) for t in inputs)
             )
 
@@ -1006,12 +1006,12 @@ class AOTInductorTestsTemplate:
 
         # compiler under no_grad
         with torch.no_grad():
-            so_path = AOTInductorModelRunner.compile(m, example_inputs)
+            so_path = AOTIRunnerUtil.compile(m, example_inputs)
 
         # run under grad enabled
         self.assertTrue(torch.is_grad_enabled())
 
-        optimized = AOTInductorModelRunner.load(self.device, so_path, example_inputs)
+        optimized = AOTIRunnerUtil.load(self.device, so_path)
         actual = optimized(example_inputs)
         actual = pytree.tree_leaves(actual)
 
@@ -1330,6 +1330,27 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), inputs)
 
+    def test_scatter_reduce_fallback(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self,
+                inp: torch.Tensor,
+                index: torch.Tensor,
+                src: torch.Tensor,
+            ):
+                return torch.scatter_reduce(inp, 0, index, src, reduce="sum")
+
+        inputs = (
+            torch.tensor([1, 10, 100, 1000], device=self.device, dtype=torch.int64),
+            torch.tensor([0, 1, 0, 1, 2, 1], device=self.device, dtype=torch.int64),
+            torch.tensor([1, 2, 3, 4, 5, 6], device=self.device, dtype=torch.int64),
+        )
+
+        self.check_model(Model(), inputs)
+
     def test_convolution(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1404,6 +1425,59 @@ class AOTInductorTestsTemplate:
             torch.rand(4, 4, 4, 4, device=self.device),
         )
         self.check_model(Model(), inputs)
+
+    def test_constant_original_fqn_and_dtype(self):
+        class FooBarModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_parameter("0", torch.nn.Parameter(torch.randn(3, 4)))
+                self.register_buffer("test_buf", torch.randn(3, 4))
+                self.register_parameter(
+                    "test_param", torch.nn.Parameter(torch.randn(3, 4))
+                )
+
+            def forward(self, x):
+                return ((x + self.test_buf) * getattr(self, "0")) / self.test_param
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo_bar = FooBarModule()
+                self.register_parameter(
+                    "test_param", torch.nn.Parameter(torch.randn(3, 4))
+                )
+                self.register_buffer("test_buf", torch.randn(3, 4))
+
+            def forward(self, x):
+                return (self.foo_bar(x) + self.test_param) * self.test_buf
+
+        with torch.no_grad():
+            so_path = AOTIRunnerUtil.compile(
+                model=TestModule().to(device=self.device),
+                example_inputs=(torch.rand(3, 4, device=self.device),),
+            )
+
+        runner = AOTIRunnerUtil.load_runner(self.device, so_path)
+
+        expected_original_fqns = {
+            "L__self___test_param": "test_param",
+            "L__self___test_buf": "test_buf",
+            "getattr_L__self___foo_bar___0__": "foo_bar.0",
+            "L__self___foo_bar_test_param": "foo_bar.test_param",
+            "L__self___foo_bar_test_buf": "foo_bar.test_buf",
+        }
+        self.assertEqual(
+            expected_original_fqns, runner.get_constant_names_to_original_fqns()
+        )
+
+        expected_dtypes = {
+            "L__self___test_param": 6,
+            "L__self___test_buf": 6,
+            "getattr_L__self___foo_bar___0__": 6,
+            "L__self___foo_bar_test_param": 6,
+            "L__self___foo_bar_test_buf": 6,
+        }
+        self.assertEqual(expected_dtypes, runner.get_constant_names_to_dtypes())
 
     def test_fqn(self):
         class NestedChild(torch.nn.Module):
@@ -1515,7 +1589,8 @@ CPU_TEST_FAILURES = {
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
     # the test segfaults
-    "test_scatter_fallback": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_scatter_fallback": fail_stack_allocation(is_skip=True),
+    "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
     # Minimal arrayref interface doesn't support bfloat16 yet.
     "test_sdpa": fail_minimal_arrayref_interface(is_skip=True),
     # Minimal arrayref interface doesn't support bfloat16 yet.
