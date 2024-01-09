@@ -398,8 +398,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return OutDtypeHigherOrderVariable(value, source, **kwargs)
         elif value is torch._functorch.eager_transforms.grad_impl:
             return FunctorchGradHigherOrderVariable(value, source, **kwargs)
-        elif value is torch._functorch.vmap.vmap_impl:
-            return FunctorchVmapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
             "trampoline_autograd_fwd",
             "trampoline_autograd_bwd",
@@ -428,26 +426,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         unimplemented(f"HigherOrderOperator {self.value.__name__}")
-
-
-class FunctorchVmapHigherOrderVariable(UserFunctionVariable):
-    def call_function(
-        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
-    ) -> VariableTracker:
-        try:
-            # Try to trace through vmap call
-            return super().call_function(tx, args, kwargs)
-        except Unsupported:
-            # In case of failure, mark the functino as skipped to avoid dynamo from
-            # trying to trace it again
-            from torch._C._dynamo import eval_frame
-
-            if hasattr(args[0], "get_code"):
-                # methods implemented in C++ don't have '__code__'
-                eval_frame.skip_code(args[0].get_code())
-
-            # Graph break
-            raise
 
 
 class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):

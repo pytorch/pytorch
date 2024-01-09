@@ -2051,6 +2051,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             speculation_log=speculation_log,
         )
 
+        if torch._C._functorch.peek_interpreter_stack() is not None:
+            unimplemented('functorch transform partial graph')
+
         # as soon as we create the tracing context we should keep it active, so any calls
         # into dynamo apis can rely on finding it
         with tracing(self.output.tracing_context), self.set_current_tx():
