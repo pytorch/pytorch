@@ -439,9 +439,9 @@ Tensor FunctionalInverses::slice_scatter_inverse(const at::Tensor & base, const 
     // TODO: Add a comment here explaining this.
     auto output = mutated_view.slice_symint(dim, start, end, step);
     if (inverse_return_mode == InverseReturnMode::NeverView) {
-      return at::slice_copy_symint(mutated_view, dim, start, end, step);
+      return at::slice_copy_symint(mutated_view, dim, std::move(start), std::move(end), step);
     } else {
-      return mutated_view.slice_symint(dim, start, end, step);
+      return mutated_view.slice_symint(dim, std::move(start), std::move(end), step);
     }
 }
 
