@@ -2,6 +2,7 @@
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandBase.h>
 #include <ATen/OpMathType.h>
 #include <ATen/native/TensorIterator.h>
@@ -285,7 +286,7 @@ namespace cuda {
 
 template<typename RNG>
 void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t base, RNG gen) {
-  AT_DISPATCH_V2(iter.dtype(), "random_from_to_kernel_cuda", [&] AT_WRAP({
+  AT_DISPATCH_V2(iter.dtype(), "random_from_to_kernel_cuda", AT_WRAP([&] {
     if ((
       std::is_same<scalar_t, int64_t>::value ||
       std::is_same<scalar_t, double>::value ||
