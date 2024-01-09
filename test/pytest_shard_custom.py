@@ -24,7 +24,7 @@ def pytest_addoptions(parser: Parser):
     )
     group.addoption(
         "--print-items",
-        dest="shard_verbose",
+        dest="print_items",
         action="store_true",
         default=False,
         help="Print out the items being tested in this shard.",
