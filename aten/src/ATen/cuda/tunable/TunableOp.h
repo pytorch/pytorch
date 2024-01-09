@@ -87,16 +87,16 @@ class TunableOp {
     }
 
   private:
-    static void WarmUp(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, int num_iter) {
-      for (int i = 0; i < num_iter; i++) {
+    static void WarmUp(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter) {
+      for (size_t i = 0; i < num_iter; i++) {
         TORCH_CHECK(op->Call(param[i%param.size()]) == OK);
       }
     }
 
-    static double Profile(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, int num_iter) {
+    static double Profile(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter) {
       TimerT timer{};
       timer.Start();
-      for (int i = 0; i < num_iter; i++) {
+      for (size_t i = 0; i < num_iter; i++) {
         TORCH_CHECK(op->Call(param[i%param.size()]) == OK);
       }
       timer.End();
@@ -126,7 +126,7 @@ class TunableOp {
 
       // need a copy of params to reuse
       std::vector<ParamsT*> reusable_params(ctx->GetBufferRotationCount());
-      for (int i = 0; i < reusable_params.size(); i++) {
+      for (size_t i = 0; i < reusable_params.size(); i++) {
           reusable_params[i] = params->DeepCopy();
       }
 
@@ -211,7 +211,7 @@ class TunableOp {
       }
 
       // done with reusable_params and reference_params
-      for (int i = 0; i < reusable_params.size(); i++) {
+      for (size_t i = 0; i < reusable_params.size(); i++) {
         reusable_params[i]->Delete();
       }
       reference_params->Delete();

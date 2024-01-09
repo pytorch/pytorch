@@ -202,12 +202,12 @@ if(HIP_FOUND)
       "}\n"
       )
 
-    try_compile(hipblaslt_compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
+    try_compile(hipblaslt_compile_result_custom_datatype ${PROJECT_RANDOM_BINARY_DIR} ${file}
       CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
       COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
       OUTPUT_VARIABLE hipblaslt_compile_output)
 
-    if(hipblaslt_compile_result)
+    if(hipblaslt_compile_result_custom_datatype)
       set(HIPBLASLT_CUSTOM_DATA_TYPE ON)
       #message("hipblaslt is using custom data type: ${hipblaslt_compile_output}")
       message("hipblaslt is using custom data type")
@@ -227,12 +227,12 @@ if(HIP_FOUND)
       "}\n"
       )
 
-    try_compile(hipblaslt_compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
+    try_compile(hipblaslt_compile_result_custom_compute_type ${PROJECT_RANDOM_BINARY_DIR} ${file}
       CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
       COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
       OUTPUT_VARIABLE hipblaslt_compile_output)
 
-    if(hipblaslt_compile_result)
+    if(hipblaslt_compile_result_custom_compute_type)
       set(HIPBLASLT_CUSTOM_COMPUTE_TYPE ON)
       #message("hipblaslt is using custom compute type: ${hipblaslt_compile_output}")
       message("hipblaslt is using custom compute type")
@@ -254,7 +254,7 @@ if(HIP_FOUND)
       "}\n"
       )
 
-    try_compile(hipblaslt_compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
+    try_compile(hipblaslt_compile_result_getindexfromalgo ${PROJECT_RANDOM_BINARY_DIR} ${file}
       CMAKE_FLAGS
         "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
         "-DLINK_DIRECTORIES=${ROCM_PATH}/lib"
@@ -262,7 +262,7 @@ if(HIP_FOUND)
       COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
       OUTPUT_VARIABLE hipblaslt_compile_output)
 
-    if(hipblaslt_compile_result)
+    if(hipblaslt_compile_result_getindexfromalgo)
       set(HIPBLASLT_HAS_GETINDEXFROMALGO ON)
       #message("hipblaslt provides getIndexFromAlgo: ${hipblaslt_compile_output}")
       message("hipblaslt provides getIndexFromAlgo")
