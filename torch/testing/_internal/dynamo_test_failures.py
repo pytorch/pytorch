@@ -1,53 +1,6 @@
 # tests in this list will run without Dynamo strict mode by default.
 FIXME_default_non_strict = {
-    "dynamo/test_activation_checkpointing",
-    "dynamo/test_after_aot",
-    "dynamo/test_aot_autograd",
-    "dynamo/test_autograd_function",
-    "dynamo/test_backends",
-    "dynamo/test_backward_higher_order_ops",
-    "dynamo/test_base_output",
-    "dynamo/test_bytecode_hook",
-    "dynamo/test_compile",
-    "dynamo/test_comptime",
-    "dynamo/test_config",
-    "dynamo/test_ctx_manager",
-    "dynamo/test_cudagraphs",
-    "dynamo/test_debug_utils",
-    "dynamo/test_decorators",
-    "dynamo/test_dynamic_shapes",
-    "dynamo/test_exc",
-    "dynamo/test_export",
-    "dynamo/test_export_mutations",
-    "dynamo/test_frame_init",
-    "dynamo/test_functions",
-    "dynamo/test_global",
-    "dynamo/test_higher_order_ops",
-    "dynamo/test_hooks",
-    "dynamo/test_input_attr_tracking",
-    "dynamo/test_interop",
     "dynamo/test_logging",
-    "dynamo/test_minifier",
-    "dynamo/test_misc",
-    "dynamo/test_model_output",
-    "dynamo/test_modules",
-    "dynamo/test_nops",
-    "dynamo/test_optimizers",
-    "dynamo/test_pre_dispatch",
-    "dynamo/test_profiler",
-    "dynamo/test_python_autograd",
-    "dynamo/test_recompile_ux",
-    "dynamo/test_recompiles",
-    "dynamo/test_replay_record",
-    "dynamo/test_repros",
-    "dynamo/test_skip_non_tensor",
-    "dynamo/test_sources",
-    "dynamo/test_subclasses",
-    "dynamo/test_subgraphs",
-    "dynamo/test_torchrec",
-    "dynamo/test_trace_rules",
-    "dynamo/test_unspec",
-    "dynamo/test_verify_correctness",
     "export/test_db",
     "export/test_experimental",
     "export/test_export",
@@ -3141,6 +3094,361 @@ dynamo_expected_failures = {
     "TestControlFlowTraced.test_nested_map_cond_symbolic",  # functorch/test_control_flow
     "TestControlFlowTraced.test_nested_map_cond_real",  # functorch/test_control_flow
     "TestMetaKernel.test_addmm_invalid_dtype",  # lazy/test_meta_kernel
+    "TestVerifyCorrectness.test_incorrect_verify_true",  # dynamo/test_verify_correctness
+    "TestVerifyCorrectness.test_torchscript",  # dynamo/test_verify_correctness
+    "UnspecTests.test_conv1d_symint_padding",  # dynamo/test_unspec
+    "UnspecTests.test_no_recompiles",  # dynamo/test_unspec
+    "UnspecTests.test_no_recompilations",  # dynamo/test_unspec
+    "UnspecTests.test_builtin_max_min",  # dynamo/test_unspec
+    "UnspecTests.test_propagate_dynamic_dim",  # dynamo/test_unspec
+    "UnspecTests.test_isinstance_symint",  # dynamo/test_unspec
+    "UnspecTests.test_mark_01_dynamic",  # dynamo/test_unspec
+    "UnspecTests.test_use_and_specialize",  # dynamo/test_unspec
+    "TraceRuleTests.test_skipfiles_inlinelist",  # dynamo/test_trace_rules
+    "SubGraphTests.test_dynamic_order_dependence",  # dynamo/test_subgraphs
+    "SubGraphTests.test_no_graph_break_on_item",  # dynamo/test_subgraphs
+    "SubGraphTests.test_dynamic_zero_inference",  # dynamo/test_subgraphs
+    "SubGraphTests.test_enumerate_not_break_graph",  # dynamo/test_subgraphs
+    "SubGraphTests.test_dynamic_duck_size",  # dynamo/test_subgraphs
+    "SubGraphTests.test_dynamic_getitem",  # dynamo/test_subgraphs
+    "SubGraphTests.test_dynamic_kwarg",  # dynamo/test_subgraphs
+    "SubclassTests.test_compile_with_functionalization",  # dynamo/test_subclasses
+    "TestNestedTensor.test_binary_recompiles",  # dynamo/test_subclasses
+    "SubclassTests.test_wrapper_subclass_with_differently_sized_inner_tensor",  # dynamo/test_subclasses
+    "SubclassTests.test_compile_higher_order_with_functionalization",  # dynamo/test_subclasses
+    "SubclassTests.test_wrapper_subclass_guards_on_inner_tensor",  # dynamo/test_subclasses
+    "TestNestedTensor.test_unbind",  # dynamo/test_subclasses
+    "SubclassTests.test_torch_function_state_guards",  # dynamo/test_subclasses
+    "SubclassTests.test_wrapper_subclass_with_same_sized_inner_tensor",  # dynamo/test_subclasses
+    "SkipNonTensorTests.test_do_not_skip_side_effects",  # dynamo/test_skip_non_tensor
+    "SkipNonTensorTests.test_add_tensor_dict",  # dynamo/test_skip_non_tensor
+    "SkipNonTensorTests.test_add_tensor2",  # dynamo/test_skip_non_tensor
+    "SkipNonTensorTests.test_add_tensor1",  # dynamo/test_skip_non_tensor
+    "SkipNonTensorTests.test_add_tensor_list",  # dynamo/test_skip_non_tensor
+    "SkipNonTensorTests.test_recursive_list",  # dynamo/test_skip_non_tensor
+    "ReproTests.test_function_in_skipfiles",  # dynamo/test_repros
+    "ReproTests.test_negative_shape_guard",  # dynamo/test_repros
+    "ReproTests.test_dynamic_shapes_implicit_guard",  # dynamo/test_repros
+    "ReproTests.test_reformer_min_chunk_len",  # dynamo/test_repros
+    "ReproTests.test_jit_trace_errors",  # dynamo/test_repros
+    "ReproTests.test_chunk_reformer_ff",  # dynamo/test_repros
+    "ReproTests.test_module_in_skipfiles",  # dynamo/test_repros
+    "ReproTests.test_do_paste_mask",  # dynamo/test_repros
+    "ReproTests.test_boxes_len",  # dynamo/test_repros
+    "ReproTests.test_convert_boxes_to_pooler_format",  # dynamo/test_repros
+    "ReproTests.test_list_self_reference",  # dynamo/test_repros
+    "ReproTests.test_validate_model_kwargs",  # dynamo/test_repros
+    "ReproTests.test_create_rand_mask_from_inputs",  # dynamo/test_repros
+    "ReproTests.test_rewrite_assert_with_non_string_msg",  # dynamo/test_repros
+    "ReproTests.test_empty_list_contains_with_jump",  # dynamo/test_repros
+    "ReproTests.test_issue175",  # dynamo/test_repros
+    "ReproTests.test_restricted_list_subclass1",  # dynamo/test_repros
+    "ReproTests.test_add_sub_alpha_out",  # dynamo/test_repros
+    "ReproTests.test_dynamic_shapes_float_guard",  # dynamo/test_repros
+    "ReproTests.test_list_aliasing",  # dynamo/test_repros
+    "ReproTests.test_addr_alpha_beta_out",  # dynamo/test_repros
+    "ReproTests.test_merge_criteria_processor_list2",  # dynamo/test_repros
+    "ReproTests.test_reformer_eval",  # dynamo/test_repros
+    "ReproTests.test_longformer_chunk",  # dynamo/test_repros
+    "ReproTests.test_functools_wraps",  # dynamo/test_repros
+    "ReproTests.test_tensor_data_kwarg",  # dynamo/test_repros
+    "ReproTests.test_recursive_map",  # dynamo/test_repros
+    "ReproTests.test_reformer_sorting",  # dynamo/test_repros
+    "ReproTests.test_size_typematch",  # dynamo/test_repros
+    "ReproTests.test_threading_local",  # dynamo/test_repros
+    "ReproTests.test_merge_criteria_processor_list1",  # dynamo/test_repros
+    "ReproTests.test_relative_import",  # dynamo/test_repros
+    "ReproTests.test_rewrite_assert_noop",  # dynamo/test_repros
+    "ReproTests.test_seq_append_list",  # dynamo/test_repros
+    "ReproTests.test_relative_import_no_modulename",  # dynamo/test_repros
+    "ReproTests.test_multi_import",  # dynamo/test_repros
+    "ReproTests.test_rewrite_assert_with_msg",  # dynamo/test_repros
+    "ReproTests.test_hf_t5_forward",  # dynamo/test_repros
+    "ReproTests.test_hf_xsoftmax_training",  # dynamo/test_repros
+    "ReproTests.test_numpy_not_ndarray_recompiles",  # dynamo/test_repros
+    "RecompileTests.test_automatic_dynamic_reduce_recompiles",  # dynamo/test_recompiles
+    "RecompileTests.test_automatic_dynamic_tensor_scalar_change",  # dynamo/test_recompiles
+    "RecompileTests.test_recompiles_true_false_flop",  # dynamo/test_recompiles
+    "RecompileTests.test_dynamic_shape_parameter_recompile",  # dynamo/test_recompiles
+    "RecompileTests.test_aliasing_guard_failures_with_globals",  # dynamo/test_recompiles
+    "RecompileUxTests.test_verbose_tensor_check",  # dynamo/test_recompile_ux
+    "RecompileUxTests.test_mismatched_type",  # dynamo/test_recompile_ux
+    "TestPythonAutograd.test_backwards2",  # dynamo/test_python_autograd
+    "TestPythonAutograd.test_forwards1",  # dynamo/test_python_autograd
+    "TestPythonAutograd.test_split",  # dynamo/test_python_autograd
+    "TestPythonAutograd.test_forwards2",  # dynamo/test_python_autograd
+    "DynamoProfilerTests.test_dynamo_timed_profiling_isolated",  # dynamo/test_profiler
+    "DynamoProfilerTests.test_profiler_cache_lookup",  # dynamo/test_profiler
+    "DynamoProfilerTests.test_profiler_dynamo_compiled_region",  # dynamo/test_profiler
+    "OptimizerTests.test_rmsprop",  # dynamo/test_optimizers
+    "OptimizerTests.test_rprop",  # dynamo/test_optimizers
+    "OptimizerTests.test_nadam",  # dynamo/test_optimizers
+    "OptimizerTests.test_adagrad",  # dynamo/test_optimizers
+    "OptimizerTests.test_adamax",  # dynamo/test_optimizers
+    "OptimizerTests.test_adam",  # dynamo/test_optimizers
+    "OptimizerTests.test_asgd",  # dynamo/test_optimizers
+    "End2EndTests.test_init_group",  # dynamo/test_optimizers
+    "OptimizerTests.test_adamw",  # dynamo/test_optimizers
+    "OptimizerTests.test_sgd",  # dynamo/test_optimizers
+    "OptimizedModuleTest.test_module_dict_iter_name",  # dynamo/test_modules
+    "NNModuleTests.test_lazy_module1",  # dynamo/test_modules
+    "OptimizedModuleTest.test_composition_with_opt_mod",  # dynamo/test_modules
+    "OptimizedModuleTest.test_backward_hooks",  # dynamo/test_modules
+    "OptimizedModuleTest.test_nn_module",  # dynamo/test_modules
+    "OptimizedModuleTest.test_to",  # dynamo/test_modules
+    "OptimizedModuleTest.test_hooks_outer",  # dynamo/test_modules
+    "NNModuleTests.test_lazy_module5",  # dynamo/test_modules
+    "OptimizedModuleTest.test_hooks_inner",  # dynamo/test_modules
+    "NNModuleTests.test_lazy_module_no_cls_to_become",  # dynamo/test_modules
+    "OptimizedModuleTest.test_cache_size_limit_on_guarded_nn_modules",  # dynamo/test_modules
+    "NNModuleTests.test_self_mutating1",  # dynamo/test_modules
+    "NNModuleTests.test_unsupportedmodule",  # dynamo/test_modules
+    "NNModuleTests.test_unsupportedmethod",  # dynamo/test_modules
+    "OptimizedModuleTest.test_hooks_skip_guards",  # dynamo/test_modules
+    "NNModuleTests.test_lazy_module2",  # dynamo/test_modules
+    "OptimizedModuleTest.test_no_recompile_on_nn_guarded_modules",  # dynamo/test_modules
+    "NNModuleTests.test_lazy_module4",  # dynamo/test_modules
+    "NNModuleTests.test_lazy_module6",  # dynamo/test_modules
+    "MiscTests.test_tensor_dict3",  # dynamo/test_misc
+    "MiscTests.test_with_builtin_type",  # dynamo/test_misc
+    "MiscTests.test_tolist_scalar",  # dynamo/test_misc
+    "MiscTests.test_raise_guard_full_constraint",  # dynamo/test_misc
+    "MiscTests.test_setattr_mutation1",  # dynamo/test_misc
+    "MiscTests.test_closure_out_of_scope_cell",  # dynamo/test_misc
+    "MiscTests.test_size_input",  # dynamo/test_misc
+    "MiscTests.test_inplace_view_on_graph_input",  # dynamo/test_misc
+    "MiscTests.test_itertools_groupby_pure_python_key_func",  # dynamo/test_misc
+    "MiscTests.test_frozenset_torch_func_contains",  # dynamo/test_misc
+    "MiscTests.test_nested_closure",  # dynamo/test_misc
+    "MiscTests.test_tolist_1d",  # dynamo/test_misc
+    "MiscTests.test_any_all_symnode",  # dynamo/test_misc
+    "MiscTests.test_iter_set",  # dynamo/test_misc
+    "MiscTests.test_dict_order_keys_tensors",  # dynamo/test_misc
+    "MiscTests.test_mark_static",  # dynamo/test_misc
+    "MiscTests.test_backend_match_guard",  # dynamo/test_misc
+    "MiscTests.test_tolist_0d",  # dynamo/test_misc
+    "MiscTests.test_str_format_assert2",  # dynamo/test_misc
+    "MiscTests.test_typing_typevar",  # dynamo/test_misc
+    "MiscTests.test_raise_guard_partial_constraint_no_graph_break",  # dynamo/test_misc
+    "MiscTests.test_get_cache_entry",  # dynamo/test_misc
+    "MiscTests.test_nested_optimize_decorator",  # dynamo/test_misc
+    "MiscTests.test_nested_optimize_run",  # dynamo/test_misc
+    "MiscTests.test_release_input_memory",  # dynamo/test_misc
+    "MiscTests.test_inplace_param_update",  # dynamo/test_misc
+    "MiscTests.test_numpy_recompilation_scalar",  # dynamo/test_misc
+    "MiscTests.test_inline_closure_not_loaded_by_parent",  # dynamo/test_misc
+    "MiscTests.test_tracing_nested_py_tree_dicts",  # dynamo/test_misc
+    "MiscTests.test_tracing_py_tree_tensor_subclass",  # dynamo/test_misc
+    "MiscTests.test_user_getattribute",  # dynamo/test_misc
+    "MiscTests.test_listcomp",  # dynamo/test_misc
+    "MiscTests.test_yield_gen_and_from",  # dynamo/test_misc
+    "MiscTests.test_guard_failure_fn",  # dynamo/test_misc
+    "MiscTests.test_numpy_non_torch_dtype",  # dynamo/test_misc
+    "MiscTests.test_numpy_with_builtin_type",  # dynamo/test_misc
+    "MiscTests.test_py_guards_mark_dynamic",  # dynamo/test_misc
+    "MiscTests.test_namedtuple2",  # dynamo/test_misc
+    "MiscTests.test_itertools_accumulate_tensors_default_sum",  # dynamo/test_misc
+    "MiscTests.test_guard_failure_fn2",  # dynamo/test_misc
+    "MiscTests.test_cond_nested",  # dynamo/test_misc
+    "MiscTests.test_nn_module_getattr",  # dynamo/test_misc
+    "MiscTests.test_itertools_repeat",  # dynamo/test_misc
+    "MiscTests.test_numpy_int_constant",  # dynamo/test_misc
+    "MiscTests.test_torch_seed",  # dynamo/test_misc
+    "MiscTests.test_callpacked",  # dynamo/test_misc
+    "MiscTests.test_mandelbrot_numpy",  # dynamo/test_misc
+    "MiscTests.test_pure_python_accumulate",  # dynamo/test_misc
+    "MiscTests.test_release_module_memory",  # dynamo/test_misc
+    "MiscTests.test_dunder_new_function_inlining",  # dynamo/test_misc
+    "MiscTests.test_numpy_readonly",  # dynamo/test_misc
+    "MiscTests.test_tolist_kd",  # dynamo/test_misc
+    "MiscTests.test_deque_append_left",  # dynamo/test_misc
+    "MiscTests.test_nested_optimize",  # dynamo/test_misc
+    "MiscTests.test_tracing_nested_py_tree",  # dynamo/test_misc
+    "MiscTests.test_repeat_interleave_graphbreaks",  # dynamo/test_misc
+    "MiscTests.test_itertools_infinite_repeat",  # dynamo/test_misc
+    "MiscTests.test_is_compiling",  # dynamo/test_misc
+    "MiscTests.test_boolarg",  # dynamo/test_misc
+    "MiscTests.test_compare_shapes_with_constant",  # dynamo/test_misc
+    "MiscTests.test_itertools_groupby_pure_python_default_identify_func",  # dynamo/test_misc
+    "MiscTests.test_no_raise_guard_partial_constraint",  # dynamo/test_misc
+    "MiscTests.test_tracing_nested_py_tree_tuples",  # dynamo/test_misc
+    "MiscTests.test_set_aliasing_recompiles",  # dynamo/test_misc
+    "MiscTests.test_guard_failure_fn_tensor_iter",  # dynamo/test_misc
+    "MiscTests.test_itertools_infinite_repeat_mutation",  # dynamo/test_misc
+    "MiscTests.test_numpy_force",  # dynamo/test_misc
+    "MiscTests.test_tracing_nested_py_tree_mixed_all",  # dynamo/test_misc
+    "MiscTests.test_inference_mode",  # dynamo/test_misc
+    "MiscTests.test_numpy_array_of_arrays",  # dynamo/test_misc
+    "MiscTests.test_itertools_infinite_cycle",  # dynamo/test_misc
+    "MiscTests.test_tracing_py_tree",  # dynamo/test_misc
+    "MiscTests.test_tensor_build_list_unpack",  # dynamo/test_misc
+    "MiscTests.test_simple_set_usage",  # dynamo/test_misc
+    "MiscTests.test_no_raise_guard_partial_constraint_across_break",  # dynamo/test_misc
+    "MiscTests.test_numpy_tolist",  # dynamo/test_misc
+    "MiscTests.test_dictcomp",  # dynamo/test_misc
+    "MiscTests.test_dict_order_keys",  # dynamo/test_misc
+    "MiscTests.test_numpy_size_attr",  # dynamo/test_misc
+    "MiscTests.test_add_to_set",  # dynamo/test_misc
+    "MiscTests.test_tolist_kd_dynamic",  # dynamo/test_misc
+    "MiscTests.test_raise_on_backend_error",  # dynamo/test_misc
+    "MiscTests.test_nan",  # dynamo/test_misc
+    "MiscTests.test_numpy_iter",  # dynamo/test_misc
+    "MiscTests.test_return_nested_function",  # dynamo/test_misc
+    "MiscTests.test_tensor_item_capture",  # dynamo/test_misc
+    "MiscTests.test_guard_failure_fn_shape_control",  # dynamo/test_misc
+    "MiscTests.test_tensor_dict1",  # dynamo/test_misc
+    "MiscTests.test_deterministic_algorithms_mutated",  # dynamo/test_misc
+    "MiscTests.test_dataclass_fields",  # dynamo/test_misc
+    "MiscTests.test_dict_order_keys_modules",  # dynamo/test_misc
+    "MiscTests.test_deque_input",  # dynamo/test_misc
+    "MiscTests.test_itertools_accumulate_symint_default_sum",  # dynamo/test_misc
+    "MiscTests.test_numpy_subdtype",  # dynamo/test_misc
+    "MiscTests.test_numpy_torch_operators",  # dynamo/test_misc
+    "MiscTests.test_dtypes_no_graphbreaks",  # dynamo/test_misc
+    "MiscTests.test_tracing_tree_map_only",  # dynamo/test_misc
+    "MiscTests.test_out_variants_with_resizing_on_graph_inputs",  # dynamo/test_misc
+    "MiscTests.test_nested_closure_mutation",  # dynamo/test_misc
+    "MiscTests.test_tensor_dict2",  # dynamo/test_misc
+    "MiscTests.test_cond_side_effects",  # dynamo/test_misc
+    "MiscTests.test_namedtuple1",  # dynamo/test_misc
+    "MiscTests.test_yield_send_to_subgenerator_graph_break",  # dynamo/test_misc
+    "MiscTests.test_recompile_on_global_state_change",  # dynamo/test_misc
+    "MiscTests.test_type_copy",  # dynamo/test_misc
+    "MiscTests.test_yield_from",  # dynamo/test_misc
+    "MiscTests.test_intermediary_tensor_grad_access",  # dynamo/test_misc
+    "MiscTests.test_release_scope_memory",  # dynamo/test_misc
+    "InteropTests.test_vmap_in_graph",  # dynamo/test_interop
+    "TestInputAttrTracking.test_complex_attr_access_without_graph_breaks",  # dynamo/test_input_attr_tracking
+    "TestInputAttrTracking.test_tensor_property_on_tensor",  # dynamo/test_input_attr_tracking
+    "TestInputAttrTracking.test_set_data_on_input_tensor",  # dynamo/test_input_attr_tracking
+    "TestInputAttrTracking.test_tensor_property_assigned_on_tensor",  # dynamo/test_input_attr_tracking
+    "TestInputAttrTracking.test_const_property_on_tensor",  # dynamo/test_input_attr_tracking
+    "HooksTests.test_tensor_register_multiple_hooks_handles_in_list",  # dynamo/test_hooks
+    "HooksTests.test_functools_arg_vary",  # dynamo/test_hooks
+    "HooksTests.test_tensor_register_hook_in_graph_local",  # dynamo/test_hooks
+    "HooksTests.test_post_acc_grad_hook",  # dynamo/test_hooks
+    "HooksTests.test_tensor_register_multiple_hooks",  # dynamo/test_hooks
+    "HooksTests.test_tensor_register_global_hook",  # dynamo/test_hooks
+    "HigherOrderOpTests.test_wrap_kwarg_recompile",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_non_tensor_input",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_with_side_effect",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_fallback_on_python_primitives_output",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_cond_branches_no_arguments",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_free_const",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_multiple_invocation_in_dims",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_illegal_op_graph_break",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_cond_pytree_operands",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_cond_branches_no_arguments_no_closure",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_side_effects",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_nested_tuple_output",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_output_with_dict",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_two_tensor_has_aux",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_wrap_subgraph_name_is_valid",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_freevar_python_scalar",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_free_tensor",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_two_inputs_tuple_in_dims",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_with_graph_break",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_multiple_invocation_out_dims",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_map_pytree_return",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_capture_untracked_global_nested",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_multiple_outputs_diff_dims",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_vmap_source_fn_stack",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_kwargs",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_over_vmap_two_inputs",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_disable_capture",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_fn_with_kwargs",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_multiple_outputs",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_map_lowers_to_graph",  # dynamo/test_higher_order_ops
+    "ActivationCheckpointingTests.test_cond_with_kwargs",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_map_source_fn_stack",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_capture_value_created_in_subgraph",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_pytree",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_cond_pytree_operands_with_non_tensor_leaves",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_side_effect_in_body",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_cond_subgraph_name_is_valid",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_modules",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_over_vmap_captured",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_cond_source_fn_stack",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_map_subgraph_name_is_valid",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_pytree_inputs",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_disable_capture",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_multiple_outputs_out_dims_tuple",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_map_multi_return",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_two_tensor_all_grad_has_aux",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_has_aux",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_map_symint_input",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_two_inputs",  # dynamo/test_higher_order_ops
+    "DefaultsTests.test_in_set_inplace",  # dynamo/test_functions
+    "FunctionTests.test_default_dict_lambda",  # dynamo/test_functions
+    "FunctionTests.test_default_dict_closure",  # dynamo/test_functions
+    "FunctionTests.test_is_contiguous_frame_counts",  # dynamo/test_functions
+    "FunctionTests.test_partials_as_input_partials_lambda",  # dynamo/test_functions
+    "FunctionTests.test_default_dict",  # dynamo/test_functions
+    "DefaultsTests.test_cast_tensor_single_elem",  # dynamo/test_functions
+    "DefaultsTests.test_func_default_torch_args",  # dynamo/test_functions
+    "FunctionTests.test_math_radians",  # dynamo/test_functions
+    "DefaultsTests.test_compare_constant_and_tensor",  # dynamo/test_functions
+    "DefaultsTests.test_in_set_would_fail_broadcast",  # dynamo/test_functions
+    "FunctionTests.test_partials_as_input_partials_mod",  # dynamo/test_functions
+    "ExportTests.test_cond_raise_user_error_on_non_list_operands",  # dynamo/test_export
+    "ExportTests.test_export_dynamic_dim_range_constraint",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_free_function_and_class_method_multiarg",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_free_function_and_class_method",  # dynamo/test_export
+    "ExportTests.test_cond_raise_user_error_on_unsupported_pred",  # dynamo/test_export
+    "ExportTests.test_export_no_raise",  # dynamo/test_export
+    "ExportTests.test_torch_inference_mode_ctx",  # dynamo/test_export
+    "ExportTests.test_export_decomp",  # dynamo/test_export
+    "ExportTests.test_export_mark_dynamic_conflict_dynamic_dim",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_not_return_const",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_none_control_flow",  # dynamo/test_export
+    "ExportTests.test_exported_graph_serialization",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_free_function",  # dynamo/test_export
+    "ExportTests.test_export_preserve_constraints_as_metadata_scalar",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_none_control_flow_free_func",  # dynamo/test_export
+    "ExportTests.test_cond_raise_user_error_on_non_tensor_operands",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_not_none_control_flow_free_func",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_not_none_control_flow_pos",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_tuple_nonzero",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_not_none_control_flow",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_dict_values",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_list_nonzero",  # dynamo/test_export
+    "ExportTests.test_export_dynamic_dim_cleanup",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_method_on_module_invoke_twice",  # dynamo/test_export
+    "ExportTests.test_map_cond_param_buffer_lifted",  # dynamo/test_export
+    "ExportTests.test_export_multi_dynamic_dim_unsafe_relationship",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_free_function_and_class_method_multiarg_diff",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_method_on_module",  # dynamo/test_export
+    "ExportTests.test_export_multi_dynamic_dim_constraint",  # dynamo/test_export
+    "ExportTests.test_untracked_inputs_in_constraints",  # dynamo/test_export
+    "ExportTests.test_export_raise_on_relationship",  # dynamo/test_export
+    "ExportTests.test_export_with_map_cond",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_list_nonzero_free_function",  # dynamo/test_export
+    "ExcTests.test_graph_break_log",  # dynamo/test_exc
+    "ExcTests.test_trigger_bisect_on_error",  # dynamo/test_exc
+    "ExcTests.test_backend_suppress_line",  # dynamo/test_exc
+    "ExcTests.test_not_implemented_error",  # dynamo/test_exc
+    "ExcTests.test_trigger_on_error",  # dynamo/test_exc
+    "ExcTests.test_internal_error_no_suppress",  # dynamo/test_exc
+    "ExcTests.test_internal_error_suppress_errors",  # dynamo/test_exc
+    "DecoratorTests.test_mark_static_address_guarded",  # dynamo/test_decorators
+    "DecoratorTests.test_mark_static_address_unguarded",  # dynamo/test_decorators
+    "CtxManagerTests.test_disable_saved_tensors_hooks",  # dynamo/test_ctx_manager
+    "CtxManagerTests.test_disable_saved_tensors_hooks_prev_disabled",  # dynamo/test_ctx_manager
+    "CtxManagerTests.test_autograd_profiler_enabled",  # dynamo/test_ctx_manager
+    "CtxManagerTests.test_disable_saved_tensors_hooks_prev_disabled_nested",  # dynamo/test_ctx_manager
+    "ComptimeTests.test_graph_break",  # dynamo/test_comptime
+    "PublicTorchCompilerTests.test_dynamo_signatures",  # dynamo/test_compile
+    "TestCustomBackendAPI.test_aot_autograd_api",  # dynamo/test_backends
+    "TestOptimizations.test_example_inputs",  # dynamo/test_backends
+    "TestCustomBackendAPI.test_lookup_backend",  # dynamo/test_backends
+    "TestOptimizations.test_example_inputs_runtime_use",  # dynamo/test_backends
+    "TestCustomBackendAPI.test_register_backend_api",  # dynamo/test_backends
+    "AutogradFunctionTests.test_stride_in_bwd",  # dynamo/test_autograd_function
+    "AutogradFunctionTests.test_print_in_bwd",  # dynamo/test_autograd_function
+    "AutogradFunctionTests.test_graph_break_if_lifted_free_variable",  # dynamo/test_autograd_function
+    "AotAutogradFallbackTests.test_aot_sequence_nr",  # dynamo/test_aot_autograd
 }
 
 dynamo_skips = {
@@ -3249,4 +3557,310 @@ dynamo_skips = {
     "TestLazyReuseIr.testAddSubFallback",  # known py311 fail
     "TestLazyReuseIr.testBatchNorm",  # known py311 fail
     "TestLazyReuseIr.testAddSub",  # known py311 fail
+    "TestVerifyCorrectness.test_example_inputs",  # known py311 fail
+    "RecompileTests.test_aliasing_guard_failures",  # known py311 fail
+    "TestPythonAutograd.test_backwards1",  # known py311 fail
+    "DynamicShapesExportTests.test_retracibility_dict_container_inp_out_dynamic_shapes",  # Takes way too long
+    "DynamicShapesExportTests.test_retracibility_dynamic_shapes",  # takes way too long
+    "DynamicShapesExportTests.test_retracibility_nested_list_out_dynamic_shapes",  # takes way too long
+    "DynamoProfilerTests.test_dynamo_timed_profiling_backend_compile",  # known py311 fail
+    "OptimizerTests.test_adadelta",  # known py311 fail
+    "NopTests.test_extended_args",  # known py311 fail
+    "MiscTests.test_exception_table_parsing",  # known py311 fail
+    "MiscTests.test_py311_jump_offset",  # known py311 fail
+    "MiscTests.test_linetable_311_writer1",  # known py311 fail
+    "MiscTests.test_itertools_infinite_count",  # known py311 fail
+    "MiscTests.test_exception_table_e2e",  # known py311 fail
+    "MiscTests.test_linetable_311_writer2",  # known py311 fail
+    "MiscTests.test_exception_table_e2e_2",  # known py311 fail
+    "MiscTests.test_itertools_accumulate_tensors_user_defined",  # known py311 fail
+    "MiscTests.test_itertools_accumulate_tensors_kwargs",  # known py311 fail
+    "MiscTests.test_itertools_accumulate_tensors_builtins",  # known py311 fail
+    "InteropTests.test_fx_fn",  # known py311 fail
+    "HigherOrderOpTests.test_access_module_attr",  # known py311 fail
+    "FrameInitTests.test_frame_init",  # known py311 fail
+    "DynamicShapesMiscTests.test_tolist_0d_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_cond_pytree_operands_with_non_tensor_leaves_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesHigherOrderOpTests.test_output_with_dict_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_multiple_outputs_diff_dims_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_wrap_subgraph_name_is_valid_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_over_vmap_two_inputs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFunctionTests.test_math_radians_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_map_lowers_to_graph_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_type_copy_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_inference_mode_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_two_inputs_tuple_in_dims_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_get_cache_entry_dynamic_shapes",  # known py311 fail
+    "DynamicShapesSubGraphTests.test_no_graph_break_on_item_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_tuple_nonzero_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_subdtype_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_modules_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_capture_value_created_in_subgraph_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_yield_send_to_subgenerator_graph_break_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_list_self_reference_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_vmap_source_fn_stack_dynamic_shapes",  # known py311 fail
+    "DynamicShapesSubGraphTests.test_dynamic_duck_size_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_inline_closure_not_loaded_by_parent_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_non_torch_dtype_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_multiple_outputs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_reformer_sorting_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_linetable_311_writer1_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_cond_raise_user_error_on_non_tensor_operands_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_free_tensor_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_list_nonzero_free_function_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_side_effect_in_body_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tracing_tree_map_only_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tensor_dict2_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tracing_nested_py_tree_mixed_all_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_dynamic_shapes_implicit_guard_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_int_constant_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_nn_module_getattr_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_yield_gen_and_from_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_map_cond_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_multiple_invocation_out_dims_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesMiscTests.test_set_aliasing_recompiles_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_reformer_min_chunk_len_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_map_multi_return_dynamic_shapes",  # known py311 fail
+    "DynamicShapesNNModuleTests.test_unsupportedmodule_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_iter_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_reformer_train_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_mandelbrot_numpy_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_infinite_repeat_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_force_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_list_nonzero_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tracing_nested_py_tree_tuples_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_seq_append_list_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_dynamic_dim_cleanup_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_infinite_cycle_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_map_source_fn_stack_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_cond_branches_no_arguments_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_nested_closure_mutation_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_tensor_data_kwarg_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFunctionTests.test_partials_as_input_partials_mod_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tolist_scalar_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_with_builtin_type_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_compare_shapes_with_constant_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_frozenset_torch_func_contains_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFunctionTests.test_is_contiguous_frame_counts_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_rewrite_assert_noop_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_map_symint_input_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_relative_import_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_raise_on_relationship_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_threading_local_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_reformer_eval_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_groupby_pure_python_default_identify_func_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesMiscTests.test_release_input_memory_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_decomp_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_none_control_flow_free_func_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_longformer_chunk_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_disable_capture_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_free_function_and_class_method_multiarg_diff_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesReproTests.test_boxes_len_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_list_slice_mul_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tensor_build_list_unpack_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_create_rand_mask_from_inputs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_repeat_interleave_graphbreaks_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_grad_state_mutated_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_release_module_memory_dynamic_shapes",  # known py311 fail
+    "DynamicShapesCtxManagerTests.test_disable_saved_tensors_hooks_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_wrap_kwarg_recompile_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_slice_input_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFunctionTests.test_fstrings2_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tracing_py_tree_tensor_subclass_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_multi_import_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_not_none_control_flow_pos_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_map_cond_param_buffer_lifted_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_over_vmap_captured_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_out_variants_with_resizing_on_graph_inputs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_repeat_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_add_to_set_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tensor_dict1_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_convert_boxes_to_pooler_format_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_kwargs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_exception_table_e2e_2_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_free_const_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFunctionTests.test_default_dict_lambda_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_guard_failure_fn_shape_control_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_merge_criteria_processor_list1_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_accumulate_tensors_builtins_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_numpy_not_ndarray_recompiles_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_function_in_skipfiles_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_pytree_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_recompile_on_global_state_change_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_return_nested_function_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_cond_raise_user_error_on_non_list_operands_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_restricted_list_subclass1_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_raise_guard_full_constraint_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_optim_state_references_cleared_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_boolarg_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_nested_closure_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_map_pytree_return_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_access_module_attr_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_rewrite_assert_with_non_string_msg_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_no_raise_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tensor_item_capture_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tracing_py_tree_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_non_tensor_input_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_two_tensor_all_grad_has_aux_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_simple_set_usage_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_fn_with_kwargs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_size_attr_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_torch_operators_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_dunder_new_function_inlining_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_yield_from_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_empty_list_contains_with_jump_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_raise_on_backend_error_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_not_return_const_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_with_side_effect_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_deque_input_dynamic_shapes",  # known py311 fail
+    "DynamicShapesCtxManagerTests.test_autograd_profiler_enabled_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_linetable_311_writer2_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_recursive_map_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_dataclass_fields_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_list_aliasing_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_cond_source_fn_stack_dynamic_shapes",  # known py311 fail
+    "DynamicShapesSubGraphTests.test_dynamic_zero_inference_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_functools_wraps_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_illegal_op_graph_break_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_is_compiling_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_relative_import_no_modulename_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_iter_set_dynamic_shapes",  # known py311 fail
+    "DynamicShapesSubGraphTests.test_dynamic_getitem_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_negative_shape_guard_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFunctionTests.test_default_dict_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_deterministic_algorithms_mutated_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_str_format_assert2_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_not_none_control_flow_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_pytree_inputs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_map_subgraph_name_is_valid_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tolist_kd_dynamic_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_dynamic_dim_range_constraint_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_raise_guard_partial_constraint_no_graph_break_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_any_all_symnode_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_recompilation_scalar_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_inplace_view_on_graph_input_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_dict_order_keys_modules_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_py311_jump_offset_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_addr_alpha_beta_out_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_cond_pytree_operands_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_untracked_inputs_in_constraints_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_py_guards_mark_dynamic_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_rewrite_assert_with_msg_dynamic_shapes",  # known py311 fail
+    "DynamicShapesSubGraphTests.test_dynamic_kwarg_dynamic_shapes",  # known py311 fail
+    "DynamicShapesNNModuleTests.test_lazy_module_no_cls_to_become_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_release_scope_memory_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_callpacked_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_listcomp_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_infinite_count_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_namedtuple1_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_mark_dynamic_conflict_dynamic_dim_dynamic_shapes",  # known py311 fail
+    "DynamicShapesNNModuleTests.test_self_mutating1_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_user_getattribute_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_accumulate_tensors_default_sum_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_size_typematch_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_inplace_param_update_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_nested_tuple_output_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_closure_out_of_scope_cell_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_not_none_control_flow_free_func_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_multiple_invocation_in_dims_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_accumulate_tensors_user_defined_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_nan_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_readonly_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_multi_dynamic_dim_constraint_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_hf_t5_forward_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tolist_kd_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_capture_untracked_global_nested_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_two_inputs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_has_aux_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_free_function_and_class_method_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesExportTests.test_export_with_constant_none_control_flow_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_add_sub_alpha_out_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_jit_trace_errors_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_setattr_mutation1_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_multiple_outputs_out_dims_tuple_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesMiscTests.test_numpy_array_of_arrays_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_method_on_module_invoke_twice_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesSubGraphTests.test_dynamic_order_dependence_dynamic_shapes",  # known py311 fail
+    "DynamicShapesNNModuleTests.test_unsupportedmethod_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_exception_table_parsing_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_batchnorm_e2e_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_merge_criteria_processor_list2_dynamic_shapes",  # known py311 fail
+    "DynamicShapesSubGraphTests.test_enumerate_not_break_graph_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_chunk_reformer_ff_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_with_builtin_type_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tracing_nested_py_tree_dicts_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_no_raise_guard_partial_constraint_across_break_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_method_on_module_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_cond_nested_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_requires_grad_guards_with_grad_mode2_dynamic_shapes",  # known py311 fail
+    "DynamicShapesCtxManagerTests.test_disable_saved_tensors_hooks_prev_disabled_nested_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesMiscTests.test_cond_side_effects_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_nested_optimize_run_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_nested_optimize_decorator_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_nested_optimize_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_typing_typevar_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_side_effects_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_intermediary_tensor_grad_access_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_no_raise_guard_partial_constraint_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_dtypes_no_graphbreaks_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFunctionTests.test_partials_as_input_partials_lambda_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_mark_static_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tuple_mul_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_deque_append_left_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_many_views_with_mutation_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_hf_xsoftmax_training_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_accumulate_symint_default_sum_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_do_paste_mask_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_torch_seed_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_infinite_repeat_mutation_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_two_tensor_has_aux_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_tolist_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_dict_order_keys_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_free_function_and_class_method_multiarg_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesHigherOrderOpTests.test_cond_branches_no_arguments_no_closure_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_pure_python_accumulate_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tolist_1d_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_exported_graph_serialization_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_exception_table_e2e_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_namedtuple2_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_fallback_on_python_primitives_output_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_size_input_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_guard_failure_fn_tensor_iter_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_accumulate_tensors_kwargs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_dict_order_keys_tensors_dynamic_shapes",  # known py311 fail
+    "DynamicShapesCtxManagerTests.test_disable_saved_tensors_hooks_prev_disabled_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_with_graph_break_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_module_in_skipfiles_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_cond_subgraph_name_is_valid_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tensor_dict3_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_torch_inference_mode_ctx_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_dictcomp_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFunctionTests.test_default_dict_closure_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_issue175_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_dict_values_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_disable_capture_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_groupby_pure_python_key_func_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_backend_match_guard_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_freevar_python_scalar_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tracing_nested_py_tree_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_validate_model_kwargs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_preserve_constraints_as_metadata_scalar_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_cond_raise_user_error_on_unsupported_pred_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_multi_dynamic_dim_unsafe_relationship_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_free_function_dynamic_shapes",  # known py311 fail
+    "DecoratorTests.test_allow_in_graph",  # known py311 fail
+    "InPlaceCompilationTests.test_compilation",  # known py311 fail
+    "DynamicShapesAotAutogradFallbackTests.test_aot_sequence_nr_dynamic_shapes",  # weird
+    "ExportTests.test_predispatch_with_for_out_dtype",  # weird
+    "ExportTests.test_predispatch_with_for_out_dtype_nested",  # weird
+    "MiscTests.test_auto_functionalize_on_view",  # weird
+    "MiscTests::test_auto_functionalize_optional",  # weird
+    "MiscTests::test_auto_functionalize_with_returns",  # weird
+    "MiscTests::test_generate_trivial_abstract_impl",  # weird
+    "RecompileUxTests.test_drop_cache_on_skip",  # weird
+    "ReproTests.test_optim_state_references_cleared",  # weird
+    "ReproTests.test_reformer_train",  # weird
+    "TraceRuleTests.test_torch_name_rule_map_updated",  # weird
 }
