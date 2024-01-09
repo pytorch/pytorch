@@ -24,7 +24,6 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._higher_order_ops.wrap import wrap
-from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -3010,7 +3009,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 1)
         self.assertEqual(expected, got)
 
-    @skipIfTorchDynamo
     @config.patch(capture_func_transforms=True)
     def test_vmap_with_graph_break_2(self):
         counters.clear()
@@ -3037,7 +3035,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 1)
         self.assertEqual(expected, got)
 
-    @skipIfTorchDynamo
     def test_vmap_with_graph_break_lambda(self):
         counters.clear()
 
