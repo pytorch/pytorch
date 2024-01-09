@@ -62,7 +62,7 @@ python oss_coverage.py --run-only=test_complex.py
 
 You may also want to specify more than one test or interested folder, in this case, try:
 ```
-python oss_coverage.py --run-only=atest c10_logging_test --interest-only aten/src/Aten c10/core
+python oss_coverage.py --run-only=atest c10_logging_test --interest-only aten/src/ATen c10/core
 ```
 That it is! With these two simple options, you can customize many different functionality according to your need.
 By default, the tool will run all tests in `build/bin` folder (by running all executable binaries in it) and `test/` folder (by running `run_test.py`), and then collect coverage over the entire *Pytorch* folder. If this is what you want, try:
