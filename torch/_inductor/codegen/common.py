@@ -144,6 +144,9 @@ DTYPE_TO_COMPUTATION_DTYPE = {
             torch.int32,
             torch.int64,
             torch.uint8,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
         ]
     },
 }
