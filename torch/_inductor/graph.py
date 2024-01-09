@@ -944,7 +944,7 @@ class GraphLowering(torch.fx.Interpreter):
                 curr = result.data.data
                 if isinstance(curr, Pointwise):
                     # Use inner fn as a rough proxy. Good enough.
-                    if curr.inner_fn_str_len() > config.realize_bytes_threshold:
+                    if curr.has_large_inner_fn():
                         result.realize()
 
         # This is not complete, but it doesn't have to be: origin_node
