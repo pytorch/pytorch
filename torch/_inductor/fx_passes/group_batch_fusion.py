@@ -343,9 +343,7 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             )
             for i, original_add in enumerate(subset):
                 with graph.inserting_after(batch_op):
-                    new_add = graph.call_function(
-                        torch.ops.aten.select, args=((batch_op, 0, i))
-                    )
+                    new_add = graph.call_function(aten.select, args=((batch_op, 0, i)))
                 original_add.replace_all_uses_with(new_add)
                 new_add.meta.update(original_add.meta)
                 graph.erase_node(original_add)
@@ -641,12 +639,24 @@ class BatchLayernormFusion(BatchFusion):
 class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     """
     Batch poinwise ops (e.g., sigmoid, relu, tanh) fusion in pre grad pass.
-    We fuse it in random place, and the introduced stack node may be merged in split cat.
+    We fuse them into two steps to better leverage split cat advantages:
+        Step 1: find all same nodes with same split/unbind node.
+        Step: find all same nodes from random plances.
     """
 
     def __init__(self, op, **kwargs):
         super().__init__(op, **kwargs)
         self.op = op
+
+    def _getitem_args(self, getitem_node: torch.fx.Node):
+        # case 1: fuse with the same split/unbind node
+        if getitem_node.target == operator.__getitem__ and (
+            getitem_node.op == "call_function"
+        ):
+            return getitem_node.args[0]
+        # case 2: fuse in random place
+        else:
+            return None
 
     def match(self, node: torch.fx.Node):
         input = get_arg_value(node, 0, "input")
@@ -654,6 +664,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
             # for relu op, we also use the inplace to construct the key
             group_key = (
                 "batch_" + self.op.__name__.lower() + "_pre_grad",
+                self._getitem_args(input),
                 str(input.meta["example_value"].shape),
                 str(node.kwargs.get("inplace", False)),
             )

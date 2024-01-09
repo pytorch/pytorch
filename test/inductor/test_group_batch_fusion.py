@@ -204,11 +204,25 @@ class TestPoitwiseOps(torch.nn.Module):
         self.device = device
 
     def forward(self, x):
+        # case 1: with same split node
         inputs = torch.split(x.to(self.device), 500, dim=1)
         x_split = torch.split(inputs[0].to(self.device), 50, dim=1)
         y_split = torch.split(inputs[1].to(self.device), 50, dim=1)
-        tanh_1 = [torch.tanh(x_split[i]) for i in range(len(x_split))]
-        tanh_2 = [torch.tanh(y_split[i]) for i in range(len(y_split))]
+        # case 2: random place
+        shape = x_split[0].shape
+        random_inputs = [
+            torch.randn(shape, device=self.device),
+            torch.randn(shape, device=self.device),
+            torch.randn(shape, device=self.device),
+            torch.randn(shape, device=self.device),
+            torch.randn(shape, device=self.device),
+        ]
+        tanh_1 = [torch.tanh(x_split[i]) for i in range(len(x_split))] + [
+            torch.tanh(input) for input in random_inputs
+        ]
+        tanh_2 = [torch.tanh(y_split[i]) for i in range(len(y_split))] + [
+            torch.tanh(input) for input in random_inputs
+        ]
         sigmoid_1 = [torch.sigmoid(tanh_1[i]) for i in range(len(tanh_1))]
         sigmoid_2 = [torch.sigmoid(tanh_2[i]) for i in range(len(tanh_2))]
         relu_1 = [torch.nn.functional.relu(sigmoid_1[i]) for i in range(len(sigmoid_1))]
@@ -417,7 +431,7 @@ class TestGroupBatchFusion(TestCase):
         ref = module(*input)
         res = traced(*input)
         self.compare_pred(module, traced, input)
-        self.assertEqual(counters["inductor"]["batch_fusion"], 7)
+        self.assertEqual(counters["inductor"]["batch_fusion"], 11)
         self.assertEqual(
             counters["inductor"]["scmerge_split_removed"],
             0,
