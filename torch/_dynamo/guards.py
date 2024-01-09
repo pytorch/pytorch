@@ -14,13 +14,13 @@ import math
 import os
 import re
 import sys
+import textwrap
 import types
 import weakref
 from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from weakref import ReferenceType
 
-from .allowed_functions import is_allowed
 
 try:
     import numpy as np
@@ -50,11 +50,10 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 
 from torch.utils._traceback import format_frame, report_compile_source_on_error
-from torch.utils.weak import TensorWeakRef, WeakIdRef
+from torch.utils.weak import TensorWeakRef
 
-from . import config, convert_frame, mutation_guard
-from .eval_frame import set_guard_error_hook, set_guard_fail_hook
-from .exc import unimplemented
+from . import config, convert_frame, exc, mutation_guard
+from .eval_frame import set_guard_error_hook
 from .source import (
     AttrSource,
     DefaultsSource,
@@ -67,20 +66,24 @@ from .source import (
 )
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
-    dict_const_keys,
-    dict_const_keys_repr,
-    dict_param_key_ids,
+    common_constant_types,
+    dict_keys_getitem,
+    dict_keys_repr,
     guard_failures,
-    is_guard_failure_reporting_enabled,
     istype,
     orig_code_map,
     tensor_always_has_static_shape,
+    tensor_or_module_to_id,
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
 
 log = logging.getLogger(__name__)
 guards_log = torch._logging.getArtifactLogger(__name__, "guards")
+recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
+recompiles_verbose_log = torch._logging.getArtifactLogger(
+    __name__, "recompiles_verbose"
+)
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
 
 TensorGuards = torch._C._dynamo.guards.TensorGuards
@@ -101,38 +104,37 @@ def uninteresting_files():
     return {inspect.getfile(m) for m in mods}
 
 
-CLOSURE_VARS = collections.OrderedDict(
-    [
-        ("___check_type_id", check_type_id),
-        ("___check_obj_id", check_obj_id),
-        (
-            "___current_backend",
-            lambda: torch._dynamo.eval_frame.guarded_backend_cache.current_backend,
-        ),
-        (
-            "___lookup_backend",
-            lambda backend_obj_id: torch._dynamo.eval_frame.guarded_backend_cache.cached_backends[
-                backend_obj_id
-            ],
-        ),
-        (
-            "___skip_backend_check",
-            lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode,
-        ),
-        ("___odict_getitem", collections.OrderedDict.__getitem__),
-        ("___dict_param_key_ids", dict_param_key_ids),
-        ("___dict_const_keys", dict_const_keys),
-        ("___dict_version", dict_version),
-        ("___tuple_iterator_len", tuple_iterator_len),
-        ("___tuple_iterator_getitem", tuple_iterator_getitem),
-        ("__math_isnan", math.isnan),
-        ("inf", float("inf")),
-        ("__load_module", lambda name: importlib.import_module(name)),
-        ("utils_device", torch.utils._device),
-        ("device", torch.device),
-        ("__as_tensor", torch.as_tensor),
-    ]
-)
+CLOSURE_VARS = {
+    "___check_type_id": check_type_id,
+    "___check_obj_id": check_obj_id,
+    "___current_backend": (
+        lambda: torch._dynamo.eval_frame.guarded_backend_cache.current_backend
+    ),
+    "___lookup_backend": (
+        lambda backend_obj_id: torch._dynamo.eval_frame.cached_backends.get(
+            backend_obj_id, None
+        )
+    ),
+    "___skip_backend_check": (
+        lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
+    ),
+    "___odict_getitem": collections.OrderedDict.__getitem__,
+    "___tensor_or_module_to_id": tensor_or_module_to_id,
+    "___dict_version": dict_version,
+    "___dict_contains": lambda a, b: a in b,
+    "___dict_keys_getitem": dict_keys_getitem,
+    "___tuple_iterator_len": tuple_iterator_len,
+    "___tuple_iterator_getitem": tuple_iterator_getitem,
+    "__math_isnan": math.isnan,
+    "inf": float("inf"),
+    "__load_module": importlib.import_module,
+    "utils_device": torch.utils._device,
+    "device": torch.device,
+    "___from_numpy":
+    # If not numpy array, piggy back on e.g. tensor guards to check type
+    (lambda a: torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a),
+    "torch": torch,
+}
 
 if sys.version_info[:2] <= (3, 8):
     # [Note: Python Version <= 3.8]
@@ -198,24 +200,18 @@ class GuardCodeList:
 class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
-        id_ref: Callable[[Type[object]], str],
+        id_ref: Callable[[Any], str],
         source_ref: Callable[[Source], str],
-        lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
-        user_scope: Optional[Dict[str, object]],
+        lookup_weakrefs: Callable[[object], ReferenceType[object]],
+        local_scope: Dict[str, object],
+        global_scope: Dict[str, object],
         root_guard_mananger: RootGuardManager,
         check_fn_manager: CheckFunctionManager,
-        *,
-        local: bool,
     ):
-        self.local = local
         self.id_ref = id_ref
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
-        if user_scope:
-            scope = {"L" if local else "G": user_scope}
-        else:
-            scope = {"L" if local else "G": dict()}
-        self.scope: Dict[str, Dict[str, object]] = scope
+        self.scope: Dict[str, Dict[str, object]] = {"L": local_scope, "G": global_scope}
         self.scope["__builtins__"] = builtins.__dict__.copy()
         self.root_guard_mananger = root_guard_mananger
         for (
@@ -224,14 +220,14 @@ class GuardBuilder(GuardBuilderBase):
         ) in torch.package.package_importer._package_imported_modules.items():
             name = name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             # Write the package module into the scope so that we can import it
-            self.scope["__builtins__"][name] = package_module  # type: ignore[index]
+            self.scope["__builtins__"][name] = package_module
             # Write the demangled name to the scope so that we can use it
             self.scope[name] = package_module
 
         self.argnames: List[str] = []
         # Code is python expression strings generated for each guard
         self.code: List[GuardCodeList] = []
-        # shape_env_code is only used by local_builder and is used for
+        # shape_env_code is only used by builder and is used for
         # shape env code.  This exists only because we need to make sure
         # shape env guards get run after tensor match guards (since the
         # tensor match guards make sure we actually have tensors)
@@ -340,6 +336,13 @@ class GuardBuilder(GuardBuilderBase):
         code = f"___dict_version({ref}) == {version}"
         self._produce_guard_code(guard, [code])
 
+    def DICT_CONTAINS(self, guard: Guard, key: str, invert: bool):
+        dict_ref = self.arg_ref(guard)
+
+        maybe_not = "not " if invert else ""
+        code = f"{maybe_not}___dict_contains({key!r}, {dict_ref})"
+        return self._produce_guard_code(guard, [code])
+
     def BOOL_FALSE(self, guard: Guard):
         # Guard on the runtime value being 'False',
         # can be faster than seemingly equivalent checks like DICT_KEYS for empty dict
@@ -362,9 +365,7 @@ class GuardBuilder(GuardBuilderBase):
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(
-                Guard(
-                    guard.originating_source.base, guard.source, GuardBuilder.TYPE_MATCH
-                )
+                Guard(guard.originating_source.base, GuardBuilder.TYPE_MATCH)  # type: ignore[arg-type]
             )
 
         ref = self.arg_ref(guard)
@@ -374,7 +375,7 @@ class GuardBuilder(GuardBuilderBase):
 
         # Keep track of ID_MATCH'd objects. This will be used to modify the
         # cache size logic
-        if self.local and isinstance(guard.originating_source, LocalSource):
+        if isinstance(guard.originating_source, LocalSource):
             # TODO(janimesh) - This is currently restricted to nn.Module objects
             # because many other ID_MATCH'd objects fail - like DeviceMesh.
             # Increase the scope of ID_MATCH'd objects.
@@ -414,7 +415,7 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         t = type(val)
         if np:
-            np_types = (
+            np_types: Tuple[Type[Any], ...] = (
                 np.int8,
                 np.int16,
                 np.int32,
@@ -428,24 +429,20 @@ class GuardBuilder(GuardBuilderBase):
                 np.float64,
             )
         else:
-            np_types = ()  # type: ignore[assignment]
-        ok_types = (
-            int,
-            float,
-            bool,
-            type(None),
-            str,
-            type,
-            list,
-            tuple,
-            set,
-            slice,
-            frozenset,
-            range,
-            torch.Size,
-            torch.device,
-            torch.dtype,
-            *np_types,
+            np_types = ()
+        ok_types = tuple(
+            common_constant_types
+            | {
+                type,
+                list,
+                tuple,
+                set,
+                frozenset,
+                slice,
+                range,
+                torch.Size,
+                *np_types,
+            }
         )
         if istype(val, dict):
             assert all(
@@ -456,12 +453,6 @@ class GuardBuilder(GuardBuilderBase):
                 val,
                 ok_types,
             ), t.__name__
-
-        if istype(val, (torch.device, torch.dtype)):
-            # TODO(jansel): is this slow? perhaps optimize it
-            code = [f"str({ref}) == {str(val)!r}"]
-            self._produce_guard_code(guard, code)
-            return
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
@@ -504,57 +495,41 @@ class GuardBuilder(GuardBuilderBase):
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
-        # TODO(janimesh) - This id_match can be removed because nn_module_guard
-        # checks this in C. However, we need this redundant check to allow
-        # flexible cache size policy when we guard on self of nn module
-        # instances. See Note in torch/_dynamo/cache_size.py
         self.ID_MATCH(guard)
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
 
-        # The module guard checks for modifications to the Module's type, __dict__,
-        # and various nested OrderedDicts, such as _parameters, _buffers, and _modules.
-        # This subsumes the check for Module.training.
-        if not hasattr(val, "training"):
-            unimplemented(f"Guard setup for uninitialized class {type(val)}")
-        if config.allow_rnn and isinstance(
-            val, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM)
-        ):
-            # TorchDynamo graph breaks on LSTMs, but this is a way if user wants
-            # to override it. LSTMs change the module state in every invocation,
-            # leading to recompilations.
-            log.warning("Skipping nn module guard on LSTMs")
-            return
-
-        # Dynamo does not trace inside the inbuilt torch nn modules. Skip
-        # guarding on those. More rationale at https://github.com/pytorch/pytorch/issues/110048
-        if is_allowed(val.__class__):
-            return
-        try:
-            g = torch._C._dynamo.guards.nn_module_guard(val)
-        except AttributeError:
-            # We get an attribute error if the module is partially initialized. For example,
-            # we might be trying to install a guard before a super().__init__() call when
-            # the module is missing _parameters, _modules, and other attributes.
-            # For now, we skip installing the guard.
-            log.warning(
-                "Skipping nn module guard because the module could be partially initialized"
+        def setup_guard():
+            assert istype(val.training, bool)
+            # TODO: Why doesn't this use produce_guard_code?
+            self.code.append(
+                GuardCodeList([f"{ref}.training == {val.training}"], guard)
             )
-            return
-        name = self.check_fn_manager.add_extra_closure_var("__nn_module_guard", g)
-        if guards_log.isEnabledFor(logging.DEBUG):
-            # Avoid debug_msg related python bytecode overhead in the runtime.
 
-            # debug_msg is only for debugging help and goes to kwargs of guard call,
-            # which is ignored.
-            self._produce_guard_code(guard, [f'{name}({ref}, debug_msg="{g}")'])
+        if hasattr(val, "training"):
+            # There are cases where a monkeypatched object has a guard made between __new__ and __init__
+            setup_guard()
         else:
-            self._produce_guard_code(guard, [f"{name}({ref})"])
+            exc.unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
         if guard.is_local():
             return self.ID_MATCH(guard)
+
+    def CLOSURE_MATCH(self, guard: Guard):
+        """matches a closure by __code__ id."""
+        if guard.is_local():
+            val = self.get(guard.name)
+            # Strictly only want user-defined functions
+            if type(val) == types.FunctionType and hasattr(val, "__code__"):
+                ref = self.arg_ref(guard)
+                code = [
+                    f"___check_obj_id(getattr({ref}, '__code__', None), {self.id_ref(val.__code__)})",
+                ]
+                self._produce_guard_code(guard, code)
+            else:
+                self.FUNCTION_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
@@ -593,20 +568,24 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def DICT_KEYS(self, guard):
+        # Guard on the keys and their order
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        param_key_ids = set(dict_param_key_ids(value))
-        const_keys = set(dict_const_keys(value))
-        const_keys_repr = dict_const_keys_repr(const_keys, local=self.local)
-        if param_key_ids:
-            code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
-            code.append(f"___dict_const_keys({ref}) == {const_keys_repr}")
+        any_tensor_or_module = any(
+            isinstance(k, (torch.Tensor, torch.nn.Module)) for k in value.keys()
+        )
+        const_keys_repr = dict_keys_repr(
+            tensor_or_module_to_id(value),
+            local=is_from_local_source(guard.originating_source),
+        )
+        if any_tensor_or_module:
+            code.append(f"___tensor_or_module_to_id({ref}) == {const_keys_repr}")
         else:
-            code.append(f"set({ref}.keys()) == {const_keys_repr}")
+            code.append(f"list({ref}.keys()) == {const_keys_repr}")
 
         self._produce_guard_code(guard, code)
 
@@ -665,7 +644,7 @@ class GuardBuilder(GuardBuilderBase):
             f"{id(torch._dynamo.eval_frame.guarded_backend_cache.current_backend)}"
         )
         code = [
-            f"___skip_backend_check() or ___current_backend() == ___lookup_backend({backend_id})"
+            f"(___skip_backend_check() or ___current_backend() == ___lookup_backend({backend_id}))"
         ]
         self._produce_guard_code(guard, code)
 
@@ -677,7 +656,7 @@ class GuardBuilder(GuardBuilderBase):
         output_graph = self.check_fn_manager.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
-        constraint_inputs = [a.constraint_dims for a in fs]
+        input_contexts = [a.symbolic_context for a in fs]
 
         def get_sources(t_id, dim):
             # Looks up base sources mapped to a tensor id and uses them to create
@@ -720,7 +699,7 @@ class GuardBuilder(GuardBuilderBase):
         guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
-            constraint_inputs=constraint_inputs,
+            input_contexts=input_contexts,
             equalities_inputs=equalities_inputs,
             source_ref=self.source_ref,
             # Export keeps static.
@@ -1006,14 +985,12 @@ class CheckFunctionManager:
     def __init__(
         self,
         output_graph=None,
-        guard_fail_fn: Optional[Callable[[Tuple[str, str]], None]] = None,
+        guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
     ):
         guards = output_graph.guards if output_graph else None
         self.valid = True
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
-        self._extra_closure_vars: Dict[str, object] = {}
         self.output_graph = output_graph
-        self.extra_closure_vars_count = 0
 
         # Note: right overrides left
         def combine_scopes(left, right):
@@ -1025,55 +1002,52 @@ class CheckFunctionManager:
 
             return {**left, **right}
 
+        w_builder = None
+
         def source_ref(source):
             guard_source = source.guard_source()
             if guard_source is GuardSource.CONSTANT:
                 # No need to track constants
                 return source.name()
-            builder = guard_source.select(w_local(), w_global())
-            assert builder is not None
-            return builder.arg_ref(source.name())
+            assert w_builder
+            r_builder = w_builder()
+            assert r_builder is not None
+            return r_builder.arg_ref(source.name())
 
         self.root_guard_mananger = RootGuardManager()
-        local_builder = GuardBuilder(
+        builder = GuardBuilder(
             self.id_ref,
             source_ref,
             self.lookup_weakrefs,
-            combine_scopes(output_graph.global_scope, output_graph.local_scope),
-            self.root_guard_mananger,
-            self,
-            local=True,
-        )
-        global_builder = GuardBuilder(
-            self.id_ref,
-            source_ref,
-            self.lookup_weakrefs,
+            output_graph.local_scope,
             output_graph.global_scope,
             self.root_guard_mananger,
             self,
-            local=False,
         )
 
-        # We need to transplant a copy here, because some guards
-        # might get a cross ref between local and global, like L['mod_name'][G['some_key']]
-        # the inverse is illegal.
-        if "G" in global_builder.scope:
-            local_builder.scope["G"] = global_builder.scope["G"]
-        # source_ref can cause a cycle, make sure we break it with weakref
-        w_local = weakref.ref(local_builder)
-        w_global = weakref.ref(global_builder)
+        # Break retain cycle. See test_release_scope_memory
+        def cleanup_builder(weak_b):
+            b = weak_b()
+            if b:
+                b.scope = None
+
+        # Break retain cycle. See test_release_input_memory
+        w_builder = weakref.ref(builder, cleanup_builder)
+
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
                 not config.guard_nn_modules
                 and guard.is_nn_module()
-                and not must_add_nn_module_guards(guard)
+                # Default func args must be guarded on.
+                # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
+                and "__defaults__" not in guard.name
+                and "__kwdefaults__" not in guard.name
+                and (config.skip_nnmodule_hook_guards or "hooks" not in guard.name)
             ):
                 continue
 
-            guard.create(local_builder, global_builder)
-        self.check_fn = self.compile_check_fn(
-            local_builder, global_builder, guards, guard_fail_fn
-        )
+            guard.create(builder)
+        self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
         self._weakrefs.clear()
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and check_fn and is used to
@@ -1083,36 +1057,30 @@ class CheckFunctionManager:
         # eval_frame.c. In future, we should probably replace check_fn with a
         # queryable data structure such that this information is already present
         # in some form.
-        self.check_fn.id_matched_objs = local_builder.id_matched_objs
+        self.check_fn.id_matched_objs = builder.id_matched_objs
 
-    def compile_check_fn(
-        self, local_builder, global_builder, guards_out, guard_fail_fn
-    ):
-        assert not (set(local_builder.argnames) & set(global_builder.argnames))
+    def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
-        largs = local_builder.argnames
+        largs = builder.argnames
         largs += ["**___kwargs_ignored"]
 
         guards_log.debug("GUARDS:")
 
         # Don't report this guard, it's always the same, useless!
         code_parts = ["___guarded_code.valid", "___check_global_state()"]
+        verbose_code_parts = code_parts[:]
 
         def add_code_part(code, guard, log_only=False):
-            if guards_log.isEnabledFor(logging.DEBUG):
-                extra = ""
-                if guard is not None:
-                    if guard.user_stack:
-                        for fs in reversed(guard.user_stack):
-                            if fs.filename not in uninteresting_files():
-                                break
-                        else:
-                            fs = guard.user_stack[-1]
+            extra = ""
+            if guard.user_stack:
+                for fs in reversed(guard.user_stack):
+                    if fs.filename not in uninteresting_files():
                         extra = f"  # {format_frame(fs, line=True)}"
-                    elif guard.stack:
-                        extra = f"  # {format_frame(guard.stack.summary()[-1])}"
+                        break
+            elif guard.stack:
+                extra = f"  # {format_frame(guard.stack.summary()[-1])}"
 
-                guards_log.debug("%s", f"{code:<60}{extra}")
+            guards_log.debug("%s", f"{code:<60}{extra}")
 
             if verbose_guards_log.isEnabledFor(logging.DEBUG):
                 maybe_stack = ""
@@ -1133,35 +1101,23 @@ class CheckFunctionManager:
 
             if not log_only:
                 code_parts.append(code)
+                verbose_code_parts.append(f"{code:<60}{extra}")
 
         seen = set()
-        for gcl in local_builder.code:
+        for gcl in builder.code:
             for code in gcl.code_list:
                 if code not in seen:
                     add_code_part(code, gcl.guard)
                     seen.add(code)
 
-        seen = set()
-        for gcl in global_builder.code:
-            for code in gcl.code_list:
-                if code not in seen:
-                    add_code_part(code, gcl.guard)
-                    seen.add(code)
-
-        tensor_check_names = (
-            local_builder.tensor_check_names + global_builder.tensor_check_names
-        )
-
+        tensor_check_names = builder.tensor_check_names
         check_tensors_fn = None
         check_tensors_verbose_fn = None
         if tensor_check_names:
             assert (
                 not self.output_graph.export
             ), "Illegal to set tensor_check_names in export."
-            tensor_check_examples = (
-                local_builder.tensor_check_examples
-                + global_builder.tensor_check_examples
-            )
+            tensor_check_examples = builder.tensor_check_examples
 
             def convert(size_or_stride):
                 converted: List[Optional[int]] = []
@@ -1174,20 +1130,12 @@ class CheckFunctionManager:
                 return converted
 
             dynamic_dims_sizes = [
-                convert(
-                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
-                        "size"
-                    ]
-                )
+                convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["size"])
                 for t in tensor_check_examples
             ]
 
             dynamic_dims_strides = [
-                convert(
-                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
-                        "stride"
-                    ]
-                )
+                convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["stride"])
                 for t in tensor_check_examples
             ]
 
@@ -1203,9 +1151,9 @@ class CheckFunctionManager:
             )
             # Do this manually, to un-stagger the guards in log message
             code_parts.append(f"___check_tensors({tensor_check_args})")
-            tensor_check_guards = (
-                local_builder.tensor_check_guards + global_builder.tensor_check_guards
-            )
+            verbose_code_parts.append(f"___check_tensors({tensor_check_args})")
+            tensor_check_guards = builder.tensor_check_guards
+
             for i, name in enumerate(tensor_check_names):
                 # This is a copy of what guards.cpp checks against
                 # Keep this in sync with TensorCheck constructor
@@ -1242,27 +1190,23 @@ class CheckFunctionManager:
 
         # TODO: the "guard" here is actually just the top level SHAPE_ENV
         # which is useless.  Get ShapeEnv to pass in more provenance.
-        for gcl in local_builder.shape_env_code:
+        for gcl in builder.shape_env_code:
             for code in gcl.code_list:
                 add_code_part(code, gcl.guard)
 
-        assert not global_builder.shape_env_code
         global_state = convert_frame.initial_global_state
         if global_state is None:
             # we should only hit this case in NopTests()
             global_state = convert_frame.GlobalStateGuard()
-        closure_vars = collections.OrderedDict(
-            [
-                ("___guarded_code", self),
-                ("___check_tensors", check_tensors_fn),
-                ("___check_tensors_verbose", check_tensors_verbose_fn),
-                ("___check_global_state", global_state.check),
-                ("tensor_check_names", tensor_check_names),
-            ]
-            + list(SYMPY_INTERP.items())
-        )
-        closure_vars.update(CLOSURE_VARS)
-        closure_vars.update(self._extra_closure_vars)
+        closure_vars = {
+            "___guarded_code": self,
+            "___check_tensors": check_tensors_fn,
+            "___check_tensors_verbose": check_tensors_verbose_fn,
+            "___check_global_state": global_state.check,
+            "tensor_check_names": tensor_check_names,
+            **SYMPY_INTERP,
+            **CLOSURE_VARS,
+        }
 
         unique_code_parts = list(unique(code_parts))
         make_guard_fn_args = ", ".join(closure_vars.keys())
@@ -1271,23 +1215,17 @@ class CheckFunctionManager:
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS\n", guard_body)
 
-        if is_guard_failure_reporting_enabled() or guard_fail_fn is not None:
-            # Guard fail hook is called everytime guard eval fails. For a cache
-            # lookup where there are multiple entries in the same cache line,
-            # this can lead to very high performance overhead. So, we have
-            # decided to hide this behing a config flag.
-            set_guard_fail_hook(guard_fail_hook)
-
         out: Dict[str, Any] = dict()
-        exec(pycode, global_builder.scope, out)
+        exec(pycode, builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
         guard_fn.code_parts = code_parts
+        guard_fn.verbose_code_parts = verbose_code_parts
         # Grab only G, but preserve "G" because guards access it as "G"
         guard_fn.global_scope = {
-            "G": global_builder.scope["G"],
+            "G": builder.scope["G"],
         }
         guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
@@ -1317,12 +1255,6 @@ class CheckFunctionManager:
         if id(obj) in self._weakrefs:
             return self._weakrefs[id(obj)]
         return None
-
-    def add_extra_closure_var(self, name_hint, obj):
-        name = f"{name_hint}_{self.extra_closure_vars_count}"
-        self.extra_closure_vars_count += 1
-        self._extra_closure_vars[name] = obj
-        return name
 
 
 def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
@@ -1368,67 +1300,111 @@ def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
     return guard_body.getvalue(), make_guard_fn.getvalue()
 
 
-stashed_first_fail_reason = None
+def is_recompiles_enabled():
+    return torch._logging._internal.log_state.is_artifact_enabled("recompiles")
 
 
-def guard_fail_hook(
+def is_recompiles_verbose_enabled():
+    return torch._logging._internal.log_state.is_artifact_enabled("recompiles_verbose")
+
+
+def get_guard_fail_reason(
     guard_fn: GuardFn,
     code: types.CodeType,
     f_locals: Dict[str, object],
-    index: int,
-    last: bool,
-) -> None:
+) -> str:
     """
-    called whenever a guard fails.
+    Return the reason why `guard_fn` failed.
+    Updates `guard_failures` with the generated reason.
+    Only the first failed check of guard_fn is reported.
     """
-    first = index == 0
-    global stashed_first_fail_reason
-    # Don't waste time computing the fail reason for guards we aren't going to report out.
-    if not guard_fn.guard_fail_fn and not (first or last):
-        return
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
     scope["___check_tensors"] = scope["___check_tensors_verbose"]
-    reason = None
-    for part in guard_fn.code_parts:
+    reasons: List[str] = []
+    for part in guard_fn.verbose_code_parts:
         global_scope = dict(guard_fn.global_scope)
         global_scope["__compile_source__"] = part
         with report_compile_source_on_error():
-            fail_reason = eval(part, global_scope, scope)
+            try:
+                fail_reason = eval(part, global_scope, scope)
+            except Exception as e:
+                if is_recompiles_verbose_enabled():
+                    continue
+                else:
+                    raise
         # Only ___check_tensors knows how to return a fancy fail reason;
         # for everything else we just report the code that failed
+
+        if isinstance(fail_reason, bool) and not fail_reason:
+            fail_reason = part
         if isinstance(fail_reason, str):
-            reason = fail_reason
-            break
-        elif isinstance(fail_reason, bool) and not fail_reason:
-            reason = part
-            break
+            reasons.append(fail_reason)
+            if not is_recompiles_verbose_enabled():
+                break
 
-    if first:
-        stashed_first_fail_reason = reason
+    reason_str = "\n".join(reasons)
+    guard_failures[orig_code_map[code]].append(reason_str)
 
-    if not last:
-        return
-
-    # Technically, we're failing our last guard, which is our oldest guard due to the
-    # eval_frame.c logic that moves newest frames to head, but for logging purposes
-    # it's more useful to see the 'first' failure (if we never got a hit) since it's
-    # likely not yet been logged as a failure reason in a case of repeating failures.
-    assert stashed_first_fail_reason
-    guard_failures[orig_code_map[code]].append(stashed_first_fail_reason)
-    stashed_first_fail_reason = None
-
-    # TODO should we GuardFail our stashed_first_fail_reason too?
     try:
         if guard_fn.guard_fail_fn is not None:
             guard_fn.guard_fail_fn(
-                GuardFail(reason or "unknown reason", orig_code_map[code])
+                GuardFail(reason_str or "unknown reason", orig_code_map[code])
             )
     except Exception as e:
-        log.error(
+        log.exception(
             "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
-            exc_info=True,
         )
+
+    return reason_str
+
+
+def get_and_maybe_log_recompilation_reason(
+    cache_entry, frame: types.FrameType
+) -> List[str]:
+    """
+    Return the list of guard failure reasons using cache_entry.
+    Logs the recompilation reason if `recompiles` logging is enabled.
+    Raises a RecompileError if `config.error_on_recompile` is enabled.
+    """
+    reasons = []
+    while cache_entry is not None:
+        reason = get_guard_fail_reason(
+            cache_entry.check_fn, cache_entry.code, frame.f_locals
+        )
+        if reason:
+            reasons.append(reason)
+        cache_entry = cache_entry.next
+
+    code = frame.f_code
+
+    # at least one of "recompiles" or "recompiles_verbose" is enabled
+    do_recompiles_log = is_recompiles_enabled() or is_recompiles_verbose_enabled()
+
+    if do_recompiles_log or config.error_on_recompile:
+        if is_recompiles_verbose_enabled():
+            failures = "\n\n".join(
+                f"guard {i} failures:\n" + textwrap.indent(reason, "- ")
+                for i, reason in enumerate(reasons)
+            )
+        else:
+            failures = textwrap.indent("\n".join(reasons), "- ")
+        guard_failure_details = (
+            f"triggered by the following guard failure(s):\n{failures}"
+        )
+        message = (
+            f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}\n"
+            f"{textwrap.indent(guard_failure_details, '    ')}"
+        )
+        if do_recompiles_log:
+            if is_recompiles_verbose_enabled():
+                recompiles_verbose_log.debug(message)
+            else:
+                recompiles_log.debug(message)
+        if config.error_on_recompile:
+            raise exc.RecompileError(message)
+
+    return reasons
 
 
 def guard_error_hook(
@@ -1467,7 +1443,7 @@ def make_dupe_guard(obj_source, dupe_source):
     # Prior to the addition of tracking to all relevant objects, we would handle this just fine by
     # eagerly re-entering VB and rewrapping inputs, correctly creating graphargs and placeholders. However,
     # with tracking on inputs, duplicate inputs or aliased relationships may end up getting erased here -
-    # In the the fn(x, x) example call above look like a graph with a single input.
+    # In the fn(x, x) example call above look like a graph with a single input.
     # In order to ensure that we do not reuse fn(x, x) for fn(x, y), we create a duplicate input guard.
 
     # Note - we may not have a source, that is fine, it just means we had an object that is safe to have
@@ -1484,3 +1460,19 @@ def make_dupe_guard(obj_source, dupe_source):
             # However, this should always be a sound guard to add here.
             return functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=dupe_source)
     return None
+
+
+def install_guard(*guards, skip=0):
+    """
+    Add dynamo guards to the current tracing context.
+
+    Args:
+        guards: guard(s) to add
+        skip: number of stack frames to ignore for debug stack trace
+    """
+    from torch._guards import TracingContext
+
+    add = TracingContext.get().guards_context.dynamo_guards.add
+    for guard in guards:
+        assert isinstance(guard, Guard)
+        add(guard, skip=skip + 1)

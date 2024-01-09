@@ -70,7 +70,8 @@ class RemovableHandle:
 
 def unserializable_hook(f):
     """
-    Decorator which marks a function as an unserializable hook.
+    Mark a function as an unserializable hook with this decorator.
+
     This suppresses warnings that would otherwise arise if you attempt
     to serialize a tensor that has a hook.
     """
@@ -91,6 +92,7 @@ def warn_if_has_hooks(tensor):
 class BackwardHook:
     """
     A wrapper class to implement nn.Module backward hooks.
+
     It handles:
       - Ignoring non-Tensor inputs and replacing them by None before calling the user hook
       - Generating the proper Node to capture a set of Tensor's gradients
@@ -181,7 +183,11 @@ class BackwardHook:
         for idx, val in zip(tensors_idx, new_tensors):
             arg_list[idx] = val
 
-        return tuple(arg_list), tensors_idx
+        if type(args) is tuple:
+            out = tuple(arg_list)
+        else:
+            out = type(args)(*arg_list)
+        return out, tensors_idx
 
     def setup_input_hook(self, args):
         def fn(grad_fn):
@@ -212,6 +218,9 @@ class BackwardHook:
                                                f"got {actual_len}, but expected {expected_len}")
                         self.grad_outputs = hook_grad_outputs
 
+                # We need to be able to clear self.grad_outputs but also return it
+                local_grad_outputs = self.grad_outputs
+
                 # Special case if no input required gradients, this hook should call the user
                 # hook directly
                 if self.input_tensors_index is None:
@@ -223,9 +232,9 @@ class BackwardHook:
                                                "gradient should always return None or None for all gradients.")
                     self.grad_outputs = None
 
-                if self.grad_outputs is not None:
+                if local_grad_outputs is not None:
                     assert self.output_tensors_index is not None  # mypy
-                    return tuple(self.grad_outputs[i] for i in self.output_tensors_index)
+                    return tuple(local_grad_outputs[i] for i in self.output_tensors_index)
 
             grad_fn.register_hook(hook)
 

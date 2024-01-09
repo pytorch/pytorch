@@ -3,7 +3,6 @@ from typing import cast, Dict, List, Tuple
 
 import torch
 import torch.distributed._tensor.api as dtensor
-from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import (
     _Partial,
     DTensorSpec,
@@ -11,6 +10,7 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.distributed.device_mesh import DeviceMesh
 
 
 _PlacementItem = Tuple[int, Tuple[Placement, Placement]]
@@ -76,6 +76,7 @@ def redistribute_local_tensor(
     local_tensor: torch.Tensor,
     current_spec: DTensorSpec,
     target_spec: DTensorSpec,
+    is_backward: bool = False,
 ) -> torch.Tensor:
     """
     This redistribute the local tensor (torch.Tensor) from the current DTensorSpec to
@@ -99,7 +100,7 @@ def redistribute_local_tensor(
 
     for i, (current, target) in sorted_placements:
         my_coordinate = device_mesh.get_coordinate()
-        num_chunks = device_mesh.size(dim=i)
+        num_chunks = device_mesh.size(mesh_dim=i)
 
         if my_coordinate is None:
             # if rank is not part of mesh, we simply return local_tensor,
@@ -159,12 +160,12 @@ def redistribute_local_tensor(
 
         elif target.is_partial():
             if current.is_replicate():
-                # For replicate -> partial, we zero out all other ranks of the current mesh dim
-                # and leave only 1 rank have the data, to perform a "zero cost" reshard.
-                if my_coordinate[i] != 0:
-                    new_local_tensor = local_tensor.zero_()
-                else:
-                    new_local_tensor = local_tensor
+                # For replicate -> partial forward pass we perform division to num of chunks
+                # and generate parial, and recover it back when pending sum get cleared.
+                # Skip/pass through when replicate -> partial is in backward pass.
+                new_local_tensor = (
+                    local_tensor / num_chunks if not is_backward else local_tensor
+                )
             else:
                 raise RuntimeError(
                     f"redistribute from {current_placements} to {target_placements} not supported yet"
@@ -185,12 +186,12 @@ class Redistribute(torch.autograd.Function):
         ctx,
         input: "dtensor.DTensor",
         device_mesh: DeviceMesh,
-        placements: List[Placement],
+        placements: Tuple[Placement, ...],
     ):
         current_spec = input._spec
         ctx.current_spec = current_spec
         target_spec = DTensorSpec(
-            device_mesh, tuple(placements), tensor_meta=input._spec.tensor_meta
+            device_mesh, placements, tensor_meta=input._spec.tensor_meta
         )
 
         local_tensor = input._local_tensor

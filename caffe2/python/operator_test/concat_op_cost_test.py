@@ -38,7 +38,7 @@ class TestConcatOpCost(TestCase):
 
         [
             _test_columnwise_concat_for_type(t)
-            for t in [np.int64, np.float, np.half, np.int8]
+            for t in [np.int64, np.float64, np.half, np.int8]
         ]
 
     def test_split_then_concat(self):

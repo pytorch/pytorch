@@ -9,7 +9,7 @@ from torch._export.db.case import export_case, ExportArgs, SupportLevel
         (torch.randn(4), torch.randn(4)),
         *[torch.randn(4), torch.randn(4)],
         mykw0=torch.randn(4),
-        **{"input0": torch.randn(4), "input1": torch.randn(4)}
+        input0=torch.randn(4), input1=torch.randn(4)
     ),
     tags={"python.data-structure"},
     support_level=SupportLevel.SUPPORTED,

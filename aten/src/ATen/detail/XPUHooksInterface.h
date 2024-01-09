@@ -9,10 +9,6 @@
 #include <functional>
 #include <memory>
 
-namespace at {
-class Context;
-}
-
 // We use forward declaration here instead of #include <ATen/dlpack.h> to avoid
 // leaking DLPack implementation detail to every project that includes `ATen/Context.h`, which in turn
 // would lead to a conflict when linked with another project using DLPack (for example TVM)
@@ -67,13 +63,11 @@ struct TORCH_API XPUHooksInterface {
         XPU_HELP);
   }
 
-  virtual Generator getXPUGenerator(DeviceIndex device_index = -1) const {
-    (void)device_index; // Suppress unused variable warning
+  virtual Generator getXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
     TORCH_CHECK(false, "Cannot get XPU generator without Intel Extension for Pytorch. ", XPU_HELP);
   }
 
-  virtual const Generator& getDefaultXPUGenerator(DeviceIndex device_index = -1) const {
-    (void)device_index; // Suppress unused variable warning
+  virtual const Generator& getDefaultXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
     TORCH_CHECK(false, "Cannot get default XPU generator without Intel Extension for Pytorch. ", XPU_HELP);
   }
 

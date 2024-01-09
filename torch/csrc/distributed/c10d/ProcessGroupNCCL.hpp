@@ -2,7 +2,9 @@
 
 #ifdef USE_C10D_NCCL
 
+#include <atomic>
 #include <chrono>
+#include <future>
 #include <iostream>
 #include <list>
 #include <mutex>
@@ -12,7 +14,7 @@
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
-#include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
+#include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -28,23 +30,53 @@
 namespace c10d {
 // Environment variable which controls whether we perform a NCCL healt check
 // which ensures communicators are healthy at the beginning of init.
-constexpr const char* ENABLE_NCCL_HEALTH_CHECK = "ENABLE_NCCL_HEALTH_CHECK";
+static std::vector<std::string> TORCH_ENABLE_NCCL_HEALTH_CHECK = {
+    "TORCH_ENABLE_NCCL_HEALTH_CHECK",
+    "ENABLE_NCCL_HEALTH_CHECK"};
 
 // Environment variable which controls whether or not wait() is blocking or
 // non-blocking.
-constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
+static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
+    "TORCH_NCCL_BLOCKING_WAIT",
+    "NCCL_BLOCKING_WAIT"};
 
 // Environment variable which controls whether or not we perform Async Error
 // Handling with NCCL.
-constexpr const char* NCCL_ASYNC_ERROR_HANDLING = "NCCL_ASYNC_ERROR_HANDLING";
+static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
+    "TORCH_NCCL_ASYNC_ERROR_HANDLING",
+    "NCCL_ASYNC_ERROR_HANDLING"};
+
+// Environment Variable to control whether dumping debug info on watchdog
+// timeout is enabled. This variable must be set together with
+// TORCH_NCCL_ENABLE_MONITORING=1 and TORCH_NCCL_TRACE_BUFFER_SIZE > 0.
+static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
+    "TORCH_NCCL_DUMP_ON_TIMEOUT"};
 
 // Environment Variable to control whether Desync Debug is enabled.
-// This variable must be set together with NCCL_ASYNC_ERROR_HANDLING.
-constexpr const char* NCCL_DESYNC_DEBUG = "NCCL_DESYNC_DEBUG";
+// This variable must be set together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
+static std::vector<std::string> TORCH_NCCL_DESYNC_DEBUG = {
+    "TORCH_NCCL_DESYNC_DEBUG",
+    "NCCL_DESYNC_DEBUG"};
 
-constexpr const char* NCCL_ENABLE_TIMING = "NCCL_ENABLE_TIMING";
+static std::vector<std::string> TORCH_NCCL_ENABLE_TIMING = {
+    "TORCH_NCCL_ENABLE_TIMING",
+    "NCCL_ENABLE_TIMING"};
+
+static std::vector<std::string> TORCH_NCCL_ENABLE_MONITORING = {
+    "TORCH_NCCL_ENABLE_MONITORING"};
+
+static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
+    "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"};
+
+static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
+    "TORCH_NCCL_TRACE_BUFFER_SIZE"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
+
+constexpr const char* TIMEOUT_DUMP = "timeout_dump";
+
+constexpr auto kProcessGroupNCCLDefaultTimeout =
+    std::chrono::milliseconds(10 * 60 * 1000);
 
 // NoHandling: do not handle asynchronous NCCL errors
 // TearDown: tear down process upon error, see `WorkNCCL::handleException`
@@ -64,14 +96,25 @@ enum ErrorHandlingMode {
 
 #define SHOULD_TEAR_DOWN(a) (a != NoHandling && a != CleanUpOnly)
 
+#define PRINT_COLLECTIVE_HASH_SIGNATURE(phase, opType, numel, hashValue)      \
+  LOG(WARNING) << logPrefix() << "Hash of " << phase << " to NCCL " << opType \
+               << " with size " << numel << " is " << hashValue;
+
 // If set, ProcessGroupNCCL doesn't use recordStream calls to ensure
 // caching allocator safety for tensors used on both user-facing and
 // internal comm streams.
 // Instead, it stashes live references to those tensors until after
 // user-facing streams are synced with comm streams.
 // See stashed_for_allocator_safety_ below.
-constexpr const char* TORCH_NCCL_AVOID_RECORD_STREAMS =
-    "TORCH_NCCL_AVOID_RECORD_STREAMS";
+static std::vector<std::string> TORCH_NCCL_AVOID_RECORD_STREAMS = {
+    "TORCH_NCCL_AVOID_RECORD_STREAMS"};
+
+// If set, ProcessGroupNCCL registers postAlloc and preFree hooks to cuda cache
+// allocator so that whenever a tensor is allocated or freed, ProcessGroupNCCL
+// can register/deregister the tensor on all available NCCL communicators.
+static std::vector<std::string> TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
+    {"TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK",
+     "NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"};
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -123,7 +166,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt,
         bool desyncDebug = false,
-        bool enableTiming = false);
+        bool enableTiming = false,
+        DebugLevel distDebugLevel = DebugLevel::Off);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
     // destructs outputs_ tensors who are view tensors in autograd graph.
@@ -167,6 +211,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     float getDuration() const override;
 
     uint64_t getSequencenumber() const override;
+
+    const std::string& logPrefix() const;
 
     // Helper function that sets an exception_ptr on the WorkNCCL object.
     void setException(std::exception_ptr exception_ptr);
@@ -270,6 +316,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     c10::intrusive_ptr<at::ivalue::Future> future_;
 
     bool timingEnabled_;
+    // unique id used to tell the trace buffer that this
+    // work has completed
+    c10::optional<uint64_t> trace_id_;
+    DebugLevel distDebugLevel_;
     friend class ProcessGroupNCCL;
   };
 
@@ -313,6 +363,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Configure ranks
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
 #endif
+
+    // Optional "parent" backend and color to create communicators from
+    // via `ncclCommSplit`
+    std::shared_ptr<ProcessGroupNCCL> split_from;
+    int64_t split_color{0};
+    std::vector<uint64_t> global_ranks_in_group;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -354,6 +410,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   const std::string getBackendName() const override {
     return std::string(NCCL_BACKEND_NAME);
+  }
+
+  bool supportsSplitting() const override {
+    return true;
   }
 
   void startCoalescing() override;
@@ -481,18 +541,33 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // may indicate that there is some sort of collective desynchronization.
   uint64_t getSequenceNumberForGroup() override;
 
+  // Return the total number of splits the communicators held by this process
+  // group have performed.
+  uint64_t getCommSplitCounter() const;
+
   void registerOnCompletionHook(
       std::function<void(std::shared_ptr<WorkInfo>)>&& hook) override;
   void waitForPendingWorks() override;
 
   void enableCollectivesTiming() override;
 
-  // Tests if the UCC fallback path is available
-  bool isUCCAvailable() const;
+  // Helper function for iteratively aborting communicators in the provided map
+  void abortCommsFromMap(
+      std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
+          ncclCommsMap,
+      c10::optional<std::string> abortReason);
+
+  c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
 
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
   void abort(c10::optional<std::string> abortReason = c10::nullopt);
+
+  void shutdown();
+
+  void eagerConnectSingleDevice(at::Device device) override;
+
+  void performNocolorSplit(at::Device device);
 
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
@@ -520,7 +595,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       int rank,
       OpType opType,
       const char* profilingTitle = nullptr,
-      const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt);
+      const std::vector<at::Tensor>& inputs = {},
+      const std::vector<at::Tensor>& outputs = {});
 
   virtual c10::intrusive_ptr<ProcessGroupNCCL::CoalescedWorkNCCL>
   initCoalescedWork(
@@ -529,6 +605,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       OpType opType);
 
  private:
+  int globalRankStart;
+  int globalRankStride;
+
   // Helper that encapsulates work shared across all collective communication
   // primitives.  The callbacks have the following signatures:
   //
@@ -541,7 +620,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& output,
       Fn fn,
       OpType opType,
-      const char* profilingTitle = nullptr);
+      const char* profilingTitle = nullptr,
+      bool avoidRecordStreams = false);
+
   template <typename Fn, typename PreProcess, typename PostProcess>
   c10::intrusive_ptr<Work> collective(
       std::vector<at::Tensor>& input,
@@ -550,7 +631,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       PreProcess pre,
       PostProcess post,
       OpType opType,
-      const char* profilingTitle = nullptr);
+      const char* profilingTitle = nullptr,
+      bool avoidRecordStreams = false);
 
   // Helper that encapsulates work shared across point-to-point communication
   // primitives. It is the same structure as the helper used for collective
@@ -592,6 +674,15 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // object might get destroyed before the WorkNCCL object.
   void ncclCommWatchdog();
 
+  // Return the CUDA device most likely associated with this backend.
+  // If we aren't bound to a specific device, there is no strict
+  // guarantee that this heuristic is the correct assignment of ranks
+  // to GPUs that Python layers use, but in practice it tends to be.
+  // Fortunately we don't rely on this for correctness of any tensor
+  // operations, just for ancillary uses like health checks and
+  // barriers.
+  at::Device guessDeviceForRank() const;
+
   // Performs a health check by initializing dummy NCCL communicators and then
   // destroying them. This will help indicate and signal any NCCL-related issues
   // prior to the first collective. The actual initialization and subsequent
@@ -607,9 +698,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Watchdog's inside loop.
   // Takes care of cleaning up completed work, and aborting upon failure or
   // timeout.
-  void workCleanupLoop();
+  void watchdogHandler();
 
   void runHookLoop();
+
+  // In the timeout case and we will dump debug info such as the NCCL flight
+  // recorder to storage. Down the road, if we have more complicated or blocking
+  // operations, we might need to use a side thread to do it.
+  bool dumpDebuggingInfo();
 
   // Desync debug helper
   void logWorkStart(WorkNCCL& work);
@@ -617,7 +713,47 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Desync debug helper
   void logWorkEnd(WorkNCCL& work);
 
+  // Generates a prefix that is unique to this process group and rank, for
+  // disambiguating logs
+  std::string createLogPrefix() const;
+
+  // Returns the unique prefix created in createLogPrefix
+  const std::string& logPrefix() const;
+
+  // Returns the global rank of the device. This function assumes that users
+  // always create a default global process group(PG) which includes all
+  // devices. It is called in the constructor of ProcessGroupNCCL, so it always
+  // return the rank_ of the the very first PG created, aka, default global PG.
+  const int& globalRank() const;
+
  protected:
+  // Function that runs as part of a separate thread aside from watchdog
+  // thread because we need to check the heartbeat from watchdog thread
+  // so that when we get stuck in some NCCL/CUDA calls,
+  // we can dump the debugging information and abort the process.
+  virtual void heartbeatMonitor();
+
+  // Function that directly trigger std::abort so that the whole process
+  // gets terminated.
+  virtual void terminateProcess(std::string errMsg);
+
+  // Create a thread that dumps debug info to the file specified as
+  // ${TORCH_NCCL_DEBUG_INFO_TEMP_FILE}{$RANK}
+  // Serializes all dumping activity, but allows concurrent calls.
+  // Each call returns a future, which can be checked or waited on
+  // for dump completion.
+  std::future<bool> launchAsyncDebugDump();
+
+  // Helper to wait up to the specified timeout and then abandon the dump.
+  // Logs on timeout, and asserts the future's status is as expected.
+  void waitForDumpOrTimeout(std::future<bool>& fut, size_t timeout_sec = 30);
+
+  // When watchdog timeout, this function will be called and return debug info
+  // for users. For now we only get information from retrieveDesyncReport.
+  // We are working on enabling more useful debug information for watchdog
+  // timeout.
+  virtual std::string getNCCLWatchdogDebugInfo();
+
   static const int64_t kWatchdogThreadSleepMillis;
 
   // The store is used to broadcast the NCCL unique ID of rank 0.
@@ -680,6 +816,23 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Mutex to guard maps like devNCCLCommMap_ and ncclIdToCommMap_.
   std::mutex mutex_;
 
+  // Heartbeat of watchdog thread.
+  std::atomic_uint64_t heartbeat_;
+
+  // The time interval used for deciding whether there is no watchdog heartbeat.
+  int heartbeatTimeoutInSec_;
+
+  // Size of ring buffer where we store NCCL Traces for debugging.
+  int ncclTraceBufferSize_;
+
+  // We gate the heartbeat monitor thread so that we can roll it out gradually.
+  std::atomic<bool> monitorThreadEnabled_;
+
+  // Monitor thread which checks the heartbeat of Watchdog thread.
+  // If the monitor thread finds there is no heartbeat, it will dump debug info
+  // and then kill the watchdog thread to avoid hang.
+  std::thread ncclHeartbeatMonitorThread_;
+
   // Watchdog thread which looks for errors on the cached NCCL communicators.
   std::thread ncclCommWatchdogThread_;
 
@@ -688,17 +841,34 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not we should terminate the watchdog and workCleanup threads.
   std::atomic<bool> terminateProcessGroup_;
 
+  // Whether or not we should terminate the heartbeat monitoring threads.
+  std::atomic<bool> terminateHeartbeatMonitorThread_;
+
+  // Whether we are in the shutdown mode when we are trying to get debug info,
+  // such as desync report.
+  std::atomic<bool> collectiveDebugInfoMode_;
+
   // Whether there are hooks pending to be fired
   std::atomic<bool> hasPendingHooks_;
 
   // Mutex to Guard workMetaList_
   std::mutex workMetaListMutex_;
 
+  // Mutex to Guard monitorWakeUpCV_
+  std::mutex monitorMutex_;
+
+  bool writeDebugInfo_ = false;
+
   // Condition Variable for watchdog thread sleep
   std::condition_variable workMetaListCV_;
 
+  // Condition Variable for monitor thread to wake up early
+  std::condition_variable monitorWakeUpCV_;
+
   // Vector to Store WorkNCCL pointers
   std::list<ProcessGroupNCCL::WorkNCCL> workMetaList_;
+
+  std::chrono::time_point<std::chrono::steady_clock> lastWorkListUpdateTime_;
 
   // Mutex to Guard workMetaList_
   std::mutex completedWorkListMutex_;
@@ -754,6 +924,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // for the operation to complete.
   bool blockingWait_ = false;
 
+  // Whether or not to hook the cache allocator to register all allocated
+  // tensors
+  bool useTensorRegisterAllocatorHook_ = false;
+
   // Whether or not the workCleanupThread is used to perform async error
   // handling.
   ErrorHandlingMode asyncErrorHandling_ = NoHandling;
@@ -761,10 +935,17 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
 
+  // Whether or not to dump debug info on timeout
+  bool dumpOnTimeout_;
+
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_
   // is set to true.
   std::atomic<bool> enableTiming_;
+
+  // Flag to enable the print of hash value of input/output of collectives for
+  // verification.
+  std::atomic<bool> enableCollecticeHashDebug_;
 
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;
@@ -785,12 +966,20 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   std::exception_ptr watchDogException_ = nullptr;
 
-#ifdef USE_NCCL_WITH_UCC
-  // ProcessGroupUCC shared library handle and ProcessGroup pointer
-  static std::shared_ptr<at::DynamicLibrary> uccLib_;
-  c10::intrusive_ptr<Backend> uccPG_;
-#endif
+  size_t uid_;
+
+  std::string logPrefix_;
+
+  c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
 };
+
+TORCH_API std::string dump_nccl_trace();
+
+// Gets a mutable reference to a global optional function.  Heartbeat Monitor
+// will query this function and if available, call it to dump traces. Inside
+// fbcode, we store a function here that uses an internal tool for process
+// tracing
+TORCH_API c10::optional<std::function<std::string()>>& get_cpp_trace_dumper();
 
 } // namespace c10d
 
