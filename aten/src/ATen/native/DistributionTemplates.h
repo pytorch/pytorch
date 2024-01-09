@@ -112,12 +112,13 @@ static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
       WARN_OUT_OF_BOUNDS(to_inc, "to - 1", digits, dtype);
     });
   } else if (scalar_type == kUInt64) {
-    AT_DISPATCH_V2(scalar_type, "check_random_integral_bounds", AT_WRAP([&]() {
-      // This is annoying: because randint takes int arguments, this means
-      // it cannot represent the entire uint64_t range
-      CHECK_OUT_OF_BOUNDS(from, "from", 0, INT64_MAX, dtype);
-      CHECK_OUT_OF_BOUNDS(to_inc, "to - 1", 0, INT64_MAX, dtype);
-    }), kUInt64);
+    // When you do a comparison between int64_t and uint64_t, the usual
+    // arithmetic conversions say that the int64_t value is promoted to
+    // unsigned. But this conversion wraps around: if I had -1 as my int64_t,
+    // then it will promote to 0xFFFFFFFFFFFFFFFF in uint64_t. This is never
+    // the right thing to do.
+    CHECK_OUT_OF_BOUNDS(from, "from", 0, INT64_MAX, dtype);
+    CHECK_OUT_OF_BOUNDS(to_inc, "to - 1", 0, INT64_MAX, dtype);
   } else if (isIntegralType(scalar_type, /*includeBool=*/true)) {
     AT_DISPATCH_V2(scalar_type, "check_random_integral_bounds", AT_WRAP([&]() {
       const auto min = static_cast<int64_t>(std::numeric_limits<scalar_t>::lowest());
