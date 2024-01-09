@@ -254,7 +254,7 @@ def _annotate_linear_relu(
         assert isinstance(weight, Node)
         input_qspec_map[weight] = weight_qspec
 
-        #adding weight node to the partition as well
+        # adding weight node to the partition as well
         partition = [relu_node, linear_node, weight]
         bias = linear_node.args[2] if len(linear_node.args) > 2 else None
         if isinstance(bias, Node):
