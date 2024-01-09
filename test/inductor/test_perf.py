@@ -451,7 +451,7 @@ class SchedulerFusionTests(TestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._stack = contextlib.ExitStack()
-        cls._stack.enter_context(patch.object(config, "realize_bytes_threshold", 0))
+        cls._stack.enter_context(patch.object(config, "realize_opcount_threshold", 0))
 
     @classmethod
     def tearDownClass(cls):
@@ -818,7 +818,7 @@ class WouldBeNiceIfItWorked:
         self.assertExpectedInline(count_numel(f, *inp), """200""")
 
     # TODO: The greedy fusion strategy results in suboptimal grouping
-    @patch.object(config, "realize_bytes_threshold", 0)
+    @patch.object(config, "realize_opcount_threshold", 0)
     def test_fusion_choice4(self):
         def f(a, b, b2):
             c = a + b
