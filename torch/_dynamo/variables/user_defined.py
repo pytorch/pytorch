@@ -43,6 +43,15 @@ from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
 from .dicts import DefaultDictVariable
 
 
+disallowed_modules = {
+    "torch._C._cudart",
+    "torch._C._distributed_autograd",
+    "torch._C._distributed_c10d",
+    "torch._C._distributed_rpc",
+    "torch.distributed",
+}
+
+
 class UserDefinedVariable(VariableTracker):
     pass
 
@@ -93,6 +102,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if name == "__name__":
             return ConstantVariable.create(self.value.__name__)
+        if any(self.value.__module__.startswith(x) for x in disallowed_modules):
+            unimplemented("ybliang debug")
 
         source = AttrSource(self.source, name) if self.source is not None else None
         try:
