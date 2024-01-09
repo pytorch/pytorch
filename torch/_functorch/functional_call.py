@@ -55,7 +55,7 @@ def functional_call(
             >>> new_a = {'foo': torch.zeros(()), 'foo_tied': torch.zeros(())}
             >>> functional_call(mod, new_a, torch.zeros()) # tensor(0.)
 
-    An example of passing mutliple dictionaries
+    An example of passing multiple dictionaries
 
     .. code-block:: python
 
@@ -108,8 +108,8 @@ def functional_call(
         args (Any or tuple): arguments to be passed to the module call. If not a tuple, considered a single argument.
         kwargs (dict): keyword arguments to be passed to the module call
         tie_weights (bool, optional): If True, then parameters and buffers tied in the original model will be treated as
-            tied in the reparamaterized version. Therefore, if True and different values are passed for the tied
-            paramaters and buffers, it will error. If False, it will not respect the originally tied parameters and
+            tied in the reparameterized version. Therefore, if True and different values are passed for the tied
+            parameters and buffers, it will error. If False, it will not respect the originally tied parameters and
             buffers unless the values passed for both weights are the same. Default: True.
         strict (bool, optional): If True, then the parameters and buffers passed in must match the parameters and
             buffers in the original module. Therefore, if True and there are any missing or unexpected keys, it will

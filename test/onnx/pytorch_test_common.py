@@ -6,10 +6,12 @@ import os
 import random
 import sys
 import unittest
+from enum import auto, Enum
 from typing import Optional
 
 import numpy as np
 import packaging.version
+import pytest
 
 import torch
 from torch.autograd import function
@@ -27,6 +29,11 @@ RNN_BATCH_SIZE = 7
 RNN_SEQUENCE_LENGTH = 11
 RNN_INPUT_SIZE = 5
 RNN_HIDDEN_SIZE = 3
+
+
+class TorchModelType(Enum):
+    TORCH_NN_MODULE = auto()
+    TORCH_EXPORT_EXPORTEDPROGRAM = auto()
 
 
 def _skipper(condition, reason):
@@ -187,11 +194,13 @@ def skip_min_ort_version(reason: str, version: str, dynamic_only: bool = False):
     return skip_dec
 
 
-def skip_dynamic_fx_test(reason: str):
+def skip_dynamic_fx_test(reason: str, skip_model_type: TorchModelType = None):
     """Skip dynamic exporting test.
 
     Args:
         reason: The reason for skipping dynamic exporting test.
+        skip_model_type (TorchModelType): The model type to skip dynamic exporting test for.
+            When None, model type is not used to skip dynamic tests.
 
     Returns:
         A decorator for skipping dynamic exporting test.
@@ -200,7 +209,9 @@ def skip_dynamic_fx_test(reason: str):
     def skip_dec(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
-            if self.dynamic_shapes:
+            if self.dynamic_shapes and (
+                not skip_model_type or self.model_type == skip_model_type
+            ):
                 raise unittest.SkipTest(
                     f"Skip verify dynamic shapes test for FX. {reason}"
                 )
@@ -327,6 +338,54 @@ def skipDtypeChecking(func):
         return func(self, *args, **kwargs)
 
     return wrapper
+
+
+def xfail_if_model_type_is_exportedprogram(reason: str):
+    """xfail test with models using ExportedProgram as input.
+
+    Args:
+        reason: The reason for xfail the ONNX export test.
+
+    Returns:
+        A decorator for xfail tests.
+    """
+
+    def xfail_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if self.model_type == TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM:
+                pytest.xfail(
+                    reason=f"Xfail model_type==torch.export.ExportedProgram. {reason}"
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return xfail_dec
+
+
+def xfail_if_model_type_is_not_exportedprogram(reason: str):
+    """xfail test without models using ExportedProgram as input.
+
+    Args:
+        reason: The reason for xfail the ONNX export test.
+
+    Returns:
+        A decorator for xfail tests.
+    """
+
+    def xfail_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if self.model_type != TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM:
+                pytest.xfail(
+                    reason=f"Xfail model_type!=torch.export.ExportedProgram. {reason}"
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return xfail_dec
 
 
 def flatten(x):

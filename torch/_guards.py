@@ -22,15 +22,25 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     TypeVar,
 )
 
 import torch
+from torch.utils import _pytree as pytree
 from torch.utils._traceback import CapturedTraceback
+from torch.utils.weak import WeakTensorKeyDictionary
 
 log = logging.getLogger(__name__)
 
-import sympy
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # such as auto-completion in tools like pylance, even when these modules are not explicitly
+    # imported in user code.
+
+    import sympy
+
 
 """
 torch._guards is the definitional source of truth for general purpose guard structures.
@@ -76,29 +86,6 @@ class GuardSource(enum.Enum):
     SHAPE_ENV = 6
     LOCAL_FSDP_MODULE = 7
     GLOBAL_FSDP_MODULE = 8
-
-    def select(self, locals_, globals_):
-        # SHAPE_ENV counts as locals, because the guard expressions
-        # created by shape env can reference f_locals
-        #
-        # RANDOM_VALUE counts as locals, because what we do is we run
-        # Python RNG and assign it to a temporary, and then perform
-        # guard tests on that temporary
-        if self in (
-            GuardSource.LOCAL,
-            GuardSource.LOCAL_NN_MODULE,
-            GuardSource.LOCAL_FSDP_MODULE,
-            GuardSource.SHAPE_ENV,
-            GuardSource.RANDOM_VALUE,
-        ):
-            return locals_
-        if self in (
-            GuardSource.GLOBAL,
-            GuardSource.GLOBAL_NN_MODULE,
-            GuardSource.GLOBAL_FSDP_MODULE,
-        ):
-            return globals_
-        raise NotImplementedError(str(self))
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
@@ -165,7 +152,6 @@ class Guard:
     # GRAD_MODE and SHAPE_ENV.
     originating_source: Source
     create_fn: Callable[[GuardBuilderBase, Guard], None]
-    is_volatile: bool = False
 
     # Export only. These values are written to at time of guard check_fn creation.
     guard_types: Optional[List[str]] = None
@@ -255,8 +241,14 @@ class Guard:
         output += f"    Guarded Class Weakref: {self.guarded_class_weakref}\n"
         return output
 
-    def create(self, local_builder: GuardBuilderBase, global_builder: GuardBuilderBase):
-        return self.create_fn(self.source.select(local_builder, global_builder), self)
+    def create(self, builder: GuardBuilderBase):
+        try:
+            return self.create_fn(builder, self)
+        except Exception:
+            log.error("Error while creating guard:\n%s", str(self).rstrip())
+            if self.stack:
+                log.error("Created at:\n%s", "".join(self.stack.format()[-4:]).rstrip())
+            raise
 
     def is_nn_module(self):
         return self.source.is_nn_module()
@@ -397,7 +389,7 @@ class ModuleContextCheckpointState:
 
 class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
     def __init__(self):
-        self.nn_modules: Dict[str, torch.nn.Module] = {}
+        self.nn_modules: Dict[str, Any] = {}
 
     def copy_graphstate(self):
         return ModuleContextCheckpointState(dict(self.nn_modules))
@@ -545,7 +537,12 @@ CompileContext is a more overarching context that encompasses multiple restarts.
 
 class CompileContext:
     @staticmethod
-    def get() -> Optional[CompileContext]:
+    def get() -> CompileContext:
+        assert _TLS.compile_context is not None
+        return _TLS.compile_context
+
+    @staticmethod
+    def try_get() -> Optional[CompileContext]:
         return getattr(_TLS, "compile_context", None)
 
     def __init__(self, compile_id):
@@ -555,14 +552,14 @@ class CompileContext:
 
     @staticmethod
     def current_compile_id():
-        self = CompileContext.get()
+        self = CompileContext.try_get()
         if self is None:
             return None
         return self.compile_id
 
     @staticmethod
     def current_trace_id():
-        self = CompileContext.get()
+        self = CompileContext.try_get()
         if self is None:
             return None
         if self.compile_id is None:
@@ -579,8 +576,16 @@ class TracingContext:
     """
 
     @staticmethod
-    def get() -> Optional[TracingContext]:
+    def try_get() -> Optional[TracingContext]:
         return getattr(_TLS, "tracing_context", None)
+
+    @staticmethod
+    def get() -> TracingContext:
+        if ctx := TracingContext.try_get():
+            return ctx
+        raise RuntimeError(
+            "TracingContext.get() must be called within an ongoing trace."
+        )
 
     def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
@@ -614,13 +619,14 @@ class TracingContext:
         # ints that are known to be size-like and may have 0/1 entries that we
         # must not specialize on.
         self.force_unspec_int_unbacked_size_like = False
+        # See note [Tensor Fakification and Symbol Caching]
+        self.tensor_to_context = WeakTensorKeyDictionary()
 
     @staticmethod
     @contextmanager
     def patch(**kwargs):
         prior = {}
         ctx = TracingContext.get()
-        assert ctx is not None
 
         for key in kwargs.keys():
             # KeyError on invalid entry
@@ -635,7 +641,7 @@ class TracingContext:
 
     @staticmethod
     def extract_stack():
-        self = TracingContext.get()
+        self = TracingContext.try_get()
         if self is None:
             return traceback.StackSummary()
         stack = list(self.frame_summary_stack)
@@ -649,9 +655,6 @@ class TracingContext:
     @contextlib.contextmanager
     def clear_frame():
         tc = TracingContext.get()
-        assert (
-            tc is not None
-        ), "Frame context manager must be called within an ongoing trace."
         with unittest.mock.patch.object(
             tc, "frame_summary_stack", []
         ), unittest.mock.patch.object(tc, "loc_in_frame", None):
@@ -685,9 +688,6 @@ class TracingContext:
         # frame_summary can be None to solely take advantage of real_stack
         # attachment to thrown exceptions
         tc = TracingContext.get()
-        assert (
-            tc is not None
-        ), "Frame context manager must be called within an ongoing trace."
         if frame_summary is not None:
             tc.frame_summary_stack.append(frame_summary)
         old = tc.loc_in_frame
@@ -706,7 +706,7 @@ class TracingContext:
     @staticmethod
     @contextlib.contextmanager
     def report_output_strides():
-        tc = TracingContext.get()
+        tc = TracingContext.try_get()
         if tc is None:
             yield None
             return
@@ -719,11 +719,9 @@ class TracingContext:
 
     @staticmethod
     def set_current_loc(filename, lineno, frame_name):
-        tc = TracingContext.get()
-        assert (
-            tc is not None
-        ), "Loc context manager must be called within an ongoing trace."
-        tc.loc_in_frame = traceback.FrameSummary(filename, lineno, frame_name)
+        TracingContext.get().loc_in_frame = traceback.FrameSummary(
+            filename, lineno, frame_name
+        )
 
 
 @contextmanager
@@ -737,7 +735,7 @@ def compile_context(context: CompileContext):
 
 
 @contextmanager
-def tracing(context: TracingContext):
+def tracing(context: Optional[TracingContext]):
     """
     This function installs the passed in tracing context as a dynamic scoped
     global variable.
@@ -776,18 +774,16 @@ class Source:
     def name(self) -> str:
         raise NotImplementedError()
 
-    def make_guard(self, fn, is_volatile=False) -> Guard:
+    def make_guard(self, fn) -> Guard:
         if self.guard_source() is GuardSource.CONSTANT:
             raise NotImplementedError()
-        return Guard(self, fn, is_volatile)
+        return Guard(self, fn)
 
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()
 
 
 # Subclasses can be found in torch/_dynamo/source.py
-# Note - there is an odd exception to this invariant of a single base,
-# see class SuperSource
 @dataclasses.dataclass(frozen=True)
 class ChainedSource(Source):
     base: Source
@@ -805,12 +801,10 @@ def detect_fake_mode(inputs: Any = None):
           have to be flattened)
     """
     from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-    from torch.utils._pytree import tree_flatten
 
     fake_modes = []
 
-    context = TracingContext.get()
-    if context is not None:
+    if context := TracingContext.try_get():
         fake_mode = context.fake_mode
         if fake_mode is not None:
             fake_modes.append((fake_mode, "tracing context", 0))
@@ -821,7 +815,7 @@ def detect_fake_mode(inputs: Any = None):
         if isinstance(m, FakeTensorMode):
             fake_modes.append((m, "active fake mode", i))
 
-    flat_inputs, _ = tree_flatten(inputs)
+    flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
         if isinstance(flat_input, FakeTensor):
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))

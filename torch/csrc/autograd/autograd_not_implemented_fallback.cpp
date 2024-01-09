@@ -46,7 +46,7 @@ void _foreach_tensor(
   }
 }
 
-AutogradFallbackMode kAutogradFallbackMode = AutogradFallbackMode::Nothing;
+AutogradFallbackMode kAutogradFallbackMode = AutogradFallbackMode::Warn;
 
 } // namespace
 
@@ -528,24 +528,47 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
   if (is_view) {
     c10::IValue& aliased_output_iv =
         (*stack)[stack->size() - num_returns + aliased_output_idx];
+
+    // See NOTE [ View + Inplace detection ] for more details about this logic
+    const auto erroring_view_func = [op_name = op_name](const at::Tensor&) {
+      // We always need this view_func because otherwise if we do in-place
+      // on this view, we would implicitly use AsStridedBackward instead
+      // of the NotImplemented node. For the cross-dtype/non-strided
+      // cases, we would create something like this anyway
+      TORCH_CHECK(
+          false,
+          "Mutating the view ",
+          op_name,
+          " which does not have a derivative implemented is forbidden.");
+      return at::Tensor();
+    };
+
+    const auto erroring_rev_view_func = [op_name = op_name](const at::Tensor&) {
+      TORCH_CHECK(
+          false,
+          "Accessing the reverse view for ",
+          op_name,
+          " which does not have a derivative implemented is forbidden.");
+      return at::Tensor();
+    };
+
     if (aliased_output_iv.isTensorList()) {
       auto aliased_output = aliased_output_iv.toTensorVector();
-      // Only allow rebasing of the history if we return a single Tensor that is
-      // why we don't have to care about the view_func logic below.
-      // See NOTE [ View + Inplace detection ] for more details about this logic
-      auto result = as_view(
-          /* base=*/aliased_input,
-          /* tensors=*/aliased_output,
-          /* is_bw_differentiable=*/true,
-          /* is_fw_differentiable=*/true,
-          /* creation_meta=*/
-          InferenceMode::is_enabled()
-              ? CreationMeta::INFERENCE_MODE
-              : (at::GradMode::is_enabled() ? CreationMeta::MULTI_OUTPUT_NODE
-                                            : CreationMeta::NO_GRAD_MODE));
-      // ^ pass in creation meta unnecessarily even if not isDifferentiableType,
-      // but we don't have that
-      //   information here anyway.
+      for (auto& sub_output : aliased_output) {
+        as_view(
+            /* base=*/aliased_input,
+            /* tensor=*/sub_output,
+            /* is_bw_differentiable=*/true,
+            /* is_fw_differentiable=*/true,
+            /* view_func=*/erroring_view_func,
+            /* rev_view_func=*/erroring_rev_view_func,
+            /* creation_meta=*/
+            InferenceMode::is_enabled()
+                ? CreationMeta::INFERENCE_MODE
+                : (at::GradMode::is_enabled() ? CreationMeta::MULTI_OUTPUT_NODE
+                                              : CreationMeta::NO_GRAD_MODE));
+      }
+      auto result = std::move(aliased_output);
       stack->at(stack->size() - num_returns + aliased_output_idx) = result;
     } else {
       TORCH_CHECK(aliased_output_iv.isTensor());
@@ -554,19 +577,8 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
           /* tensor=*/std::move(aliased_output_iv).toTensor(),
           /* is_bw_differentiable=*/true,
           /* is_fw_differentiable=*/true,
-          /* view_func=*/
-          [op_name = op_name](const at::Tensor&) {
-            // We always need this view_func because otherwise if we do in-place
-            // on this view, we would implicitly use AsStridedBackward instead
-            // of the NotImplemented node. For the cross-dtype/non-strided
-            // cases, we would create something like this anyway
-            TORCH_CHECK(
-                false,
-                "Mutating the view ",
-                op_name,
-                " which does not have a derivative implemented is forbidden.");
-            return at::Tensor();
-          },
+          /* view_func=*/erroring_view_func,
+          /* rev_view_func=*/erroring_rev_view_func,
           /* creation_meta=*/
           InferenceMode::is_enabled()
               ? CreationMeta::INFERENCE_MODE

@@ -15,7 +15,6 @@
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
-#include <c10/util/Exception.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 
@@ -38,6 +37,10 @@
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_backward_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_backward.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_backward_native.h>
 #include <ATen/ops/_softmax.h>
 #include <ATen/ops/_transform_bias_rescale_qkv.h>
 #include <ATen/ops/_transform_bias_rescale_qkv_native.h>
@@ -446,6 +449,13 @@ int64_t _fused_sdp_choice_meta(
     bool is_causal,
     c10::optional<double> scale) {
   auto query_key_set = query_.key_set();
+#if defined(USE_ROCM)
+  bool has_rocm = query_key_set.has(c10::DispatchKey::HIP);
+  if (has_rocm) {
+    auto choice_int = _fused_sdp_choice_stub(at::kHIP, query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+    return choice_int;
+  }
+#else
   bool has_cuda = query_key_set.has(c10::DispatchKey::CUDA);
   if (has_cuda) {
     auto choice_int = _fused_sdp_choice_stub(
@@ -459,6 +469,7 @@ int64_t _fused_sdp_choice_meta(
         scale);
     return choice_int;
   }
+#endif
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 namespace {
@@ -523,9 +534,14 @@ c10::optional<Tensor> convert_boolean_attn_mask(const c10::optional<Tensor>& att
 // We apply this function to the top level SDPA so that
 // if padding is done it will be tracked for backward automatically
 
-template <int alignment>
-bool is_aligned(const SymInt& size){
-  return size % alignment == 0;
+template<int alignment>
+bool aligned_tensor(const at::Tensor& tensor){
+  for(const auto i : c10::irange(tensor.dim() - 1)){
+    if(tensor.sym_stride(i) % alignment != 0){
+      return false;
+    }
+  }
+  return tensor.sym_stride(-1) == 1;
 }
 
 template <int alignment>
@@ -541,26 +557,16 @@ at::Tensor preprocess_mask(
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value) {
-  constexpr int mem_eff_alignment = 16;
-  // Expand to 4d case
-  at::Tensor attn_mask = mask.expand_symint(
+  constexpr int mem_eff_alignment = 8;
+  at::Tensor result_mask = mask;
+  if (!aligned_tensor<mem_eff_alignment>(mask)) {
+    result_mask = pad_bias<mem_eff_alignment>(mask);
+  }
+  return result_mask.expand_symint(
       {query.sym_size(0),
        query.sym_size(1),
        query.sym_size(2),
        key.sym_size(2)});
-
-  bool aligned_last_dim = is_aligned<mem_eff_alignment>(attn_mask.sym_size(-1));
-  // Apply pad_bias and store the result in attn_mask
-  if (!aligned_last_dim) {
-    return pad_bias<mem_eff_alignment>(attn_mask);
-  }
-  // Check and make the tensor contiguous if needed
-  if (attn_mask.sym_stride(0) % 16 != 0 || attn_mask.sym_stride(1) % 16 != 0 ||
-      attn_mask.sym_stride(2) % 16 != 0 || attn_mask.sym_stride(3) != 1) {
-    return attn_mask.contiguous();
-  }
-
-  return attn_mask;
 }
 // FlashAttentionV2 requires that head dimension be a multiple of 8
 // This was previously done within the kernel, however
@@ -631,7 +637,8 @@ Tensor scaled_dot_product_attention(
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (query_.device().type() == DeviceType::CUDA
-      || query_.device().type() == DeviceType::CPU){
+      || query_.device().type() == DeviceType::CPU
+      || query_.device().type() == DeviceType::HIP){
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
       query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   }
@@ -651,9 +658,8 @@ Tensor scaled_dot_product_attention(
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
       }
       // For the CPU case we do not need to pad the last dim
-      auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
-          query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, scale);
-      return std::get<0>(out_lse_softmax);
+      return std::get<0>(at::_scaled_dot_product_flash_attention_for_cpu(
+          query_, key, value, dropout_p, is_causal, attn_mask, scale));
     }
     case sdp::SDPBackend::efficient_attention: {
       bool compute_logsumexp =
@@ -739,23 +745,14 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     return std::make_tuple(at::matmul(attn, value), attn);
 }
 
-std::tuple<
-    at::Tensor,
-    at::Tensor,
-    at::Tensor,
-    at::Tensor,
-    c10::SymInt,
-    c10::SymInt,
-    at::Tensor,
-    at::Tensor,
-    at::Tensor>
+std::tuple<at::Tensor, at::Tensor>
 _scaled_dot_product_flash_attention_cpu(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
     double dropout_p,
     bool is_causal,
-    bool return_debug_mask,
+    const c10::optional<Tensor>& attn_mask,
     c10::optional<double> scale) {
   const auto dtype = query.scalar_type();
   int64_t batchSize = query.size(0);
@@ -771,49 +768,38 @@ _scaled_dot_product_flash_attention_cpu(
     "scaled_dot_product_attention_flash_attention: Currently do not support dropout > 0");
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
     "scaled_dot_product_attention_flash_attention: Q/K/V should have the same head size");
-  TORCH_CHECK(return_debug_mask == false,
-    "scaled_dot_product_attention_flash_attention: Currently do not support 'return_debug_mask'");
+  TORCH_CHECK(!attn_mask.has_value() ||
+          dtype == attn_mask.value().scalar_type(),
+    "scaled_dot_product_attention_flash_attention: Attention mask is the same data type as query");
+  TORCH_CHECK(!attn_mask.has_value() ||
+          (attn_mask.value().dim() == 2 || attn_mask.value().dim() == 4),
+    "scaled_dot_product_attention_flash_attention: Attention mask dim in {2, 4}");
 
   at::Tensor output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
   const auto accumulate_dtype = toOpMathType(dtype);
   at::Tensor logsumexp = at::empty({batchSize, qSize, num_head},
       query.options().dtype(accumulate_dtype));
-  at::Tensor cum_seq_q = at::empty({}, at::kLong);
-  at::Tensor cum_seq_k = at::empty({}, at::kLong);
-  int64_t max_q = 0;
-  int64_t max_k = 0;
-  at::Tensor philox_seed = at::empty({}, at::kLong);
-  at::Tensor philox_offset = at::empty({}, at::kLong);
-  at::Tensor debug_attn_mask = at::empty({}, query.options());
 
-  flash_attention_kernel(kCPU, output, logsumexp, cum_seq_q, cum_seq_k,
-      max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
-      query, key, value, dropout_p, is_causal, return_debug_mask, scale);
+  flash_attention_kernel(kCPU, output, logsumexp,
+      query, key, value, dropout_p, is_causal, attn_mask, scale);
 
   output = output.transpose(1, 2);
   logsumexp = logsumexp.transpose(1, 2);
 
-  return std::make_tuple(std::move(output), std::move(logsumexp),
-      std::move(cum_seq_q), std::move(cum_seq_k), max_q, max_k,
-      std::move(philox_seed), std::move(philox_offset), std::move(debug_attn_mask));
+  return std::make_tuple(std::move(output), std::move(logsumexp));
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor>
-_scaled_dot_product_flash_attention_backward_cpu(
+_scaled_dot_product_flash_attention_cpu_backward(
     const Tensor& grad_out,
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
     const Tensor& out,
     const Tensor& logsumexp,
-    const Tensor& cum_seq_q,
-    const Tensor& cum_seq_k,
-    const int64_t max_q,
-    const int64_t max_k,
     double dropout_p,
     bool is_causal,
-    const Tensor& philox_seed,
-    const Tensor& philox_offset,
+    const c10::optional<Tensor>& attn_mask,
     c10::optional<double> scale) {
   if (!grad_out.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
@@ -830,8 +816,8 @@ _scaled_dot_product_flash_attention_backward_cpu(
   auto grad_v = at::zeros(v_t.sizes(), value.options());
 
   flash_attention_backward_kernel(kCPU, grad_q, grad_k, grad_v,
-      grad_out_t, q_t, k_t, v_t, o_t, lse_t, cum_seq_q, cum_seq_k,
-      max_q, max_k, dropout_p, is_causal, philox_seed, philox_offset, scale);
+      grad_out_t, q_t, k_t, v_t, o_t, lse_t,
+      dropout_p, is_causal, attn_mask, scale);
 
   grad_q = grad_q.transpose(1, 2);
   grad_k = grad_k.transpose(1, 2);

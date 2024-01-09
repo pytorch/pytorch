@@ -69,8 +69,6 @@ Some notable attributes of the :class:`torch.export.ExportedProgram` class are:
   that are exported with data dependent behavior, the metadata on each node will
   contain symbolic shapes (which look like ``s0``, ``i0``). This attribute maps
   the symbolic shapes to their lower/upper ranges.
-- ``equality_constraints`` (``List[Tuple[InputDim, InputDim]]``): A list of
-  nodes in the graph and dimensions that have the same shape.
 
 Graph
 -----
@@ -190,7 +188,7 @@ A ``call_function`` node represents a call to an operator.
 - **Functional:** We say a callable is “functional” if it satisfies all the
   following requirements:
 
-  - Non-mutating: The the operator does not mutate the value of its input (for
+  - Non-mutating: The operator does not mutate the value of its input (for
     tensors, this includes both metadata and data).
   - No side effects: The operator does not mutate states that are visible
     from outside, like changing values of module parameters.

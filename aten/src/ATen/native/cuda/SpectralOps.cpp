@@ -10,6 +10,7 @@
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/cuda/CuFFTUtils.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -27,7 +28,6 @@
 #include <cufftXt.h>
 
 #include <cmath>
-#include <vector>
 
 
 namespace at::native {
@@ -304,6 +304,17 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   CUFFT_CHECK(cufftSetWorkArea(plan, workspace.mutable_data_ptr()));
 
   // execute transform plan
+#if !defined(USE_ROCM)
+  CUcontext pctx = nullptr;
+  at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx);
+  if (C10_UNLIKELY(!pctx)) {
+    // workaround for corner case where a primary context exists but is not
+    // the current context
+    TORCH_WARN_ONCE("Attempting to run cuFFT, but there was no current CUDA context! Attempting to set the primary context...");
+    at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(&pctx, 0);
+    at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
+  }
+#endif /* !defined(USE_ROCM) */
   exec_cufft_plan(*config, input.data_ptr(), out.data_ptr(), forward);
 
   // Inplace reshaping to original batch shape and inverting the dimension permutation

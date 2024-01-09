@@ -9,8 +9,8 @@
 /// If you are writing a compute bound kernel, you can use the CUDA half
 /// intrinsics directly on the Half type from device code.
 
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/complex.h>
 #include <c10/util/floating_point_utils.h>
@@ -18,25 +18,18 @@
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>
-#include <cstdint>
 #elif !defined(__OPENCL_VERSION__)
 #include <math.h>
-#include <stdint.h>
 #endif
 
 #ifdef _MSC_VER
 #include <intrin.h>
 #endif
 
-#include <complex>
 #include <cstdint>
 #include <cstring>
 #include <iosfwd>
 #include <limits>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <utility>
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
@@ -51,8 +44,6 @@
 #elif defined(SYCL_LANGUAGE_VERSION)
 #include <sycl/sycl.hpp> // for SYCL 2020
 #endif
-
-#include <typeinfo> // operator typeid
 
 namespace c10 {
 
@@ -231,7 +222,7 @@ C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
   constexpr uint32_t exp_offset = UINT32_C(0xE0) << 23;
   // const float exp_scale = 0x1.0p-112f;
   constexpr uint32_t scale_bits = (uint32_t)15 << 23;
-  float exp_scale_val;
+  float exp_scale_val = 0;
   std::memcpy(&exp_scale_val, &scale_bits, sizeof(exp_scale_val));
   const float exp_scale = exp_scale_val;
   const float normalized_value =
@@ -302,7 +293,7 @@ inline uint16_t fp16_ieee_from_fp32_value(float f) {
   // const float scale_to_zero = 0x1.0p-110f;
   constexpr uint32_t scale_to_inf_bits = (uint32_t)239 << 23;
   constexpr uint32_t scale_to_zero_bits = (uint32_t)17 << 23;
-  float scale_to_inf_val, scale_to_zero_val;
+  float scale_to_inf_val = 0, scale_to_zero_val = 0;
   std::memcpy(&scale_to_inf_val, &scale_to_inf_bits, sizeof(scale_to_inf_val));
   std::memcpy(
       &scale_to_zero_val, &scale_to_zero_bits, sizeof(scale_to_zero_val));
@@ -350,7 +341,7 @@ struct alignas(2) Half {
   Half() = default;
 #endif
 
-  constexpr C10_HOST_DEVICE Half(unsigned short bits, from_bits_t) : x(bits){};
+  constexpr C10_HOST_DEVICE Half(unsigned short bits, from_bits_t) : x(bits) {}
   inline C10_HOST_DEVICE Half(float value);
   inline C10_HOST_DEVICE operator float() const;
 
@@ -438,32 +429,34 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 // `error: comparison of constant '255' with boolean expression is always false`
 // for `f > limit::max()` below
 template <typename To, typename From>
-typename std::enable_if<std::is_same<From, bool>::value, bool>::type overflows(
-    From /*f*/) {
+std::enable_if_t<std::is_same_v<From, bool>, bool> overflows(
+    From /*f*/,
+    bool strict_unsigned = false) {
   return false;
 }
 
 // skip isnan and isinf check for integral types
 template <typename To, typename From>
-typename std::enable_if<
-    std::is_integral<From>::value && !std::is_same<From, bool>::value,
-    bool>::type
-overflows(From f) {
+std::enable_if_t<std::is_integral_v<From> && !std::is_same_v<From, bool>, bool>
+overflows(From f, bool strict_unsigned = false) {
   using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
-  if (!limit::is_signed && std::numeric_limits<From>::is_signed) {
+  if constexpr (!limit::is_signed && std::numeric_limits<From>::is_signed) {
     // allow for negative numbers to wrap using two's complement arithmetic.
     // For example, with uint8, this allows for `a - b` to be treated as
     // `a + 255 * b`.
-    return greater_than_max<To>(f) ||
-        (c10::is_negative(f) && -static_cast<uint64_t>(f) > limit::max());
-  } else {
-    return c10::less_than_lowest<To>(f) || greater_than_max<To>(f);
+    if (!strict_unsigned) {
+      return greater_than_max<To>(f) ||
+          (c10::is_negative(f) &&
+           -static_cast<uint64_t>(f) > static_cast<uint64_t>(limit::max()));
+    }
   }
+  return c10::less_than_lowest<To>(f) || greater_than_max<To>(f);
 }
 
 template <typename To, typename From>
-typename std::enable_if<std::is_floating_point<From>::value, bool>::type
-overflows(From f) {
+std::enable_if_t<std::is_floating_point_v<From>, bool> overflows(
+    From f,
+    bool strict_unsigned = false) {
   using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
   if (limit::has_infinity && std::isinf(static_cast<double>(f))) {
     return false;
@@ -481,7 +474,9 @@ C10_CLANG_DIAGNOSTIC_POP()
 #endif
 
 template <typename To, typename From>
-typename std::enable_if<is_complex<From>::value, bool>::type overflows(From f) {
+std::enable_if_t<is_complex<From>::value, bool> overflows(
+    From f,
+    bool strict_unsigned = false) {
   // casts from complex to real are considered to overflow if the
   // imaginary component is non-zero
   if (!is_complex<To>::value && f.imag() != 0) {

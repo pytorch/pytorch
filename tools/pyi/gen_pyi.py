@@ -1,7 +1,11 @@
 import argparse
 import collections
+import importlib
+import sys
+
 from pprint import pformat
 from typing import Dict, List, Sequence
+from unittest.mock import Mock, patch
 
 from torchgen.api.python import (
     PythonSignatureGroup,
@@ -74,7 +78,7 @@ def get_py_torch_functions(
 # TODO: Consider defining some aliases for our Union[...] types, to make
 # the stubs to read on the human eye.
 
-DEVICE_PARAM = "device: Device = None"
+DEVICE_PARAM = "device: Optional[DeviceLikeType] = None"
 FACTORY_PARAMS = f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False, pin_memory: _bool = False"
 
 # NOTE: specifying indices for Tensor.__getitem__
@@ -580,6 +584,43 @@ def gen_nn_functional(fm: FileManager) -> None:
     )
 
 
+"""
+We gather the docstrings for torch with the following steps:
+1. Mock torch and torch._C, which are the only dependencies of the docs files
+2. Mock the _add_docstr function to save the docstrings
+3. Import the docs files to trigger mocked _add_docstr and collect docstrings
+"""
+
+
+def gather_docstrs() -> Dict[str, str]:
+    docstrs = {}
+
+    def mock_add_docstr(func: Mock, docstr: str) -> None:
+        docstrs[func._extract_mock_name()] = docstr.strip()
+
+    # sys.modules and sys.path are restored after the context manager exits
+    with patch.dict(sys.modules), patch.object(sys, "path", sys.path + ["torch"]):
+        # mock the torch module and torch._C._add_docstr
+        sys.modules["torch"] = Mock(name="torch")
+        sys.modules["torch._C"] = Mock(_add_docstr=mock_add_docstr)
+
+        # manually import torch._torch_docs and torch._tensor_docs to trigger
+        # the mocked _add_docstr and collect docstrings
+        sys.modules["torch._torch_docs"] = importlib.import_module("_torch_docs")
+        sys.modules["torch._tensor_docs"] = importlib.import_module("_tensor_docs")
+
+    return docstrs
+
+
+def add_docstr_to_hint(docstr: str, hint: str) -> str:
+    if "..." in hint:  # function or method
+        assert hint.endswith("..."), f"Hint `{hint}` does not end with '...'"
+        hint = hint[:-3]  # remove "..."
+        return "\n    ".join([hint, 'r"""'] + docstr.split("\n") + ['"""', "..."])
+    else:  # attribute or property
+        return f'{hint}\nr"""{docstr}"""\n'
+
+
 def gen_pyi(
     native_yaml_path: str,
     tags_yaml_path: str,
@@ -624,7 +665,7 @@ def gen_pyi(
                                 "size: Optional[_size] = None",
                                 "*",
                                 "dtype: Optional[_dtype] = None",
-                                "device: Union[_device, str, None] = None",
+                                "device: Optional[DeviceLikeType] = None",
                                 "requires_grad: _bool = False",
                                 "check_invariants: Optional[_bool] = None",
                             ]
@@ -645,7 +686,7 @@ def gen_pyi(
                             "obj: Any",
                             "*",
                             "dtype: Optional[_dtype] = None",
-                            "device: Union[_device, str, None] = None",
+                            "device: Optional[DeviceLikeType] = None",
                             "copy: Optional[_bool] = None",
                             "requires_grad: _bool = False",
                         ]
@@ -662,7 +703,7 @@ def gen_pyi(
                             "dtype: _dtype",
                             "count: int = -1",
                             "offset: int = 0",
-                            "device: Union[_device, str, None] = None",
+                            "device: Optional[DeviceLikeType] = None",
                             "requires_grad: _bool = False",
                         ]
                     )
@@ -700,7 +741,7 @@ def gen_pyi(
                             "size: Optional[_size] = None",
                             "*",
                             "dtype: Optional[_dtype] = None",
-                            "device: Union[_device, str, None] = None",
+                            "device: Optional[DeviceLikeType] = None",
                             "requires_grad: _bool = False",
                             "check_invariants: Optional[_bool] = None",
                             "is_coalesced: Optional[_bool] = None",
@@ -719,7 +760,7 @@ def gen_pyi(
                             "*",
                             "dtype: Optional[_dtype] = None",
                             "layout: Optional[_layout] = None",
-                            "device: Union[_device, str, None] = None",
+                            "device: Optional[DeviceLikeType] = None",
                             "requires_grad: _bool = False",
                             "check_invariants: Optional[_bool] = None",
                         ]
@@ -741,6 +782,15 @@ def gen_pyi(
             ],
             "_functionalize_commit_update": [
                 "def _functionalize_commit_update(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_mark_mutation_hidden_from_autograd": [
+                "def _functionalize_mark_mutation_hidden_from_autograd(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_are_all_mutations_hidden_from_autograd": [
+                "def _functionalize_are_all_mutations_hidden_from_autograd(t: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_are_all_mutations_under_no_grad_or_inference_mode": [
+                "def _functionalize_are_all_mutations_under_no_grad_or_inference_mode(t: Tensor) -> _bool: ..."
             ],
             "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_enable_functionalization": [
@@ -963,11 +1013,15 @@ def gen_pyi(
         )
         return hint
 
+    docstrs = gather_docstrs()
     function_hints = []
     for name, hints in sorted(unsorted_function_hints.items()):
         hints = [replace_special_case(h) for h in hints]
         if len(hints) > 1:
             hints = ["@overload\n" + h for h in hints]
+        docstr = docstrs.get(f"torch.{name}")
+        if docstr is not None:
+            hints = [add_docstr_to_hint(docstr, h) for h in hints]
         function_hints += hints
 
     # Generate type signatures for Tensor methods
@@ -977,12 +1031,12 @@ def gen_pyi(
     unsorted_tensor_method_hints.update(
         {
             "size": [
-                "def size(self) -> Size: ...",
+                "def size(self, dim: None = None) -> Size: ...",
                 "def size(self, dim: _int) -> _int: ...",
             ],
             "stride": [
-                "def stride(self) -> Tuple[_int, ...]: ...",
-                "def stride(self, _int) -> _int: ...",
+                "def stride(self, dim: None = None) -> Tuple[_int, ...]: ...",
+                "def stride(self, dim: _int) -> _int: ...",
             ],
             "new_ones": [
                 f"def new_ones(self, size: _size, {FACTORY_PARAMS}) -> Tensor: ..."
@@ -990,10 +1044,11 @@ def gen_pyi(
             "new_tensor": [
                 f"def new_tensor(self, data: Any, {FACTORY_PARAMS}) -> Tensor: ..."
             ],
+            "__new__": ["def __new__(self, *args, **kwargs) -> Tensor: ..."],
             # new and __init__ have the same signatures differ only in return type
             # Adapted from legacy_tensor_ctor and legacy_tensor_new
             "new": [
-                f"def new(self, *args: Any, {DEVICE_PARAM}) ->Tensor: ...",
+                f"def new(self, *args: Any, {DEVICE_PARAM}) -> Tensor: ...",
                 "def new(self, storage: Storage) -> Tensor: ...",
                 "def new(self, other: Tensor) -> Tensor: ...",
                 f"def new(self, size: _size, *, {DEVICE_PARAM}) -> Tensor: ...",
@@ -1087,19 +1142,15 @@ def gen_pyi(
             "is_ipu": ["is_ipu: _bool"],
             "storage_offset": ["def storage_offset(self) -> _int: ..."],
             "to": [
-                "def to(self, dtype: _dtype, non_blocking: _bool = False, copy: _bool = False) -> Tensor: ...",
-                "def to({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "self",
-                            "device: Optional[Union[_device, str]] = None",
-                            "dtype: Optional[_dtype] = None",
-                            "non_blocking: _bool = False",
-                            "copy: _bool = False",
-                        ]
-                    )
-                ),
-                "def to(self, other: Tensor, non_blocking: _bool = False, copy: _bool = False) -> Tensor: ...",
+                (
+                    f"def to(self, {args}, non_blocking: _bool = False, copy: _bool = False, *, "
+                    "memory_format: Optional[torch.memory_format] = None) -> Tensor: ..."
+                )
+                for args in [
+                    "dtype: _dtype",
+                    "device: Optional[DeviceLikeType] = None, dtype: Optional[_dtype] = None",
+                    "other: Tensor",
+                ]
             ],
             "item": ["def item(self) -> Number: ..."],
             "copy_": [
@@ -1193,6 +1244,9 @@ def gen_pyi(
     for name, hints in sorted(unsorted_tensor_method_hints.items()):
         if len(hints) > 1:
             hints = ["@overload\n" + h for h in hints]
+        docstr = docstrs.get(f"torch._C.TensorBase.{name}")
+        if docstr is not None:
+            hints = [add_docstr_to_hint(docstr, h) for h in hints]
         tensor_method_hints += hints
 
     # TODO: Missing type hints for nn
@@ -1211,6 +1265,7 @@ def gen_pyi(
     for c in (
         "DoubleTensor",
         "FloatTensor",
+        "BFloat16Tensor",
         "LongTensor",
         "IntTensor",
         "ShortTensor",
@@ -1236,7 +1291,9 @@ def gen_pyi(
             "float16",
             "bfloat16",
             "float8_e4m3fn",
+            "float8_e4m3fnuz",
             "float8_e5m2",
+            "float8_e5m2fnuz",
             "half",
             "uint8",
             "int8",
@@ -1258,6 +1315,11 @@ def gen_pyi(
             "bool",
             "quint4x2",
             "quint2x4",
+            "bits1x8",
+            "bits2x4",
+            "bits4x2",
+            "bits8",
+            "bits16",
         ]
     ]
 
