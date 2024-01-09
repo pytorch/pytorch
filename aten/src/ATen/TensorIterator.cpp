@@ -1272,7 +1272,7 @@ TensorIterator TensorIterator::reduce_op(TensorBase& out1, TensorBase& out2, con
 }
 
 void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
-  for (int idx = 0; idx < config.tensors_.size(); idx++) {
+  for (const auto idx : c10::irange(config.tensors_.size())) {
     auto& tensor = config.tensors_[idx];
     // If *any* of the arguments is a meta tensor, the overall
     // computation is a meta computation (don't do any work,
