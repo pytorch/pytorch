@@ -293,6 +293,12 @@ int aten_to_numpy_dtype(const ScalarType scalar_type) {
       return NPY_INT8;
     case kByte:
       return NPY_UINT8;
+    case kUInt16:
+      return NPY_UINT16;
+    case kUInt32:
+      return NPY_UINT32;
+    case kUInt64:
+      return NPY_UINT64;
     case kBool:
       return NPY_BOOL;
     default:
