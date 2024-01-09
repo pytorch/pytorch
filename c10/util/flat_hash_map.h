@@ -8,6 +8,7 @@
 // - make sherwood_v3_table::convertible_to_iterator public because GCC5 seems
 // to have issues with it otherwise
 // - fix compiler warnings in operator templated_iterator<const value_type>
+// - make use of 'if constexpr' and eliminate AssignIfTrue template
 
 //          Copyright Malte Skarupke 2017.
 // Distributed under the Boost Software License, Version 1.0.
@@ -176,6 +177,7 @@ struct sherwood_v3_entry {
 };
 
 inline int8_t log2(uint64_t value) {
+  // NOLINTNEXTLINE(*c-arrays*)
   static constexpr int8_t table[64] = {
       63, 0,  58, 1,  59, 47, 53, 2,  60, 39, 48, 27, 54, 33, 42, 3,
       61, 51, 37, 40, 49, 18, 28, 20, 55, 30, 34, 11, 43, 14, 22, 4,
@@ -189,21 +191,6 @@ inline int8_t log2(uint64_t value) {
   value |= value >> 32;
   return table[((value - (value >> 1)) * 0x07EDD5E59A4E28C2) >> 58];
 }
-
-template <typename T, bool>
-struct AssignIfTrue {
-  void operator()(T& lhs, const T& rhs) {
-    lhs = rhs;
-  }
-  void operator()(T& lhs, T&& rhs) {
-    lhs = std::move(rhs);
-  }
-};
-template <typename T>
-struct AssignIfTrue<T, false> {
-  void operator()(T&, const T&) {}
-  void operator()(T&, T&&) {}
-};
 
 inline uint64_t next_power_of_two(uint64_t i) {
   --i;
@@ -389,15 +376,13 @@ class sherwood_v3_table : private EntryAlloc,
       return *this;
 
     clear();
-    if (AllocatorTraits::propagate_on_container_copy_assignment::value) {
+    if constexpr (AllocatorTraits::propagate_on_container_copy_assignment::
+                      value) {
       if (static_cast<EntryAlloc&>(*this) !=
           static_cast<const EntryAlloc&>(other)) {
         reset_to_empty_state();
       }
-      AssignIfTrue<
-          EntryAlloc,
-          AllocatorTraits::propagate_on_container_copy_assignment::value>()(
-          *this, other);
+      static_cast<EntryAlloc&>(*this) = other;
     }
     _max_load_factor = other._max_load_factor;
     static_cast<DetailHasher&>(*this) = other;
@@ -409,13 +394,11 @@ class sherwood_v3_table : private EntryAlloc,
   sherwood_v3_table& operator=(sherwood_v3_table&& other) noexcept {
     if (this == std::addressof(other))
       return *this;
-    else if (AllocatorTraits::propagate_on_container_move_assignment::value) {
+    else if constexpr (AllocatorTraits::propagate_on_container_move_assignment::
+                           value) {
       clear();
       reset_to_empty_state();
-      AssignIfTrue<
-          EntryAlloc,
-          AllocatorTraits::propagate_on_container_move_assignment::value>()(
-          *this, std::move(other));
+      static_cast<EntryAlloc&>(*this) = std::move(other);
       swap_pointers(other);
     } else if (
         static_cast<EntryAlloc&>(*this) == static_cast<EntryAlloc&>(other)) {
@@ -494,9 +477,9 @@ class sherwood_v3_table : private EntryAlloc,
     // otherwise.
     template <
         class target_type = const value_type,
-        class = typename std::enable_if<
-            std::is_same<target_type, const value_type>::value &&
-            !std::is_same<target_type, value_type>::value>::type>
+        class = std::enable_if_t<
+            std::is_same_v<target_type, const value_type> &&
+            !std::is_same_v<target_type, value_type>>>
     operator templated_iterator<target_type>() const {
       return {current};
     }
@@ -543,6 +526,7 @@ class sherwood_v3_table : private EntryAlloc,
     return end();
   }
   const_iterator find(const FindKey& key) const {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     return const_cast<sherwood_v3_table*>(this)->find(key);
   }
   uint64_t count(const FindKey& key) const {
@@ -726,7 +710,7 @@ class sherwood_v3_table : private EntryAlloc,
     rehash_for_other_container(*this);
   }
 
-  void swap(sherwood_v3_table& other) {
+  void swap(sherwood_v3_table& other) noexcept {
     using std::swap;
     swap_pointers(other);
     swap(static_cast<ArgumentHash&>(*this), static_cast<ArgumentHash&>(other));
@@ -795,7 +779,8 @@ class sherwood_v3_table : private EntryAlloc,
 
   uint64_t num_buckets_for_reserve(uint64_t num_elements_) const {
     return static_cast<uint64_t>(std::ceil(
-        num_elements_ / std::min(0.5, static_cast<double>(_max_load_factor))));
+        static_cast<double>(num_elements_) /
+        std::min(0.5, static_cast<double>(_max_load_factor))));
   }
   void rehash_for_other_container(const sherwood_v3_table& other) {
     rehash(
@@ -1486,6 +1471,7 @@ struct prime_number_hash_policy {
     // ClosestPrime(p * 2^(1/3)) and ClosestPrime(p * 2^(2/3)) and put those in
     // the gaps
     // 5. get PrevPrime(2^64) and put it at the end
+    // NOLINTNEXTLINE(*c-arrays*)
     static constexpr const uint64_t prime_list[] = {
         2llu,
         3llu,
@@ -1673,6 +1659,7 @@ struct prime_number_hash_policy {
         11493228998133068689llu,
         14480561146010017169llu,
         18446744073709551557llu};
+    // NOLINTNEXTLINE(*c-arrays*)
     static constexpr uint64_t (*const mod_functions[])(uint64_t) = {
         &mod0,
         &mod2,
@@ -1911,7 +1898,7 @@ struct fibonacci_hash_policy {
 
   int8_t next_size_over(uint64_t& size) const {
     size = std::max(uint64_t(2), detailv3::next_power_of_two(size));
-    return 64 - detailv3::log2(size);
+    return static_cast<int8_t>(64 - detailv3::log2(size));
   }
   void commit(int8_t shift_) {
     shift = shift_;
@@ -2020,9 +2007,7 @@ class flat_hash_map
       return false;
     for (const typename Table::value_type& value : lhs) {
       auto found = rhs.find(value.first);
-      if (found == rhs.end())
-        return false;
-      else if (value.second != found->second)
+      if (found == rhs.end() || value.second != found->second)
         return false;
     }
     return true;

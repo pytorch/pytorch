@@ -6,10 +6,10 @@ import unittest
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 
 import torch
-import torch.utils._cxx_pytree as cxx_pytree
 import torch.utils._pytree as py_pytree
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
     run_tests,
     subtest,
@@ -17,6 +17,11 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+if IS_FBCODE:
+    # optree is not yet enabled in fbcode, so just re-test the python implementation
+    cxx_pytree = py_pytree
+else:
+    import torch.utils._cxx_pytree as cxx_pytree
 
 GlobalPoint = namedtuple("GlobalPoint", ["x", "y"])
 
@@ -454,7 +459,7 @@ class TestGenericPytree(TestCase):
             subtest(cxx_pytree, name="cxx"),
         ],
     )
-    def test_flatten_unflatten_return_type(self, pytree_impl, op):
+    def test_flatten_unflatten_return_types(self, pytree_impl, op):
         x = torch.randn(3, 3)
         expected = op(x, dim=0)
 
@@ -502,7 +507,52 @@ class TestGenericPytree(TestCase):
             subtest(cxx_pytree, name="cxx"),
         ],
     )
-    def test_treemap(self, pytree_impl):
+    def test_flatten_with_is_leaf(self, pytree_impl):
+        def run_test(pytree, one_level_leaves):
+            values, treespec = pytree_impl.tree_flatten(
+                pytree, is_leaf=lambda x: x is not pytree
+            )
+            self.assertIsInstance(values, list)
+            self.assertEqual(len(values), treespec.num_nodes - 1)
+            self.assertEqual(len(values), treespec.num_leaves)
+            self.assertEqual(len(values), treespec.num_children)
+            self.assertEqual(values, one_level_leaves)
+
+            self.assertEqual(
+                treespec,
+                pytree_impl.tree_structure(
+                    pytree_impl.tree_unflatten([0] * treespec.num_leaves, treespec)
+                ),
+            )
+
+            unflattened = pytree_impl.tree_unflatten(values, treespec)
+            self.assertEqual(unflattened, pytree)
+
+        cases = [
+            ([()], [()]),
+            (([],), [[]]),
+            ({"a": ()}, [()]),
+            ({"a": 0, "b": [{"c": 1}]}, [0, [{"c": 1}]]),
+            (
+                {
+                    "a": 0,
+                    "b": [1, {"c": 2}, torch.ones(3)],
+                    "c": (torch.zeros(2, 3), 1),
+                },
+                [0, [1, {"c": 2}, torch.ones(3)], (torch.zeros(2, 3), 1)],
+            ),
+        ]
+        for case in cases:
+            run_test(*case)
+
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
+    def test_tree_map(self, pytree_impl):
         def run_test(pytree):
             def f(x):
                 return x * 3
@@ -536,7 +586,40 @@ class TestGenericPytree(TestCase):
             subtest(cxx_pytree, name="cxx"),
         ],
     )
-    def test_tree_only(self, pytree_impl):
+    def test_tree_map_multi_inputs(self, pytree_impl):
+        def run_test(pytree):
+            def f(x, y, z):
+                return x, [y, (z, 0)]
+
+            pytree_x = pytree
+            pytree_y = pytree_impl.tree_map(lambda x: (x + 1,), pytree)
+            pytree_z = pytree_impl.tree_map(lambda x: {"a": x * 2, "b": 2}, pytree)
+
+            self.assertEqual(
+                pytree_impl.tree_map(f, pytree_x, pytree_y, pytree_z),
+                pytree_impl.tree_map(
+                    lambda x: f(x, (x + 1,), {"a": x * 2, "b": 2}), pytree
+                ),
+            )
+
+        cases = [
+            [()],
+            ([],),
+            {"a": ()},
+            {"a": 1, "b": [{"c": 2}]},
+            {"a": 0, "b": [2, {"c": 3}, 4], "c": (5, 6)},
+        ]
+        for case in cases:
+            run_test(case)
+
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
+    def test_tree_map_only(self, pytree_impl):
         self.assertEqual(
             pytree_impl.tree_map_only(int, lambda x: x + 2, [0, "a"]), [2, "a"]
         )
@@ -975,6 +1058,10 @@ TreeSpec(tuple, None, [*,
 
 
 class TestCxxPytree(TestCase):
+    def setUp(self):
+        if IS_FBCODE:
+            raise unittest.SkipTest("C++ pytree tests are not supported in fbcode")
+
     def test_treespec_equality(self):
         self.assertEqual(cxx_pytree.LeafSpec(), cxx_pytree.LeafSpec())
 

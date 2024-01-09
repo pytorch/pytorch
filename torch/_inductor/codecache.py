@@ -1344,11 +1344,12 @@ def get_include_and_linking_paths(
         if aot_mode and cuda:
             if macros is None:
                 macros = ""
-            macros += " -D USE_CUDA"
+            macros += " -D USE_ROCM" if torch.version.hip else " -D USE_CUDA"
 
         if cuda:
             if torch.version.hip is not None:
                 libs += ["c10_hip", "torch_hip"]
+                macros += " -D __HIP_PLATFORM_AMD__"
             else:
                 if config.is_fbcode():
                     libs += ["cuda"]
@@ -1466,6 +1467,7 @@ def cpp_compile_command(
         assert is_clang()
         # Use clang runtime instead of libgcc
         clang_flags += " --rtlib=compiler-rt"
+        clang_flags += " -fuse-ld=lld"
         linker_paths = "-B" + build_paths.glibc_lib()
         linker_paths += " -L" + build_paths.glibc_lib()
     else:
@@ -1937,8 +1939,7 @@ class CppWrapperCodeCache:
     def load(cls, source_code: str, func_name: str, key: str, cuda: bool) -> CDLL:
         name = f"inline_extension_{key}"
         cpp_wrapper_dir = cpp_wrapper_cache_dir(name)
-        if not os.path.exists(cpp_wrapper_dir):
-            os.makedirs(cpp_wrapper_dir)
+        os.makedirs(cpp_wrapper_dir, exist_ok=True)
 
         ext = "so"
         filepath = os.path.join(cpp_wrapper_dir, f"{name}.{ext}")
@@ -2340,6 +2341,8 @@ def _async_compile_initializer(orig_ppid) -> None:
     global _watchdog_thread
     _watchdog_thread = Thread(target=run, daemon=True)
     _watchdog_thread.start()
+    # Ignore Ctrl-C (i.e. SIGINT) sent to pool workers to avoid meaningless log spam.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 _watchdog_thread: Optional[Thread] = None

@@ -471,7 +471,7 @@ def _annotate_gru_io_only(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
     gru_partitions = get_source_partitions(gm.graph, [torch.nn.GRU], filter_fn)
-    gru_partitions = list(itertools.chain(*gru_partitions.values()))
+    gru_partitions = list(itertools.chain.from_iterable(gru_partitions.values()))
     annotated_partitions = []
     for gru_partition in gru_partitions:
         annotated_partitions.append(gru_partition.nodes)
@@ -525,7 +525,7 @@ def _annotate_max_pool2d(
     module_partitions = get_source_partitions(
         gm.graph, [torch.nn.MaxPool2d, torch.nn.functional.max_pool2d], filter_fn
     )
-    maxpool_partitions = list(itertools.chain(*module_partitions.values()))
+    maxpool_partitions = list(itertools.chain.from_iterable(module_partitions.values()))
     annotated_partitions = []
     for maxpool_partition in maxpool_partitions:
         annotated_partitions.append(maxpool_partition.nodes)
@@ -577,7 +577,7 @@ def _annotate_adaptive_avg_pool2d(
     module_partitions = get_source_partitions(
         gm.graph, [torch.nn.AdaptiveAvgPool2d, F.adaptive_avg_pool2d], filter_fn
     )
-    partitions = list(itertools.chain(*module_partitions.values()))
+    partitions = list(itertools.chain.from_iterable(module_partitions.values()))
     annotated_partitions = []
     for partition in partitions:
         pool_node = partition.output_nodes[0]
@@ -701,7 +701,7 @@ def _annotate_add(
     add_partitions = get_source_partitions(
         gm.graph, [operator.add, torch.add, operator.iadd], filter_fn
     )
-    add_partitions = list(itertools.chain(*add_partitions.values()))
+    add_partitions = list(itertools.chain.from_iterable(add_partitions.values()))
     annotated_partitions = []
     for add_partition in add_partitions:
         annotated_partitions.append(add_partition.nodes)
@@ -800,7 +800,7 @@ def _annotate_mul(
     mul_partitions = get_source_partitions(
         gm.graph, ["mul", "mul_", operator.mul, torch.mul, operator.imul], filter_fn
     )
-    mul_partitions = list(itertools.chain(*mul_partitions.values()))
+    mul_partitions = list(itertools.chain.from_iterable(mul_partitions.values()))
     annotated_partitions = []
     for mul_partition in mul_partitions:
         annotated_partitions.append(mul_partition.nodes)
@@ -844,7 +844,7 @@ def _annotate_cat(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
     cat_partitions = get_source_partitions(gm.graph, [torch.cat], filter_fn)
-    cat_partitions = list(itertools.chain(*cat_partitions.values()))
+    cat_partitions = list(itertools.chain.from_iterable(cat_partitions.values()))
     annotated_partitions = []
     for cat_partition in cat_partitions:
         cat_node = cat_partition.output_nodes[0]
