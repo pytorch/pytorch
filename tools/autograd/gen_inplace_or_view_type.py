@@ -26,13 +26,11 @@ from torchgen.api.types import (
     SymIntT,
     # See Note [Nested Arg Types]
     tensorT,
-    ViewInverseSignature,
 )
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
 from torchgen.model import (
     NativeFunction,
-    NativeFunctionsViewGroup,
     SchemaKind,
     SelfArgument,
     TensorOptionsArguments,
@@ -161,7 +159,7 @@ at::_ops::${unambiguous_name}::call(${unpacked_args})"""
 
 REVERSE_VIEW_DISPATCH = CodeTemplate(
     """\
-at::functionalization::FunctionalInverses::${reverse_name}(${unpacked_args})"""
+${reverse_name}(${unpacked_args})"""
 )
 
 MULTI_OUTPUT_VIEW_ITERATION = CodeTemplate(
@@ -275,16 +273,12 @@ def unpacked_name(arg_name: str) -> str:
 
 
 # e.g. select.int -> select_copy_int_inverse()
-def inverse_view_name(f: NativeFunction, g: NativeFunctionsViewGroup) -> str:
-    if g.view_copy is not None:
-        return ViewInverseSignature(g).name()
-    else:
-        # NB: some view ops don't have associated group data (e.g. chunk, narrow)
-        copy_variant = f"{f.root_name}_copy"
-        overload = f"{f.func.name.overload_name}"
-        if overload != "":
-            overload = "_" + overload
-        return f"{copy_variant}{overload}_inverse"
+def inverse_view_name(f: NativeFunction) -> str:
+    copy_variant = f"{f.root_name}_copy"
+    overload = f"{f.func.name.overload_name}"
+    if overload != "":
+        overload = "_" + overload
+    return f"{copy_variant}{overload}_inverse"
 
 
 def extract_bindings(f: NativeFunction) -> List[Binding]:
@@ -365,10 +359,7 @@ def emit_view_call(
 
 
 def emit_view_lambda(
-    f: NativeFunction,
-    g: NativeFunctionsViewGroup,
-    bindings: List[Binding],
-    view_idx: Optional[str] = None,
+    f: NativeFunction, bindings: List[Binding], view_idx: Optional[str] = None
 ) -> str:
     """Generate an additional lambda function to recover views in backward when as_strided is not supported.
     See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details.
@@ -439,8 +430,10 @@ def emit_view_lambda(
         *updated_args[1:],
     ]
 
+    from torchgen.api.functionalization import reverse_name
+
     reverse_replay_view_call = REVERSE_VIEW_DISPATCH.substitute(
-        reverse_name=inverse_view_name(f, g),
+        reverse_name=reverse_name(f, include_namespace=True),
         unpacked_args=reverse_unpacked_args,
     )
     reverse_replay_view_func = REVERSE_REPLAY_VIEW_LAMBDA_FUNC.substitute(
@@ -463,9 +456,6 @@ def emit_view_body(
 ) -> Tuple[str, str]:
     # See NOTE [ Autograd View Variables ] in variable.h for details.
     f = fn.func
-    g = fn.view_group
-    assert g is not None
-
     base_name = get_base_name(f)
     view_info = get_view_info(f)
     call = ""
@@ -504,7 +494,7 @@ def emit_view_body(
             creation_meta = get_creation_meta_in_mode("CreationMeta::MULTI_OUTPUT_NODE")
             view_idx = "view_idx"
             view_lambda = emit_view_lambda(
-                f, g, extract_bindings(f), view_idx=view_idx
+                f, extract_bindings(f), view_idx=view_idx
             ).strip()
             as_view_call = (
                 f"as_view(/* base */ {view_info}, /* output */ {var}[{view_idx}], "
@@ -517,7 +507,7 @@ def emit_view_body(
             )
             rhs_value = f"std::move({var})"
         else:
-            call += emit_view_lambda(f, g, extract_bindings(f), view_idx=None)
+            call += emit_view_lambda(f, extract_bindings(f), view_idx=None)
             creation_meta = get_creation_meta_in_mode("CreationMeta::DEFAULT")
             rhs_value = (
                 f"as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, "
