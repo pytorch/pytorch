@@ -141,7 +141,7 @@ SymInt operator-(const SymInt& s) {
     // Which in opimized code affects results of `check_range` condition
     // Workaround by using ternary that avoids alterning the flags
 #if C10_HAS_BUILTIN_OVERFLOW()
-   decltype(val) out = 0;
+   std::decay_t<decltype(val)> out = 0;
    if (C10_UNLIKELY(__builtin_sub_overflow(out, val, &out))) {
      return SymInt(val);
    }
