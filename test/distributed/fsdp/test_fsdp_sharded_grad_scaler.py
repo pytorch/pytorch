@@ -206,7 +206,6 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
 
     def _build_model_and_optim(
         self,
-        build_extra_ddp: bool = False,
         cpu_offload: CPUOffload = CPUOffload(offload_params=False),
         use_orig_params: bool = False,
     ):
@@ -216,14 +215,11 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
             CUDAInitMode.CUDA_BEFORE,
             deterministic=True,
         )
-
-        if build_extra_ddp:
-            ref_model = DDP(
-                copy.deepcopy(model),
-                device_ids=[self.rank],
-            )
-            ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-2)
-
+        ref_model = DDP(
+            copy.deepcopy(model),
+            device_ids=[self.rank],
+        )
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         fsdp_kwargs = {
             "use_orig_params": use_orig_params,
             "cpu_offload": cpu_offload,
@@ -234,14 +230,9 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                 }
             ),
         }
-
         model = FSDP(model, **fsdp_kwargs)
-        optim = torch.optim.SGD(model.parameters(), lr=1e-2)
-
-        if build_extra_ddp:
-            return model, optim, ref_model, ref_optim
-        else:
-            return model, optim
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        return model, optim, ref_model, ref_optim
 
     @skip_if_lt_x_gpu(2)
     def test_sharded_grad_scaler_found_inf(self):
@@ -262,7 +253,6 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
         cpu_offload: CPUOffload,
     ):
         model, optim, ref_model, ref_optim = self._build_model_and_optim(
-            build_extra_ddp=True,
             cpu_offload=cpu_offload,
             use_orig_params=use_orig_params,
         )

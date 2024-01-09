@@ -280,7 +280,7 @@ class ShardedGradScaler(GradScaler):
 
         # Synchronize the detected inf across the ranks
         optimizer_state = self._per_optimizer_states[id(optimizer)]
-        future_handles = []
+        works = []
         found_inf_on_cpus = []
         found_inf_on_cudas = []
 
@@ -289,26 +289,19 @@ class ShardedGradScaler(GradScaler):
                 found_inf_on_cpus.append(found_inf)
                 found_inf_on_cuda = found_inf.cuda()
                 found_inf_on_cudas.append(found_inf_on_cuda)
-                future_handles.append(
+                works.append(
                     dist.all_reduce(
                         found_inf_on_cuda, async_op=True, group=self.process_group
-                    ).get_future()
+                    )
                 )
             else:
-                future_handles.append(
-                    dist.all_reduce(
-                        found_inf, async_op=True, group=self.process_group
-                    ).get_future()
+                works.append(
+                    dist.all_reduce(found_inf, async_op=True, group=self.process_group)
                 )
-
-        # Make sure that the calls are done before moving out.
-        if future_handles:
-            torch.futures.wait_all(future_handles)
-
-        for found_inf_on_cpu, found_inf_on_cuda in zip(
-            found_inf_on_cpus, found_inf_on_cudas
-        ):
-            found_inf_on_cpu.copy_(found_inf_on_cuda)
+        for work in works:
+            work.wait()
+        if found_inf_on_cpus:
+            torch._foreach_copy_(found_inf_on_cpus, found_inf_on_cudas)
 
     def _amp_update_scale_cpu_(self, found_inf: torch.Tensor) -> None:
         """
