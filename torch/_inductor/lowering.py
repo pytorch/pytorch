@@ -2563,6 +2563,14 @@ def _local_scalar_dense(data):
     return sym
 
 
+@register_lowering(aten._assert_scalar)
+def _assert_scalar(data, msg):
+    buffer = ir.AssertScalar(data, msg)
+    # This buffer isn't used by anyone (it returns None), so we must explicitly register it
+    buffer.name = V.graph.register_buffer(buffer)
+    return buffer
+
+
 def _full(fill_value, device, dtype, size):
     value = fill_value
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):

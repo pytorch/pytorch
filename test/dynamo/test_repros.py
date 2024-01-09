@@ -3784,7 +3784,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_deferred_runtime_asserts(self):
-        @torch.compile(backend="aot_eager", fullgraph=True)
+        @torch.compile(fullgraph=True)
         def f(x):
             y = x.item()
             torch._check_is_size(y)

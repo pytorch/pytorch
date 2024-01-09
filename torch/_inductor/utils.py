@@ -586,6 +586,11 @@ def has_incompatible_cudagraph_ops(gm):
         "run_and_save_rng_state",
         "run_with_rng_state",
         "aten._local_scalar_dense",
+        # Technically, it's not necessary to ban this, because an
+        # assert_scalar with constant arguments can be validly run
+        # with CUDA graphs, but the operator is also pointless with
+        # constant arguments, so might as well ban
+        "aten._assert_scalar",
     }
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
@@ -606,6 +611,11 @@ def has_incompatible_cudagraph_ops(gm):
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
             return True
+        if hasattr(node.target, "tags"):
+            if torch.Tag.dynamic_output_shape in node.target.tags:
+                return True
+            if torch.Tag.data_dependent_output in node.target.tags:
+                return True
     return False
 
 
