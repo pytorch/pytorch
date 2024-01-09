@@ -325,7 +325,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         elif self.value is torch._functorch.vmap.vmap_nesting:
             assert len(args) == 2
             return VmapCtxManagerVariable.create(
-                tx, [guard_if_dyn(x) for x in args],
+                tx,
+                [guard_if_dyn(x) for x in args],
             )
         elif self.value is torch._C._is_torch_function_enabled:
             assert not (args or kwargs)

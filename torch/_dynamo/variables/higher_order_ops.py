@@ -441,7 +441,10 @@ class FunctorchVmapHigherOrderVariable(UserFunctionVariable):
             # In case of failure, mark the functino as skipped to avoid dynamo from
             # trying to trace it again
             from torch._C._dynamo import eval_frame
-            eval_frame.skip_code(args[0].get_code())
+
+            if hasattr(args[0], "get_code"):
+                # methods implemented in C++ don't have '__code__'
+                eval_frame.skip_code(args[0].get_code())
 
             # Graph break
             raise
