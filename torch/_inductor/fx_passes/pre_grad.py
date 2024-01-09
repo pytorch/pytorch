@@ -34,6 +34,7 @@ split_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 unbind_stack_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 efficient_conv_bn_eval_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 merge_getitem_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+predispatch_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalization_pass,
@@ -71,6 +72,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
         # explicitly run with predispatch atenIR based passes
         if config.is_predispatch:
             group_batch_fusion_passes(gm.graph, pre_grad=True)
+            predispatch_pass.apply(gm.graph)
         else:
             gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
