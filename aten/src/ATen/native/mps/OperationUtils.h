@@ -28,7 +28,7 @@
 // Fwd declarations
 namespace at {
   struct TensorIteratorBase;
-};
+}
 using namespace at::mps;
 
 namespace at::native::mps {
@@ -342,6 +342,6 @@ static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
   [encoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
 }
 
-id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder, const TensorIteratorBase& iter);
+id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder, const TensorIteratorBase& iter, bool use_64bit_index = false);
 
 } // namespace at::native::mps
