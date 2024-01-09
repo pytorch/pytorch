@@ -43,7 +43,6 @@ from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseScheduling, WhyNoFuse
 from ..triton_heuristics import AutotuneHint
 from ..utils import (
-    cache_on_self,
     do_bench,
     get_fused_kernel_name,
     get_kernel_metadata,
@@ -51,7 +50,6 @@ from ..utils import (
     is_welford_reduction,
     next_power_of_2,
     Placeholder,
-    sympy_dot,
     sympy_product,
     sympy_subs,
     sympy_symbol,
@@ -97,150 +95,6 @@ class IndexingOptions:
 
     def has_tmpmask(self):
         return "tmp" in self.mask_str
-
-
-@dataclasses.dataclass
-class BlockPtrOptions:
-    constant_offset: sympy.Expr
-    shape: List[sympy.Expr]
-    strides: List[sympy.Expr]
-    block_shape: List[str]
-    order: List[int]
-    offsets: List[str]
-    mask_vars: Set[sympy.Symbol]
-    reshape_suffix: List[str]
-
-    @staticmethod
-    def create(
-        strides: List[sympy.Expr],
-        constant_offset: sympy.Expr,
-        range_trees: List[IterationRangesEntry],
-        mask_vars: Set[sympy.Symbol],
-    ) -> BlockPtrOptions:
-        """Helper to create a  BlockPtrOptions instance"""
-        block_shape = [f"{t.prefix.upper()}BLOCK" for t in range_trees]
-        reshape_suffix = [*block_shape]
-
-        broadcasting_dim = [s == 0 for s in strides]
-        for i, is_broadcasting in enumerate(broadcasting_dim):
-            if is_broadcasting:
-                # drop any stride==0 dimensions for performance
-                reshape_suffix[i] = "1"
-
-        if V.kernel.no_x_dim:
-            assert range_trees[0].prefix == "x"
-            reshape_suffix.pop(0)
-
-        if (
-            not V.kernel.inside_reduction
-            and len(strides) == len(V.kernel.numels) - 1
-            and V.kernel.numels[-1] != 1
-        ):
-            # Need to expand rank by 1 to match rank when self.inside_reduction=True
-            reshape_suffix.append("1")
-
-        def filter(it):
-            """Removes any broadcasting dims from a given sequence"""
-            assert len(it) == len(broadcasting_dim)
-            return [
-                item
-                for item, is_broadcasting in zip(it, broadcasting_dim)
-                if not is_broadcasting
-            ]
-
-        return BlockPtrOptions(
-            constant_offset=V.graph.sizevars.lookup_precomputed_size(constant_offset),
-            shape=[
-                V.graph.sizevars.lookup_precomputed_size(t.numel)
-                for t in filter(range_trees)
-            ],
-            strides=[*map(V.graph.sizevars.lookup_precomputed_size, filter(strides))],
-            block_shape=filter(block_shape),
-            order=V.graph.sizevars.guarded_order(filter(strides)),
-            offsets=filter([f"{t.prefix}offset" for t in range_trees]),
-            mask_vars=mask_vars,
-            reshape_suffix=reshape_suffix,
-        )
-
-    def format(self, name: str, roffset=True) -> str:
-        """
-        Codegen a call to tl.make_block_ptr()
-
-        Args:
-            name: variable name for pointer
-            roffset: should roffset be included in offsets=..., for use with tl.advance()
-
-        Returns:
-            "tl.make_block_ptr(...)"
-        """
-        f = V.kernel.index_to_str
-        offsets = [*self.offsets]
-        if not roffset:
-            offsets[offsets.index("roffset")] = "0"
-        args = [
-            f"{name} + ({f(self.constant_offset)})"
-            if self.constant_offset != 0
-            else name,
-            f"shape={f(self.shape)}",
-            f"strides={f(self.strides)}",
-            f"block_shape={f(self.block_shape)}",
-            f"order={f(self.order)}",
-            f"offsets={f(offsets)}",
-        ]
-        return f"tl.make_block_ptr({', '.join(args)})"
-
-    @cache_on_self
-    def boundary_check(self) -> List[int]:
-        """List of indices to pass to tl.load(boundary_check=...)"""
-        check = []
-        for i in range(len(self.shape)):
-            if (
-                self.block_shape[i] != "1"
-                and not V.graph.sizevars.statically_known_equals(self.strides[i], 0)
-                and not V.graph.sizevars.statically_known_multiple_of(
-                    self.shape[i],
-                    config.triton.max_block[self.block_shape[i][0]],
-                )
-                and not (V.kernel.no_x_dim and self.block_shape[i] == "XBLOCK")
-            ):
-                check.append(i)
-        return check
-
-    def advance_roffset(self):
-        """Codegen string to pass to tl.advance(name, ...)"""
-        advance = ["0"] * len(self.shape)
-        advance[self.offsets.index("roffset")] = "RBLOCK"
-        return V.kernel.index_to_str(advance)
-
-    def has_rindex(self):
-        return "RBLOCK" in self.block_shape
-
-    def has_tmpmask(self):
-        return False  # block_ptr can't do indirect indexing
-
-    def has_mask(self):
-        return bool(self.boundary_check())
-
-
-def triton_reshape(value: str, old_shape: List[str], new_shape: List[str]):
-    """Workaround https://github.com/openai/triton/issues/2836"""
-    assert isinstance(old_shape, list) and isinstance(new_shape, list)
-    if old_shape == new_shape:
-        return value
-    if [s for s in new_shape if s != "1"] != old_shape:
-        return f"tl.reshape({value}, [{', '.join(new_shape)}])"
-    # rewrite to [:, None] syntax, which is less buggy
-    idx = 0
-    expand = []
-    for size in new_shape:
-        if idx < len(old_shape) and size == old_shape[idx]:
-            expand.append(":")
-            idx += 1
-        else:
-            assert size == "1"
-            expand.append("None")
-    assert idx == len(old_shape)
-    return f"{value}[{', '.join(expand)}]"
 
 
 class TritonPrinter(PythonPrinter):
@@ -346,17 +200,6 @@ def triton_compute_type(dtype):
     elif triton_type_name in ("float16", "bfloat16"):
         # float16 math is done in float32 inside the kernel
         triton_type_name = "float32"
-    elif triton_type_name == "float8_e4m3fn":
-        triton_type_name = "float8e4nv"
-    elif triton_type_name == "float8_e5m2":
-        triton_type_name = "float8e5"
-    return f"tl.{triton_type_name}"
-
-
-def triton_store_type(dtype):
-    triton_type_name = str(dtype).split(".")[-1]
-    if triton_type_name == "bool":
-        triton_type_name = "int8"
     elif triton_type_name == "float8_e4m3fn":
         triton_type_name = "float8e4nv"
     elif triton_type_name == "float8_e5m2":
@@ -814,7 +657,7 @@ class TritonKernelOverrides(TritonOverrides):
 
     @classmethod
     def index_expr(cls, expr, dtype):
-        indexing = V.kernel.indexing(expr, block_ptr=False)
+        indexing = V.kernel.indexing(expr)
         assert isinstance(indexing, IndexingOptions)
         # This is called from CSEProxy.__getattr__,  so we'll set the bounds there
         var = V.kernel.cse.generate(V.kernel.compute, indexing.index_str)
@@ -1162,7 +1005,6 @@ class TritonKernel(Kernel):
         self.index_dtype: str = index_dtype
         self.min_elem_per_thread = min_elem_per_thread
         self.last_usage: Set[str] = set()
-        self.block_ptr_id = itertools.count()
 
         self.persistent_reduction: bool = self.should_use_persistent_reduction()
         self.no_x_dim = (
@@ -1447,8 +1289,7 @@ class TritonKernel(Kernel):
         copy_shape=None,
         dense_indexing=False,
         override_mask=None,
-        block_ptr=False,
-    ) -> Union[IndexingOptions, BlockPtrOptions]:
+    ) -> IndexingOptions:
         """
         Compute the index and mask to pass to tl.load() or tl.store()
         """
@@ -1511,36 +1352,6 @@ class TritonKernel(Kernel):
             else:
                 have_dense = False
             dense_mask_vars.add(f"{tree.prefix}mask")
-
-        if (
-            block_ptr
-            and config.triton.use_block_ptr
-            and not override_mask
-            and not self._load_mask
-            and len(mask_vars - dense_mask_vars) == 0
-            and not self.is_indirect_indexing(index)
-            and have_loop_vars
-            # workaround https://github.com/openai/triton/issues/2821
-            and self.index_dtype == "tl.int32"
-        ):
-            index_relative_to_xyr_index = sympy_subs(
-                index, {v: t.expr for v, t in self.range_tree_nodes.items()}
-            )
-            range_trees = self.active_range_trees(reorder=True)
-            symbols = [t.symbol() for t in range_trees]
-            strides = [sympy.Wild(f"stride_{s}", exclude=symbols) for s in symbols]
-            offset = sympy.Wild("_offset", exclude=symbols)
-            m = index_relative_to_xyr_index.match(sympy_dot(symbols, strides) + offset)
-            # TODO(jansel): it is sometimes possible to do higher dimensional block_ptrs with
-            #               a tl.reshape the correct block.  We will miss these cases today.
-            if m:
-                self.filter_masks(mask_vars)
-                return BlockPtrOptions.create(
-                    [m[s] for s in strides],
-                    m[offset],
-                    range_trees,
-                    mask_vars,
-                )
 
         expand_str = None
         index_str = self.index_to_str(index)
@@ -1680,54 +1491,11 @@ class TritonKernel(Kernel):
             )
         return strides
 
-    def codegen_block_ptr(
-        self, name: str, var: str, indexing: BlockPtrOptions, other=""
-    ) -> Tuple[str, Optional[DeferredLine], str]:
-        advance_block_ptr = None
-        check = indexing.boundary_check()
-        if not check:
-            # workaround https://github.com/openai/triton/issues/2813
-            other = ""
-        elif other:
-            assert other == ", other=0.0"
-            other = f", boundary_check={check!r}, padding_option='zero'"
-        else:
-            other = f", boundary_check={check!r}"
-        if (
-            self.inside_reduction
-            and not self.persistent_reduction
-            and indexing.has_rindex()
-        ):
-            block_ptr = f"block_ptr{next(self.block_ptr_id)}"
-            self.body.writeline(
-                DeferredLine(
-                    name, f"{block_ptr} = {indexing.format(var, roffset=False)}"
-                )
-            )
-            advance_block_ptr = DeferredLine(
-                name,
-                f"{block_ptr} = tl.advance({block_ptr}, {indexing.advance_roffset()})",
-            )
-        else:
-            block_ptr = indexing.format(var)
-        return block_ptr, advance_block_ptr, other
-
-    def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
-        # broadcasting is not implicit for block_ptrs
-        value = (
-            f"tl.broadcast_to({value}, {self.index_to_str(indexing.reshape_suffix)})"
-        )
-        # drop any extra size=1 dimensions
-        value = triton_reshape(value, indexing.reshape_suffix, indexing.block_shape)
-        # workaround https://github.com/openai/triton/issues/2814
-        value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
-        return f"tl.store({block_ptr}, {value}{other})"
-
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
-        indexing = self.indexing(index, block_ptr=True)
+        indexing = self.indexing(index)
         has_rindex = indexing.has_rindex()
         has_tmpmask = indexing.has_tmpmask()
 
@@ -1773,21 +1541,11 @@ class TritonKernel(Kernel):
         else:
             other = ""
 
-        advance_block_ptr = None
         append_broadcast = None
         if V.graph.is_unspec_arg(name):
             line = var
         else:
-            if isinstance(indexing, BlockPtrOptions):
-                block_ptr, advance_block_ptr, other = self.codegen_block_ptr(
-                    name, var, indexing, other
-                )
-                line = f"tl.load({block_ptr}{other}{ep})"
-                # add needed size=1 dimensions
-                line = triton_reshape(
-                    line, indexing.block_shape, indexing.reshape_suffix
-                )
-            elif isinstance(original_index, sympy.Integer):
+            if isinstance(original_index, sympy.Integer):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
             else:
@@ -1825,9 +1583,6 @@ class TritonKernel(Kernel):
             line = f"tl.broadcast_to({result_var}, {append_broadcast})"
             result_var = self.cse.generate(load_buffer, line)
 
-        if advance_block_ptr:
-            load_buffer.writeline(advance_block_ptr)
-
         if not self.inside_reduction or not has_rindex:
             self.outside_loop_vars.add(result_var)
 
@@ -1836,7 +1591,7 @@ class TritonKernel(Kernel):
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
         original_index = index
-        indexing = self.indexing(index, dense_indexing=True, block_ptr=mode is None)
+        indexing = self.indexing(index, dense_indexing=True)
 
         # Guard against write-after-read corruption in triton.
         # See # https://github.com/openai/triton/issues/1615
@@ -1849,24 +1604,13 @@ class TritonKernel(Kernel):
         if is_inplace and is_broadcasted:
             self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
 
-        advance_block_ptr = None
-        if isinstance(indexing, BlockPtrOptions):
-            block_ptr, advance_block_ptr, other = self.codegen_block_ptr(
-                name, var, indexing
-            )
-            # block_ptr stores don't do implicit casting
-            line = self.codegen_block_ptr_store_line(
-                name, indexing, block_ptr, value, other
-            )
-        elif mode is None:
+        if mode is None:
             line = f"tl.store({var} + ({indexing.index_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
             line = f"tl.atomic_add({var} + ({indexing.index_str}), {value}, {indexing.mask_str})"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(DeferredLine(name, line))
-        if advance_block_ptr:
-            self.stores.writeline(advance_block_ptr)
 
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
@@ -2152,31 +1896,17 @@ class TritonKernel(Kernel):
     def store_reduction(self, name, index, value):
         assert self.inside_reduction
         self.inside_reduction = False
-        indexing = self.indexing(index, block_ptr=True)
+        indexing = self.indexing(index)
         self.inside_reduction = True
         var = self.args.output(name)
 
-        if isinstance(indexing, BlockPtrOptions):
-            self.suffix.writeline(
-                DeferredLine(
-                    name,
-                    self.codegen_block_ptr_store_line(
-                        name,
-                        indexing,
-                        indexing.format(var),
-                        value,
-                        f", boundary_check={indexing.boundary_check()!r}",
-                    ),
-                )
+        assert isinstance(indexing, IndexingOptions)
+        self.suffix.writeline(
+            DeferredLine(
+                name,
+                f"tl.store({var} + ({indexing.index_str}), {value}, {indexing.mask_str})",
             )
-        else:
-            assert isinstance(indexing, IndexingOptions)
-            self.suffix.writeline(
-                DeferredLine(
-                    name,
-                    f"tl.store({var} + ({indexing.index_str}), {value}, {indexing.mask_str})",
-                )
-            )
+        )
 
     def _lift_helper(self, fn, num_args) -> str:
         # Lift IR function into a triton function in the global namespace
