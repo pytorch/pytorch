@@ -3165,6 +3165,22 @@ def _unsafe_masked_index(self, mask, indices, fill):
     )
 
 
+@register_lowering(aten._unsafe_masked_index_put)
+def _unsafe_masked_index_put(x, mask, indices, values, accumulate=False):
+    masked_value = where(mask, values, 0)
+    shape = x.get_size()
+    clamped_indices = [
+        clamp(indices[i], -shape[i], shape[i] - 1) if indices[i] else None
+        for i in range(len(indices))
+    ]
+    return _unsafe_index_put(x, clamped_indices, masked_value, accumulate)
+
+
+@make_pointwise
+def clamp(a, min, max):
+    return ops.maximum(min, ops.minimum(max, a))
+
+
 @register_lowering(aten.as_strided_scatter, type_promotion_kind=None)
 def as_strided_scatter(self, src, size, stride, storage_offset=None):
     output = clone(self)

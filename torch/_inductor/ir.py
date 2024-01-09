@@ -334,6 +334,31 @@ class IRNode:
     realize_hint: Callable[[], None]
 
 
+class _OpCounterCSE:
+    """Shim to count how many ops are used"""
+
+    def __init__(self, inner):
+        super().__init__()
+        self.parent_handler = inner
+        self.op_count = 0
+        self.var_names = {}
+
+    def __getattr__(self, name):
+        def inner(*args, **kwargs):
+            val = getattr(self.parent_handler, name)(*args, **kwargs)
+            if name == "indirect_indexing":
+                return val
+            if val not in self.var_names:
+                varname = f"tmp{self.op_count}"
+                self.op_count += 1
+                self.var_names[val] = varname
+                return varname
+            else:
+                return self.var_names[val]
+
+        return inner
+
+
 @dataclasses.dataclass
 class Loops(IRNode):
     device: torch.device
@@ -395,12 +420,38 @@ class Loops(IRNode):
         ]
 
     @cache_on_self
+    def inner_fn_opcount(self):
+        from .ir import FlexibleLayout
+
+        opcounter = _OpCounterCSE(V.MockHandler())
+
+        with V.set_ops_handler(opcounter), patch.object(
+            FlexibleLayout, "allow_indexing", True
+        ):
+            result = self.inner_fn(*self.inner_fn_args())
+            return opcounter.op_count
+
+    def inner_fn_args(self):
+        return (self._index(self.ranges),)
+
+    def inner_fn_str(self):
+        return V.KernelFormatterHandler.ir_to_string(
+            self.inner_fn, *self.inner_fn_args()
+        )
+
+    @cache_on_self
     def inner_fn_str_len(self):
         return len(self.inner_fn_str())
 
-    def inner_fn_str(self):
-        index = self._index(self.ranges)
-        return V.KernelFormatterHandler.ir_to_string(self.inner_fn, index)
+    def has_large_inner_fn(self):
+        res1 = self.inner_fn_str_len() > config.realize_bytes_threshold
+        res2 = self.inner_fn_opcount() > config.realize_opcount_threshold
+        if res1 != res2:
+            raise RuntimeError(
+                f"Different inner_fn heuristics {self.inner_fn_str_len()} (max: {config.realize_bytes_threshold}) "
+                f"and {self.inner_fn_opcount()} (max: {config.realize_opcount_threshold}) for {self.inner_fn_str()}"
+            )
+        return res1
 
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
@@ -598,14 +649,10 @@ class Reduction(Loops):
     def index_length(self):
         return len(self.ranges) + len(self.reduction_ranges)
 
-    def inner_fn_str(self):
+    def inner_fn_args(self):
         index = self._index(self.ranges)
         rindex = self._index(self.reduction_ranges, "r")
-        return V.KernelFormatterHandler.ir_to_string(
-            self.inner_fn,
-            index,
-            rindex,
-        )
+        return (self.inner_fn, index, rindex)
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
@@ -1576,14 +1623,10 @@ class Scan(Loops):
     def index_length(self):
         return len(self.ranges) + len(self.scan_ranges)
 
-    def inner_fn_str(self):
+    def inner_fn_args(self):
         index = self._index(self.ranges)
         rindex = self._index(self.scan_ranges, "r")
-        return V.KernelFormatterHandler.ir_to_string(
-            self.inner_fn,
-            index,
-            rindex,
-        )
+        return (index, rindex)
 
     @classmethod
     def create(
@@ -6400,7 +6443,7 @@ class StorageBox(MutableBox):
     def has_exceeded_max_reads(self):
         return isinstance(self.data, Pointwise) and (
             self.num_reads() > config.realize_acc_reads_threshold
-            or self.inner_fn_str_len() > config.realize_bytes_threshold
+            or self.has_large_inner_fn()
         )
 
     def mark_reuse(self, users):
@@ -6422,7 +6465,7 @@ class StorageBox(MutableBox):
             and isinstance(self.data, (Pointwise, Reduction))
             and (
                 self.num_reads() > config.realize_reads_threshold
-                or len(self.inner_fn_str()) > config.realize_bytes_threshold
+                or self.has_large_inner_fn()
                 or (is_cpu(self.data) and should_realize_on_cpu(self.data))
             )
         ):
