@@ -277,7 +277,7 @@ auto GetHipBlasLtTypeStringAndOps() {
         in_out_datatype,
         in_out_datatype,
         in_out_datatype,
-        HIPBLASLT_COMPUTE_F32,
+        COMPUTE_TYPE_32,
         heuristic_result));
   TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(handle));
 
