@@ -77,7 +77,7 @@ Tensor linear_hack(const Tensor& input, const Tensor& weight, const c10::optiona
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
-    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+    : c10::MaybeOwned<Tensor>::owned(std::in_place);
 
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, *bias);
@@ -176,8 +176,7 @@ static Tensor make_feature_noise(const Tensor& input) {
   sizes.reserve(input.dim());
   sizes.push_back(input_sizes[0]);
   sizes.push_back(input_sizes[1]);
-  for (const auto i : c10::irange(2, input.dim())) {
-    (void)i; //Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(2, input.dim())) {
     sizes.push_back(1);
   }
   // NB: THIS WAS CHANGED FROM THE ORIGINAL

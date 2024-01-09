@@ -2,12 +2,12 @@ from typing import Optional, Tuple, Union
 
 from torch import Tensor
 
-from .optimizer import Optimizer, params_t
+from .optimizer import Optimizer, ParamsT
 
 class Adam(Optimizer):
     def __init__(
         self,
-        params: params_t,
+        params: ParamsT,
         lr: Union[float, Tensor] = 1e-3,
         betas: Tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,

@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 
+#include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <nccl.h>
@@ -15,6 +16,11 @@
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
     (NCCL_MINOR >= 14)
 #define NCCL_HAS_COMM_NONBLOCKING
+#endif
+
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 18)
+#define NCCL_HAS_COMM_SPLIT
 #endif
 
 // ncclGetLastError() is enabled only for NCCL versions 2.13+
@@ -58,6 +64,14 @@
 #define NCCL_HAS_COMM_CTA_CGA
 #elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
 #define NCCL_HAS_COMM_CTA_CGA
+#endif
+
+#if defined(NCCL_REGISTRATION_SUPPORTED) ||                              \
+    ((defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+      (NCCL_MINOR >= 19)))
+#define NCCL_HAS_COMM_REGISTER
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#define NCCL_HAS_COMM_REGISTER
 #endif
 
 // Macro to throw on a non-successful NCCL return value.
@@ -150,6 +164,7 @@
 
 namespace c10d {
 
+TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
 std::string getNcclVersion();
 std::string ncclGetErrorWithVersion(ncclResult_t error);
 bool nccl_use_nonblocking();
@@ -160,6 +175,32 @@ int nccl_nonblocking_timeout();
 std::string getNcclErrorDetailStr(
     ncclResult_t error,
     c10::optional<std::string> processGroupFailureReason = c10::nullopt);
+
+// Write NCCL debug info to local disk or any storage users define.
+// There are some constrains we set for the debug info writer:
+// 1. The writer should only be registered once.
+// 2. Once registered, users cannot change it including un-register.
+// 3. It is recommended to register the customized writer in the trainer setup,
+//    If users don't register before calling launchAsyncDebugDump, then users
+//    lose the chance to register (and the default writer will be
+//    auto-registered).
+class TORCH_API DebugInfoWriter {
+ public:
+  virtual ~DebugInfoWriter();
+  virtual void write(const std::string& ncclTrace);
+  static DebugInfoWriter& getWriter(int rank);
+  static void registerWriter(std::unique_ptr<DebugInfoWriter> writer);
+
+ protected:
+  DebugInfoWriter(std::string namePrefix, int rank) {
+    filename_ = c10::str(namePrefix, rank);
+  }
+  std::string filename_;
+
+ private:
+  static std::unique_ptr<DebugInfoWriter> writer_;
+  static std::atomic<bool> hasWriterRegistered_;
+};
 
 // RAII wrapper for NCCL communicator
 class NCCLComm {
@@ -227,6 +268,22 @@ class NCCLComm {
   }
 #endif
 
+#ifdef NCCL_HAS_COMM_SPLIT
+  static std::shared_ptr<NCCLComm> split(
+      NCCLComm* source,
+      int color_id,
+      int rank,
+      ncclConfig_t& config) {
+    auto comm = std::make_shared<NCCLComm>();
+    C10D_NCCL_CHECK(
+        ncclCommSplit(
+            source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
+        c10::nullopt);
+    ++source->ncclCommSplitCounter_;
+    return comm;
+  }
+#endif
+
   ncclUniqueId getNcclId() {
     return ncclId_;
   }
@@ -264,6 +321,21 @@ class NCCLComm {
       return;
     }
 
+#ifdef NCCL_HAS_COMM_REGISTER
+    // Deregister all registered segments before aborting.
+    for (auto& it : registeredSegmentHandles_) {
+      void* handle = it.second;
+      C10D_NCCL_CHECK(
+          ::ncclCommDeregister(ncclComm_, handle),
+          c10::str(
+              "Failed to deregister segment handle ",
+              handle,
+              " on ncclComm_ ",
+              ncclComm_));
+    }
+    registeredSegmentHandles_.clear();
+#endif
+
     // Set true failure reason if provided by ProcessGroupNCCL (e.g. work
     // timeout)
     commFailureReason_ = commFailureReason;
@@ -291,6 +363,10 @@ class NCCLComm {
     return aborted_;
   }
 
+  uint64_t getCommSplitCounter() const {
+    return ncclCommSplitCounter_;
+  }
+
   ncclResult_t checkForNcclError() {
     std::unique_lock<std::mutex> lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -306,11 +382,68 @@ class NCCLComm {
 #endif
   }
 
+  ncclResult_t registerSegment(void* ptr, size_t size) {
+    std::unique_lock<std::mutex> lock(mutex_);
+#ifdef NCCL_HAS_COMM_REGISTER
+    // We register only segments from cache allocator
+    // which are guaranteed to be with disjoint addr ranges. Thus, a ptr always
+    // maps to a unique handle and should not be registered before the current
+    // ptr is deregistered and freed.
+    TORCH_CHECK(
+        registeredSegmentHandles_.count(ptr) == 0,
+        "Segment with ptr ",
+        ptr,
+        " has already been registered on ncclComm_ ",
+        ncclComm_);
+
+    void* handle;
+    C10D_NCCL_CHECK(
+        ncclCommRegister(ncclComm_, ptr, size, &handle),
+        c10::str(
+            "Failed to register segment with ptr ",
+            ptr,
+            ", size ",
+            size,
+            " on ncclComm_ ",
+            ncclComm_));
+    registeredSegmentHandles_[ptr] = handle;
+    return ncclSuccess;
+#else
+    return ncclInvalidUsage;
+#endif
+  }
+
+  ncclResult_t deregisterSegment(void* ptr) {
+    std::unique_lock<std::mutex> lock(mutex_);
+#ifdef NCCL_HAS_COMM_REGISTER
+    TORCH_CHECK(
+        registeredSegmentHandles_.count(ptr) == 1,
+        "Segment with ptr ",
+        ptr,
+        " is not registered on ncclComm_ ",
+        ncclComm_);
+
+    void* handle = registeredSegmentHandles_[ptr];
+    C10D_NCCL_CHECK(
+        ncclCommDeregister(ncclComm_, handle),
+        c10::str(
+            "Failed to deregister segment handle ",
+            handle,
+            " on ncclComm_ ",
+            ncclComm_));
+    registeredSegmentHandles_.erase(ptr);
+    return ncclSuccess;
+#else
+    return ncclInvalidUsage;
+#endif
+  }
+
  protected:
   ncclComm_t ncclComm_;
   // Unique nccl_id for this communicator.
   ncclUniqueId ncclId_;
   bool aborted_;
+  uint64_t ncclCommSplitCounter_{0};
   ncclResult_t ncclAsyncErr_;
   mutable std::mutex mutex_;
   // Rank that this communicator corresponds to.
@@ -318,6 +451,10 @@ class NCCLComm {
   // Optional reason for communicator failure, provided by ProcessGroupNCCL for
   // better error messaging.
   c10::optional<std::string> commFailureReason_;
+#ifdef NCCL_HAS_COMM_REGISTER
+  // Stores handlers for tensors registered by NCCL
+  std::unordered_map<void*, void*> registeredSegmentHandles_;
+#endif
 };
 
 // Helper that automatically cleans up premul sums.

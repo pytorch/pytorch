@@ -261,6 +261,7 @@ TypePtr DynamicType::fallback() const {
         std::vector<c10::string_view> fields;
         fields.reserve(arguments_.elems.size());
         for (const auto& elem : arguments_.elems) {
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           fields.emplace_back(*elem.label);
         }
         return TupleType::createNamed(*name_, fields, fallbacks);
@@ -290,6 +291,7 @@ TypePtr DynamicType::fallback() const {
     case Tag::Storage:
       return StorageType::get();
     case Tag::Var:
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       return VarType::create(*name_);
     case Tag::AnyClass:
       return AnyClassType::get();
@@ -364,8 +366,8 @@ DynamicType::Ptr IValue::TagType<c10::DynamicType>::get(const c10::IValue& v) {
 }
 
 DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::create(
-    std::vector<TypePtr> elemTypes) {
-  return DynamicTypeFactory::create<TupleType>(std::move(elemTypes));
+    const std::vector<TypePtr>& elemTypes) {
+  return DynamicTypeFactory::create<TupleType>(elemTypes);
 }
 
 DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::fallback(

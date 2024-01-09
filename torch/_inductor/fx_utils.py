@@ -3,7 +3,8 @@ from typing import Any, Callable, DefaultDict, Dict, Optional, Tuple, Type
 
 import torch
 import torch.fx
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils import _pytree as pytree
+from torch.utils._pytree import tree_map
 from .virtualized import V
 
 
@@ -137,8 +138,7 @@ class FakeTensorUpdater:
                 # tests - add a test
                 existing_storages[get_node_storage(new_fake_tensor)] += 1
                 processed.add(updating_node)
-                for user in updating_node.users:
-                    processing.append(user)
+                processing.extend(updating_node.users)
 
                 self.processed_hashes.add(self.hash_node(updating_node))
 
@@ -147,7 +147,7 @@ def get_storage(t: torch.Tensor) -> int:
     return t.untyped_storage()._cdata
 
 
-def get_node_storage(node: torch.Tensor) -> Optional[int]:
+def get_node_storage(node: torch.fx.Node) -> Optional[int]:
     if "val" not in node.meta:
         return None
     if not isinstance(node.meta["val"], torch.Tensor):
@@ -170,6 +170,8 @@ def get_fake_args_kwargs(x: torch.fx.Node) -> Tuple[bool, Tuple[Any], Dict[str, 
     First value returns a boolean if any of the input nodes don't have a faketensor.
     """
     args, kwargs = tree_map(get_fake, (x.args, x.kwargs))
-    if any(isinstance(a, torch.fx.Node) for a in tree_flatten((args, kwargs))[0]):
+    if any(
+        isinstance(a, torch.fx.Node) for a in pytree.arg_tree_leaves(*args, **kwargs)
+    ):
         return False, args, kwargs
     return True, args, kwargs

@@ -24,7 +24,7 @@ from ._normalizations import (
 def _deco_axis_expand(func):
     """
     Generically handle axis arguments in reductions.
-    axis is *always* the 2nd arg in the funciton so no need to have a look at its signature
+    axis is *always* the 2nd arg in the function so no need to have a look at its signature
     """
 
     @functools.wraps(func)
@@ -421,9 +421,14 @@ def percentile(
     *,
     interpolation: NotImplementedType = None,
 ):
+    # np.percentile(float_tensor, 30) : q.dtype is int64 => q / 100.0 is float32
+    if _dtypes_impl.python_type_for_torch(q.dtype) == int:
+        q = q.to(_dtypes_impl.default_dtypes().float_dtype)
+    qq = q / 100.0
+
     return quantile(
         a,
-        q / 100.0,
+        qq,
         axis=axis,
         overwrite_input=overwrite_input,
         method=method,
