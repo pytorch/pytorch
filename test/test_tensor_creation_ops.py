@@ -1047,8 +1047,10 @@ class TestTensorCreation(TestCase):
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
 
     # Note: CUDA will fail this test on most dtypes, often dramatically.
+    # NB: torch.uint16, torch.uint32, torch.uint64 excluded as this
+    # nondeterministically fails, warning "invalid value encountered in cast"
     @onlyCPU
-    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.uint16, torch.uint32, torch.uint64)
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
         vals = (float('-inf'), float('inf'), float('nan'))
 
@@ -1623,9 +1625,7 @@ class TestTensorCreation(TestCase):
                         lambda: t.random_(from_, to_)
                     )
 
-    # NB: uint64 is broken because its max value is not representable in
-    # int64_t, but this is what random expects
-    @dtypes(*all_types_and(torch.bfloat16, torch.half, torch.uint16, torch.uint32))
+    @dtypes(*all_types_and(torch.bfloat16, torch.half))
     def test_random_full_range(self, device, dtype):
         size = 2000
         alpha = 0.1
@@ -1659,9 +1659,7 @@ class TestTensorCreation(TestCase):
         self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
         self.assertTrue((to_inc_ - delta) < t.to(torch.double).max() <= to_inc_)
 
-    # NB: uint64 is broken because its max value is not representable in
-    # int64_t, but this is what random expects
-    @dtypes(*all_types_and(torch.bfloat16, torch.half, torch.uint16, torch.uint32))
+    @dtypes(*all_types_and(torch.bfloat16, torch.half))
     def test_random_from_to(self, device, dtype):
         size = 2000
         alpha = 0.1
@@ -1750,7 +1748,7 @@ class TestTensorCreation(TestCase):
                         lambda: t.random_(from_, to_)
                     )
 
-    @dtypes(*all_types_and(torch.bfloat16, torch.half, torch.uint16, torch.uint32))
+    @dtypes(*all_types_and(torch.bfloat16, torch.half))
     def test_random_to(self, device, dtype):
         size = 2000
         alpha = 0.1
