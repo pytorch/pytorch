@@ -3078,7 +3078,6 @@ class TestNestedTensorSubclass(TestCase):
 
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
 
-    @xfailIfTorchDynamo
     def test_split(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -3100,7 +3099,6 @@ class TestNestedTensorSubclass(TestCase):
         ):
             torch.split(nt, 2, 1)
 
-    @xfailIfTorchDynamo
     def test_split_with_sizes(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -3168,7 +3166,6 @@ class TestNestedTensorSubclass(TestCase):
         flattened = nt.flatten(-3, -2)
         self.assertEqual(flattened.shape, nt.view(3, -1, 10, 6).shape)
 
-    @xfailIfTorchDynamo
     def test_chunk(self, device):
         # normal case
         D = 30
@@ -3189,6 +3186,39 @@ class TestNestedTensorSubclass(TestCase):
         with self.assertRaisesRegex(
                 RuntimeError, "chunk.* not supported for NestedTensor on dim=0 or dim=1"):
             nt.chunk(2, dim=1)
+
+    def test_squeeze(self, device):
+        B = 4
+        D = 6
+        # squeeze middle dim
+        nt = random_nt_from_dims(
+            [B, None, 1, D], device=device, dtype=torch.float32, layout=torch.jagged)
+        j0 = nt.shape[1]
+
+        for dim_arg in [-2, 2]:
+            out = nt.squeeze(dim_arg)
+            self.assertEqual(out.shape, (B, j0, D))
+            self.assertEqual(out.unsqueeze(-2), nt)
+
+        # squeeze last dim
+        nt = random_nt_from_dims(
+            [B, None, 1], device=device, dtype=torch.float32, layout=torch.jagged)
+        j1 = nt.shape[1]
+
+        for dim_arg in [-1, 2]:
+            out = nt.squeeze(dim_arg)
+            self.assertEqual(out.shape, (B, j1))
+            self.assertEqual(out.unsqueeze(-1), nt)
+
+        # squeeze on batch dim not supported
+        with self.assertRaisesRegex(
+                RuntimeError, "squeeze.* not supported for NestedTensor on dim=0 or dim=1"):
+            nt.squeeze(0)
+
+        # squeeze on ragged dim not supported
+        with self.assertRaisesRegex(
+                RuntimeError, "squeeze.* not supported for NestedTensor on dim=0 or dim=1"):
+            nt.squeeze(1)
 
     def test_binary_pointwise_broadcasting(self, device):
         # (B, j0, 3, 4)
