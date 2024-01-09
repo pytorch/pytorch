@@ -1533,7 +1533,7 @@ void ProcessGroupNCCL::watchdogHandler() {
     // and abort. We poll store to see if some ranks have flagged a timeout when
     // we haven't polled for `heartbeat_timeout` seconds and there haven't
     // any work added or removed for `watchdog_timeout` seconds.
-    if (dumpOnTimeout_) {
+    if (dumpOnTimeout_ && uid_ == 0) {
       auto currentTime = std::chrono::steady_clock::now();
       auto timeSinceLastWorkListUpdate =
           std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1555,7 +1555,8 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (timeSinceLastWorkListUpdate >= watchdogCheckInMilSec_ &&
           timeSinceLastPollStore >= timeoutCheckInMilSec_) {
         lastTimePollStore = currentTime;
-        if (store_->check({std::string(TIMEOUT_DUMP)}) && !optAsyncDebugDump) {
+        if (store_->checkNoPrefix({std::string(TIMEOUT_DUMP)}) &&
+            !optAsyncDebugDump) {
           auto wakeUpTime = std::chrono::steady_clock::now() +
               std::chrono::milliseconds(waitTimeoutDumpInMilSec_);
           const auto startCheckMsg = c10::str(
@@ -1598,7 +1599,7 @@ void ProcessGroupNCCL::watchdogHandler() {
               // abort process immediately.
               collectiveDebugInfoMode_.store(true);
               std::vector<uint8_t> vec(1);
-              store_->set(std::string(TIMEOUT_DUMP), vec);
+              store_->setNoPrefix(std::string(TIMEOUT_DUMP), vec);
               const auto exitMsg = c10::str(
                   logPrefix(),
                   "Timeout detected in watchdog and signal a global abort.");
