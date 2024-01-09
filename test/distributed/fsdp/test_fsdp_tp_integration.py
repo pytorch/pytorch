@@ -373,6 +373,14 @@ class TestTPFSDPIntegration(FSDPTest):
         self.assertEqual(comm_counts[funcol.all_gather_into_tensor], 2)
         self.assertEqual(comm_counts[funcol.all_reduce], 1)
 
+        grads = [p.grad for p in fsdp_2d_model.parameters() if p.grad is not None]
+
+        for grad in grads:
+            if isinstance(grad, DTensor):
+                grad = grad.full_tensor()
+
+            self.assertFalse(grad.isnan().any().item())
+
 
 instantiate_parametrized_tests(TestTPFSDPIntegration)
 
