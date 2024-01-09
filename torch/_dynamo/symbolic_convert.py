@@ -25,7 +25,6 @@ import torch._logging
 from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import config, exc, logging as torchdynamo_logging, skipfiles, variables
-from .allowed_functions import is_builtin_constant, is_forbidden
 from .bytecode_analysis import (
     get_indexof,
     JUMP_OPNAMES,
@@ -58,6 +57,7 @@ from .source import (
     LocalSource,
     Source,
 )
+from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     counters,
     get_fake_value,
@@ -1377,12 +1377,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         items = self.popn(inst.argval * 2)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert (
+            if not (
                 isinstance(k, (ConstantVariable, EnumVariable, BuiltinVariable))
                 or (isinstance(k, TensorVariable) and k.specialized_value is not None)
                 or k.is_python_constant()
-            )
-
+            ):
+                unimplemented(f"BUILD_MAP {items}")
             result[ConstDictVariable.get_key(k)] = v
         assert len(result) == len(items) / 2
         self.push(ConstDictVariable(result, dict, mutable_local=MutableLocal()))

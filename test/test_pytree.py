@@ -1013,6 +1013,10 @@ TreeSpec(tuple, None, [*,
 
 
 class TestCxxPytree(TestCase):
+    def setUp(self):
+        if IS_FBCODE:
+            raise unittest.SkipTest("C++ pytree tests are not supported in fbcode")
+
     def test_treespec_equality(self):
         self.assertEqual(cxx_pytree.LeafSpec(), cxx_pytree.LeafSpec())
 
