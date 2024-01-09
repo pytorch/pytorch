@@ -98,7 +98,7 @@ void* OperandInfo::mutable_data() const {
   return std::visit(GetMutableVisitor(), data_);
 }
 
-void OperandInfo::set_data(void* data) {
+void OperandInfo::set_data(std::variant<void*, const void*> data) {
   data_ = data;
 }
 
@@ -136,6 +136,13 @@ TensorIteratorConfig& TensorIteratorConfig::add_owned_input(const TensorBase& in
   return *this;
 }
 
+TensorIteratorConfig& TensorIteratorConfig::add_owned_const_input(const TensorBase& input) {
+  const_input_indices_.push_back(tensors_.size());
+  tensors_.push_back(c10::MaybeOwned<TensorBase>::owned(std::in_place, input));
+  num_inputs_++;
+  return *this;
+}
+
 TensorIteratorConfig& TensorIteratorConfig::add_borrowed_output(const TensorBase& output) {
   TORCH_INTERNAL_ASSERT(
       num_inputs_ == 0,
@@ -147,6 +154,13 @@ TensorIteratorConfig& TensorIteratorConfig::add_borrowed_output(const TensorBase
 }
 
 TensorIteratorConfig& TensorIteratorConfig::add_borrowed_input(const TensorBase& input) {
+  tensors_.push_back(c10::MaybeOwned<TensorBase>::borrowed(input));
+  num_inputs_++;
+  return *this;
+}
+
+TensorIteratorConfig& TensorIteratorConfig::add_borrowed_const_input(const TensorBase& input) {
+  const_input_indices_.push_back(tensors_.size());
   tensors_.push_back(c10::MaybeOwned<TensorBase>::borrowed(input));
   num_inputs_++;
   return *this;
@@ -1153,7 +1167,8 @@ TensorIterator TensorIterator::reduce_op(TensorBase& out1, TensorBase& out2, con
 }
 
 void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
-  for (auto& tensor: config.tensors_) {
+  for (int idx = 0; idx < config.tensors_.size(); idx++) {
+    auto& tensor = config.tensors_[idx];
     // If *any* of the arguments is a meta tensor, the overall
     // computation is a meta computation (don't do any work,
     // just compute output information).  This aligns with
@@ -1162,6 +1177,11 @@ void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
       is_meta_ = true;
     }
     operands_.emplace_back(std::move(tensor));
+
+    // If this operand's index was marked as const, switch the operand's data to the const variant.
+    if (std::find(config.const_input_indices_.begin(), config.const_input_indices_.end(), idx) != config.const_input_indices_.end()) {
+      operands_[idx].set_data(static_cast<const void*>(nullptr));
+    }
   }
   num_outputs_ = config.num_outputs_;
 }
@@ -1535,6 +1555,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor_base().defined());
+    // TODO: Conditionally call op.tensor_base().mutable_data_ptr
     op.set_data(op.tensor_base().data_ptr());
   }
 

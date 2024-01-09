@@ -133,7 +133,7 @@ struct TORCH_API OperandInfo {
   C10_ALWAYS_INLINE OperandInfo& operator=(OperandInfo&&) noexcept = default;
   C10_ALWAYS_INLINE ~OperandInfo() = default;
 
-  void set_data(void* data);
+  void set_data(std::variant<void*, const void*> data);
   void* mutable_data() const;
 
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
@@ -772,10 +772,14 @@ class TORCH_API TensorIteratorConfig final {
   TensorIteratorConfig& add_input(const TensorBase& input) {
     return add_borrowed_input(input);
   }
+  TensorIteratorConfig& add_const_input(const TensorBase& input) {
+    return add_borrowed_const_input(input);
+  }
 
   // Borrowing from temporaries is unlikely to go well.
   TensorIteratorConfig& add_output(TensorBase&& output) = delete;
   TensorIteratorConfig& add_input(TensorBase&& input) = delete;
+  TensorIteratorConfig& add_const_input(TensorBase&& input) = delete;
 
   // Stores input/output Tensors while incrementing the reference count.
   // Note that add_{in,out}put are nearly always what you
@@ -783,6 +787,7 @@ class TORCH_API TensorIteratorConfig final {
   // compile.
   TensorIteratorConfig& add_owned_output(const TensorBase& output);
   TensorIteratorConfig& add_owned_input(const TensorBase& input);
+  TensorIteratorConfig& add_owned_const_input(const TensorBase& input);
 
   // Advanced API: stores input/output Tensors without incrementing
   // the reference count. The caller must ensure that these Tensors
@@ -791,10 +796,12 @@ class TORCH_API TensorIteratorConfig final {
   // Important: the outputs have to be added before the inputs.
   TensorIteratorConfig& add_borrowed_output(const TensorBase& output);
   TensorIteratorConfig& add_borrowed_input(const TensorBase& input);
+  TensorIteratorConfig& add_borrowed_const_input(const TensorBase& input);
 
   // Borrowing from temporaries is unlikely to go well.
   TensorIteratorConfig& add_borrowed_output(TensorBase&& output) = delete;
   TensorIteratorConfig& add_borrowed_input(TensorBase&& input) = delete;
+  TensorIteratorConfig& add_borrowed_const_input(TensorBase&& input) = delete;
 
   // Sets the check_mem_overlap_ flag, which is true by default.
   // If true, inputs are checked for partial overlap with the outputs and
@@ -950,6 +957,8 @@ class TORCH_API TensorIteratorConfig final {
   bool promote_inputs_to_common_dtype_ = false;
   bool promote_integer_inputs_to_float_ = false;
   bool cast_common_dtype_to_outputs_ = false;
+
+  SmallVector<int, 4> const_input_indices_;
 };
 
 /// A container-like struct that acts as if it contains splits of a
