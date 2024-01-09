@@ -2678,3 +2678,13 @@ class TestHelperModules:
 
         def example_inputs(self):
             return (torch.randn(2, 4, 10, 10),)
+
+    class LinearReluModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
+            self.relu = torch.nn.ReLU()
+
+        def forward(self, x):
+            x = self.relu(self.fc(x))
+            return x
