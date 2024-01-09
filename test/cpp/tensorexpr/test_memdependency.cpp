@@ -694,7 +694,7 @@ TEST(MemDependency, MemDependencyCheckerLoopReduce) {
   // B -> A.
   ASSERT_TRUE(analyzer.dependsDirectly(bStore, aReduce));
 
-  // B depends indirectly on the intializer of A, since the reduction depends
+  // B depends indirectly on the initializer of A, since the reduction depends
   // on it.
   ASSERT_FALSE(analyzer.dependsDirectly(bStore, aInit));
   ASSERT_TRUE(analyzer.dependsIndirectly(bStore, aInit));
@@ -751,7 +751,7 @@ TEST(MemDependency, MemDependencyCheckerLoopReduceExpanded) {
   // B -> A.
   ASSERT_TRUE(analyzer.dependsDirectly(bStore, aReduce));
 
-  // B depends indirectly on the intializer of A, since the reduction depends
+  // B depends indirectly on the initializer of A, since the reduction depends
   // on it.
   ASSERT_FALSE(analyzer.dependsDirectly(bStore, aInit));
   ASSERT_TRUE(analyzer.dependsIndirectly(bStore, aInit));
@@ -1177,7 +1177,7 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
   // The seventh access is the store to A[9 - x] in the third loop.
   ASSERT_EQ(history[6]->type(), AccessType::Store);
   ASSERT_EQ(history[6]->var(), aVar);
-  // This store has a negative stride on it's indices, but is notmalized
+  // This store has a negative stride on it's indices, but is normalized
   // internally.
   ASSERT_TRUE(EQ(history[6]->bounds(), {CB(1, 9)}));
 
@@ -1185,7 +1185,7 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
   ASSERT_EQ(history[7]->type(), AccessType::Load);
   ASSERT_EQ(history[7]->var(), aVar);
   // It has the bounds of the loop (0 <= x < 9), modified by the offset 9 - x,
-  // which esstentially traverses the loop backwards.
+  // which essentially traverses the loop backwards.
   ASSERT_TRUE(EQ(history[7]->bounds(), {CB(0, 9)}));
   // This Load has three write dependencies:
   ASSERT_EQ(history[7]->dependencies().size(), 3);
@@ -1201,11 +1201,11 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
   // The ninth access is the store to A[x] in the fourth loop.
   ASSERT_EQ(history[8]->type(), AccessType::Store);
   ASSERT_EQ(history[8]->var(), aVar);
-  // This store has a negative stride on it's indices, but is notmalized
+  // This store has a negative stride on it's indices, but is normalized
   // internally.
   ASSERT_TRUE(EQ(history[8]->bounds(), {CB(0, 9)}));
 
-  // The tenth and 11th acceses are the copy from A[x] to B[x].
+  // The tenth and 11th accesses are the copy from A[x] to B[x].
   ASSERT_EQ(history[9]->type(), AccessType::Load);
   ASSERT_EQ(history[9]->var(), aVar);
   ASSERT_EQ(history[10]->type(), AccessType::Store);
@@ -1308,7 +1308,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
      * }
      */
 
-    // Is not self dependent beacause there is no store to the buffer that is
+    // Is not self dependent because there is no store to the buffer that is
     // read.
 
     MemDependencyChecker analyzer;
@@ -1526,8 +1526,8 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 
     // Here we can use the common stride of the accesses to determine they are
     // distinct.
-    // Note, this is the only place (loop self depedency) we use this stride
-    // to avoid unnecessary depedence.
+    // Note, this is the only place (loop self dependency) we use this stride
+    // to avoid unnecessary dependence.
 
     MemDependencyChecker analyzer;
     // Execution order doesn't matter since the read and the write are totally
@@ -1724,7 +1724,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
      * }
      */
 
-    // If they have strides with no common muliple > 1, they overlap.
+    // If they have strides with no common multiple > 1, they overlap.
     MemDependencyChecker analyzer;
     StmtPtr stmt = For::make(
         x, 0, 10, Store::make(a, {x * 2}, Load::make(a, {x * 3 + 1})));
@@ -1862,8 +1862,8 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
 }
 
 // Verify that a strided access still works.
-// TODO: actually this only works because of the size of the ranges, revist this
-// test after strided overlap is implemented.
+// TODO: actually this only works because of the size of the ranges, revisit
+// this test after strided overlap is implemented.
 TEST(MemDependency, MemDependencyCheckerLoopDistinctStrides) {
   BufHandle a("A", {20}, kInt);
   BufHandle b("B", {20}, kInt);
@@ -2200,7 +2200,7 @@ TEST(MemDependency, MemDependencyCheckerIfThenElse) {
     // In this case C is dependent on both A and B.
 
     // TODO: in cases like this it would be possible to split the range of B
-    // into two bounds, one dependent on A and one depenent on B. We'd need to
+    // into two bounds, one dependent on A and one dependent on B. We'd need to
     // examine conditions relative to previously encountered loop variables. I'm
     // uncertain if this would be helpful.
 
@@ -2249,7 +2249,7 @@ TEST(MemDependency, MemDependencyCheckerCutLoop) {
     // Output depends on input.
     ASSERT_TRUE(analyzer.dependsIndirectly(b.node(), a.node()));
 
-    // Output has 2 depdenencies.
+    // Output has 2 dependencies.
     auto outputAccess = analyzer.output(b.node());
     ASSERT_NE(outputAccess, nullptr);
     ASSERT_EQ(outputAccess->dependencies().size(), 2);
@@ -2289,7 +2289,7 @@ TEST(MemDependency, MemDependencyCheckerCutLoop) {
     // Output depends on input.
     ASSERT_TRUE(analyzer.dependsIndirectly(b.node(), a.node()));
 
-    // Output has 4 depdenencies.
+    // Output has 4 dependencies.
     auto outputAccess = analyzer.output(b.node());
     ASSERT_NE(outputAccess, nullptr);
     ASSERT_EQ(outputAccess->dependencies().size(), 4);

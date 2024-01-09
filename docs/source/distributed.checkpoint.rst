@@ -20,11 +20,18 @@ The entrypoints to load and save a checkpoint are the following:
 
 .. currentmodule:: torch.distributed.checkpoint
 
+.. autofunction::  load
+.. autofunction::  save
 .. autofunction::  load_state_dict
 .. autofunction::  save_state_dict
 
-This `example <https://github.com/pytorch/pytorch/blob/main/torch/distributed/checkpoint/examples/fsdp_checkpoint_example.py>`_ shows how to use Pytorch Distributed Checkpoint to save a FSDP model.
+In addition to the above entrypoints, `Stateful` objects, as described below, provide additional customization during saving/loading
+.. automodule:: torch.distributed.checkpoint.stateful
 
+.. autoclass:: torch.distributed.checkpoint.stateful.Stateful
+  :members:
+
+This `example <https://github.com/pytorch/pytorch/blob/main/torch/distributed/checkpoint/examples/fsdp_checkpoint_example.py>`_ shows how to use Pytorch Distributed Checkpoint to save a FSDP model.
 
 The following types define the IO interface used during checkpoint:
 
@@ -70,3 +77,21 @@ can handle all of torch.distributed constructs such as FSDP, DDP, ShardedTensor 
 
 .. autoclass:: torch.distributed.checkpoint.DefaultLoadPlanner
   :members:
+
+We provide a set of APIs to help users do get and set state_dict easily. This is
+an experimental feature and is subject to change.
+
+.. autofunction:: torch.distributed.checkpoint.state_dict.get_state_dict
+
+.. autofunction:: torch.distributed.checkpoint.state_dict.get_model_state_dict
+
+.. autofunction:: torch.distributed.checkpoint.state_dict.get_optimizer_state_dict
+
+.. autofunction:: torch.distributed.checkpoint.state_dict.set_state_dict
+
+.. autofunction:: torch.distributed.checkpoint.state_dict.set_model_state_dict
+
+.. autofunction:: torch.distributed.checkpoint.state_dict.set_optimizer_state_dict
+
+.. autoclass:: torch.distributed.checkpoint.state_dict.StateDictOptions
+   :members:

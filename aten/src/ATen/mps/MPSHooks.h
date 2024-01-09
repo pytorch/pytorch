@@ -7,7 +7,7 @@
 #include <ATen/mps/MPSEvent.h>
 #include <c10/util/Optional.h>
 
-namespace at { namespace mps {
+namespace at::mps {
 
 // The real implementation of MPSHooksInterface
 struct MPSHooks : public at::MPSHooksInterface {
@@ -16,7 +16,7 @@ struct MPSHooks : public at::MPSHooksInterface {
 
   // MPSDevice interface
   bool hasMPS() const override;
-  bool isOnMacOS13orNewer(unsigned minor) const override;
+  bool isOnMacOSorNewer(unsigned major, unsigned minor) const override;
 
   // MPSGeneratorImpl interface
   const Generator& getDefaultMPSGenerator() const override;
@@ -48,4 +48,4 @@ struct MPSHooks : public at::MPSHooksInterface {
   double elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id) const override;
 };
 
-}} // at::mps
+} // namespace at::mps

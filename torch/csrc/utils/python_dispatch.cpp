@@ -6,7 +6,9 @@
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
+#include <ATen/core/SingletonSymNodeImpl.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <torch/library.h>
 
@@ -15,11 +17,9 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
-#include <c10/core/SingletonSymNodeImpl.h>
 #include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
 
@@ -171,7 +171,14 @@ class PythonKernelHolder : public c10::OperatorKernel {
 
     auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
     py::gil_scoped_acquire g;
+    // Jan 2024: We're slated to get rid of multipy, so stop forcing hermetic
+    // mode unconditionally in all situations when you're using multipy.
+    // Eventually just delete this entirely.  (Note that you may break multipy
+    // anyway this way with dispatcher registered functions that require
+    // hermetic to be off.)
+#if defined(USE_DEPLOY)
     EnableHermeticPyObject g2;
+#endif
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
     auto obj = py::reinterpret_steal<py::object>(PyObject_Call(
         func_.ptr(getPyInterpreter()),
@@ -368,18 +375,20 @@ void initDispatchBindings(PyObject* module) {
           "define",
           [](const py::object& self,
              const char* schema,
-             const char* alias_analysis) {
+             const char* alias_analysis,
+             const std::vector<at::Tag>& tags) {
             auto parsed_schema =
                 torch::schema(schema, parseAliasAnalysisKind(alias_analysis));
             self.cast<torch::Library&>().def(
-                std::move(parsed_schema), {}, register_or_verify());
+                std::move(parsed_schema), tags, register_or_verify());
             // TODO: this is dumb, had to make a second copy
             return torch::schema(schema, parseAliasAnalysisKind(alias_analysis))
                 .name();
           },
           "",
           py::arg("schema"),
-          py::arg("alias_analysis") = "")
+          py::arg("alias_analysis") = "",
+          py::arg("tags") = std::vector<at::Tag>())
       .def(
           "fallback_fallthrough",
           [](py::object self, const char* dispatch) {
@@ -733,6 +742,16 @@ void initDispatchBindings(PyObject* module) {
       py::arg("dispatch_key") = static_cast<const char*>(""));
 
   m.def(
+      "_parse_dispatch_key",
+      [](const char* dispatch_key) -> c10::optional<c10::DispatchKey> {
+        try {
+          return c10::parseDispatchKey(dispatch_key);
+        } catch (const c10::Error& err) {
+          return c10::nullopt;
+        }
+      });
+
+  m.def(
       "_dispatch_get_registrations_for_dispatch_key",
       [](const char* dispatch_key = "") {
         auto k = std::string(dispatch_key).empty()
@@ -761,6 +780,10 @@ void initDispatchBindings(PyObject* module) {
 
   m.def(
       "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
+  m.def("_dispatch_pystub", [](const char* name, const char* overload) {
+    return c10::Dispatcher::singleton().getAbstractImplPyStub(
+        c10::OperatorName(name, overload));
+  });
 
   m.def("_replace_", [](const at::Tensor& a, const at::Tensor& b) {
     return at::functionalization::impl::replace_(a, b);
@@ -770,6 +793,19 @@ void initDispatchBindings(PyObject* module) {
   });
   m.def("_commit_update", [](const at::Tensor& a) {
     return at::functionalization::impl::commit_update(a);
+  });
+  m.def("_unsafe_reset_storage", [](const at::Tensor& a) {
+    return at::functionalization::impl::unsafe_reset_storage(a);
+  });
+
+  m.def("_dispatch_key_for_device", [](const std::string& device_type) {
+    auto device = c10::Device(device_type);
+    TORCH_CHECK(
+        !device.has_index(),
+        "Expected device_type string to not have a device index; got ",
+        device_type);
+    return c10::toString(
+        c10::computeDispatchKey(c10::nullopt, c10::nullopt, device));
   });
 
   m.def("_are_functorch_transforms_active", []() {
@@ -787,6 +823,10 @@ void initDispatchBindings(PyObject* module) {
   m.def("_get_constant_bool_symnode", [](int64_t data) {
     return c10::SymNode(
         c10::make_intrusive<c10::ConstantSymNodeImpl<bool>>(data));
+  });
+
+  m.def("_non_sym_sizes", [](const at::Tensor& a) {
+    return a.sizes(); // NB: NOT sym_size
   });
 
   using c10::impl::TorchDispatchModeKey;

@@ -4,6 +4,7 @@ import os
 import sys
 
 import torch
+import torch.nn.functional as F
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -11,6 +12,10 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.fx.passes.utils.matcher_with_name_node_map_utils import SubgraphMatcherWithNameNodeMap
+from torch.testing._internal.common_utils import IS_WINDOWS
+from torch.testing._internal.common_utils import run_tests
+import unittest
 
 class TestMatcher(JitTestCase):
     def test_subgraph_matcher_with_attributes(self):
@@ -122,3 +127,110 @@ class TestMatcher(JitTestCase):
         maxpool_sp_graph = make_fx(maxpool_sp)(*inputs).graph
         match_sp_result = maxpool_matcher.match(maxpool_sp_graph)
         self.assertEqual(len(match_sp_result), 1)
+
+    @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
+    def test_split_to_graph_and_name_node_map(self):
+        """Testing the internal helper function for splitting the pattern graph"""
+        from torch.fx.passes.utils.matcher_with_name_node_map_utils import _split_to_graph_and_name_node_map
+
+        def pattern(x, weight):
+            conv = F.conv2d(x, weight)
+            relu = F.relu(conv)
+            relu_mul_by_two = relu * 2
+            return relu, relu_mul_by_two, {"conv": conv, "relu": relu}
+
+        from torch._export import capture_pre_autograd_graph
+        example_inputs = (
+            torch.randn(1, 3, 3, 3) * 10,
+            torch.randn(3, 3, 3, 3),
+        )
+        pattern_gm = capture_pre_autograd_graph(pattern, example_inputs)
+        before_split_res = pattern_gm(*example_inputs)
+        pattern_gm, name_node_map = _split_to_graph_and_name_node_map(pattern_gm)
+        after_split_res = pattern_gm(*example_inputs)
+        self.assertEqual(before_split_res[0], after_split_res[0])
+        self.assertEqual(before_split_res[1], after_split_res[1])
+
+    @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
+    def test_matcher_with_name_node_map_function(self):
+        """Testing SubgraphMatcherWithNameNodeMap with function pattern
+        """
+
+        def target_graph(x, weight):
+            x = x * 2
+            weight = weight * 3
+            conv = F.conv2d(x, weight)
+            relu = F.relu(conv)
+            relu2 = relu * 2
+            return relu + relu2
+
+        def pattern(x, weight):
+            conv = F.conv2d(x, weight)
+            relu = F.relu(conv)
+            relu_mul_by_two = relu * 2
+            return relu, relu_mul_by_two, {"conv": conv, "relu": relu}
+
+        from torch._export import capture_pre_autograd_graph
+        example_inputs = (
+            torch.randn(1, 3, 3, 3) * 10,
+            torch.randn(3, 3, 3, 3),
+        )
+        pattern_gm = capture_pre_autograd_graph(pattern, example_inputs)
+        matcher = SubgraphMatcherWithNameNodeMap(pattern_gm)
+        target_gm = capture_pre_autograd_graph(target_graph, example_inputs)
+        internal_matches = matcher.match(target_gm.graph)
+        for internal_match in internal_matches:
+            name_node_map = internal_match.name_node_map
+            assert "conv" in name_node_map
+            assert "relu" in name_node_map
+            name_node_map["conv"].meta["custom_annotation"] = "annotation"
+            # check if we correctly annotated the target graph module
+            for n in target_gm.graph.nodes:
+                if n == name_node_map["conv"]:
+                    assert "custom_annotation" in n.meta and n.meta["custom_annotation"] == "annotation"
+
+    @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
+    def test_matcher_with_name_node_map_module(self):
+        """Testing SubgraphMatcherWithNameNodeMap with module pattern
+        """
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+
+        class Pattern(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                linear = self.linear(x)
+                # Note: we can't put "weight": self.linear.weight in dictionary since
+                # nn.Parameter is not an allowed output type in dynamo
+                return linear, {"linear": linear, "x": x}
+
+        from torch._export import capture_pre_autograd_graph
+        example_inputs = (
+            torch.randn(3, 5),
+        )
+        pattern_gm = capture_pre_autograd_graph(Pattern(), example_inputs)
+        matcher = SubgraphMatcherWithNameNodeMap(pattern_gm)
+        target_gm = capture_pre_autograd_graph(M(), example_inputs)
+        internal_matches = matcher.match(target_gm.graph)
+        for internal_match in internal_matches:
+            name_node_map = internal_match.name_node_map
+            assert "linear" in name_node_map
+            assert "x" in name_node_map
+            name_node_map["linear"].meta["custom_annotation"] = "annotation"
+            # check if we correctly annotated the target graph module
+            for n in target_gm.graph.nodes:
+                if n == name_node_map["linear"]:
+                    assert "custom_annotation" in n.meta and n.meta["custom_annotation"] == "annotation"
+
+if __name__ == "__main__":
+    run_tests()

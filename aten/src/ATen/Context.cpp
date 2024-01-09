@@ -65,6 +65,14 @@ void Context::setDeterministicAlgorithms(bool b, bool warn_only=false) {
   _deterministic_algorithms_warn_only = warn_only;
 }
 
+bool Context::deterministicFillUninitializedMemory() const {
+  return _deterministic_fill_uninitialized_memory;
+}
+
+void Context::setDeterministicFillUninitializedMemory(bool b) {
+  _deterministic_fill_uninitialized_memory = b;
+}
+
 void Context::alertNotDeterministic(c10::string_view const& caller) {
   if (globalContext().deterministicAlgorithms()) {
     if (globalContext().deterministicAlgorithmsWarnOnly()) {
@@ -83,6 +91,14 @@ void Context::alertNotDeterministic(c10::string_view const& caller) {
         "to help us prioritize adding deterministic support for this operation.");
     }
   }
+}
+
+bool Context::userEnabledNNPACK() const {
+  return enabled_nnpack;
+}
+
+void Context::setUserEnabledNNPACK(bool e) {
+  enabled_nnpack = e;
 }
 
 bool Context::allowTF32CuDNN() const {

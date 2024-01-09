@@ -17,7 +17,7 @@ TORCH_LIBRARY(c10d, m) {
       .def("wait", [](const c10::intrusive_ptr<Work>& self) { self->wait(); });
   m.class_<ReduceOp>("ReduceOp").def(torch::init<>());
   m.def(
-      "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
+      "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, bool asyncOp, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
       "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, Tensor? sparse_indices, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
@@ -25,7 +25,7 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int timeout) -> (Tensor[][], __torch__.torch.classes.c10d.Work)");
   m.def(
-      "_allgather_base_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group) -> (Tensor, __torch__.torch.classes.c10d.Work)");
+      "_allgather_base_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, bool asyncOp, int timeout) -> (Tensor, __torch__.torch.classes.c10d.Work)");
   m.def(
       "allgather_coalesced_(Tensor[][] output_lists, Tensor[] input_list, __torch__.torch.classes.c10d.ProcessGroup process_group) -> __torch__.torch.classes.c10d.Work");
   m.def(
@@ -33,7 +33,7 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "reduce_scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
-      "_reduce_scatter_base_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int timeout) -> (Tensor, __torch__.torch.classes.c10d.Work)");
+      "_reduce_scatter_base_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, bool asyncOp, int timeout) -> (Tensor, __torch__.torch.classes.c10d.Work)");
   m.def(
       "reduce_scatter_tensor_coalesced_(Tensor[] outputs, Tensor[] inputs, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
@@ -41,7 +41,7 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "gather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
-      "scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
+      "scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, bool asyncOp, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
       "alltoall_(Tensor[] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
@@ -134,24 +134,25 @@ IMPL_REDUCE(CPU)
 IMPL_REDUCE(CUDA)
 IMPL_REDUCE(PrivateUse1)
 
-#define IMPL_BROADCAST(DEV)                                               \
-  std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>           \
-      broadcast_##DEV(                                                    \
-          at::TensorList tensors,                                         \
-          const c10::intrusive_ptr<ProcessGroup>& process_group,          \
-          int64_t root_rank,                                              \
-          int64_t root_tensor,                                            \
-          int64_t timeout) {                                              \
-    auto tensor_vec = tensors.vec();                                      \
-    auto work = process_group->getBackend(c10::DeviceType::DEV)           \
-                    ->broadcast(                                          \
-                        tensor_vec,                                       \
-                        BroadcastOptions{                                 \
-                            root_rank,                                    \
-                            root_tensor,                                  \
-                            std::chrono::milliseconds(timeout)});         \
-    return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>( \
-        std::move(tensor_vec), work);                                     \
+#define IMPL_BROADCAST(DEV)                                                   \
+  std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>               \
+      broadcast_##DEV(                                                        \
+          at::TensorList tensors,                                             \
+          const c10::intrusive_ptr<ProcessGroup>& process_group,              \
+          int64_t root_rank,                                                  \
+          int64_t root_tensor,                                                \
+          bool asyncOp,                                                       \
+          int64_t timeout) {                                                  \
+    auto tensor_vec = tensors.vec();                                          \
+    auto work = process_group->getBackend(c10::DeviceType::DEV) -> broadcast( \
+        tensor_vec,                                                           \
+        BroadcastOptions{                                                     \
+            root_rank,                                                        \
+            root_tensor,                                                      \
+            std::chrono::milliseconds(timeout),                               \
+            asyncOp});                                                        \
+    return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(     \
+        std::move(tensor_vec), work);                                         \
   }
 
 IMPL_BROADCAST(CPU)
@@ -161,23 +162,21 @@ IMPL_BROADCAST(PrivateUse1)
 // Return input tensors as output tensors to make inplace allreduce look like
 // a functional API, so that make_fx can correctly build the dependencies in
 // the graph later.
-#define IMPL_ALLREDUCE(DEV)                                                 \
-  std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>             \
-      allreduce_##DEV(                                                      \
-          at::TensorList tensors,                                           \
-          const c10::intrusive_ptr<ProcessGroup>& process_group,            \
-          const c10::intrusive_ptr<ReduceOp>& reduce_op,                    \
-          const c10::optional<at::Tensor>& sparse_indices,                  \
-          int64_t timeout) {                                                \
-    auto tensor_vec = tensors.vec();                                        \
-    auto work =                                                             \
-        process_group->getBackend(c10::DeviceType::DEV)                     \
-            ->allreduce(                                                    \
-                tensor_vec,                                                 \
-                AllreduceOptions{                                           \
-                    *reduce_op.get(), std::chrono::milliseconds(timeout)}); \
-    return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(   \
-        std::move(tensor_vec), work);                                       \
+#define IMPL_ALLREDUCE(DEV)                                                   \
+  std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>               \
+      allreduce_##DEV(                                                        \
+          at::TensorList tensors,                                             \
+          const c10::intrusive_ptr<ProcessGroup>& process_group,              \
+          const c10::intrusive_ptr<ReduceOp>& reduce_op,                      \
+          const c10::optional<at::Tensor>& sparse_indices,                    \
+          int64_t timeout) {                                                  \
+    auto tensor_vec = tensors.vec();                                          \
+    auto work = process_group->getBackend(c10::DeviceType::DEV) -> allreduce( \
+        tensor_vec,                                                           \
+        AllreduceOptions{                                                     \
+            *reduce_op.get(), std::chrono::milliseconds(timeout)});           \
+    return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(     \
+        std::move(tensor_vec), work);                                         \
   }
 
 IMPL_ALLREDUCE(CPU)
@@ -212,12 +211,10 @@ IMPL_ALLREDUCE_COALESCED(PrivateUse1)
           const c10::intrusive_ptr<ProcessGroup>& process_group,               \
           int64_t timeout) {                                                   \
     auto input_tensors_vec = input_tensors.vec();                              \
-    auto work = process_group->getBackend(c10::DeviceType::DEV)                \
-                    ->allgather(                                               \
-                        const_cast<std::vector<std::vector<at::Tensor>>&>(     \
-                            output_tensors),                                   \
-                        input_tensors_vec,                                     \
-                        AllgatherOptions{std::chrono::milliseconds(timeout)}); \
+    auto work = process_group->getBackend(c10::DeviceType::DEV) -> allgather(  \
+        const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),     \
+        input_tensors_vec,                                                     \
+        AllgatherOptions{std::chrono::milliseconds(timeout)});                 \
     return std::                                                               \
         tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>( \
             output_tensors, work);                                             \
@@ -227,15 +224,20 @@ IMPL_ALLGATHER(CPU)
 IMPL_ALLGATHER(CUDA)
 IMPL_ALLGATHER(PrivateUse1)
 
-#define IMPL__ALLGATHER_BASE(DEV)                                         \
-  std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_##DEV( \
-      at::Tensor& output_tensor,                                          \
-      at::Tensor& input_tensor,                                           \
-      const c10::intrusive_ptr<ProcessGroup>& process_group) {            \
-    auto work = process_group->getBackend(c10::DeviceType::DEV)           \
-                    ->_allgather_base(output_tensor, input_tensor);       \
-    return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(              \
-        output_tensor, work);                                             \
+#define IMPL__ALLGATHER_BASE(DEV)                                           \
+  std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_##DEV(   \
+      at::Tensor& output_tensor,                                            \
+      at::Tensor& input_tensor,                                             \
+      const c10::intrusive_ptr<ProcessGroup>& process_group,                \
+      bool asyncOp,                                                         \
+      int64_t timeout) {                                                    \
+    auto work =                                                             \
+        process_group->getBackend(c10::DeviceType::DEV) -> _allgather_base( \
+            output_tensor,                                                  \
+            input_tensor,                                                   \
+            AllgatherOptions{std::chrono::milliseconds(timeout), asyncOp}); \
+    return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(                \
+        output_tensor, work);                                               \
   }
 
 IMPL__ALLGATHER_BASE(CPU)
@@ -273,25 +275,23 @@ IMPL_ALLGATHER_INTO_TENSOR_COALESCED(CPU)
 IMPL_ALLGATHER_INTO_TENSOR_COALESCED(CUDA)
 IMPL_ALLGATHER_INTO_TENSOR_COALESCED(PrivateUse1)
 
-#define IMPL_REDUCE_SCATTER(DEV)                                            \
-  std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>             \
-      reduce_scatter_##DEV(                                                 \
-          const at::TensorList& output_tensors,                             \
-          const std::vector<std::vector<at::Tensor>>& input_tensors,        \
-          const c10::intrusive_ptr<ProcessGroup>& process_group,            \
-          const c10::intrusive_ptr<ReduceOp>& reduce_op,                    \
-          int64_t timeout) {                                                \
-    auto output_tensors_vec = output_tensors.vec();                         \
-    auto work =                                                             \
-        process_group->getBackend(c10::DeviceType::DEV)                     \
-            ->reduce_scatter(                                               \
-                output_tensors_vec,                                         \
-                const_cast<std::vector<std::vector<at::Tensor>>&>(          \
-                    input_tensors),                                         \
-                ReduceScatterOptions{                                       \
-                    *reduce_op.get(), std::chrono::milliseconds(timeout)}); \
-    return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(   \
-        output_tensors_vec, work);                                          \
+#define IMPL_REDUCE_SCATTER(DEV)                                              \
+  std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>               \
+      reduce_scatter_##DEV(                                                   \
+          const at::TensorList& output_tensors,                               \
+          const std::vector<std::vector<at::Tensor>>& input_tensors,          \
+          const c10::intrusive_ptr<ProcessGroup>& process_group,              \
+          const c10::intrusive_ptr<ReduceOp>& reduce_op,                      \
+          int64_t timeout) {                                                  \
+    auto output_tensors_vec = output_tensors.vec();                           \
+    auto work =                                                               \
+        process_group->getBackend(c10::DeviceType::DEV) -> reduce_scatter(    \
+            output_tensors_vec,                                               \
+            const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors), \
+            ReduceScatterOptions{                                             \
+                *reduce_op.get(), std::chrono::milliseconds(timeout)});       \
+    return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(     \
+        output_tensors_vec, work);                                            \
   }
 
 IMPL_REDUCE_SCATTER(CPU)
@@ -304,14 +304,16 @@ IMPL_REDUCE_SCATTER(PrivateUse1)
       at::Tensor& input_tensor,                                                \
       const c10::intrusive_ptr<ProcessGroup>& process_group,                   \
       const c10::intrusive_ptr<ReduceOp>& reduce_op,                           \
+      bool asyncOp,                                                            \
       int64_t timeout) {                                                       \
-    auto work =                                                                \
-        process_group->getBackend(c10::DeviceType::DEV)                        \
-            ->_reduce_scatter_base(                                            \
-                output_tensor,                                                 \
-                input_tensor,                                                  \
-                ReduceScatterOptions{                                          \
-                    *reduce_op.get(), std::chrono::milliseconds(timeout)});    \
+    auto work = process_group->getBackend(c10::DeviceType::DEV)                \
+                    -> _reduce_scatter_base(                                   \
+                        output_tensor,                                         \
+                        input_tensor,                                          \
+                        ReduceScatterOptions{                                  \
+                            *reduce_op.get(),                                  \
+                            std::chrono::milliseconds(timeout),                \
+                            asyncOp});                                         \
     return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(                   \
         output_tensor, work);                                                  \
   }
@@ -366,15 +368,14 @@ IMPL_GATHER(PrivateUse1)
       const std::vector<std::vector<at::Tensor>>& input_tensors,               \
       const c10::intrusive_ptr<ProcessGroup>& process_group,                   \
       int64_t root_rank,                                                       \
+      bool asyncOp,                                                            \
       int64_t timeout) {                                                       \
     auto output_tensors_vec = output_tensors.vec();                            \
-    auto work = process_group->getBackend(c10::DeviceType::DEV)                \
-                    ->scatter(                                                 \
-                        output_tensors_vec,                                    \
-                        const_cast<std::vector<std::vector<at::Tensor>>&>(     \
-                            input_tensors),                                    \
-                        ScatterOptions{                                        \
-                            root_rank, std::chrono::milliseconds(timeout)});   \
+    auto work = process_group->getBackend(c10::DeviceType::DEV) -> scatter(    \
+        output_tensors_vec,                                                    \
+        const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),      \
+        ScatterOptions{                                                        \
+            root_rank, std::chrono::milliseconds(timeout), asyncOp});          \
     return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(      \
         std::move(output_tensors_vec), work);                                  \
   }
@@ -383,22 +384,21 @@ IMPL_SCATTER(CPU)
 IMPL_SCATTER(CUDA)
 IMPL_SCATTER(PrivateUse1)
 
-#define IMPL_ALLTOALL(DEV)                                                    \
-  std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>               \
-      alltoall_##DEV(                                                         \
-          const at::TensorList& output_tensors,                               \
-          const at::TensorList& input_tensors,                                \
-          const c10::intrusive_ptr<ProcessGroup>& process_group,              \
-          int64_t timeout) {                                                  \
-    auto output_tensors_vec = output_tensors.vec();                           \
-    auto input_tensors_vec = input_tensors.vec();                             \
-    auto work = process_group->getBackend(c10::DeviceType::DEV)               \
-                    ->alltoall(                                               \
-                        output_tensors_vec,                                   \
-                        input_tensors_vec,                                    \
-                        AllToAllOptions{std::chrono::milliseconds(timeout)}); \
-    return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(     \
-        std::move(output_tensors_vec), work);                                 \
+#define IMPL_ALLTOALL(DEV)                                                   \
+  std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>              \
+      alltoall_##DEV(                                                        \
+          const at::TensorList& output_tensors,                              \
+          const at::TensorList& input_tensors,                               \
+          const c10::intrusive_ptr<ProcessGroup>& process_group,             \
+          int64_t timeout) {                                                 \
+    auto output_tensors_vec = output_tensors.vec();                          \
+    auto input_tensors_vec = input_tensors.vec();                            \
+    auto work = process_group->getBackend(c10::DeviceType::DEV) -> alltoall( \
+        output_tensors_vec,                                                  \
+        input_tensors_vec,                                                   \
+        AllToAllOptions{std::chrono::milliseconds(timeout)});                \
+    return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(    \
+        std::move(output_tensors_vec), work);                                \
   }
 
 IMPL_ALLTOALL(CPU)

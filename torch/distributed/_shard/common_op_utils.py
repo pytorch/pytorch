@@ -1,5 +1,5 @@
 import torch
-from torch.utils._pytree import tree_map
+from torch.utils import _pytree as pytree
 from typing import Optional
 
 def _basic_validation(op, args=(), kwargs=None):
@@ -19,8 +19,8 @@ def _basic_validation(op, args=(), kwargs=None):
         if isinstance(e, ShardedTensor):
             has_distributed_tensor = True
 
-    tree_map(is_distributed_tensor, args)
-    tree_map(is_distributed_tensor, kwargs)
+    pytree.tree_map_(is_distributed_tensor, args)
+    pytree.tree_map_(is_distributed_tensor, kwargs)
 
     if not has_distributed_tensor:
         raise TypeError(
@@ -41,8 +41,8 @@ def _basic_validation(op, args=(), kwargs=None):
                 )
             cur_pg = e._process_group
 
-    tree_map(validate_pg, args)
-    tree_map(validate_pg, kwargs)
+    pytree.tree_map_(validate_pg, args)
+    pytree.tree_map_(validate_pg, kwargs)
 
 def _register_default_op(op, decorator):
     @decorator(op)
