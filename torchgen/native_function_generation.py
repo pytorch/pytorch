@@ -50,6 +50,7 @@ MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
 FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_assert_async",  # no return
     "_assert_async.msg",  # no return
+    "_cslt_sparse_mm_search",  # returns an int
     "_dimI",  # returns an int
     "_dimV",  # returns an int
     "_has_same_storage_numel",  # returns a boolean
@@ -323,7 +324,9 @@ def generate_function(
             )
         }
     }
-    tags = {"generated"} | set(f.tags & {"nondeterministic_seeded", "view_copy"})
+    tags = {"generated"} | set(
+        f.tags & {"nondeterministic_seeded", "view_copy", "pt2_compliant_tag"}
+    )
 
     return (
         NativeFunction(
@@ -371,8 +374,8 @@ def add_generated_native_functions(
     rs: List[NativeFunction],
     indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]],
 ) -> None:
-    # The main code for gnerating new NativeFunctions
-    # First we group of NaitveFunctions by schema kind,
+    # The main code for generating new NativeFunctions
+    # First we group of NativeFunctions by schema kind,
     # then we detect which ones are missing and generate them.
     pre_grouped_native_functions = pre_group_native_functions(rs)
     for d in pre_grouped_native_functions.values():

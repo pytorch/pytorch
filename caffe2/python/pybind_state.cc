@@ -1029,7 +1029,7 @@ void addGlobalMethods(py::module& m) {
   );
 
   // if the binary is built with USE_ROCM, this is a ROCm build
-  // and therefore we need to ignore dyndep failures (because the the module
+  // and therefore we need to ignore dyndep failures (because the module
   // may not have a ROCm equivalent yet e.g. nccl)
   m.attr("use_rocm") = py::bool_(
 #if defined(USE_ROCM)

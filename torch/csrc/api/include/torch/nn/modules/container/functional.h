@@ -29,7 +29,7 @@ namespace nn {
 /// \endrst
 ///
 /// While a `Functional` module only accepts a single `Tensor` as input, it is
-/// possible for the the wrapped function to accept further arguments. However,
+/// possible for the wrapped function to accept further arguments. However,
 /// these have to be bound *at construction time*. For example, if
 /// you want to wrap `torch::leaky_relu`, which accepts a `slope` scalar as its
 /// second argument, with a particular value for its `slope` in a `Functional`

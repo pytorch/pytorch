@@ -61,7 +61,6 @@ serialized.
             assertion_dep_token=None,
         )
         Range constraints: {}
-        Equality constraints: []
 
 ``torch.export`` produces a clean intermediate representation (IR) with the
 following invariants. More specifications about the IR can be found
@@ -220,7 +219,6 @@ example:
             assertion_dep_token=None,
         )
         Range constraints: {}
-        Equality constraints: []
 
 Inspecting the ``ExportedProgram``, we can note the following:
 
@@ -329,7 +327,6 @@ run. Such dimensions must be specified by using the
             assertion_dep_token=None,
         )
         Range constraints: {s0: RangeConstraint(min_val=2, max_val=9223372036854775806)}
-        Equality constraints: [(InputDim(input_name='arg5_1', dim=0), InputDim(input_name='arg6_1', dim=0))]
 
 Some additional things to note:
 
@@ -347,13 +344,6 @@ Some additional things to note:
   that the exported program will not work for dimensions 0 or 1. See
   `The 0/1 Specialization Problem <https://docs.google.com/document/d/16VPOa3d-Liikf48teAOmxLc92rgvJdfosIy-yoT38Io/edit?fbclid=IwAR3HNwmmexcitV0pbZm_x1a4ykdXZ9th_eJWK-3hBtVgKnrkmemz6Pm5jRQ#heading=h.ez923tomjvyk>`_
   for an in-depth discussion of this topic.
-
-* ``exported_program.equality_constraints`` describes which dimensions are
-  required to be equal. Since we specified in the constraints that the first
-  dimension of each argument is equivalent,
-  (``dynamic_dim(example_args[0], 0) == dynamic_dim(example_args[1], 0)``),
-  we see in the equality constraints the tuple specifying that ``arg5_1``
-  dimension 0 and ``arg6_1`` dimension 0 are equal.
 
 (A legacy mechanism for specifying dynamic shapes
 involves marking and constraining dynamic dimensions with the
@@ -501,18 +491,8 @@ Graph breaks can also be encountered on data-dependent control flow (``if
 x.shape[0] > 2``) when shapes are not being specialized, as a tracing compiler cannot
 possibly deal with without generating code for a combinatorially exploding
 number of paths. In such cases, users will need to rewrite their code using
-special control flow operators. Currently, we support :ref:`torch.cond <control_flow_cond>`
+special control flow operators. Currently, we support :ref:`torch.cond <cond>`
 to express if-else like control flow (more coming soon!).
-
-Data-Dependent Accesses
-^^^^^^^^^^^^^^^^^^^^^^^
-
-Data dependent behavior such as using the value inside of a tensor to construct
-another tensor, or using the value of a tensor to slice into another tensor, is
-also something the tracer cannot fully determine. Users will need to rewrite
-their code using the inline constraint APIs
-:func:`torch.export.constrain_as_size` and
-:func:`torch.export.constrain_as_value`.
 
 Missing Meta Kernels for Operators
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -521,9 +501,13 @@ When tracing, a META implementation (or "meta kernel") is required for all
 operators. This is used to reason about the input/output shapes for this
 operator.
 
-Note that the official API for registering custom meta kernels for custom ops is
-currently undergoing development. While the final API is being refined, you can
-refer to the documentation `here <https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0>`_.
+To register a meta kernel for a C++ Custom Operator, please refer to
+`this documentation <https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz>`__.
+
+The official API for registering custom meta kernels for custom ops implemented
+in python is currently undergoing development. While the final API is being
+refined, you can refer to the documentation
+`here <https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0>`_.
 
 In the unfortunate case where your model uses an ATen operator that is does not
 have a meta kernel implementation yet, please file an issue.
@@ -540,7 +524,7 @@ Read More
    torch.compiler_transformations
    torch.compiler_ir
    generated/exportdb/index
-   control_flow_cond
+   cond
 
 .. toctree::
    :caption: Deep Dive for PyTorch Developers
@@ -556,13 +540,11 @@ API Reference
 
 .. automodule:: torch.export
 .. autofunction:: export
-.. autofunction:: dynamic_dim
-.. autofunction:: constrain_as_size
-.. autofunction:: constrain_as_value
+.. autofunction:: torch.export.dynamic_shapes.dynamic_dim
 .. autofunction:: save
 .. autofunction:: load
 .. autofunction:: register_dataclass
-.. autofunction:: Dim
+.. autofunction:: torch.export.dynamic_shapes.Dim
 .. autofunction:: dims
 .. autoclass:: Constraint
 .. autoclass:: ExportedProgram
@@ -575,7 +557,20 @@ API Reference
 
 .. autoclass:: ExportBackwardSignature
 .. autoclass:: ExportGraphSignature
-.. autoclass:: ArgumentKind
-.. autoclass:: ArgumentSpec
 .. autoclass:: ModuleCallSignature
 .. autoclass:: ModuleCallEntry
+
+
+.. automodule:: torch.export.exported_program
+.. automodule:: torch.export.graph_signature
+.. autoclass:: InputKind
+.. autoclass:: InputSpec
+.. autoclass:: OutputKind
+.. autoclass:: OutputSpec
+.. autoclass:: ExportGraphSignature
+
+    .. automethod:: replace_all_uses
+
+.. py:module:: torch.export.dynamic_shapes
+
+.. automodule:: torch.export.unflatten

@@ -182,7 +182,9 @@ def _strong_wolfe(obj_func,
 
 
 class LBFGS(Optimizer):
-    """Implements L-BFGS algorithm, heavily inspired by `minFunc
+    """Implements L-BFGS algorithm.
+
+    Heavily inspired by `minFunc
     <https://www.cs.ubc.ca/~schmidtm/Software/minFunc.html>`_.
 
     .. warning::
@@ -282,7 +284,7 @@ class LBFGS(Optimizer):
 
     @torch.no_grad()
     def step(self, closure):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable): A closure that reevaluates the model
