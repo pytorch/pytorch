@@ -750,6 +750,10 @@ TODO:
 - Unit test: in-place op in named segment
 - For named segments, show its segment ID (prefix + fwd/bwd + nth_call) in profiler annotation in GPU trace
 - Integration with DDPOptimizer
+- Integration with FSDP (graph break, not tracing)
+- Integration with activation checkpointing
+- Implement "fall back when there is side effect in delayed region detected by Dynamo”
+- what if a segment is in the schedule but is never run due to dynamic control flow change? we should gracefully fall back to no-scheduler mode
 - (Later) Integration with compiled autograd
 
 AsyncTensor specific:
