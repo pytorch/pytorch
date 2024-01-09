@@ -756,6 +756,81 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    def test_qconv2d_add_3(self):
+        r"""
+        This testcase will test below model:
+             x
+           /   \
+        conv1  maxpool
+          \    /   \
+           add    conv2
+            \     /
+              cat
+        Based on default recipe of x86InductorQuantizer, we will see this pattern after convert:
+        qconv1    maxpool
+         \           |
+          \         q1
+           \       /   \
+            \     dq1  qconv2
+             \   /
+              add
+               |
+               q2
+        Since q1 has 2 users and qconv2 is not ancestor node of qconv1, we shouldn't fuse:
+                int8
+                 /
+        qconv1 dq1
+           \   /
+            add
+             |
+             q2
+             |
+            int8
+        Instead we can match and fuse this pattern into qconv_binary:
+        qconv1  fp32
+            \   /
+             add
+              |
+             fp32
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(3, 3, kernel_size=1, stride=1)
+                self.maxpool = torch.nn.MaxPool2d(
+                    kernel_size=3, stride=1, padding=0, dilation=1
+                )
+
+            def forward(self, x):
+                tmp1 = self.conv1(x)
+                tmp2 = self.maxpool(x)
+                add = torch.add(tmp1, tmp2)
+                tmp3 = self.conv2(tmp2)
+                return torch.cat((add, tmp3), dim=1)
+
+        mod = M().eval()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+
+        def matcher_check_fn():
+            self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_count"], 1)
+            # The matched qconv binary pattern should have 2 nodes [qconv, add]
+            # instead of 11 which has dequant in binary input and output quant
+            self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_nodes"], 2)
+
+        self._test_common(
+            mod,
+            (v,),
+            check_quantization=True,
+            matcher_check_fn=matcher_check_fn,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
     def test_qat_qconv2d(self):
         r"""
         This testcase will quantize a single Conv2d module with qat flow.
@@ -1047,32 +1122,42 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_check_fn=matcher_check_fn,
         )
 
-    def _qlinear_cpu_test_helper(self, inputs, int8_mixed_bf16=False):
+    def _qlinear_cpu_test_helper(
+        self,
+        inputs,
+        int8_mixed_bf16=False,
+        do_permute=False,
+        matcher_check_fn=None,
+        bias=True,
+    ):
         class M(torch.nn.Module):
-            def __init__(self, use_bias):
+            def __init__(self, use_bias, do_permute=False):
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4, use_bias)
                 self.linear2 = torch.nn.Linear(4, 4, use_bias)
+                self.do_permute = do_permute
 
             def forward(self, x):
+                if self.do_permute:
+                    x = torch.reshape(torch.permute(x, (0, 2, 3, 1)), (2, 12, 4))
                 return self.linear2(self.linear(x))
 
-        bias_list = [True, False]
-        for bias in bias_list:
-            mod = M(bias).eval()
+        mod = M(bias, do_permute=do_permute).eval()
 
-            def matcher_check_fn():
-                self.assertEqual(
-                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 2
-                )
-
-            self._test_common(
-                mod,
-                inputs,
-                check_autocast=int8_mixed_bf16,
-                check_quantization=True,
-                matcher_check_fn=matcher_check_fn,
+        def _default_matcher_check_fn():
+            self.assertEqual(
+                counters["inductor"]["qlinear_weight_prepack_matcher_count"], 2
             )
+
+        self._test_common(
+            mod,
+            inputs,
+            check_autocast=int8_mixed_bf16,
+            check_quantization=True,
+            matcher_check_fn=matcher_check_fn
+            if matcher_check_fn is not None
+            else _default_matcher_check_fn,
+        )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -1081,7 +1166,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a single Linear Moduel.
         """
-        self._qlinear_cpu_test_helper((torch.randn((2, 4)),))
+        for bias in [True, False]:
+            self._qlinear_cpu_test_helper((torch.randn((2, 4)),), bias=bias)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -1091,7 +1177,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
         """
-        self._qlinear_cpu_test_helper((torch.randn((2, 4)),), int8_mixed_bf16=True)
+        for bias in [True, False]:
+            self._qlinear_cpu_test_helper(
+                (torch.randn((2, 4)),), int8_mixed_bf16=True, bias=bias
+            )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -1100,7 +1189,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a single Linear Moduel.
         """
-        self._qlinear_cpu_test_helper((torch.randn((2, 3, 4)),))
+        for bias in [True, False]:
+            self._qlinear_cpu_test_helper((torch.randn((2, 3, 4)),), bias=bias)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -1110,7 +1200,66 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
         """
-        self._qlinear_cpu_test_helper((torch.randn((2, 3, 4)),), int8_mixed_bf16=True)
+        for bias in [True, False]:
+            self._qlinear_cpu_test_helper(
+                (torch.randn((2, 3, 4)),), int8_mixed_bf16=True, bias=bias
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_input_dim_exceeds_2_and_not_contiguous(self):
+        r"""
+        This testcase will quantize a single Linear Module.
+        * Input dim exceeds 2
+        * Input not contiguous
+        """
+        for bias in [True, False]:
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 2
+                )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                    17 if bias else 16,
+                )
+
+            self._qlinear_cpu_test_helper(
+                (torch.randn((2, 4, 3, 4)),),
+                do_permute=True,
+                matcher_check_fn=matcher_check_fn,
+                bias=bias,
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_int8_mixed_bf16_input_dim_exceeds_2_and_not_contiguous(self):
+        r"""
+        This testcase will quantize a single Linear Module for int8_bf16.
+        * Input dim exceeds 2
+        * Input not contiguous
+        """
+        for bias in [True, False]:
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 2
+                )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                    21 if bias else 20,
+                )
+
+            self._qlinear_cpu_test_helper(
+                (torch.randn((2, 4, 3, 4)),),
+                int8_mixed_bf16=True,
+                do_permute=True,
+                matcher_check_fn=matcher_check_fn,
+                bias=bias,
+            )
 
     def _qlinear_unary_cpu_test_helper(self, inputs, int8_mixed_bf16=False):
         class M(torch.nn.Module):
