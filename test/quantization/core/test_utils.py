@@ -194,5 +194,5 @@ class TestUtils(TestCase):
 
     def test_new_dtype(self):
         # make sure we can create new dtypes
-        int4 = torch.dtype(torch.bits8, "int4")
-        int4_backup_by_bits16 = torch.dtype(torch.bits16, "int4")
+        int4 = torch._C._custom_dtype(torch.bits8, "int4")
+        int4_backup_by_bits16 = torch.._C._custom_dtype(torch.bits16, "int4")
