@@ -13,7 +13,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA, tf32_off
 from torch.testing._internal.common_device_type import OpDTypes, instantiate_device_type_tests, ops
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_nn import TestBase, module_tests, new_module_tests
-from torch.testing._internal.common_utils import TestCase, freeze_rng_state, make_tensor, run_tests, parametrize
+from torch.testing._internal.common_utils import TestCase, freeze_rng_state, make_tensor, run_tests, parametrize, skipIfTorchDynamo
 from torch.testing._internal.common_methods_invocations import SampleInput, op_db
 from torch.nn.utils._expanded_weights import ExpandedWeight
 from torch.nn.utils._expanded_weights.expanded_weights_utils import forward_helper, set_grad_sample_if_exists, \
@@ -78,6 +78,7 @@ class TestExpandedWeightHelperFunction(TestCase):
                 expanded_args, expanded_kwargs = standard_kwargs(('bias',), (input, maybe_batched_weight, maybe_batched_bias))
                 forward_helper(nn.functional.linear, expanded_args, expanded_kwargs)
 
+    @skipIfTorchDynamo("Not a Dynamo suitable test")
     def test_set_grad_sample_if_exists(self, device):
         def test_fn(a):
             return grad_sample
