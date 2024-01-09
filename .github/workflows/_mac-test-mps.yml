@@ -25,14 +25,10 @@ on:
         type: string
         description: |
           A JSON description of what configs to run later on.
-      runs-on:
-        required: false
-        type: string
-        default: "macos-m1-12"
-        description: Hardware to run tests on
 
 jobs:
   filter:
+    if: github.repository_owner == 'pytorch'
     runs-on: [self-hosted, linux.large]
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
@@ -60,10 +56,9 @@ jobs:
     strategy:
       matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
-    runs-on: ${{ inputs.runs-on }}
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Print runner OS/HW info
-        shell: arch -arch arm64 bash {0}
         run: |
           sysctl machdep.cpu.brand_string kern.osproductversion
 
@@ -74,7 +69,6 @@ jobs:
           quiet-checkout: true
 
       - name: Clean checkout
-        shell: arch -arch arm64 bash {0}
         run: |
           git clean -fxd
 
@@ -94,15 +88,15 @@ jobs:
       - name: Install PyTorch and run MPS tests
         id: test
         env:
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          TEST_CONFIG: ${{ matrix.config }}
           ENV_NAME: conda-test-env-${{ github.run_id }}
           PY_VERS: 3.9
           PR_BODY: ${{ github.event.pull_request.body }}
-          PYTORCH_RETRY_TEST_CASES: 1
-          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
           PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
           REENABLED_ISSUES: ${{ needs.filter.outputs.reenabled-issues }}
-        shell: arch -arch arm64 bash {0}
         run: |
           # shellcheck disable=SC1090
           set -ex
@@ -141,7 +135,7 @@ jobs:
         shell: bash
         if: always() && steps.test.conclusion
         run: |
-          cat test/**/*.log || true
+          cat test/**/*_toprint.log || true
 
       - name: Get workflow job id
         id: get-job-id
@@ -155,4 +149,9 @@ jobs:
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
           use-gha: true
-          file-suffix: ${{ github.job }}-mps-1-1-macos-m1-12_${{ steps.get-job-id.outputs.job-id }}
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Clean up disk space
+        if: always()
+        continue-on-error: true
+        uses: pytorch/test-infra/.github/actions/check-disk-space@main

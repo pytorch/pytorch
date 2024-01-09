@@ -106,6 +106,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   if (!THPFunctionClass)
     return nullptr;
 
+  // NOTE: "leaks" GradientEdge
+  auto autograd_graph_mod =
+      THPObjectPtr(PyImport_ImportModule("torch.autograd.graph"));
+  THPGradientEdgeClass =
+      PyObject_GetAttrString(autograd_graph_mod, "GradientEdge");
+  if (!THPGradientEdgeClass)
+    return nullptr;
+
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
   if (!torch_C_module)
     return nullptr;
@@ -307,18 +315,19 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   });
 
   m.def("_supported_activities", []() {
-    std::set<ActivityType> activities{ActivityType::CPU};
+    std::set<torch::profiler::impl::ActivityType> activities{
+        torch::profiler::impl::ActivityType::CPU};
 #if defined(USE_KINETO) && \
     (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
     if (at::getNumGPUs() > 0) {
-      activities.insert(ActivityType::CUDA);
+      activities.insert(torch::profiler::impl::ActivityType::CUDA);
     }
 #elif defined(USE_KINETO)
     if (at::hasXPU()) {
-      activities.insert(ActivityType::XPU);
+      activities.insert(torch::profiler::impl::ActivityType::XPU);
     }
     if (at::hasMTIA()) {
-      activities.insert(ActivityType::MTIA);
+      activities.insert(torch::profiler::impl::ActivityType::MTIA);
     }
 #endif
     return activities;
@@ -1041,6 +1050,7 @@ static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
   if (maybe_mode == c10::nullopt) {
     Py_RETURN_NONE;
   }
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
   Py_INCREF(r);
   return r;
@@ -1056,6 +1066,7 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
   if (maybe_mode == c10::nullopt) {
     Py_RETURN_NONE;
   }
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
   Py_INCREF(r);
   return r;
@@ -1071,7 +1082,7 @@ static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
 
 PyObject* THPModule_increment_version(PyObject* _unused, PyObject* tensor) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  TORCH_CHECK(
       THPVariable_Check(tensor), "increment_version expect a Tensor as input");
   torch::autograd::increment_version((THPVariable_Unpack(tensor)));
   Py_RETURN_NONE;

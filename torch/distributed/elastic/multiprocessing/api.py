@@ -63,9 +63,7 @@ def _terminate_process_handler(signum: int, frame: Optional[FrameType]) -> None:
 
 
 def _get_kill_signal() -> signal.Signals:
-    """
-    Get the kill signal. SIGKILL for unix, CTRL_C_EVENT for windows.
-    """
+    """Get the kill signal. SIGKILL for unix, CTRL_C_EVENT for windows."""
     if IS_WINDOWS:
         return signal.CTRL_C_EVENT  # type: ignore[attr-defined] # noqa: F821
     else:
@@ -73,9 +71,7 @@ def _get_kill_signal() -> signal.Signals:
 
 
 def _get_default_signal() -> signal.Signals:
-    """
-    Get the default termination signal. SIGTERM for unix, CTRL_C_EVENT for windows.
-    """
+    """Get the default termination signal. SIGTERM for unix, CTRL_C_EVENT for windows."""
     if IS_WINDOWS:
         return signal.CTRL_C_EVENT  # type: ignore[attr-defined] # noqa: F821
     else:
@@ -107,7 +103,6 @@ class Std(IntFlag):
     def from_str(cls, vm: str) -> Union["Std", Dict[int, "Std"]]:
         """
         Example:
-
         ::
 
          from_str("0") -> Std.NONE
@@ -146,7 +141,6 @@ def to_map(
     method that converts a value or mapping into a mapping.
 
     Example:
-
     ::
 
      to_map(Std.OUT, local_world_size=2) # returns: {0: Std.OUT, 1: Std.OUT}
@@ -165,8 +159,7 @@ def to_map(
 @dataclass
 class RunProcsResult:
     """
-    Results of a completed run of processes started with ``start_processes()``.
-    Returned by ``PContext``.
+    Results of a completed run of processes started with ``start_processes()``. Returned by ``PContext``.
 
     Note the following:
 
@@ -188,9 +181,9 @@ class RunProcsResult:
 
 class PContext(abc.ABC):
     """
-    The base class that standardizes operations over a set of processes
-    that are launched via different mechanisms. The name ``PContext``
-    is intentional to disambiguate with ``torch.multiprocessing.ProcessContext``.
+    The base class that standardizes operations over a set of processes that are launched via different mechanisms.
+
+    The name ``PContext`` is intentional to disambiguate with ``torch.multiprocessing.ProcessContext``.
 
     .. warning:: stdouts and stderrs should ALWAYS be a superset of
                  tee_stdouts and tee_stderrs (respectively) this is b/c
@@ -208,6 +201,7 @@ class PContext(abc.ABC):
         tee_stdouts: Dict[int, str],
         tee_stderrs: Dict[int, str],
         error_files: Dict[int, str],
+        log_line_prefixes: Optional[Dict[int, str]] = None,
     ):
         self.name = name
         # validate that all mappings have the same number of keys and
@@ -224,13 +218,11 @@ class PContext(abc.ABC):
         self.error_files = error_files
         self.nprocs = nprocs
 
-        self._stdout_tail = TailLog(name, tee_stdouts, sys.stdout)
-        self._stderr_tail = TailLog(name, tee_stderrs, sys.stderr)
+        self._stdout_tail = TailLog(name, tee_stdouts, sys.stdout, log_line_prefixes)
+        self._stderr_tail = TailLog(name, tee_stderrs, sys.stderr, log_line_prefixes)
 
     def start(self) -> None:
-        """
-        Start processes using parameters defined in the constructor.
-        """
+        """Start processes using parameters defined in the constructor."""
         signal.signal(signal.SIGTERM, _terminate_process_handler)
         signal.signal(signal.SIGINT, _terminate_process_handler)
         if not IS_WINDOWS:
@@ -242,15 +234,13 @@ class PContext(abc.ABC):
 
     @abc.abstractmethod
     def _start(self) -> None:
-        """
-        Start processes using strategy defined in a particular context.
-        """
+        """Start processes using strategy defined in a particular context."""
         raise NotImplementedError()
 
     @abc.abstractmethod
     def _poll(self) -> Optional[RunProcsResult]:
         """
-        Polls the run status of the processes running under this context.
+        Poll the run status of the processes running under this context.
         This method follows an "all-or-nothing" policy and returns
         a ``RunProcessResults`` object if either all processes complete
         successfully or any process fails. Returns ``None`` if
@@ -260,7 +250,7 @@ class PContext(abc.ABC):
 
     def wait(self, timeout: float = -1, period: float = 1) -> Optional[RunProcsResult]:
         """
-        Waits for the specified ``timeout`` seconds, polling every ``period`` seconds
+        Wait for the specified ``timeout`` seconds, polling every ``period`` seconds
         for the processes to be done. Returns ``None`` if the processes are still running
         on timeout expiry. Negative timeout values are interpreted as "wait-forever".
         A timeout value of zero simply queries the status of the processes (e.g. equivalent
@@ -283,7 +273,6 @@ class PContext(abc.ABC):
         received signal. If child processes will not terminate in the timeout time, the process will send
         the SIGKILL.
         """
-
         if timeout == 0:
             return self._poll()
 
@@ -301,9 +290,7 @@ class PContext(abc.ABC):
 
     @abc.abstractmethod
     def pids(self) -> Dict[int, int]:
-        """
-        Returns pids of processes mapped by their respective local_ranks
-        """
+        """Return pids of processes mapped by their respective local_ranks."""
         raise NotImplementedError()
 
     @abc.abstractmethod
@@ -373,9 +360,7 @@ def _wrap(
 
 
 class MultiprocessContext(PContext):
-    """
-    ``PContext`` holding worker processes invoked as a function.
-    """
+    """``PContext`` holding worker processes invoked as a function."""
 
     def __init__(
         self,
@@ -389,6 +374,7 @@ class MultiprocessContext(PContext):
         tee_stderrs: Dict[int, str],
         error_files: Dict[int, str],
         start_method: str,
+        log_line_prefixes: Optional[Dict[int, str]] = None,
     ):
         super().__init__(
             name,
@@ -400,6 +386,7 @@ class MultiprocessContext(PContext):
             tee_stdouts,
             tee_stderrs,
             error_files,
+            log_line_prefixes,
         )
 
         self.start_method = start_method
@@ -490,14 +477,13 @@ class MultiprocessContext(PContext):
             failed_proc = self._pc.processes[failed_local_rank]
             error_filepath = self.error_files[failed_local_rank]
 
-            log.error(
+            log.exception(
                 "failed (exitcode: %s)"
                 " local_rank: %s (pid: %s)"
                 " of fn: %s (start_method: %s)",
                 failed_proc.exitcode,
                 failed_local_rank, e.pid,
                 fn_name, self.start_method,
-                exc_info=True,
             )
 
             self.close()
@@ -575,6 +561,9 @@ class SubprocessHandler:
         self.proc: subprocess.Popen = self._popen(args_str, env_vars)
 
     def _popen(self, args: Tuple, env: Dict[str, str]) -> subprocess.Popen:
+        kwargs: Dict[str, Any] = {}
+        if not IS_WINDOWS:
+            kwargs['start_new_session'] = True
         return subprocess.Popen(
             # pyre-fixme[6]: Expected `Union[typing.Sequence[Union[_PathLike[bytes],
             #  _PathLike[str], bytes, str]], bytes, str]` for 1st param but got
@@ -583,12 +572,16 @@ class SubprocessHandler:
             env=env,
             stdout=self._stdout,
             stderr=self._stderr,
+            **kwargs
         )
 
     def close(self, death_sig: Optional[signal.Signals] = None) -> None:
         if not death_sig:
             death_sig = _get_default_signal()
-        self.proc.send_signal(death_sig)
+        if IS_WINDOWS:
+            self.proc.send_signal(death_sig)
+        else:
+            os.killpg(self.proc.pid, death_sig)
         if self._stdout:
             self._stdout.close()
         if self._stderr:
@@ -596,9 +589,7 @@ class SubprocessHandler:
 
 
 class SubprocessContext(PContext):
-    """
-    ``PContext`` holding worker processes invoked as a binary.
-    """
+    """``PContext`` holding worker processes invoked as a binary."""
 
     def __init__(
         self,
@@ -611,6 +602,7 @@ class SubprocessContext(PContext):
         tee_stdouts: Dict[int, str],
         tee_stderrs: Dict[int, str],
         error_files: Dict[int, str],
+        log_line_prefixes: Optional[Dict[int, str]] = None,
     ):
         super().__init__(
             name,
@@ -622,6 +614,7 @@ class SubprocessContext(PContext):
             tee_stdouts,
             tee_stderrs,
             error_files,
+            log_line_prefixes,
         )
 
         # state vector; _vdone[local_rank] -> is local_rank finished or not

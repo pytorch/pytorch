@@ -238,6 +238,12 @@ def _attention_scale(
     )
     const_one = g.op("Constant", value_t=torch.tensor([1.0], dtype=torch.float))
     scale = g.op("Div", const_one, g.op("Sqrt", embedding_size))
+    # Add a Cast to convert the scale back to original type
+    scale = g.op(
+        "Cast",
+        scale,
+        to_i=_type_utils.JitScalarType.from_value(query).onnx_type(),
+    )
     return scale
 
 

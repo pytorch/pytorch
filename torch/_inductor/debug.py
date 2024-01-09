@@ -70,7 +70,10 @@ def draw_buffers(nodes: List[BaseSchedulerNode], print_graph=False, fname=None):
             continue
         group = node.meta["fusion_meta"].group
         if isinstance(group, tuple):
-            group = group[1]
+            if isinstance(group[1], int):
+                group = (group[1],)
+            else:
+                group = group[1]
 
         # gather meta data
         dtype = None
@@ -86,7 +89,9 @@ def draw_buffers(nodes: List[BaseSchedulerNode], print_graph=False, fname=None):
     gm = GraphModule({}, graph)
     legalize_graph(gm)
     gm.graph.lint()
-    draw_graph(gm, fname, clear_meta=False)
+    draw_graph(
+        gm, fname, clear_meta=False, dot_graph_shape=config.trace.dot_graph_shape
+    )
 
 
 def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
@@ -134,7 +139,10 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         )
         func_name = f"{node_type}: {fused_name}"
         node_func = get_fake_func(func_name)
-        fx_node = graph.call_function(node_func, args=(), kwargs=None)
+        kwargs = {}
+        if hasattr(snode, "get_device"):
+            kwargs = {"device": snode.get_device()}
+        fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)
 
         def in_output(snode):
             if isinstance(snode, FusedSchedulerNode):
@@ -265,8 +273,7 @@ def enable_aot_logging():
     stack.enter_context(patch("functorch.compile.config.debug_partitioner", True))
 
     path = os.path.join(get_debug_dir(), "torchinductor")
-    if not os.path.exists(path):
-        os.makedirs(path)
+    os.makedirs(path, exist_ok=True)
 
     fh = logging.FileHandler(
         os.path.join(
@@ -300,9 +307,10 @@ class DebugContext:
 
     @staticmethod
     def create_debug_dir(folder_name: str) -> Optional[str]:
+        debug_dir = config.trace.debug_dir or get_debug_dir()
         for n in DebugContext._counter:
             dirname = os.path.join(
-                get_debug_dir(),
+                debug_dir,
                 "torchinductor",
                 f"{folder_name}.{n}",
             )
@@ -451,6 +459,7 @@ class DebugFormatter:
 
     def _write_ir(self, filename: str, nodes: SchedulerNodeList):
         with self.fopen(filename) as fd:
+            log.info("Writing debug ir to  %s", fd.name)
             for node in nodes:
                 fd.write(node.debug_str())
                 fd.write("\n\n\n")
@@ -466,6 +475,7 @@ class DebugFormatter:
             clear_meta=False,
             prog=GRAPHVIZ_COMMAND_SCALABLE,
             parse_stack_trace=True,
+            dot_graph_shape=config.trace.dot_graph_shape,
         )
 
     def output_code(self, filename):
@@ -545,6 +555,6 @@ def load_args_and_run_compile_fx_inner(path: str):
             return x
 
     fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
-    with fake_mode, config.patch("save_args", False):  # type: ignore[attr-defined]
+    with fake_mode, config.patch("save_args", False):
         args, kwargs = tree_map(handle_tensor, (args, kwargs))
         return compile_fx_inner(*args, **kwargs)

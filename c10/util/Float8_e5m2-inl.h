@@ -17,9 +17,8 @@ namespace c10 {
 
 /// Constructors
 
-inline C10_HOST_DEVICE Float8_e5m2::Float8_e5m2(float value) {
-  x = detail::fp8e5m2_from_fp32_value(value);
-}
+inline C10_HOST_DEVICE Float8_e5m2::Float8_e5m2(float value)
+    : x(detail::fp8e5m2_from_fp32_value(value)) {}
 
 /// Implicit conversions
 

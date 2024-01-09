@@ -4,6 +4,7 @@ import warnings
 
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
+from torch.fx.experimental import _config as fx_config
 from torch.testing._internal.common_utils import TEST_Z3
 
 try:
@@ -44,14 +45,16 @@ def make_dynamic_cls(cls):
         suffix,
         (config, "assume_static_by_default", False),
         (config, "specialize_int", False),
-        (config, "translation_validation", TEST_Z3),
-        (config, "check_shape_env_recorded_events", True),
+        (fx_config, "translation_validation", TEST_Z3),
+        (fx_config, "check_shape_env_recorded_events", True),
+        (fx_config, "validate_shape_env_verison_key", True),
         xfail_prop="_expected_failure_dynamic",
     )
 
     test_classes[test_class.__name__] = test_class
     # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
     globals()[test_class.__name__] = test_class
+    test_class.__module__ = __name__
     return test_class
 
 
@@ -76,8 +79,13 @@ if TEST_Z3:
     unittest.expectedFailure(
         # SymPy is incorrectly transforming 's0 / 6 == 0.5' into 'False'.
         # Ref: https://github.com/sympy/sympy/issues/25146
-        DynamicShapesReproTests.test_dynamic_shapes_float_guard_dynamic_shapes
+        DynamicShapesReproTests.test_dynamic_shapes_float_guard_dynamic_shapes  # noqa: F821
     )
+
+unittest.expectedFailure(
+    # Test is only valid without dynamic shapes
+    DynamicShapesReproTests.test_many_views_with_mutation_dynamic_shapes  # noqa: F821
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

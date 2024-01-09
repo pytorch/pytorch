@@ -128,13 +128,10 @@ def report_compile_source_on_error():
             tb.tb_next = tb_next
             tb_next = tb
 
-        raise exc.with_traceback(tb_next)
+        raise exc.with_traceback(tb_next)  # noqa: TRY200
 
 def shorten_filename(fn, *, base=None):
-    """
-    Shorten a source filepath, under the assumption that anything under torch/
-    directory is "obvious" and doesn't need to be shown to user.
-    """
+    """Shorten a source filepath, with the assumption that torch/ subdirectories don't need to be shown to user."""
     if base is None:
         base = os.path.dirname(os.path.dirname(__file__))
     # Truncate torch/foo.py to foo.py
@@ -147,8 +144,9 @@ def shorten_filename(fn, *, base=None):
 
 def format_frame(frame, *, base=None, line=False):
     """
-    Format a FrameSummary in a short way, without printing full absolute path
-    or code.  The idea is the result fits on a single line.
+    Format a FrameSummary in a short way, without printing full absolute path or code.
+
+    The idea is the result fits on a single line.
     """
     extra_line = ""
     if line:
@@ -156,9 +154,7 @@ def format_frame(frame, *, base=None, line=False):
     return f"{extra_line}{shorten_filename(frame.filename, base=base)}:{frame.lineno} in {frame.name}"
 
 def format_traceback_short(tb):
-    """
-    Format a TracebackType in a short way, printing only the inner-most frame.
-    """
+    """Format a TracebackType in a short way, printing only the inner-most frame."""
     return format_frame(traceback.extract_tb(tb)[-1])
 
 class CapturedTraceback:
