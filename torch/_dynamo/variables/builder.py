@@ -575,7 +575,7 @@ class VariableBuilder:
             return StreamVariable(
                 None,
                 value,
-                value.device.type,
+                value.device,
                 source=self.source,
             )
         elif isinstance(value, _EventBase):
@@ -1501,7 +1501,7 @@ def wrap_fx_proxy_cls(
     ]:
         proxy.node.meta["example_value"] = example_value
         return StreamVariable(
-            proxy, example_value, example_value.device.type, **options
+            proxy, example_value, example_value.device, **options
         )
     elif (
         inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, _EventBase)
