@@ -773,6 +773,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   watchdogCheckInMilSec_ = getCvarInt(TORCH_NCCL_WATCHDOG_CHECK_MILSEC, 500);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
+  PrefixStore* prefixStore = dynamic_cast<PrefixStore*>(store_.get());
+  globalStore_ =
+      prefixStore ? prefixStore->getUnderlyingNonPrefixStore() : store_;
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
       getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
@@ -1555,7 +1558,7 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (timeSinceLastWorkListUpdate >= watchdogCheckInMilSec_ &&
           timeSinceLastPollStore >= timeoutCheckInMilSec_) {
         lastTimePollStore = currentTime;
-        if (store_->checkNoPrefix({std::string(TIMEOUT_DUMP)}) &&
+        if (globalStore_->check({std::string(TIMEOUT_DUMP)}) &&
             !optAsyncDebugDump) {
           auto wakeUpTime = std::chrono::steady_clock::now() +
               std::chrono::milliseconds(waitTimeoutDumpInMilSec_);
@@ -1599,7 +1602,7 @@ void ProcessGroupNCCL::watchdogHandler() {
               // abort process immediately.
               collectiveDebugInfoMode_.store(true);
               std::vector<uint8_t> vec(1);
-              store_->setNoPrefix(std::string(TIMEOUT_DUMP), vec);
+              globalStore_->set(std::string(TIMEOUT_DUMP), vec);
               const auto exitMsg = c10::str(
                   logPrefix(),
                   "Timeout detected in watchdog and signal a global abort.");

@@ -409,27 +409,13 @@ void TCPStore::_splitSet(
   buffer.flush();
 }
 
-void TCPStore::doSet(
-    const std::string& key,
-    const std::vector<uint8_t>& data,
-    bool usePrefix) {
+void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
   detail::timing_guard tguard(clientCounters_["set"]);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
   detail::SendBuffer buffer(*client_, detail::QueryType::SET);
-  auto keyToUse = usePrefix ? keyPrefix_ + key : key;
-  buffer.appendString(keyToUse);
+  buffer.appendString(keyPrefix_ + key);
   buffer.appendBytes(data);
   buffer.flush();
-}
-
-void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
-  doSet(key, data, true);
-}
-
-void TCPStore::setNoPrefix(
-    const std::string& key,
-    const std::vector<uint8_t>& data) {
-  doSet(key, data, false);
 }
 
 std::vector<uint8_t> TCPStore::compareSet(
@@ -497,22 +483,13 @@ int64_t TCPStore::getNumKeys() {
 }
 
 bool TCPStore::check(const std::vector<std::string>& keys) {
-  return doCheck(keys, true);
-}
-
-bool TCPStore::checkNoPrefix(const std::vector<std::string>& keys) {
-  return doCheck(keys, false);
-}
-
-bool TCPStore::doCheck(const std::vector<std::string>& keys, bool usePrefix) {
   detail::timing_guard tguard(clientCounters_["check"]);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
   detail::SendBuffer buffer(*client_, detail::QueryType::CHECK);
   buffer.appendValue(keys.size());
 
   for (const std::string& key : keys) {
-    auto keyToUse = usePrefix ? keyPrefix_ + key : key;
-    buffer.appendString(keyToUse);
+    buffer.appendString(keyPrefix_ + key);
   }
   buffer.flush();
 

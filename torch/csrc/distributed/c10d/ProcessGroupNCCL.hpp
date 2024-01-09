@@ -14,6 +14,7 @@
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 
 #include <ATen/DynamicLibrary.h>
@@ -772,6 +773,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // The store is used to broadcast the NCCL unique ID of rank 0.
   c10::intrusive_ptr<Store> store_;
+
+  // Reference to the store so that we can coordinate for dumping
+  // debug info to the store.
+  c10::intrusive_ptr<Store> globalStore_;
 
   bool storeError_{false};
 

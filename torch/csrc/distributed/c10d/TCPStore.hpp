@@ -82,9 +82,6 @@ class TORCH_API TCPStore : public Store {
 
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
 
-  void setNoPrefix(const std::string& key, const std::vector<uint8_t>& value)
-      override;
-
   std::vector<uint8_t> compareSet(
       const std::string& key,
       const std::vector<uint8_t>& expectedValue,
@@ -97,8 +94,6 @@ class TORCH_API TCPStore : public Store {
   bool deleteKey(const std::string& key) override;
 
   bool check(const std::vector<std::string>& keys) override;
-
-  bool checkNoPrefix(const std::vector<std::string>& keys) override;
 
   int64_t getNumKeys() override;
 
@@ -153,13 +148,6 @@ class TORCH_API TCPStore : public Store {
   void doWait(
       c10::ArrayRef<std::string> keys,
       std::chrono::milliseconds timeout);
-
-  void doSet(
-      const std::string& key,
-      const std::vector<uint8_t>& value,
-      bool usePrefix);
-
-  bool doCheck(const std::vector<std::string>& keys, bool usePrefix);
 
   detail::SocketAddress addr_;
   std::shared_ptr<detail::TCPServer> server_;
