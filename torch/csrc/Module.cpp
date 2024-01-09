@@ -1191,7 +1191,7 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      METH_O,
      nullptr},
     {"_custom_dtype",
-     castPyCFunctionWithKeywords(THPDtype_pynew),
+     castPyCFunctionWithKeywords(THPDtype_pyNewCustomDtype),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_show_config", THPModule_showConfig, METH_NOARGS, nullptr},
