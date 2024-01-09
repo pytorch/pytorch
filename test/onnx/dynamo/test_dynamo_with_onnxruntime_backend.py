@@ -127,6 +127,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         model,
         dynamo_backend,
         example_args_collection,
+        full_graph: bool = False,
     ):
         """Run original and compiled model and compare the results.
 
@@ -327,6 +328,93 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 # Since dynamic shape is enabled, we should only have one ONNX model
                 # to support different batch sizes.
                 number_of_exported_onnx_models_for_all_graph_modules=(1, 1),
+            )
+
+    @parameterized.expand(
+        [
+            (True,),
+        ]
+    )
+    def test_llama_attention_with_local_backend(self, test_local_backend: bool):
+        from transformers import LlamaConfig  # noqa: F811
+        from transformers.models.llama.modeling_llama import (  # noqa: F811
+            LlamaAttention,
+        )
+
+        hidden_size = 16
+
+        config = LlamaConfig(
+            num_hidden_layers=1,
+            vocab_size=1024,
+            hidden_size=hidden_size,
+            intermediate_size=16,
+            max_position_embeddings=256,
+            num_attention_heads=2,
+            hidden_dropout_prob=0.0,
+            attention_dropout_prob=0.0,
+        )
+
+        class LlamaAttentionWrapper(torch.nn.Module):
+            def __init__(self, config):
+                super().__init__()
+                self.attention = LlamaAttention(config)
+
+            def forward(self, hidden_states, attention_mask, position_ids):
+                attn_output, _, _ = self.attention(
+                    hidden_states, attention_mask, position_ids
+                )
+                return attn_output
+
+        def generate_example_inputs(batch: int, seq: int, hidden_size: int):
+            # shape: batch x seq x hidden_size
+            hidden_state = torch.randn(batch, seq, hidden_size)
+            # [0.0000e+00, ..., 0.0000e+00, -3.4028e+38, ...]
+            # shape: batch x 1 x seq x seq
+            attention_mask = torch.zeros(batch, 1, seq, seq, dtype=torch.float)
+            position_ids = torch.arange(0, seq, dtype=torch.int64)
+            position_ids = position_ids.unsqueeze(0).view(-1, seq)
+
+            return hidden_state, attention_mask, position_ids
+
+        # Reason for using multiple example argument groups:
+        #  Export model to ONNX with one example argument group
+        #  and test it with other example argument groups.
+        example_args_collection = (
+            generate_example_inputs(2, 8, hidden_size),
+            generate_example_inputs(4, 7, hidden_size),
+            generate_example_inputs(9, 15, hidden_size),
+        )
+
+        if test_local_backend:
+            local_aot_ort, local_ort = make_aot_ort(dynamic=True)
+        else:
+            local_aot_ort, local_ort = "onnxrt", None
+
+        model = LlamaAttentionWrapper(config).eval()
+
+        self._test_model_numerically(
+            model,
+            local_aot_ort,
+            example_args_collection,
+            full_graph=True,
+        )
+
+        if test_local_backend:
+            assert local_ort is not None
+            self._assert_counting_information(
+                local_ort,
+                # The "3" comes from:
+                #   2 graph breaks and therefore 3 sub-graph runs with InferenceSession
+                #   per batch.
+                expected_execution_count=len(example_args_collection) * 3,
+                # Since this local_ort only compiled one function, there should be only two
+                # GraphModule's in its cached. One for batch sizes 2, 4, 6, 8 and the other
+                # for batch size 1.
+                number_of_cached_graph_modules=3,
+                # Since dynamic shape is enabled, we should only have one ONNX model
+                # to support different batch sizes.
+                # Should be (1, 1, 1)
+                number_of_exported_onnx_models_for_all_graph_modules=(1, 1, 1),
             )
 
 

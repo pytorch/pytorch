@@ -73,11 +73,14 @@ class TypePromotionSnapshot:
 def _fake_tensor_from_node_val(node: torch.fx.Node) -> fake_tensor.FakeTensor:
     """Syntactic sugar for retrieving fake tensor from node.meta['val']."""
     val = node.meta.get("val", None)
-    if not isinstance(val, fake_tensor.FakeTensor):
+    if isinstance(val, fake_tensor.FakeTensor):
+        return val
+    elif isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        return val.node.hint
+    else:
         raise RuntimeError(
             f"Cannot retrieve fake tensor from node {node}. Got type({type(val)}) instead."
         )
-    return val
 
 
 class TypePromotionRule(abc.ABC):

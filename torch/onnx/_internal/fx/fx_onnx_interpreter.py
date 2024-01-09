@@ -132,7 +132,16 @@ def _retrieve_or_adapt_input_to_graph_set(
             if isinstance(
                 tensor, torch.fx.Node
             ) and fx_type_utils.is_torch_symbolic_type(tensor.meta.get("val")):
-                sequence_mixed_elements.append(fx_name_to_onnxscript_value[tensor.name])
+                element_value = fx_name_to_onnxscript_value[tensor.name]
+                if (
+                    isinstance(
+                        element_value, onnxscript_graph_building.TorchScriptTensor
+                    )
+                    and element_value.rank == 0
+                ):
+                    with onnxscript.evaluator.default_as(tracer):
+                        element_value = onnxscript.opset18.Unsqueeze(element_value, axes=0)  # type: ignore[arg-type, type-var]
+                sequence_mixed_elements.append(element_value)
             elif isinstance(tensor, int):
                 # NOTE: op.Concat doesn't support scalar, so we need to wrap it with
                 # dim, and onnx-script will promote it to tensor(int64)
