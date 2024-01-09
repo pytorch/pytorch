@@ -4683,6 +4683,7 @@ class TestLinalg(TestCase):
         m2 = torch.randn(16, 131071, device=device).to(dtype)
         torch.nn.functional.linear(m1, m2, M)
 
+    @onlyCUDA
     @skipCUDAIfNotRocm
     @dtypes(*floating_types_and(torch.bfloat16, torch.half))
     def test_hipblaslt_corner_cases_rocm(self, device, dtype):
