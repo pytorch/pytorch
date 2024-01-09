@@ -444,14 +444,7 @@ class Loops(IRNode):
         return len(self.inner_fn_str())
 
     def has_large_inner_fn(self):
-        res1 = self.inner_fn_str_len() > config.realize_bytes_threshold
-        res2 = self.inner_fn_opcount() > config.realize_opcount_threshold
-        if res1 != res2:
-            raise RuntimeError(
-                f"Different inner_fn heuristics {self.inner_fn_str_len()} (max: {config.realize_bytes_threshold}) "
-                f"and {self.inner_fn_opcount()} (max: {config.realize_opcount_threshold}) for {self.inner_fn_str()}"
-            )
-        return res1
+        return self.inner_fn_opcount() > config.realize_opcount_threshold
 
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
