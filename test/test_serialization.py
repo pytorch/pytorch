@@ -785,7 +785,6 @@ class serialization_method:
         torch.save = self.torch_save
 
 @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBothSerialization(TestCase):
     @parametrize("weights_only", (True, False))
     def test_serialization_new_format_old_format_compat(self, device, weights_only):
@@ -808,7 +807,6 @@ class TestBothSerialization(TestCase):
             self.assertTrue(len(w) == 0, msg=f"Expected no warnings but got {[str(x) for x in w]}")
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestOldSerialization(TestCase, SerializationMixin):
     # unique_key is necessary because on Python 2.7, if a warning passed to
     # the warning module is the same, it is not raised again.
@@ -906,7 +904,6 @@ class TestOldSerialization(TestCase, SerializationMixin):
             return super().run(*args, **kwargs)
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSerialization(TestCase, SerializationMixin):
     @parametrize('weights_only', (True, False))
     def test_serialization_zipfile(self, weights_only):
@@ -3901,9 +3898,10 @@ class TestSerialization(TestCase, SerializationMixin):
         finally:
             set_default_load_endianness(current_load_endian)
 
+    @parametrize('path_type', (str, pathlib.Path))
     @parametrize('weights_only', (True, False))
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
-    def test_serialization_mmap_loading(self, weights_only):
+    def test_serialization_mmap_loading(self, weights_only, path_type):
         class DummyModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3914,6 +3912,7 @@ class TestSerialization(TestCase, SerializationMixin):
                 return self.fc2(self.fc1(input))
 
         with TemporaryFileName() as f:
+            f = path_type(f)
             state_dict = DummyModel().state_dict()
             torch.save(state_dict, f)
             result = torch.load(f, mmap=True, weights_only=weights_only)
@@ -4017,7 +4016,6 @@ class TestEmptySubclass(torch.Tensor):
     ...
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSubclassSerialization(TestCase):
     def test_tensor_subclass_wrapper_serialization(self):
         wrapped_tensor = torch.rand(2)

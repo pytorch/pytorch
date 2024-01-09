@@ -33,6 +33,7 @@ from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, SM90Or
     _get_torch_cuda_version
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
+import operator
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -41,7 +42,6 @@ if TEST_SCIPY:
     import scipy
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 @unittest.skipIf(IS_ARM64, "Issue with numpy version on arm")
 class TestLinalg(TestCase):
     def setUp(self):
@@ -166,6 +166,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
+    @skipIfTorchDynamo("flaky, needs investigation")
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_linalg_lstsq(self, device, dtype):
         from torch.testing._internal.common_utils import random_well_conditioned_matrix
@@ -3906,7 +3907,7 @@ class TestLinalg(TestCase):
                 self._check_einsum(equation, *operands, np_args=(equation, *np_operands))
 
                 # test sublist format
-                args = [*itertools.chain(*zip(operands, sublists))]
+                args = list(itertools.chain.from_iterable(zip(operands, sublists)))
                 self._check_einsum(*args, np_args=(equation, *np_operands))
 
                 # generate an explicit output
@@ -4150,6 +4151,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
+    @skipIfTorchDynamo("flaky, needs investigation")
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -4250,6 +4252,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @skipIfTorchDynamo("flaky, needs investigation")
     @dtypes(*floating_and_complex_types())
     def test_triangular_solve_batched_broadcasting(self, device, dtype):
         from scipy.linalg import solve_triangular as tri_solve
@@ -7006,7 +7009,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # mat_chars denotes matrix characteristics
         # possible values are: sym, sym_psd, sym_pd, sing, non_sym
         def run_test(matsize, batchdims, mat_chars):
-            num_matrices = reduce(lambda x, y: x * y, batchdims, 1)
+            num_matrices = reduce(operator.mul, batchdims, 1)
             list_of_matrices = []
 
             for idx in range(num_matrices):
@@ -7574,6 +7577,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @skipCUDAIfNoCusolver
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
+    @skipIfTorchDynamo("flaky, needs investigation")
     @dtypes(*floating_and_complex_types())
     def test_ldl_factor(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix

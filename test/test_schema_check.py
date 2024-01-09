@@ -95,7 +95,6 @@ class IncorrectAliasTensor(torch.Tensor):
         return tree_map(wrap, out)
 
 # Tests various schema checking functionalities.
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSchemaCheck(JitTestCase):
     # Tests that SchemaCheckMode records operator order with grad
     def test_schema_check_mode_operator_order(self):
@@ -491,7 +490,6 @@ class TestSchemaCheck(JitTestCase):
             x.add(x)
 
 
-@torch.testing._internal.common_utils.unMarkDynamoStrictTest
 class TestSchemaCheckModeOpInfo(JitTestCase):
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_schema_correctness(self, device, dtype, op):

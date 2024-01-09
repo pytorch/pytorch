@@ -2,12 +2,16 @@
 import sympy
 
 from torch._inductor.codegen.cpp import cexpr
-from torch._inductor.codegen.triton import texpr
+from torch._inductor.codegen.triton import texpr, TritonPrinter
 from torch._inductor.codegen.wrapper import pexpr
 
 from torch._inductor.sizevars import SizeVarAllocator
-from torch.testing._internal.common_utils import TestCase as TorchTestCase
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    TestCase as TorchTestCase,
+)
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Round, RoundDecimal
 
 
 class TestIndexingSimplification(TorchTestCase):
@@ -206,22 +210,57 @@ class ExprPrinterTests(TorchTestCase):
                     cexpr(expr), "static_cast<long>(std::floor((1.0/2.0)*s1))"
                 )
             else:
-                self.assertEqual(pexpr(expr), "math.floor((1/2)*s1)")
-                self.assertEqual(texpr(expr), "tl.math.floor(((1/2)*s1))")
-                self.assertEqual(cexpr(expr), "std::floor((1.0/2.0)*s1)")
+                self.assertExpectedInline(pexpr(expr), """math.floor((1/2)*s1)""")
+                self.assertExpectedInline(
+                    texpr(expr), """tl.math.floor((1/2)*s1).to(tl.int64)"""
+                )
+                self.assertExpectedInline(cexpr(expr), """std::floor((1.0/2.0)*s1)""")
 
     def test_print_ceil(self):
         for integer in [True, False]:
             s1 = sympy.Symbol("s1", integer=integer)
             expr = sympy.ceiling(s1 / 2)
             if integer:
-                self.assertEqual(pexpr(expr), "math.ceil((1/2)*s1)")
-                self.assertEqual(
-                    cexpr(expr), "static_cast<long>(std::ceil((1.0/2.0)*s1))"
+                self.assertExpectedInline(pexpr(expr), """math.ceil((1/2)*s1)""")
+                self.assertExpectedInline(
+                    cexpr(expr), """static_cast<long>(std::ceil((1.0/2.0)*s1))"""
                 )
             else:
-                self.assertEqual(pexpr(expr), "math.ceil((1/2)*s1)")
-                self.assertEqual(cexpr(expr), "std::ceil((1.0/2.0)*s1)")
+                self.assertExpectedInline(pexpr(expr), """math.ceil((1/2)*s1)""")
+                self.assertExpectedInline(cexpr(expr), """std::ceil((1.0/2.0)*s1)""")
+
+    def test_print_round(self):
+        expr = Round(sympy.Symbol("x", integer=True) / 2)
+        self.assertExpectedInline(pexpr(expr), """round((1/2)*x)""")
+        self.assertExpectedInline(cexpr(expr), """std::lrint((1.0/2.0)*x)""")
+        self.assertExpectedInline(
+            texpr(expr), """tl.math.llrint((1/2)*x).to(tl.int64)"""
+        )
+
+    @parametrize("ndigits", [-1, 0, 1])
+    def test_print_round_decimal(self, ndigits):
+        expr = RoundDecimal(sympy.Symbol("x", integer=True) / 2, ndigits)
+        self.assertEqual(pexpr(expr), f"round((1/2)*x, {ndigits})")
+        self.assertEqual(
+            cexpr(expr),
+            f"static_cast<double>(std::nearbyint(1e{ndigits} * ((1.0/2.0)*x)) * 1e{-ndigits})",
+        )
+        self.assertEqual(
+            texpr(expr),
+            f"tl.math.nearbyint(1e{ndigits} * ((1/2)*x)) * 1e{-ndigits}",
+        )
+
+        expr = RoundDecimal(sympy.Symbol("x", integer=True), ndigits)
+        if ndigits >= 0:
+            for do_print in [pexpr, cexpr, texpr]:
+                self.assertEqual(do_print(expr), "x")
+        else:
+            self.assertEqual(pexpr(expr), f"round(x, {ndigits})")
+            for do_print in [cexpr, texpr]:
+                with self.assertRaisesRegex(
+                    ValueError, "only non-negative ndigits are currently supported"
+                ):
+                    do_print(expr)
 
     def test_print_floor_div(self):
         for integer in [True, False]:
@@ -256,15 +295,22 @@ class ExprPrinterTests(TorchTestCase):
             (sympy.Min, "min"),
             (sympy.Max, "max"),
         )
+        extra_arg = TritonPrinter._propagate_nan_arg()
         for f, s in cases:
             x = sympy.Symbol("x", integer=True)
             expr = f(-2, x)
-            self.assertEqual(texpr(expr), f"tl.math.{s}(-2, x)")
+            self.assertEqual(texpr(expr), f"tl.math.{s}(-2, x{extra_arg})")
             self.assertEqual(cexpr(expr), f"std::{s}(-2L, x)")
 
             expr = f(x, 2 * x, 3 * x)
-            self.assertEqual(texpr(expr), f"tl.math.{s}(x, tl.math.{s}(2*x, 3*x))")
+            self.assertEqual(
+                texpr(expr),
+                f"tl.math.{s}(x, tl.math.{s}(2*x, 3*x{extra_arg}){extra_arg})",
+            )
             self.assertEqual(cexpr(expr), f"std::{s}({{x, 2L*x, 3L*x}})")
+
+
+instantiate_parametrized_tests(ExprPrinterTests)
 
 
 if __name__ == "__main__":
