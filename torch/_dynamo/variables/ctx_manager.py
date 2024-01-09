@@ -554,7 +554,6 @@ class StreamContextVariable(ContextWrappingVariable):
         codegen.load_import_from("torch", "cuda.stream")
         assert len(self.target_values) == 1
         self.target_values[0].reconstruct(codegen)
-        # codegen.extend_output([codegen.create_load_const(str(self.device))])
         codegen.extend_output(create_call_function(1, False))
         return []
 
