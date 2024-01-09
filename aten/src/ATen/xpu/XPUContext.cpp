@@ -39,7 +39,7 @@ void initDeviceProperty(int device) {
   device_properties[device] = device_prop;
 }
 
-void initDeviceGlobalIdxs(int device) {
+void initDeviceGlobalIdx(int device) {
   sycl::device& raw_device = c10::xpu::get_raw_device(device);
   // Get all SYCL devices associated with the SYCL platform.
   auto devices = sycl::device::get_devices();
@@ -86,7 +86,7 @@ int getGlobalIdxFromDevice(int device) {
       ", total number of device is ",
       num_gpus,
       ".");
-  c10::call_once(device_global_idx_flags[device], initDeviceGlobalIdxs, device);
+  c10::call_once(device_global_idx_flags[device], initDeviceGlobalIdx, device);
   return device_global_idxs[device];
 }
 
