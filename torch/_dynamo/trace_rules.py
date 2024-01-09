@@ -2792,7 +2792,7 @@ def load_object(name):
             val = _load_obj_from_str(x[0])
         if hasattr(val, "__wrapped__"):
             val = val.__wrapped__
-    except (AttributeError, ModuleNotFoundError):
+    except (AttributeError, ImportError):
         val = None
     return val
 
