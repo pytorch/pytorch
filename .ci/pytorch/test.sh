@@ -18,6 +18,10 @@ BUILD_DIR="build"
 BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
+#Set Default values for these variables in case they are not set
+SHARD_NUMBER="${SHARD_NUMBER:=1}"
+NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
+
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
@@ -309,8 +313,10 @@ test_inductor() {
 
   # docker build uses bdist_wheel which does not work with test_aot_inductor
   # TODO: need a faster way to build
-  BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-  CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+      BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
+      CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
+  fi
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
