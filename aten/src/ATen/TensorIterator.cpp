@@ -102,6 +102,14 @@ void OperandInfo::set_data(std::variant<void*, const void*> data) {
   data_ = data;
 }
 
+bool OperandInfo::is_const() const {
+  struct IsConstVisitor {
+    bool operator()(void*) { return false; }
+    bool operator()(const void*) { return true; }
+  };
+  return std::visit(IsConstVisitor(), data_);
+}
+
 void OperandInfo::tensor(c10::MaybeOwned<TensorBase> &&tensor) {
   tensor_base_ = std::move(tensor);
   *tensor_storage_ = make_otr(*tensor_base_);
@@ -1555,8 +1563,12 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor_base().defined());
-    // TODO: Conditionally call op.tensor_base().mutable_data_ptr
-    op.set_data(op.tensor_base().data_ptr());
+    if (op.is_const()) {
+      op.set_data(op.tensor_base().const_data_ptr());
+
+    } else {
+      op.set_data(op.tensor_base().mutable_data_ptr());
+    }
   }
 
   // zero out offsets

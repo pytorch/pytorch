@@ -135,6 +135,7 @@ struct TORCH_API OperandInfo {
 
   void set_data(std::variant<void*, const void*> data);
   void* mutable_data() const;
+  bool is_const() const;
 
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
   StrideVector stride_bytes;
