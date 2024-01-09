@@ -2059,6 +2059,10 @@ class View(GenericView):
                 # realize x; otherwise, the dynamic_reshape_indexer below will fail
                 # due to the size_hint's inability to process unbacked SymInts
                 x.realize()
+
+                if not is_storage_and_layout(x):
+                    x = x.unwrap_view()
+
             storage, old_layout = as_contiguous_storage_and_layout(x)
             new_layout = FixedLayout(
                 old_layout.device,
