@@ -645,7 +645,7 @@ class Reduction(Loops):
     def inner_fn_args(self):
         index = self._index(self.ranges)
         rindex = self._index(self.reduction_ranges, "r")
-        return (self.inner_fn, index, rindex)
+        return (index, rindex)
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
