@@ -839,7 +839,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             return reduce(lambda f, g: lambda x: f(g(x)), functions[::-1], lambda x: x)
 
         if not use_relu:
-            def relu_op(x):
+            def relu_op(x):  # noqa: F811
                 return x
 
         if freeze_bn:
