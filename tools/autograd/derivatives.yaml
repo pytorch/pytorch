@@ -1499,8 +1499,9 @@
   grad_output: grad.slice_symint(dim, start, end, step)
   result: auto_linear
 
+# NB: slice_scatter() inherits its derivative formula from slice_inverse() in codegen
 - name: slice_inverse(Tensor(a) self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
-  self: slice_inverse_symint(grad, zeros_like(src), dim, start, end, step)
+  self: slice_scatter_symint(grad, zeros_like(src), dim, start, end, step)
   src: grad.slice_symint(dim, start, end, step)
   result: auto_linear
 
