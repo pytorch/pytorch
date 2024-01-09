@@ -485,30 +485,9 @@ class StreamContextVariable(ContextWrappingVariable):
 
     @staticmethod
     def create_from_existing_context(tx, target_value, **kwargs):
-        from .builder import wrap_fx_proxy_cls
-
-        device = target_value.stream.device
-        interface = get_interface_for_device(device)
-
-        current_stream_method = interface.current_stream
-
-        target_stream = StreamVariable(
-            None, target_value.stream, target_value.stream.device
-        )
-        current_stream = wrap_fx_proxy_cls(
-            StreamVariable,
+        return StreamContextVariable.create_from_stream(
             tx,
-            tx.output.create_proxy(
-                "call_function",
-                current_stream_method,
-                (None,),
-                {},
-            ),
-        )
-        return StreamContextVariable(
-            target_values=[target_stream],
-            initial_values=[current_stream],
-            device=device,
+            StreamVariable(None, target_value.stream, target_value.stream.device),
             **kwargs,
         )
 
