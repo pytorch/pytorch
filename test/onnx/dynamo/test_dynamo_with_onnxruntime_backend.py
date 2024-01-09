@@ -127,7 +127,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         model,
         dynamo_backend,
         example_args_collection,
-        full_graph: bool = False,
+        fullgraph: bool = False,
     ):
         """Run original and compiled model and compare the results.
 
@@ -149,6 +149,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             model if not isinstance(model, torch.nn.Module) else copy.deepcopy(model),
             backend=dynamo_backend,
             dynamic=True,
+            fullgraph=fullgraph,
         )
 
         for example_args in example_args_collection:
@@ -396,25 +397,23 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             model,
             local_aot_ort,
             example_args_collection,
-            full_graph=True,
+            fullgraph=True,
         )
 
         if test_local_backend:
             assert local_ort is not None
             self._assert_counting_information(
                 local_ort,
-                # The "3" comes from:
-                #   2 graph breaks and therefore 3 sub-graph runs with InferenceSession
-                #   per batch.
-                expected_execution_count=len(example_args_collection) * 3,
-                # Since this local_ort only compiled one function, there should be only two
-                # GraphModule's in its cached. One for batch sizes 2, 4, 6, 8 and the other
-                # for batch size 1.
-                number_of_cached_graph_modules=3,
-                # Since dynamic shape is enabled, we should only have one ONNX model
-                # to support different batch sizes.
-                # Should be (1, 1, 1)
-                number_of_exported_onnx_models_for_all_graph_modules=(1, 1, 1),
+                # The whole attention is captured and executed
+                # as a single graph. Thus, the # of test cases
+                # is the # of session runs.
+                expected_execution_count=len(example_args_collection),
+                # This should be one because there is no graph break.
+                # If you have 1 graph break, this value should be 2.
+                number_of_cached_graph_modules=1,
+                # Since dynamic shape is enabled, we should only have
+                # one ONNX model to support different batch sizes.
+                number_of_exported_onnx_models_for_all_graph_modules=(1,),
             )
 
 

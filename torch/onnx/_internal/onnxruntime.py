@@ -173,7 +173,7 @@ class OrtOperatorSupport(OperatorSupport):
             )
             return True
         logger.warning(
-            "extra_support_dict doesn't supports node.target: %s (type: %s)",
+            "extra_support_dict doesn't support node.target: %s (type: %s)",
             node.target,
             type(node.target),
         )
@@ -322,6 +322,8 @@ def _get_onnx_devices(
     ]
 ) -> Tuple["ORTC.OrtDevice", ...]:
     devices = tuple(value.device for value in values if isinstance(value, torch.Tensor))
+    if len(devices) == 0:
+        devices = (torch.device("cpu"),)
 
     def _device_id_or_zero(device_id: int) -> int:
         return device_id or 0
@@ -681,7 +683,12 @@ class OrtBackend:
 
         extra_support_dict: Dict[str, Any] = {
             "getattr": None,
+            # To send operator.getitem to ORT, add the corresponding string
+            # recognized by PyTorch's OperatorSupport class.
             "_operator.getitem": None,
+            # To send operator.mul to ORT, add the corresponding string
+            # recognized by PyTorch's OperatorSupport class.
+            "_operator.mul": None,
         }
 
         self._supported_ops = OrtOperatorSupport(support_dict, extra_support_dict)
