@@ -1530,7 +1530,8 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
           timeSinceLastPollStore >= heartbeatTimeoutInSec_ * 1000) {
         lastTimePollStore = currentTime;
-        if (store_->check({std::string(TIMEOUT_DUMP)}) && !optAsyncDebugDump) {
+        if (store_->checkNoPrefix({std::string(TIMEOUT_DUMP)}) &&
+            !optAsyncDebugDump) {
           optAsyncDebugDump = launchAsyncDebugDump();
           waitForDumpOrTimeout(*optAsyncDebugDump);
           const auto exitMsg = c10::str(
@@ -1566,7 +1567,7 @@ void ProcessGroupNCCL::watchdogHandler() {
               // abort process immediately.
               collectiveDebugInfoMode_.store(true);
               std::vector<uint8_t> vec(1);
-              store_->set(std::string(TIMEOUT_DUMP), vec);
+              store_->setNoPrefix(std::string(TIMEOUT_DUMP), vec);
             }
 
             if (dumpOnTimeout_ && !optAsyncDebugDump) {
