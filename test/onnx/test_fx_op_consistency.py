@@ -39,7 +39,7 @@ import pytest
 import pytorch_test_common
 
 import torch
-from onnx_test_common import skip, xfail
+from onnx_test_common import skip, skip_slow, xfail
 from torch.onnx._internal.diagnostics import _rules
 from torch.testing._internal import (
     common_device_type,
@@ -1248,16 +1248,14 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="fixme: kwargs dtpye=complex64 is not supported in ONNX."
     ),
     # SLOW TESTS
-    skip(
+    skip_slow(
         "max_pool2d_with_indices_backward",
         reason="fixme: very slow",
-        enabled_if=not common_utils.TEST_WITH_SLOW
     ),
-    skip(
+    skip_slow(
         "logspace",
         variant_name="tensor_overload",
         reason="fixme: very slow",
-        enabled_if=not common_utils.TEST_WITH_SLOW
     ),
 )
 # fmt: on
