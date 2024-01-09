@@ -163,24 +163,19 @@ class VmapCtxManagerVariable(ContextWrappingVariable):
     def enter(self, tx):
         batch_size, randomness = self.target_values
         vmap_level = torch._C._functorch._vmap_increment_nesting(batch_size, randomness)
-        self.set_cleanup_hook(
-            tx, lambda: torch._C._functorch._vmap_decrement_nesting()
-        )
+        self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
         self.state.proxy = tx.output.create_node(
             "call_function",
             torch._C._functorch._vmap_increment_nesting,
             (batch_size, randomness),
-            {}
+            {},
         )
         return variables.ConstantVariable.create(vmap_level)
 
     def exit(self, tx, *args):
         self.state.cleanup()
         tx.output.create_node(
-            "call_function",
-            torch._C._functorch._vmap_decrement_nesting,
-            (),
-            {}
+            "call_function", torch._C._functorch._vmap_decrement_nesting, (), {}
         )
         return variables.ConstantVariable.create(None)
 
