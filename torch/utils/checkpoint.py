@@ -438,7 +438,7 @@ def checkpoint(
             reentrant autograd. This allows ``checkpoint`` to support additional
             functionality, such as working as expected with
             ``torch.autograd.grad`` and support for keyword arguments input into
-             the checkpointed function.
+            the checkpointed function.
         context_fn(Callable, optional): A callable returning a tuple of two
             context managers. The function and its recomputation will be run
             under the first and second context managers respectively.
