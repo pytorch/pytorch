@@ -1288,6 +1288,7 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
 };
 
 void install_no_tensor_aliasing_guard(GuardManager* x, GuardManager* y) {
+  // TODO(anijain2305) - Support arbitrary number of tensors instead of just two.
   // Adds tensor X is not tensor Y. This is a an example of relational guard.
   // There is one guard object that is shared between two guard managers.
   std::shared_ptr<RelationalGuard> guard =
