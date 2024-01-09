@@ -86,7 +86,16 @@ const Tensor& OpaqueOptionalTensorRef::getTensor() const {
 }
 
 void* OperandInfo::mutable_data() const {
-  return data_;
+  struct IsMutableVisitor {
+    bool operator()(void*) { return true; }
+    bool operator()(const void*) { return false; }
+  };
+  TORCH_INTERNAL_ASSERT(std::visit(IsMutableVisitor(), data_));
+  struct GetMutableVisitor {
+    void* operator()(void* data) { return data; }
+    void* operator()(const void*) { return nullptr; }
+  };
+  return std::visit(GetMutableVisitor(), data_);
 }
 
 void OperandInfo::set_data(void* data) {

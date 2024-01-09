@@ -220,7 +220,7 @@ struct TORCH_API OperandInfo {
 
   /// The data pointer. This may be different from tensor->data_ptr() if the
   /// iterator is split.
-  void* data_ = nullptr;
+  std::variant<void*, const void*> data_ = static_cast<void*>(nullptr);
 };
 
 struct SplitUntil32Bit;
