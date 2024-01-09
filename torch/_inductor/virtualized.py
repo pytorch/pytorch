@@ -120,7 +120,6 @@ class KernelFormatterHandler:
         self.parent_handler = parent_handler
         self.output = IndentedBuffer(1)
         self.var_counter = itertools.count()
-        self.seen = {}
 
     @staticmethod
     def ir_to_string(ir_fn, index, rindex=None) -> str:
@@ -153,12 +152,9 @@ class KernelFormatterHandler:
             line = getattr(self.parent_handler, name)(*args, **kwargs)
             if name == "indirect_indexing":
                 return line
-            if line in self.seen:
-                return self.seen[line]
             # replace line with a new variable name
             varname = f"tmp{next(self.var_counter)}"
             self.output.writeline(f"{varname} = {line}")
-            self.seen[line] = varname
             return varname
 
         return inner
