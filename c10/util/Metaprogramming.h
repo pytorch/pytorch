@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/util/TypeList.h>
-#include <functional>
 #include <type_traits>
 
 namespace c10::guts {
@@ -207,6 +206,7 @@ constexpr auto tuple_slice(Tuple t) {
 namespace detail {
 template <class Mapper, class... Args, size_t... Indices>
 auto tuple_map(
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     std::tuple<Args...>&& tuple,
     const Mapper& mapper,
     std::index_sequence<Indices...>) {
