@@ -460,7 +460,7 @@ class NullContextVariable(ContextWrappingVariable):
 
 class StreamContextVariable(ContextWrappingVariable):
     @staticmethod
-    def create(tx, target_value, **kwargs):
+    def create_from_stream(tx, target_value, **kwargs):
         from .builder import wrap_fx_proxy_cls
 
         current_stream_method = get_interface_for_device(
@@ -480,6 +480,35 @@ class StreamContextVariable(ContextWrappingVariable):
             target_values=[target_value],
             initial_values=[current_stream],
             device=target_value.device,
+            **kwargs,
+        )
+
+    @staticmethod
+    def create_from_existing_context(tx, target_value, **kwargs):
+        from .builder import wrap_fx_proxy_cls
+
+        device = target_value.stream.device
+        interface = get_interface_for_device(device)
+
+        current_stream_method = interface.current_stream
+
+        target_stream = StreamVariable(
+            None, target_value.stream, target_value.stream.device
+        )
+        current_stream = wrap_fx_proxy_cls(
+            StreamVariable,
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                current_stream_method,
+                (None,),
+                {},
+            ),
+        )
+        return StreamContextVariable(
+            target_values=[target_stream],
+            initial_values=[current_stream],
+            device=device,
             **kwargs,
         )
 
@@ -521,11 +550,13 @@ class StreamContextVariable(ContextWrappingVariable):
         )
         self.state.cleanup_assert()
 
-    def module_name(self):
-        return "torch." + str(self.device)
-
-    def fn_name(self):
-        return "stream"
+    def reconstruct(self, codegen):
+        codegen.load_import_from("torch", "cuda.stream")
+        assert len(self.target_values) == 1
+        self.target_values[0].reconstruct(codegen)
+        # codegen.extend_output([codegen.create_load_const(str(self.device))])
+        codegen.extend_output(create_call_function(1, False))
+        return []
 
 
 class StreamVariable(VariableTracker):
