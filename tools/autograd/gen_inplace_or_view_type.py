@@ -70,6 +70,7 @@ VIEW_FUNCTIONS = {
     "expand": "self",
     "permute": "self",
     "select": "self",
+    "select_inverse": "self",
     "slice": "self",
     "slice_inverse": "self",
     "split": "self",

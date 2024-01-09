@@ -204,8 +204,7 @@ Tensor FunctionalInverses::select_int_inverse(const Tensor& base, const Tensor& 
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
-      return mutated_view.as_strided_symint(
-          base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+      return mutated_view.select_inverse_symint(base, dim, std::move(index));
     } else {
       return base.select_scatter_symint(mutated_view, dim, std::move(index));
     }
@@ -360,8 +359,7 @@ Tensor FunctionalInverses::unbind_int_inverse(const Tensor& base, const Tensor& 
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
-      return mutated_view.as_strided_symint(
-          base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+      return mutated_view.select_inverse_symint(base, dim, mutated_view_idx);
     } else {
       dim = at::maybe_wrap_dim(dim, base.sizes().size());
       return base.select_scatter(mutated_view, dim, mutated_view_idx);
@@ -441,6 +439,15 @@ Tensor FunctionalInverses::slice_inverse_inverse(const at::Tensor & base, const 
       return at::slice_copy_symint(mutated_view, dim, std::move(start), std::move(end), step);
     } else {
       return mutated_view.slice_symint(dim, std::move(start), std::move(end), step);
+    }
+}
+
+Tensor FunctionalInverses::select_inverse_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, const at::Tensor & src, int64_t dim, c10::SymInt index) {
+    // select_inverse() inverse is just select()
+    if (inverse_return_mode == InverseReturnMode::NeverView) {
+      return at::select_copy_symint(mutated_view, dim, index);
+    } else {
+      return mutated_view.select_symint(dim, index);
     }
 }
 

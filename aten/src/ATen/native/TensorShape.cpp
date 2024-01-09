@@ -2574,6 +2574,11 @@ Tensor slice_inverse_symint(
   return self.as_strided_symint(base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
 }
 
+Tensor select_inverse_symint(const Tensor& self, const Tensor& base, int64_t dim, SymInt index) {
+  // assume self has enough to storage to be viewed with base's metadata
+  return self.as_strided_symint(base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+}
+
 Tensor slice_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
   auto grad_input = at::zeros(input_sizes, grad.options());
   grad_input.slice(dim, start, end, step).copy_(grad);
