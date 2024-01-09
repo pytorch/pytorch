@@ -386,7 +386,7 @@ def _adjust_scalar_from_fx_to_onnx(
         float,
         bool,
     ],
-    value_info: onnx.ValueInfoProto,
+    value_info: "onnx.ValueInfoProto",
 ) -> torch.Tensor:
     if (
         isinstance(dynamo_value, torch.Tensor)
