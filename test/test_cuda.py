@@ -3430,7 +3430,7 @@ exit(2)
             # By using ctypes and calling cuDeviceCountGet() and expect CUDA_ERROR_NOT_INITIALIZED == 3
             # See https://github.com/pytorch/pytorch/issues/116276 for more details
             cuda_driver_api_call="ctypes.CDLL('libcuda.so.1').cuDeviceGetCount(ctypes.byref(x))"
-            rc = check_output(f"import torch; import ctypes;x=ctypes.c_int(-1);print({cuda_driver_api_call}")
+            rc = check_output(f"import torch; import ctypes;x=ctypes.c_int(-1);print({cuda_driver_api_call})")
             self.assertEqual(rc, "3")
 
 
