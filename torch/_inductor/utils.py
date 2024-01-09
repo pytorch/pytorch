@@ -611,6 +611,11 @@ def has_incompatible_cudagraph_ops(gm):
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
             return True
+        if hasattr(node.target, "tags"):
+            if torch.Tag.dynamic_output_shape in node.target.tags:
+                return True
+            if torch.Tag.data_dependent_output in node.target.tags:
+                return True
     return False
 
 
