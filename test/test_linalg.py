@@ -4682,6 +4682,32 @@ class TestLinalg(TestCase):
         m2 = torch.randn(16, 131071, device=device).to(dtype)
         torch.nn.functional.linear(m1, m2, M)
 
+    @dtypes(*floating_types_and(torch.bfloat16, torch.half))
+    def test_hipblaslt_corner_cases_rocm(self, device, dtype):
+        # enable hipblaslt path via env variable.
+        import os
+        os.environ["DISABLE_ADDMM_HIP_LT"] = "0"
+        if (dtype != torch.double):
+            # common case
+            M = torch.randn(128, device=device).to(dtype)
+            m1 = torch.randn(2048, 2400, device=device).to(dtype)
+            m2 = torch.randn(128, 2400, device=device).to(dtype)
+            out1 = torch.nn.functional.linear(m1, m2, M)
+            M_cpu = M.to('cpu')
+            m1_cpu = m1.to('cpu')
+            m2_cpu = m2.to('cpu')
+            out1_cpu = torch.nn.functional.linear(m1_cpu, m2_cpu, M_cpu)
+            self.assertTrue(torch.allclose(out1_cpu, out1.cpu(), rtol=1e-2, atol=1e-2))
+
+            # common case without bias
+            m1 = torch.randn(2048, 2400, device=device).to(dtype)
+            m2 = torch.randn(128, 2400, device=device).to(dtype)
+            out2 = torch.nn.functional.linear(m1, m2, bias=None)
+            m1_cpu = m1.to('cpu')
+            m2_cpu = m2.to('cpu')
+            out2_cpu = torch.nn.functional.linear(m1_cpu, m2_cpu, bias=None)
+            self.assertTrue(torch.allclose(out2_cpu, out2.cpu(), rtol=1e-2, atol=1e-2))
+
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   torch.half,
                   *[torch.bfloat16] if SM53OrLater else []
