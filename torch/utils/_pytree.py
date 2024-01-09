@@ -91,7 +91,7 @@ class PHashable(Protocol):
     def __hash__(self) -> int:
         ...
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         ...
 
 

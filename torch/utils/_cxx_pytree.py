@@ -21,7 +21,6 @@ from typing import (
     List,
     Optional,
     overload,
-    Protocol,
     Tuple,
     Type,
     TypeVar,
@@ -35,6 +34,8 @@ if torch._running_with_deploy():
 
 import optree
 from optree import PyTreeSpec  # direct import for type annotations
+
+from torch.utils._pytree import PHashable
 
 
 __all__ = [
@@ -74,14 +75,6 @@ T = TypeVar("T")
 S = TypeVar("S")
 U = TypeVar("U")
 R = TypeVar("R")
-
-
-class PHashable(Protocol):
-    def __hash__(self) -> int:
-        ...
-
-    def __eq__(self, other: Any) -> bool:
-        ...
 
 
 Context = Any
