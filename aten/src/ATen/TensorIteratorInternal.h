@@ -90,13 +90,33 @@ inline void serial_for_each(
 
   if (ndim <= 1) {
     if (range.begin == 0) {
-      loop(mutable_base_ptrs, mutable_strides.data(), const_base_ptrs, const_strides.data(), range.size(), 1);
+      loop(
+          mutable_base_ptrs,
+          mutable_strides.data(),
+          const_base_ptrs,
+          const_strides.data(),
+          range.size(),
+          1);
     } else {
       c10::SmallBuffer<char*, 4> mutable_ptrs(nmutabletensors);
       c10::SmallBuffer<const char*, 4> const_ptrs(nconsttensors);
-      get_data_ptrs(mutable_ptrs.data(), {mutable_base_ptrs, nmutabletensors}, mutable_strides, {range.begin});
-      get_data_ptrs(const_ptrs.data(), {const_base_ptrs, nconsttensors}, const_strides, {range.begin});
-      loop(mutable_ptrs.data(), mutable_strides.data(), const_ptrs.data(), const_strides.data(), range.size(), 1);
+      get_data_ptrs(
+          mutable_ptrs.data(),
+          {mutable_base_ptrs, nmutabletensors},
+          mutable_strides,
+          {range.begin});
+      get_data_ptrs(
+          const_ptrs.data(),
+          {const_base_ptrs, nconsttensors},
+          const_strides,
+          {range.begin});
+      loop(
+          mutable_ptrs.data(),
+          mutable_strides.data(),
+          const_ptrs.data(),
+          const_strides.data(),
+          range.size(),
+          1);
     }
   } else {
     c10::SmallBuffer<char*, 4> mutable_ptrs(nmutabletensors);
@@ -104,11 +124,23 @@ inline void serial_for_each(
     auto counter = DimCounter(shape, range);
     while (!counter.is_done()) {
       get_data_ptrs(
-          mutable_ptrs.data(), {mutable_base_ptrs, nmutabletensors}, mutable_strides, counter.values);
+          mutable_ptrs.data(),
+          {mutable_base_ptrs, nmutabletensors},
+          mutable_strides,
+          counter.values);
       get_data_ptrs(
-          const_ptrs.data(), {const_base_ptrs, nconsttensors}, const_strides, counter.values);
+          const_ptrs.data(),
+          {const_base_ptrs, nconsttensors},
+          const_strides,
+          counter.values);
       auto step = counter.max_2d_step();
-      loop(mutable_ptrs.data(), mutable_strides.data(), const_ptrs.data(), const_strides.data(), step[0], step[1]);
+      loop(
+          mutable_ptrs.data(),
+          mutable_strides.data(),
+          const_ptrs.data(),
+          const_strides.data(),
+          step[0],
+          step[1]);
       counter.increment(step);
     }
   }
