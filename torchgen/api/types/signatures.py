@@ -286,16 +286,18 @@ class NativeSignature:
 
 @dataclass(frozen=True)
 class ViewInverseSignature:
-    f: NativeFunction
+    g: NativeFunctionsViewGroup
 
     def name(self) -> str:
-        return functionalization.reverse_name(self.f, include_namespace=False)
+        return functionalization.reverse_name(self.g.view, include_namespace=False)
 
     def decl(self) -> str:
-        return_type = functionalization.returns_type(self.f.func)
+        return_type = functionalization.returns_type(self.g.view.func)
         decls = [
             a.decl()
-            for a in functionalization.inner_arguments(self.f.func, is_reverse=True)
+            for a in functionalization.inner_arguments(
+                self.g.view.func, is_reverse=True
+            )
         ]
         return f"static {return_type.cpp_type()} {self.name()}({', '.join(decls)});"
 
