@@ -50,7 +50,6 @@ def extract_dispatch_table_with_keys(table, dispatch_keys):
                 extracted += (entry + '\n')
     return extracted
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDispatch(TestCase):
     namespace_index = 0
 
@@ -796,7 +795,6 @@ CPU: registered at {extension_path}:5 :: () -> () [ boxed unboxed ]
                 "could not parse dispatch key: invalid_key"):
             C._dispatch_print_registrations_for_dispatch_key('invalid_key')
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPythonDispatcher(TestCase):
     def test_basic(self):
         dispatcher = PythonDispatcher()

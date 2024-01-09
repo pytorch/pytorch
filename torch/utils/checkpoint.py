@@ -20,6 +20,7 @@ from weakref import ReferenceType
 
 import torch
 import torch.fx.traceback as fx_traceback
+from torch._functorch._aot_autograd.functional_utils import is_fun
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -366,14 +367,15 @@ def checkpoint(
 
         If the :attr:`function` invocation during the backward pass differs
         from the forward pass, e.g., due to a global variable, the checkpointed
-        checkpointed version may not be equivalent, potentially causing an
+        version may not be equivalent, potentially causing an
         error being raised or leading to silently incorrect gradients.
 
     .. warning::
 
-        If you are using the ``use_reentrant=True`` variant (this is currently
-        the default), please refer to the note below for important
-        considerations and potential limitations.
+        The ``use_reentrant`` parameter should be passed explicitly. In version
+        2.4 we will raise an exception if ``use_reentrant`` is not passed.
+        If you are using the ``use_reentrant=True`` variant, please refer to the
+        note below for important considerations and potential limitations.
 
     .. note::
 
@@ -427,15 +429,16 @@ def checkpoint(
             the RNG state during each checkpoint. Note that under torch.compile,
             this flag doesn't take effect and we always preserve RNG state.
             Default: ``True``
-        use_reentrant(bool, optional): Use checkpointing
-            implementation that requires re-entrant autograd.
-            If ``use_reentrant=False`` is specified, ``checkpoint`` will use an
-            implementation that does not require re-entrant autograd. This
-            allows ``checkpoint`` to support additional functionality, such as
-            working as expected with ``torch.autograd.grad`` and support for
-            keyword arguments input into the checkpointed function. Note that future
-            versions of PyTorch will default to ``use_reentrant=False``.
-            Default: ``True``
+        use_reentrant(bool):
+            specify whether to use the activation checkpoint variant that
+            requires reentrant autograd. This parameter should be passed
+            explicitly. In version 2.4 we will raise an exception if
+            ``use_reentrant`` is not passed. If ``use_reentrant=False``,
+            ``checkpoint`` will use an implementation that does not require
+            reentrant autograd. This allows ``checkpoint`` to support additional
+            functionality, such as working as expected with
+            ``torch.autograd.grad`` and support for keyword arguments input into
+            the checkpointed function.
         context_fn(Callable, optional): A callable returning a tuple of two
             context managers. The function and its recomputation will be run
             under the first and second context managers respectively.
@@ -459,14 +462,15 @@ def checkpoint(
     """
     if use_reentrant is None:
         warnings.warn(
-            "torch.utils.checkpoint: please pass in use_reentrant=True or "
-            "use_reentrant=False explicitly. The default value of use_reentrant "
-            "will be updated to be False in the future. To maintain current "
-            "behavior, pass use_reentrant=True. It is recommended that you use "
-            "use_reentrant=False. Refer to docs for more details on the "
-            "differences between the two variants."
+            "torch.utils.checkpoint: the use_reentrant parameter should be "
+            "passed explicitly. In version 2.4 we will raise an exception "
+            "if use_reentrant is not passed. use_reentrant=False is "
+            "recommended, but if you need to preserve the current default "
+            "behavior, you can pass use_reentrant=True. Refer to docs for more "
+            "details on the differences between the two variants."
         )
         use_reentrant = True
+
     # Hack to mix *args with **kwargs in a python 2.7-compliant way
     preserve = kwargs.pop("preserve_rng_state", True)
     if kwargs and use_reentrant:
@@ -505,8 +509,10 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
     be saved for re-running the segment in the backward pass.
 
     .. warning::
-        If you are using the ``use_reentrant=True` variant (this is the
-        default), please see :func:`~torch.utils.checkpoint.checkpoint` for
+        The ``use_reentrant`` parameter should be passed explicitly. In version
+        2.4 we will raise an exception if ``use_reentrant`` is not passed.
+        If you are using the ``use_reentrant=True` variant, please see
+        :func:`~torch.utils.checkpoint.checkpoint` for
         the important considerations and limitations of this variant. It is
         recommended that you use ``use_reentrant=False``.
 
@@ -522,14 +528,16 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
         preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint.
             Default: ``True``
-        use_reentrant(bool, optional): Use checkpointing
-            implementation that requires re-entrant autograd.
-            If ``use_reentrant=False`` is specified, ``checkpoint`` will use an
-            implementation that does not require re-entrant autograd. This
-            allows ``checkpoint`` to support additional functionality, such as
-            working as expected with ``torch.autograd.grad`` and support for
-            keyword arguments input into the checkpointed function.
-            Default: ``True``
+        use_reentrant(bool):
+            specify whether to use the activation checkpoint variant that
+            requires reentrant autograd. This parameter should be passed
+            explicitly. In version 2.4 we will raise an exception if
+            ``use_reentrant`` is not passed. If ``use_reentrant=False``,
+            ``checkpoint`` will use an implementation that does not require
+            reentrant autograd. This allows ``checkpoint`` to support additional
+            functionality, such as working as expected with
+            ``torch.autograd.grad`` and support for keyword arguments input into
+            the checkpointed function.
 
     Returns:
         Output of running :attr:`functions` sequentially on :attr:`*inputs`
@@ -541,12 +549,13 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
     """
     if use_reentrant is None:
         warnings.warn(
-            "torch.utils.checkpoint.checkpoint_sequential: please pass in "
-            "use_reentrant=True or use_reentrant=False explicitly. The default "
-            "value of use_reentrant will be updated to be False in the future. "
-            "To maintain current behavior, pass use_reentrant=True. It is "
-            "recommended that you use use_reentrant=False. Refer to docs for "
-            "more details on the differences between the two variants."
+            "torch.utils.checkpoint.checkpoint_sequential: the use_reentrant "
+            "parameter should be passed explicitly. "
+            "In version 2.4 we will raise an exception if use_reentrant "
+            "is not passed. use_reentrant=False is "
+            "recommended, but if you need to preserve the current default "
+            "behavior, you can pass use_reentrant=True. Refer to docs for more "
+            "details on the differences between the two variants."
         )
         use_reentrant = True
 
@@ -1143,12 +1152,10 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 def _is_compiling(func, args, kwargs):
     # Check if we are under AOTAutograd tracing
     # There should probably be a better way to do this...
+    # TODO: unify _is_compiling across all compile stacks
     for arg in args:
-        if isinstance(arg, torch.Tensor):
-            if isinstance(arg, torch._subclasses.functional_tensor.FunctionalTensor):
-                arg = torch._from_functional_tensor(arg.elem)
-            if isinstance(arg, torch._subclasses.FakeTensor):
-                return True
+        if isinstance(arg, torch.Tensor) and is_fun(arg):
+            return True
     return False
 
 

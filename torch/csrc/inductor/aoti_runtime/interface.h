@@ -70,6 +70,38 @@ AOTIRuntimeError AOTInductorModelContainerRun(
     AOTInductorStreamHandle stream_handle,
     AOTIProxyExecutorHandle proxy_executor_handle);
 
+// Retrieves the number of constants for the model.
+AOTIRuntimeError AOTInductorModelContainerGetNumConstants(
+    AOTInductorModelContainerHandle container_handle,
+    size_t* num_constants);
+
+// Retrieves a constant's name.
+AOTIRuntimeError AOTInductorModelContainerGetConstantName(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    const char** name);
+
+// Retrieves a constant's original FQN.
+AOTIRuntimeError AOTInductorModelContainerGetConstantOriginalFQN(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    const char** original_fqn);
+
+// Retrieves a constant's dtype.
+AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    int32_t* dtype);
+
+// Setup the constant buffer in model container with provided ConstantMap
+// use_inactive should be set as true if the inactive buffer is to be updated.
+// validate_full_update checks if all constants are included in the ConstantMap
+AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive,
+    bool validate_full_update);
+
 // Setup the inactive constant buffer in model container with provided
 // ConstantMap
 AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(

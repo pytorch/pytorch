@@ -24,6 +24,7 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     PatternPrettyPrinter,
     register_graph_pattern,
+    stable_topological_sort,
 )
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
@@ -536,7 +537,7 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 2, 5)
 
-    def test_cat_slice_cat(self):
+    def test_cat_slice_cat_cuda(self):
         def fn(a, b):
             cat_1 = torch.ops.aten.cat.default([a, b], 1)
             slice_1 = torch.ops.aten.slice.Tensor(cat_1, 0, 0, 9223372036854775807)
@@ -1075,6 +1076,32 @@ class TestPatternMatcher(TestCase):
                 actual = torch.compile(fn)(*copy.deepcopy(args))
                 self.assertEqual(counter, 1)
                 torch.testing.assert_close(actual, expected)
+
+    def test_stable_topological_sort(self):
+        def fn1(a, b):
+            return a + b
+
+        graph = torch.fx.Graph()
+        a = graph.placeholder("x")
+        b = graph.placeholder("y")
+        c = graph.call_function(fn1, (a, b))
+        stable_topological_sort(graph)
+        self.assertEqual(list(graph.nodes), [a, b, c])
+
+        graph = torch.fx.Graph()
+        b = graph.placeholder("y")
+        a = graph.placeholder("x")
+        c = graph.call_function(fn1, (a, b))
+        stable_topological_sort(graph)
+        self.assertEqual(list(graph.nodes), [b, a, c])
+
+        graph = torch.fx.Graph()
+        a = graph.placeholder("x")
+        b = graph.placeholder("y")
+        c = graph.call_function(fn1, (b, a))
+        c.append(a)
+        stable_topological_sort(graph)
+        self.assertEqual(list(graph.nodes), [b, a, c])
 
 
 if __name__ == "__main__":

@@ -8,7 +8,6 @@ import torch.utils.show_pickle
 
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestShowPickle(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Can't re-open temp file on Windows")
