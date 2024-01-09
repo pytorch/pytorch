@@ -256,7 +256,6 @@ class NativeFunctionWithDifferentiabilityInfo:
     func: NativeFunction
     info: Optional[Dict[str, DifferentiabilityInfo]]
     fw_derivatives: Optional[Dict[str, Sequence[ForwardDerivative]]]
-    view_group: Optional[NativeFunctionsViewGroup]
 
 
 # TODO: Update comment below since it is out of date.
@@ -658,7 +657,7 @@ Attempted to convert a derivative formula for a mutable operator
         if not info_dict:
             result.append(
                 NativeFunctionWithDifferentiabilityInfo(
-                    func=f, info=None, fw_derivatives=None, view_group=None
+                    func=f, info=None, fw_derivatives=None
                 )
             )
             continue
@@ -801,35 +800,11 @@ Attempted to convert a derivative formula for a mutable operator
 
         result.append(
             NativeFunctionWithDifferentiabilityInfo(
-                func=f,
-                info=info_dict,
-                fw_derivatives=fw_derivative_dict,
-                view_group=None,
+                func=f, info=info_dict, fw_derivatives=fw_derivative_dict
             )
         )
 
     return result
-
-
-def match_views_to_view_groups(
-    native_functions: List[NativeFunctionWithDifferentiabilityInfo],
-    view_groups: List[NativeFunctionsViewGroup],
-) -> List[NativeFunctionWithDifferentiabilityInfo]:
-    view_name_to_view_group_mapping = {
-        g.view.func.name.unambiguous_name: g for g in view_groups
-    }
-
-    return [
-        NativeFunctionWithDifferentiabilityInfo(
-            func=f.func,
-            info=f.info,
-            fw_derivatives=f.fw_derivatives,
-            view_group=view_name_to_view_group_mapping.get(
-                f.func.func.name.unambiguous_name
-            ),
-        )
-        for f in native_functions
-    ]
 
 
 def is_differentiable(
