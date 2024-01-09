@@ -149,7 +149,7 @@ class TestTorchDeviceType(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
             torch.bool, torch.float32, torch.complex64, torch.float64,
-            torch.complex128)
+            torch.complex128, torch.uint16, torch.uint32, torch.uint64)
     def test_bytes_to_scalar(self, device, dtype):
         def rand_byte():
             if dtype == torch.bool:
@@ -166,7 +166,7 @@ class TestTorchDeviceType(TestCase):
 
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
             torch.bool, torch.float32, torch.complex64, torch.float64,
-            torch.complex128)
+            torch.complex128, torch.uint16, torch.uint32, torch.uint64)
     def test_storage(self, device, dtype):
         v = make_tensor((3, 5), dtype=dtype, device=device, low=-9, high=9)
         self.assertEqual(v.storage()[0], v[0][0])
