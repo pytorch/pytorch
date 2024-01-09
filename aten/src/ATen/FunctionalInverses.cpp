@@ -436,9 +436,11 @@ Tensor FunctionalInverses::narrow_inverse(const at::Tensor & base, const at::Ten
 Tensor FunctionalInverses::slice_inverse_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, const at::Tensor & src, int64_t dim, std::optional<c10::SymInt> start, std::optional<c10::SymInt> end, c10::SymInt step) {
     // slice_inverse() inverse is just slice()
     if (inverse_return_mode == InverseReturnMode::NeverView) {
-      return at::slice_copy_symint(mutated_view, dim, std::move(start), std::move(end), step);
+      return at::slice_copy_symint(
+          mutated_view, dim, std::move(start), std::move(end), std::move(step));
     } else {
-      return mutated_view.slice_symint(dim, std::move(start), std::move(end), step);
+      return mutated_view.slice_symint(
+          dim, std::move(start), std::move(end), std::move(step));
     }
 }
 
