@@ -27,8 +27,11 @@ from torch.torch_version import TorchVersion, Version
 
 from setuptools.command.build_ext import build_ext
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Create a logger for this module
+log = logging.getLogger(__name__)
+
+# Set the default log level to WARNING to prevent info messages from being displayed
+log.setLevel(logging.WARNING)
 
 IS_WINDOWS = sys.platform == 'win32'
 IS_MACOS = sys.platform.startswith('darwin')
@@ -119,7 +122,7 @@ def _find_cuda_home() -> Optional[str]:
             if not os.path.exists(cuda_home):
                 cuda_home = None
     if cuda_home and not torch.cuda.is_available():
-        logging.error(f"No CUDA runtime is found, using CUDA_HOME='{cuda_home}'")
+        log.warning(f"No CUDA runtime is found, using CUDA_HOME='{cuda_home}'")
     return cuda_home
 
 def _find_rocm_home() -> Optional[str]:
@@ -141,7 +144,7 @@ def _find_rocm_home() -> Optional[str]:
             if os.path.exists(fallback_path):
                 rocm_home = fallback_path
     if rocm_home and torch.version.hip is None:
-        logging.error(f"No ROCm runtime is found, using ROCM_HOME='{rocm_home}'")
+        log.warning(f"No ROCm runtime is found, using ROCM_HOME='{rocm_home}'")
     return rocm_home
 
 
@@ -1678,7 +1681,7 @@ def _jit_compile(name,
     )
     if version > 0:
         if version != old_version and verbose:
-            logging.info(f'The input conditions for extension module {name} have changed. ' +
+            log.warning(f'The input conditions for extension module {name} have changed. ' +
                      f'Bumping to version {version} and re-building as {name}_v{version}...')
         name = f'{name}_v{version}'
 
@@ -1723,11 +1726,11 @@ def _jit_compile(name,
         else:
             baton.wait()
     elif verbose:
-        logging.info('No modifications detected for re-loaded extension '
+        log.warning('No modifications detected for re-loaded extension '
                  f'module {name}, skipping build step...')
 
     if verbose:
-        logging.info(f'Loading extension module {name}...')
+        log.warning(f'Loading extension module {name}...')
 
     if is_standalone:
         return _get_exec_path(name, build_directory)
@@ -1755,7 +1758,7 @@ def _write_ninja_file_and_compile_objects(
         with_cuda = any(map(_is_cuda_file, sources))
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
-        logging.info(f'Emitting ninja build file {build_file_path}...')
+        log.warning(f'Emitting ninja build file {build_file_path}...')
     _write_ninja_file(
         path=build_file_path,
         cflags=cflags,
@@ -1769,7 +1772,7 @@ def _write_ninja_file_and_compile_objects(
         library_target=None,
         with_cuda=with_cuda)
     if verbose:
-        logging.info('Compiling objects...')
+        log.warning('Compiling objects...')
     _run_ninja_build(
         build_directory,
         verbose,
@@ -1803,7 +1806,7 @@ def _write_ninja_file_and_build_library(
         is_standalone)
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
-        logging.info(f'Emitting ninja build file {build_file_path}...')
+        log.warning(f'Emitting ninja build file {build_file_path}...')
     # NOTE: Emitting a new ninja build file does not cause re-compilation if
     # the sources did not change, so it's ok to re-emit (and it's fast).
     _write_ninja_file_to_build_library(
@@ -1818,7 +1821,7 @@ def _write_ninja_file_and_build_library(
         is_standalone=is_standalone)
 
     if verbose:
-        logging.info(f'Building extension module {name}...')
+        log.warning(f'Building extension module {name}...')
     _run_ninja_build(
         build_directory,
         verbose,
@@ -1881,7 +1884,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
 
     if with_cuda:
         if verbose:
-            logging.info('Detected CUDA files, patching ldflags')
+            log.warning('Detected CUDA files, patching ldflags')
         if IS_WINDOWS:
             extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib", "x64")}')
             extra_ldflags.append('cudart.lib')
@@ -2030,12 +2033,12 @@ def _get_build_directory(name: str, verbose: bool) -> str:
             root_extensions_directory, build_folder)
 
     if verbose:
-        logging.info(f'Using {root_extensions_directory} as PyTorch extensions root...')
+        log.warning(f'Using {root_extensions_directory} as PyTorch extensions root...')
 
     build_directory = os.path.join(root_extensions_directory, name)
     if not os.path.exists(build_directory):
         if verbose:
-            logging.info(f'Creating extension directory {build_directory}...')
+            log.warning(f'Creating extension directory {build_directory}...')
         # This is like mkdir -p, i.e. will also create parent directories.
         os.makedirs(build_directory, exist_ok=True)
 
@@ -2046,10 +2049,10 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
     max_jobs = os.environ.get('MAX_JOBS')
     if max_jobs is not None and max_jobs.isdigit():
         if verbose:
-            logging.info(f'Using envvar MAX_JOBS ({max_jobs}) as the number of workers...')
+            log.warning(f'Using envvar MAX_JOBS ({max_jobs}) as the number of workers...')
         return int(max_jobs)
     if verbose:
-        logging.info('Allowing ninja to set a default number of workers... '
+        log.warning('Allowing ninja to set a default number of workers... '
               '(overridable by setting the environment variable MAX_JOBS=N)')
     return None
 
