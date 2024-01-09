@@ -749,10 +749,11 @@ def tree_map(
             argument to function ``func``.
         rests (tuple of pytree): A tuple of pytrees, each of which has the same structure as
             ``tree`` or has ``tree`` as a prefix.
-        is_leaf (callable, optional): An optionally specified function that will be called at each
-            flattening step. It should return a boolean, with :data:`True` stopping the traversal
-            and the whole subtree being treated as a leaf, and :data:`False` indicating the
-            flattening should traverse the current object.
+        is_leaf (callable, optional): An extra leaf predicate function that will be called at each
+            flattening step. The function should have a single argument with signature
+            ``is_leaf(node) -> bool``. If it returns :data:`True`, the whole subtree being treated
+            as a leaf. Otherwise, the default pytree registry will be used to determine a node is a
+            leaf or not. If the function is not specified, the default pytree registry will be used.
 
     Returns:
         A new pytree with the same structure as ``tree`` but with the value at each leaf given by
@@ -781,10 +782,11 @@ def tree_map_(
             argument to function ``func``.
         rests (tuple of pytree): A tuple of pytrees, each of which has the same structure as
             ``tree`` or has ``tree`` as a prefix.
-        is_leaf (callable, optional): An optionally specified function that will be called at each
-            flattening step. It should return a boolean, with :data:`True` stopping the traversal
-            and the whole subtree being treated as a leaf, and :data:`False` indicating the
-            flattening should traverse the current object.
+        is_leaf (callable, optional): An extra leaf predicate function that will be called at each
+            flattening step. The function should have a single argument with signature
+            ``is_leaf(node) -> bool``. If it returns :data:`True`, the whole subtree being treated
+            as a leaf. Otherwise, the default pytree registry will be used to determine a node is a
+            leaf or not. If the function is not specified, the default pytree registry will be used.
 
     Returns:
         The original ``tree`` with the value at each leaf is given by the side-effect of function
