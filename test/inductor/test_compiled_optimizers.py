@@ -32,7 +32,7 @@ class KernelCounts(NamedTuple):
 # expected kernel count
 KERNEL_COUNT_OVERRIDES = {
     "test_rmsprop_foreach_weight_decay_cpu": 12,
-    "test_nadam_foreach_weight_decay_momentum_decay_cpu": 20,
+    "test_nadam_foreach_weight_decay_momentum_decay_cpu": 12,
     "test_adamw_foreach_amsgrad_capturable_cuda": 3,
     "test_adamw_amsgrad_capturable_cuda": 6,
     "test_adam_amsgrad_capturable_cuda": 6,
