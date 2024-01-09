@@ -33,13 +33,14 @@ def is_hashable_python_var(x):
 
     # Note: Keep me in sync with is_hashable!
     # Even better, we should have a map of functions connecting the two
-    from ..trace_rules import is_builtin_callable
+    from ..trace_rules import is_builtin_callable, is_numpy
 
     return (
         ConstantVariable.is_literal(x)
-        or isinstance(x, (Tensor, enum.Enum, torch.nn.Module))
+        or isinstance(x, (Tensor, enum.Enum, type, torch.nn.Module))
         or is_builtin_callable(x)
         or (isinstance(x, tuple) and all(is_hashable_python_var(e) for e in x))
+        or is_numpy(x)
     )
 
 
@@ -61,6 +62,9 @@ def is_hashable(x):
                 variables.SymNodeVariable,
                 variables.ConstantVariable,
                 variables.EnumVariable,
+                variables.user_defined.UserDefinedClassVariable,
+                variables.misc.SkipFilesVariable,
+                variables.misc.NumpyVariable,
                 variables.NNModuleVariable,
             ),
         )
