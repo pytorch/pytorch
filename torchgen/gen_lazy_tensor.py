@@ -155,7 +155,7 @@ def validate_shape_inference_header(
         raise Exception(
             f"""Missing shape inference function.\n
 Please add declare this function in {shape_inference_hdr}:\n
-and implement it in the the corresponding shape_inference.cpp file.\n
+and implement it in the corresponding shape_inference.cpp file.\n
 {os.linesep.join(missing_decls)}"""
         )
 
@@ -426,7 +426,7 @@ def run_gen_lazy_tensor(
 
     Generated lazy native functions all perform shape inference, by first using a meta:: kernel
     if available for that op, and otherwise using a 'compute_shape_{op}' function instead.  The generator
-    knows the call signature for compute_shape_{op} becuase it matches the nativefunction (and meta::) signature,
+    knows the call signature for compute_shape_{op} because it matches the nativefunction (and meta::) signature,
     so it just has to check whether the op is structured and generate a call for one or the other.  It's up to the dev
     to supply the missing compute_shape_{op} function, but the codegen at least warns you about this and provides
     the expected signature which can be copy-pasted into shape_inference.h.

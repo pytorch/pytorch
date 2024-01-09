@@ -28,6 +28,9 @@ class TORCH_API Store : public torch::CustomClassHolder {
   explicit Store(const std::chrono::milliseconds& timeout)
       : timeout_(timeout) {}
 
+  Store(const Store&) = default;
+  Store(Store&&) noexcept = default;
+
   ~Store() override = default;
 
   void set(const std::string& key, const std::string& value);

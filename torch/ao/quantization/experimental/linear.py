@@ -136,7 +136,7 @@ class LinearAPoT(WeightedQuantizedModule):
         weight_rows = self.weight_transposed.size()[0]
         weight_cols = self.weight_transposed.size()[1]
 
-        decomposed_weight = np.empty(shape=(weight_rows, weight_cols), dtype=object)
+        decomposed_weight: np.ndarray = np.empty(shape=(weight_rows, weight_cols), dtype=object)
         for row in range(weight_rows):
             for col in range(weight_cols):
                 decomposed_weight[row][col] = self.decompose_APoT(bin(self.weight_transposed[row][col]))

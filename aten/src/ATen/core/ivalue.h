@@ -1198,6 +1198,7 @@ struct TORCH_API IValue final {
  private:
   // This is the source of truth for isIntrusivePtr; edit results here
   // as needed and isIntrusivePtr will pick them up.
+  // NOLINTBEGIN(bugprone-branch-clone)
   static constexpr bool isIntrusivePtrConstexpr(Tag tag) {
     switch (tag) {
       case Tag::None:
@@ -1257,6 +1258,7 @@ struct TORCH_API IValue final {
     }
     return false;
   }
+  // NOLINTEND(bugprone-branch-clone)
 
  public:
   // Don't edit this just to add results for new tags; edit

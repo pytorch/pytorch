@@ -159,8 +159,6 @@ _SKIP_PYTHON_BINDINGS = [
     "fill.Scalar",  # only used by the functionalization pass
     "lift.*",
     "normal_functional",  # only used by the functionalization pas
-    "_nested_view_from_buffer_copy",
-    "_nested_view_from_buffer_copy_out",
     "nbytes",
     "itemsize",
 ]
@@ -407,7 +405,7 @@ def create_python_bindings(
 
     grouped = group_filter_overloads(pairs, pred)
 
-    for name in sorted(grouped.keys(), key=lambda x: str(x)):
+    for name in sorted(grouped.keys(), key=str):
         overloads = grouped[name]
         py_methods.append(
             method_impl(name, module, overloads, method=method, symint=symint)
@@ -445,7 +443,7 @@ def create_python_return_type_bindings(
 
     grouped = group_filter_overloads(pairs, pred)
 
-    for name in sorted(grouped.keys(), key=lambda x: str(x)):
+    for name in sorted(grouped.keys(), key=str):
         overloads = grouped[name]
         definitions, registrations = generate_return_type_definition_and_registrations(
             overloads
@@ -483,7 +481,7 @@ def create_python_return_type_bindings_header(
 
     grouped = group_filter_overloads(pairs, pred)
 
-    for name in sorted(grouped.keys(), key=lambda x: str(x)):
+    for name in sorted(grouped.keys(), key=str):
         overloads = grouped[name]
         declarations = generate_return_type_declarations(overloads)
         py_return_types_declarations.append(
@@ -599,7 +597,7 @@ def load_deprecated_signatures(
         if is_out:
             aten_name = aten_name.replace("_out", "")
 
-        # HACK: these are fixed constants used to pass the the aten function.
+        # HACK: these are fixed constants used to pass the aten function.
         # The type must be known ahead of time
         known_constants = {
             "1": Type.parse("Scalar"),

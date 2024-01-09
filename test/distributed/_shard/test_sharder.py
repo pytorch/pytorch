@@ -15,7 +15,7 @@ from torch.distributed._shard.sharder import Sharder
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
-from torch.testing._internal.common_utils import TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import TEST_WITH_DEV_DBG_ASAN, run_tests
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     TEST_GPU_NUM,
     ShardedTensorTestBase,
@@ -163,3 +163,7 @@ class TestCustomSharder(ShardedTensorTestBase):
         ):
             # shard the module with the provided sharding plan
             shard_module(sharded_model, sharding_plan)
+
+
+if __name__ == "__main__":
+    run_tests()

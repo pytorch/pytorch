@@ -8,6 +8,7 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
+#include <ATen/detail/IPUHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/detail/MTIAHooksInterface.h>
 #include <ATen/detail/ORTHooksInterface.h>
@@ -46,6 +47,8 @@ class TORCH_API Context {
       return at::detail::getMPSHooks().getDefaultMPSGenerator();
     } else if (device_type == at::kXPU) {
       return at::detail::getXPUHooks().getDefaultXPUGenerator(device.index());
+    } else if (device_type == at::kIPU) {
+      return at::detail::getIPUHooks().getDefaultIPUGenerator(device.index());
     } else if (device_type == at::kPrivateUse1) {
       return at::GetPrivateUse1HooksInterface()->getDefaultGenerator(
           device.index());
@@ -126,6 +129,13 @@ class TORCH_API Context {
   void lazyInitHIP() {
     c10::call_once(thh_init, [&] { detail::getHIPHooks().initHIP(); });
   }
+  void lazyInitPrivateUse1() {
+    c10::call_once(thp_init, [&] {
+      if (isPrivateUse1HooksRegistered()) {
+        at::GetPrivateUse1HooksInterface()->initPrivateUse1();
+      }
+    });
+  }
   static const at::cuda::NVRTC& getNVRTC() {
     return detail::getCUDAHooks().nvrtc();
   }
@@ -146,6 +156,8 @@ class TORCH_API Context {
   void setBenchmarkLimitCuDNN(int);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
+  bool userEnabledNNPACK() const;
+  void setUserEnabledNNPACK(bool e);
 
   // Note [Disabling Fused SDP Kernels]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -202,6 +214,8 @@ class TORCH_API Context {
   bool deterministicAlgorithms() const;
   bool deterministicAlgorithmsWarnOnly() const;
   void setDeterministicAlgorithms(bool, bool);
+  bool deterministicFillUninitializedMemory() const;
+  void setDeterministicFillUninitializedMemory(bool);
 
   // Note [Writing Nondeterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -294,10 +308,12 @@ class TORCH_API Context {
   static bool checkCuBLASConfigDeterministic();
   c10::once_flag thc_init;
   c10::once_flag thh_init;
+  c10::once_flag thp_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
+  bool _deterministic_fill_uninitialized_memory = true;
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
@@ -315,6 +331,7 @@ class TORCH_API Context {
   bool allow_fp16_reduction_cublas = true;
   bool allow_bf16_reduction_cublas = true;
   bool enabled_mkldnn = true;
+  bool enabled_nnpack = true;
   at::LinalgBackend linalg_preferred_backend =
       c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true
       ? at::LinalgBackend::Cusolver
