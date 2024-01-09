@@ -87,6 +87,12 @@ class GenCompositeViewCopyKernel:
     def __call__(self, g: NativeFunctionsViewGroup) -> Optional[str]:
         if g.view_copy is None:
             return None
+        elif g.view_copy.func.name.name.base != f"{g.view.func.name.name}_copy":
+            # If the view_copy doesn't match the standard naming scheme of <op>_copy,
+            # assume it already exists and doesn't need to be generated.
+            # Example: slice_inverse() with the copy variant named slice_scatter()
+            # instead of slice_inverse_copy()
+            return None
 
         metadata = self.backend_index.get_kernel(g.view_copy)
         assert metadata is not None

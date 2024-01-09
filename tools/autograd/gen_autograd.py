@@ -29,9 +29,11 @@ from typing import List
 from torchgen.api import cpp
 from torchgen.api.autograd import (
     match_differentiability_info,
+    match_views_to_view_groups,
     NativeFunctionWithDifferentiabilityInfo,
 )
-from torchgen.gen import parse_native_yaml
+from torchgen.gen import get_grouped_by_view_native_functions, parse_native_yaml
+from torchgen.model import NativeFunctionsViewGroup
 from torchgen.selective_build.selector import SelectiveBuilder
 
 from . import gen_python_functions
@@ -71,6 +73,14 @@ def gen_autograd(
     fns_with_diff_infos: List[
         NativeFunctionWithDifferentiabilityInfo
     ] = match_differentiability_info(fns, differentiability_infos)
+
+    # add in view group info for views
+    view_groups = [
+        g
+        for g in get_grouped_by_view_native_functions(native_funcs)
+        if isinstance(g, NativeFunctionsViewGroup)
+    ]
+    fns_with_diff_infos = match_views_to_view_groups(fns_with_diff_infos, view_groups)
 
     # Generate VariableType.h/cpp
     if not disable_autograd:
