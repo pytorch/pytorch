@@ -220,7 +220,7 @@ class TestNumPyInterop(TestCase):
                     self.assertEqual(tensor_from_array2[i], array2[i])
 
         # Test unsupported type
-        array = np.array([1, 2, 3, 4], dtype=np.uint16)
+        array = np.array(['foo', 'bar'], dtype=np.dtype(np.str_))
         with self.assertRaises(TypeError):
             tensor_from_array = torch.from_numpy(array)
 

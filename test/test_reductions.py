@@ -1666,16 +1666,28 @@ class TestReductions(TestCase):
         def is_integral(dtype):
             return dtype in integral_types()
 
+        exact_dtype = True
         # On Windows CI, the current version of `numpy` promotes all lower integers
         # dtypes to int32 while `torch` promotes them to int64. Hence we skip on checking
         # the exact dtype.
         # Reference : https://dr.pytorch.org/api/view-log-full?build_id=122051580
         # PR : https://github.com/pytorch/pytorch/pull/38628#issuecomment-655905370
-        exact_dtype = False if (IS_WINDOWS and is_integral(dtype)) else True
+        if IS_WINDOWS and is_integral(dtype):
+            exact_dtype = False 
+        # For uint8, numpy promotes to uint64 while torch promotes to int64.
+        # So we must skip this as well.
+        if dtype == torch.uint8:
+            exact_dtype = False
 
         if dtype == torch.uint8:
-            with self.assertRaises(TypeError):
-                self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype, with_extremal=with_extremal)
+            # TODO: This isn't really desirable behavior.  What is happening
+            # is that we're attempting to do a comparison between uint64 and
+            # int64 tensor because Numpy has different promotion behavior,
+            # but we don't actually support this equality (because you'd need
+            # a specialized kernel for it and we don't really want one.)
+            with self.assertRaises(RuntimeError):
+                self._test_reduction_function_with_numpy(
+                    torch_fn, np_fn, device, dtype, exact_dtype=exact_dtype, with_extremal=with_extremal)
         else:
             # TODO: Investigate why the output is not close to numpy.
             if dtype == torch.float16:
