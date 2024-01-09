@@ -4689,11 +4689,11 @@ class TestLinalg(TestCase):
         # enable hipblaslt path via env variable.
         import os
         os.environ["DISABLE_ADDMM_HIP_LT"] = "0"
-        if (dtype != torch.double):
+        if dtype != torch.double:
             # common case
-            M = torch.randn(128, device=device).to(dtype)
-            m1 = torch.randn(2048, 2400, device=device).to(dtype)
-            m2 = torch.randn(128, 2400, device=device).to(dtype)
+            M = torch.randn(128, device=device, dtype=dtype)
+            m1 = torch.randn(2048, 2400, device=device, dtype=dtype)
+            m2 = torch.randn(128, 2400, device=device, dtype=dtype)
             out1 = torch.nn.functional.linear(m1, m2, M)
             M_cpu = M.to('cpu')
             m1_cpu = m1.to('cpu')
@@ -4702,8 +4702,8 @@ class TestLinalg(TestCase):
             self.assertTrue(torch.allclose(out1_cpu, out1.cpu(), rtol=1e-2, atol=1e-2))
 
             # common case without bias
-            m1 = torch.randn(2048, 2400, device=device).to(dtype)
-            m2 = torch.randn(128, 2400, device=device).to(dtype)
+            m1 = torch.randn(2048, 2400, device=device, dtype=dtype)
+            m2 = torch.randn(128, 2400, device=device, dtype=dtype)
             out2 = torch.nn.functional.linear(m1, m2, bias=None)
             m1_cpu = m1.to('cpu')
             m2_cpu = m2.to('cpu')
