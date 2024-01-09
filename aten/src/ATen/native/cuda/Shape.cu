@@ -9,6 +9,7 @@
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/util/Optional.h>
 
@@ -431,12 +432,10 @@ TORCH_IMPL_FUNC(cat_out_cuda)
           parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE, 1>(result, materialized, dim, nDims, memory_format);
         });
       } else {
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-            kComplexHalf, kHalf, kBool, kBFloat16,
-            result.scalar_type(), "cat_cuda", [&]() {
+        AT_DISPATCH_V2(result.scalar_type(), "cat_cuda", AT_WRAP([&]() {
           using dtype = OpaqueType<sizeof(scalar_t)>;
           parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE, 1>(result, materialized, dim, nDims, memory_format);
-        });
+        }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
       }
   } else if (materialized.size() > 1 &&
       result.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
@@ -451,12 +450,10 @@ TORCH_IMPL_FUNC(cat_out_cuda)
           parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE/2, CAT_ARRAY_BATCH_SIZE/2>(result, materialized, dim, nDims, memory_format);
         });
       } else {
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-            kComplexHalf, kHalf, kBool, kBFloat16,
-            result.scalar_type(), "cat_cuda", [&]() {
+        AT_DISPATCH_V2(result.scalar_type(), "cat_cuda", AT_WRAP([&]() {
             using dtype = OpaqueType<sizeof(scalar_t)>;
             parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE/2, CAT_ARRAY_BATCH_SIZE/2>(result, materialized, dim, nDims, memory_format);
-        });
+        }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
       }
   } else {
     int64_t offset = 0;

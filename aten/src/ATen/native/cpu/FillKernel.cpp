@@ -52,7 +52,7 @@ void fill_kernel(TensorIterator& iter, const Scalar& value_scalar) {
             [=]() -> scalar_t { return value; },
             [=]() { return Vectorized<scalar_t>(value); });
       }),
-      AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kBool
+      AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kBool, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES)
     );
   }
 }

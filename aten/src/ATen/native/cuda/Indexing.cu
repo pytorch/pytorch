@@ -7,6 +7,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/TensorOperators.h>
@@ -1481,14 +1482,16 @@ Tensor& index_select_out_cuda(
       index_select_out_cuda_impl<scalar_t>(out, self, dim, index);
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-        at::ScalarType::ComplexHalf,
-        at::ScalarType::Half,
-        at::ScalarType::Bool,
-        at::ScalarType::BFloat16,
+    AT_DISPATCH_V2(
         out.scalar_type(),
         "index_select_cuda",
-        [&] { index_select_out_cuda_impl<scalar_t>(out, self, dim, index); });
+        AT_WRAP([&] { index_select_out_cuda_impl<scalar_t>(out, self, dim, index); }),
+        AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+        kComplexHalf,
+        kHalf,
+        kBool,
+        kBFloat16
+        );
   }
 
   return out;
