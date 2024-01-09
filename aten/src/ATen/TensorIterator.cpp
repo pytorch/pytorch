@@ -865,6 +865,12 @@ StrideVector TensorIteratorBase::get_strides() const {
 }
 
 void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
+  TORCH_CHECK(
+    this->nconsttensors() == 0,
+    "At least one const input was added to this TensorIterator, but the loop ",
+    "function that was given only accesses mutable inputs. You must either ",
+    "change the const inputs to mutable inputs or add mutable arguments to ",
+    "the loop function. See the signature for loop2d_with_const_t");
   if (range.size() == 0) {
     return;
   }

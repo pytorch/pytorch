@@ -217,6 +217,23 @@ TEST(TensorIteratorTest, FailNonPromotingBinaryOp) {
   ASSERT_ANY_THROW(config.build());
 }
 
+TEST(TensorIteratorTest, ForEachMutableInputErrorIfConst) {
+  at::Tensor out = at::zeros({10});
+  at::Tensor a = at::arange({10}).to(at::kFloat);
+  at::TensorIteratorConfig iter_config;
+  iter_config
+    .add_output(out)
+    .add_const_input(a);
+  auto iter = iter_config.build();
+  auto my_loop = [](char** mutable_data, const int64_t* mutable_strides, int64_t n) {};
+  try {
+    iter.for_each(my_loop);
+  } catch (const c10::Error& e) {
+    EXPECT_TRUE(std::string(e.what()).rfind(
+      "At least one const input was added to this TensorIterator") == 0);
+  }
+}
+
 TEST(TensorIteratorTest, ForEachMutableInput) {
   at::Tensor out = at::zeros({10});
   at::Tensor a = at::arange({10}).to(at::kFloat);
