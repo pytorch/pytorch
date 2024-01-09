@@ -8,6 +8,7 @@ import io
 import itertools
 import warnings
 import pickle
+import re
 from copy import deepcopy
 from itertools import product
 from functools import partial
@@ -3717,7 +3718,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         x_right = torch.randn(2, 3, 10)
         for rnn, hidden in rnns:
             self.assertRaisesRegex(RuntimeError, "Expected hidden.*size.*got", rnn, x_right, hidden)
-            self.assertRaisesRegex(RuntimeError, "input.size(-1) must be equal to input_size", rnn, x_wrong)
+            self.assertRaisesRegex(RuntimeError, re.escape("input.size(-1) must be equal to input_size"), rnn, x_wrong)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @skipIfRocm
