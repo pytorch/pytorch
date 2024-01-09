@@ -6853,6 +6853,8 @@ class TestMPS(TestCaseMPS):
 
     def test_index_64bit(self):
         """ Test that index operations work for 4Gb+ tensors """
+        if product_version < 14.0:
+            raise unittest.SkipTest("Sonoma is needed for large tensors, see https://github.com/pytorch/pytorch/issues/84039")
         # Cleanup memory
         gc.collect()
         torch.mps.empty_cache()
