@@ -12,9 +12,6 @@ class TORCH_API PrefixStore : public Store {
   using Store::set;
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
 
-  void setNoPrefix(const std::string& key, const std::vector<uint8_t>& value)
-      override;
-
   using Store::compareSet;
   std::vector<uint8_t> compareSet(
       const std::string& key,
@@ -30,8 +27,6 @@ class TORCH_API PrefixStore : public Store {
   int64_t getNumKeys() override;
 
   bool check(const std::vector<std::string>& keys) override;
-
-  bool checkNoPrefix(const std::vector<std::string>& keys) override;
 
   void wait(const std::vector<std::string>& keys) override;
 
@@ -57,6 +52,9 @@ class TORCH_API PrefixStore : public Store {
   bool hasExtendedApi() const override;
 
   c10::intrusive_ptr<Store> getUnderlyingStore();
+
+  // Recursively to fetch the store before layers of wrapping with PrefixStore.
+  c10::intrusive_ptr<Store> getUnderlyingNonPrefixStore();
 
  protected:
   std::string prefix_;

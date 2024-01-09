@@ -39,12 +39,6 @@ class TORCH_API Store : public torch::CustomClassHolder {
       const std::string& key,
       const std::vector<uint8_t>& value) = 0;
 
-  virtual void setNoPrefix(
-      const std::string& key,
-      const std::vector<uint8_t>& value) {
-    TORCH_INTERNAL_ASSERT(false, "Not implemented.");
-  }
-
   std::string compareSet(
       const std::string& key,
       const std::string& currentValue,
@@ -66,10 +60,6 @@ class TORCH_API Store : public torch::CustomClassHolder {
   virtual bool deleteKey(const std::string& key) = 0;
 
   virtual bool check(const std::vector<std::string>& keys) = 0;
-
-  virtual bool checkNoPrefix(const std::vector<std::string>& keys) {
-    TORCH_INTERNAL_ASSERT(false, "Not implemented.");
-  }
 
   virtual int64_t getNumKeys() = 0;
 

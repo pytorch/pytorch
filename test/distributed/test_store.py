@@ -443,14 +443,11 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def num_keys_total(self):
         return 6
 
-    def test_no_prefix(self):
+    def test_underlying_non_prefix_store(self):
         store = self._create_store()
-        self.tcpstore._set_no_prefix("key", "value")
-        self.assertTrue(store._check_no_prefix(["key"]))
-        store._set_no_prefix("key2", "value2")
-        self.assertTrue(self.tcpstore._check_no_prefix(["key2"]))
-        store.set("key3", "value3")
-        self.assertFalse(self.tcpstore._check_no_prefix(["key3"]))
+        wrapped_store = dist.PrefixStore(self.prefix, dist.PrefixStore(self.prefix, store))
+        self.assertEqual(self.tcpstore, store._underlying_non_prefix_store)
+        self.assertEqual(self.tcpstore, wrapped_store._underlying_non_prefix_store)
 
 class MyPythonStore(dist.Store):
     def __init__(self):

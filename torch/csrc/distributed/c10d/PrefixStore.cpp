@@ -26,12 +26,6 @@ void PrefixStore::set(
   store_->set(joinKey(key), value);
 }
 
-void PrefixStore::setNoPrefix(
-    const std::string& key,
-    const std::vector<uint8_t>& value) {
-  store_->setNoPrefix(key, value);
-}
-
 std::vector<uint8_t> PrefixStore::compareSet(
     const std::string& key,
     const std::vector<uint8_t>& expectedValue,
@@ -58,10 +52,6 @@ int64_t PrefixStore::getNumKeys() {
 bool PrefixStore::check(const std::vector<std::string>& keys) {
   auto joinedKeys = joinKeys(keys);
   return store_->check(joinedKeys);
-}
-
-bool PrefixStore::checkNoPrefix(const std::vector<std::string>& keys) {
-  return store_->checkNoPrefix(keys);
 }
 
 void PrefixStore::wait(const std::vector<std::string>& keys) {
@@ -116,6 +106,21 @@ bool PrefixStore::hasExtendedApi() const {
 
 c10::intrusive_ptr<Store> PrefixStore::getUnderlyingStore() {
   return store_;
+}
+
+c10::intrusive_ptr<Store> PrefixStore::getUnderlyingNonPrefixStore() {
+  c10::intrusive_ptr<Store> store = store_;
+
+  while (store) {
+    // Attempt to dynamically cast to PrefixStore
+    PrefixStore* asPrefixStore = dynamic_cast<PrefixStore*>(store.get());
+    if (asPrefixStore) {
+      store = asPrefixStore->getUnderlyingStore();
+    } else {
+      break; // We've reached a non-PrefixStore
+    }
+  }
+  return store;
 }
 
 } // namespace c10d
