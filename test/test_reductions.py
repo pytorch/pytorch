@@ -3530,6 +3530,9 @@ as the input tensor excluding its innermost dimension'):
             # Workaround https://github.com/pytorch/pytorch/issues/66556
             expected = np.asarray(expected)  # transform numpy scalars to numpy.ndarray instances
 
+            if expected.dtype == np.uint64:
+                exact_dtype = False
+
             msg = ("Failed to produce expected results! Input tensor was"
                    f" {t}, torch result is {actual}, and reference result is"
                    f" {expected}.") if t.numel() < 10 else None
