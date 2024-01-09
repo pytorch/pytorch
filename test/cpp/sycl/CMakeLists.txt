@@ -26,10 +26,8 @@ add_executable(
   ${TEST_SYCL_CXX_SRCS})
 target_link_libraries(test_sycl_build_archive gtest)
 target_link_libraries(test_sycl_build_archive
-  -Wl,--whole-archive
-  -L$<TARGET_FILE_DIR:sycl_simple_kernel_test>
-  -l:libsycl_simple_kernel_test.a
-  -Wl,--no-whole-archive)
+  "-Wl,--whole-archive,\"$<TARGET_FILE:sycl_simple_kernel_test>\" -Wl,--no-whole-archive")
+add_dependencies(test_sycl_build_archive sycl_simple_kernel_test)
 
 # SYCL runtime library could be a transitive link library of
 # ``test_sycl_build_archive``, if using,
