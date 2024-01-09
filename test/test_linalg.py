@@ -4686,10 +4686,15 @@ class TestLinalg(TestCase):
     @skipCUDAIfNotRocm
     @dtypes(*floating_types_and(torch.bfloat16, torch.half))
     def test_hipblaslt_corner_cases_rocm(self, device, dtype):
+        if dtype == torch.double:
+            raise unittest.SkipTest("hipblasLt doesn't support doubles yet")
+
         # enable hipblaslt path via env variable.
         import os
-        os.environ["DISABLE_ADDMM_HIP_LT"] = "0"
-        if dtype != torch.double:
+        DISABLE_ADDMM_HIP_LT="DISABLE_ADDMM_HIP_LT"
+        prev_val = os.getenv(DISABLE_ADDMM_HIP_LT)
+        try:
+            os.environ[DISABLE_ADDMM_HIP_LT] = "0"
             # common case
             M = torch.randn(128, device=device, dtype=dtype)
             m1 = torch.randn(2048, 2400, device=device, dtype=dtype)
@@ -4709,6 +4714,11 @@ class TestLinalg(TestCase):
             m2_cpu = m2.to('cpu')
             out2_cpu = torch.nn.functional.linear(m1_cpu, m2_cpu, bias=None)
             self.assertTrue(torch.allclose(out2_cpu, out2.cpu(), rtol=1e-2, atol=1e-2))
+        finally:
+            if prev_val is None:
+                del os.environ[DISABLE_ADDMM_HIP_LT]
+            else:
+                os.environ[DISABLE_ADDMM_HIP_LT] = prev_val
 
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   torch.half,
