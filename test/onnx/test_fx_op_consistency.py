@@ -1249,14 +1249,26 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     # SLOW TESTS
     skip_slow(
-        "max_pool2d_with_indices_backward",
-        reason="fixme: very slow",
-    ),
-    skip_slow(
         "logspace",
         variant_name="tensor_overload",
-        reason="fixme: very slow",
+        reason="fixme: Test sets are too many.",
     ),
+    skip_slow(
+        "max_pool2d_with_indices_backward",
+        reason="fixme: Test sets are too many.",
+    ),
+    skip_slow(
+        "nn.functional.max_pool1d",
+        reason="fixme: Test sets are too many.",
+    ),
+    skip_slow(
+        "nn.functional.max_pool2d",
+        reason="fixme: Test sets are too many.",
+    ),
+    skip_slow(
+        "nn.functional.max_pool3d",
+        reason="fixme: Test sets are too many.",
+    )
 )
 # fmt: on
 
