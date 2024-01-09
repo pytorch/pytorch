@@ -387,7 +387,6 @@ at::Device ProcessGroupNCCL::guessDeviceForRank() const {
   }
 }
 
-const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 1000;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
 
@@ -770,6 +769,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 10 /*10 Mins*/);
   waitTimeoutDumpInMilSec_ =
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 2000);
+  timeoutCheckInMilSec_ = getCvarInt(TORCH_NCCL_TIMEOUT_CHECK_MILSEC, 200);
+  watchdogCheckInMilSec_ = getCvarInt(TORCH_NCCL_WATCHDOG_CHECK_MILSEC, 500);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   PrefixStore* prefixStore = dynamic_cast<PrefixStore*>(store_.get());
@@ -856,6 +857,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << monitorThreadEnabled_.load()
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
+            << ", TORCH_NCCL_TIMEOUT_CHECK_MILSEC: " << timeoutCheckInMilSec_
+            << ", TORCH_NCCL_WATCHDOG_CHECK_MILSEC: " << watchdogCheckInMilSec_
             << ", NCCL_DEBUG: " << nccl_debug << ", ID=" << this->getID();
 
   if (options_->global_ranks_in_group.empty()) {
@@ -1067,7 +1070,7 @@ void ProcessGroupNCCL::waitForPendingWorks() {
     }
 
     std::this_thread::sleep_for(
-        std::chrono::milliseconds(kWatchdogThreadSleepMillis));
+        std::chrono::milliseconds(watchdogCheckInMilSec_));
   }
 }
 
@@ -1244,6 +1247,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
     auto ncclTrace = dump_nccl_trace();
     DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
     writer.write(ncclTrace);
+    LOG(ERROR) << logPrefix() << "ProcessGroupNCCL dump debug info success!";
     return true;
   }
   return false;
@@ -1518,12 +1522,12 @@ void ProcessGroupNCCL::watchdogHandler() {
   }
   while (!done || !terminateProcessGroup_.load()) {
     std::unique_lock<std::mutex> lock(workMetaListMutex_);
-    // We busy-poll the work vector every kWatchdogThreadSleepMillis
+    // We busy-poll the work vector every watchdogCheckInMilSec_
     // milliseconds as long as the atomic is True.
     workMetaListCV_.wait_for(
-        lock,
-        std::chrono::milliseconds(kWatchdogThreadSleepMillis),
-        [&]() -> bool { return terminateProcessGroup_.load(); });
+        lock, std::chrono::milliseconds(watchdogCheckInMilSec_), [&]() -> bool {
+          return terminateProcessGroup_.load();
+        });
     // Bump up heart beat by one.
     heartbeat_++;
 
@@ -1542,19 +1546,32 @@ void ProcessGroupNCCL::watchdogHandler() {
           std::chrono::duration_cast<std::chrono::milliseconds>(
               (currentTime - lastTimePollStore))
               .count();
-      if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
-          timeSinceLastPollStore >= heartbeatTimeoutInSec_ * 1000) {
+      const auto checkMsg = c10::str(
+          logPrefix(),
+          "Before checking TCPStore in watchdog for PG 0: ",
+          timeSinceLastWorkListUpdate >= watchdogCheckInMilSec_,
+          " ",
+          timeSinceLastPollStore >= timeoutCheckInMilSec_,
+          " ",
+          optAsyncDebugDump.has_value());
+      LOG(ERROR) << checkMsg;
+      if (timeSinceLastWorkListUpdate >= watchdogCheckInMilSec_ &&
+          timeSinceLastPollStore >= timeoutCheckInMilSec_) {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(TIMEOUT_DUMP)}) &&
             !optAsyncDebugDump) {
           auto wakeUpTime = std::chrono::steady_clock::now() +
               std::chrono::milliseconds(waitTimeoutDumpInMilSec_);
+          const auto startCheckMsg = c10::str(
+              logPrefix(),
+              "[Start] Another rank reported a timeout and signaled a global abort.");
+          LOG(ERROR) << startCheckMsg;
           optAsyncDebugDump = launchAsyncDebugDump();
           waitForDumpOrTimeout(*optAsyncDebugDump);
           extraWaitForDumpUntil(wakeUpTime);
           const auto exitMsg = c10::str(
               logPrefix(),
-              "Another rank reported a timeout and signaled a global abort.");
+              "[End] Another rank reported a timeout and signaled a global abort.");
           LOG(ERROR) << exitMsg;
           C10_THROW_ERROR(DistBackendError, exitMsg);
         }
@@ -1586,6 +1603,10 @@ void ProcessGroupNCCL::watchdogHandler() {
               collectiveDebugInfoMode_.store(true);
               std::vector<uint8_t> vec(1);
               globalStore_->set(std::string(TIMEOUT_DUMP), vec);
+              const auto exitMsg = c10::str(
+                  logPrefix(),
+                  "Timeout detected in watchdog and signal a global abort.");
+              LOG(ERROR) << exitMsg;
             }
 
             auto wakeUpTime = std::chrono::steady_clock::now() +
@@ -1604,6 +1625,10 @@ void ProcessGroupNCCL::watchdogHandler() {
               // Store debug info to storage. (By default to local disk)
               waitForDumpOrTimeout(*optAsyncDebugDump);
               extraWaitForDumpUntil(wakeUpTime);
+              const auto completeMsg = c10::str(
+                  logPrefix(),
+                  "Timeout dump finished in watchdog and signaled a global abort.");
+              LOG(ERROR) << completeMsg;
             }
 
           } catch (const std::exception& e) {
@@ -1668,12 +1693,10 @@ void ProcessGroupNCCL::runHookLoop() {
   bool done = false;
   while (!done || !terminateProcessGroup_.load()) {
     std::unique_lock<std::mutex> lock(completedWorkListMutex_);
-    // We busy-poll the work vector every kWatchdogThreadSleepMillis
+    // We busy-poll the work vector every watchdogCheckInMilSec_
     // milliseconds as long as the atomic is True.
     completedWorkListCV_.wait_for(
-        lock,
-        std::chrono::milliseconds(kWatchdogThreadSleepMillis),
-        [&]() -> bool {
+        lock, std::chrono::milliseconds(watchdogCheckInMilSec_), [&]() -> bool {
           return !completedWorkList_.empty() || terminateProcessGroup_.load();
         });
 
