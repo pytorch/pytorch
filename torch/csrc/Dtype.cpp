@@ -28,7 +28,10 @@ PyObject* THPDtype_New(at::ScalarType scalar_type, const std::string& name) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPDtype_pynew(PyObject* type, PyObject* args, PyObject* kwargs) {
+PyObject* THPDtype_pyNewCustomDtype(
+    PyObject* type,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser(
       {"_custom_dtype(ScalarType scalartype, c10::string_view name)"});
@@ -172,16 +175,6 @@ PyTypeObject THPDtypeType = {
     nullptr, /* tp_alloc */
     nullptr, /* tp_new */
 };
-
-static PyMethodDef TorchMethods[] = { // NOLINT
-  {"_custom_dtype",
-   castPyCFunctionWithKeywords(THPDtype_pynew),
-   METH_VARARGS | METH_KEYWORDS,
-   nullptr},
-};
-
-static std::vector<PyMethodDef> methods;
-
 
 void THPDtype_init(PyObject* module) {
   // Set a __dict__ with `__module__` = `torch`. This means

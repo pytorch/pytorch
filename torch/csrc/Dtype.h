@@ -29,4 +29,12 @@ TORCH_API PyObject* THPDtype_New(
 
 void THPDtype_init(PyObject* module);
 
-PyObject* THPDtype_pynew(PyObject* type, PyObject* args, PyObject* kwargs);
+// this is a private function that instantiate a custom dtype that is backed up
+// by some existing dtypes, e.g. int4 backed up by bits8, this will be used in
+// Tensor subclass for defining a Tensor with a new dtype, there is no gurantee
+// that this dtype will work with any features, all features will be supported
+// on demand
+PyObject* THPDtype_pyNewCustomDtype(
+    PyObject* type,
+    PyObject* args,
+    PyObject* kwargs);
