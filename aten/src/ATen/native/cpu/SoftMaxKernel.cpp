@@ -45,7 +45,7 @@ inline void _vec_log_softmax_lastdim(
   int64_t MAX_CHUNK_SIZE = std::max<int64_t>(
       1,
       at::internal::GRAIN_SIZE / (sizeof(scalar_t) * dim_size));
-
+  int64_t CHUNK_SIZE = std::min<int64_t>(MAX_CHUNK_SIZE, outer_size);
   // Note: grain_size value of 0
   // We don't change the number of OpenMP threads in the OpenMP thread-pool,
   // so some threads do useful work, while others don't.
