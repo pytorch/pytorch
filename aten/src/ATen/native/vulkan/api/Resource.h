@@ -5,11 +5,10 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Allocator.h>
+#include <ATen/native/vulkan/api/Types.h>
 #include <ATen/native/vulkan/api/Utils.h>
 
-#include <c10/core/ScalarType.h>
-#include <c10/util/typeid.h>
-
+#include <mutex>
 #include <stack>
 #include <unordered_map>
 
@@ -19,10 +18,6 @@ namespace vulkan {
 namespace api {
 
 using MemoryAccessFlags = uint8_t;
-
-VkFormat vk_format(const at::ScalarType dtype);
-
-c10::ScalarType c10_scalartype(const VkFormat image_format);
 
 constexpr VmaAllocationCreateFlags DEFAULT_ALLOCATION_STRATEGY =
     VMA_ALLOCATION_CREATE_STRATEGY_MIN_MEMORY_BIT;

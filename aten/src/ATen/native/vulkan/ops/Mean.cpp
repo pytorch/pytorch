@@ -54,7 +54,7 @@ Tensor mean_dim(
   vTensor v_output{
       context,
       output_size,
-      type,
+      convert_dtype(type),
   };
 
   // Required to determine how to insert memory barriers in the command buffer
