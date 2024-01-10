@@ -23,7 +23,7 @@ from torch.testing._internal.common_nn import (
     nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
     freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
-    skipIfSlowGradcheckEnv)
+    slowTestIf, TEST_WITH_SLOW_GRADCHECK)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 
@@ -4090,7 +4090,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # Takes 30+ minutes with gradcheck on
-                   DecorateInfo(skipIfSlowGradcheckEnv, 'TestModule', 'test_gradgrad'),)
+                   DecorateInfo(slowTestIf(TEST_WITH_SLOW_GRADCHECK), 'TestModule', 'test_gradgrad'),)
                ),
     ModuleInfo(torch.nn.MultiheadAttention,
                train_and_eval_differ=True,
