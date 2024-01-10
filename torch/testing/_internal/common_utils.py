@@ -1341,17 +1341,7 @@ def xfailIfTorchDynamo(func):
     return unittest.expectedFailure(func) if TEST_WITH_TORCHDYNAMO else func  # noqa: F821
 
 
-def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
-    """
-    Usage:
-
-    @skipIfTorchDynamo(msg)
-    def test_blah(self):
-        ...
-
-    """
-    assert isinstance(msg, str), "Are you using skipIfTorchDynamo correctly?"
-
+def skipIfTorchDynamo(func=None, msg="test doesn't currently work with dynamo"):
     def decorator(fn):
         if not isinstance(fn, type):
             @wraps(fn)
@@ -1370,7 +1360,10 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
         return fn
 
 
-    return decorator
+    if func is None:
+        return decorator
+    else:
+        return decorator(func)
 
 def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
                         condition=TEST_WITH_TORCHINDUCTOR):  # noqa: F821
