@@ -276,7 +276,8 @@ Tensor slice(
   }
   dim += 4 - nDims;
 
-  vTensor v_output{api::context(), newSizes, self.scalar_type()};
+  IntArrayRef output_sizes(newSizes);
+  vTensor v_output{api::context(), output_sizes.vec(), self.scalar_type()};
 
   if (dim == 3) {
     slice_width(self, start_val, end_val, step, v_output);

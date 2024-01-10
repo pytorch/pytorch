@@ -15,10 +15,11 @@ Tensor view_internal(const Tensor& self_arg, const IntArrayRef shape) {
   vTensor& v_self = convert(self);
 
   at::DimVector inferred_size = at::infer_size_dv(shape, self.numel());
+  IntArrayRef output_size(inferred_size);
 
   vTensor v_output{
       context,
-      inferred_size,
+      output_size.vec(),
       self_arg.scalar_type(),
   };
   if (v_self.is_quantized()) {
