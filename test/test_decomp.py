@@ -927,7 +927,7 @@ class DecompOneOffTests(TestCase):
             attention,
             decomposition_table=get_decompositions(
                 [
-                    torch.ops.aten._scaled_dot_product_flash_attention.default,
+                    torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default,
                 ]
             ),
         )(query_layer, key_layer, value_layer)
