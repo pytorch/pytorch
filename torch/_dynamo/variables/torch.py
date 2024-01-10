@@ -213,7 +213,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
-            VmapCtxManagerVariable,
+            VmapIncrementNestingCtxManagerVariable,
         )
 
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
@@ -322,9 +322,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return DisabledSavedTensorsHooksVariable.create(
                 tx, args[0].as_python_constant()
             )
-        elif self.value is torch._functorch.vmap.vmap_nesting:
+        elif self.value is torch._functorch.vmap.vmap_increment_nesting:
             assert len(args) == 2
-            return VmapCtxManagerVariable.create(
+            return VmapIncrementNestingCtxManagerVariable.create(
                 tx,
                 [guard_if_dyn(x) for x in args],
             )
