@@ -22,7 +22,8 @@ from torch.testing._internal.common_nn import (
     marginrankingloss_reference, multimarginloss_reference, multilabelmarginloss_reference,
     nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS)
+    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
+    skipIfSlowGradcheckEnv)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 
@@ -4087,7 +4088,9 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # No channels_last support for Transformer currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # Takes 30+ minutes with gradcheck on
+                   DecorateInfo(skipIfSlowGradcheckEnv, 'TestModule', 'test_gradgrad'),)
                ),
     ModuleInfo(torch.nn.MultiheadAttention,
                train_and_eval_differ=True,
