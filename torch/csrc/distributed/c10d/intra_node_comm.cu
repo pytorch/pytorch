@@ -28,8 +28,13 @@ struct __align__(16) bf16x8 {
 
 DEVICE_INLINE __nv_bfloat162
 bf16hadd2(const __nv_bfloat162 x, const __nv_bfloat162 y) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+#if defined(USE_ROCM)
   CUDA_KERNEL_ASSERT(false);
+  return 0;
+#elif (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+  CUDA_KERNEL_ASSERT(false);
+  __nv_bfloat162 res;
+  return res;
 #else
   return __hadd2(x, y);
 #endif
@@ -654,7 +659,8 @@ AllReduceAlgo selectAllReduceAlgo(
     size_t worldSize) {
   // Only support bf16 for now
   if (input.dtype() != at::kBFloat16 ||
-      input.numel() * input.element_size() > kMaxIntraNodeSize) {
+      static_cast<size_t>(input.numel() * input.element_size()) >
+          kMaxIntraNodeSize) {
     return AllReduceAlgo::NONE;
   }
   const auto numel = input.numel();
