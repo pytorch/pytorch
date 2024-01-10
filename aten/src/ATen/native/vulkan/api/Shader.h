@@ -7,10 +7,9 @@
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Types.h>
 #include <ATen/native/vulkan/api/Utils.h>
-#include <c10/util/flat_hash_map.h>
-#include <c10/util/hash.h>
 
 #include <mutex>
+#include <unordered_map>
 
 namespace at {
 namespace native {
@@ -128,7 +127,8 @@ class ShaderLayoutCache final {
       size_t hashed = 0u;
 
       for (const VkDescriptorType type : signature) {
-        hashed = c10::hash_combine(hashed, c10::get_hash(type));
+        hashed =
+            utils::hash_combine(hashed, std::hash<VkDescriptorType>()(type));
       }
 
       return hashed;
@@ -141,7 +141,7 @@ class ShaderLayoutCache final {
   std::mutex cache_mutex_;
 
   VkDevice device_;
-  ska::flat_hash_map<Key, Value, Hasher> cache_;
+  std::unordered_map<Key, Value, Hasher> cache_;
 
  public:
   VkDescriptorSetLayout retrieve(const Key&);
@@ -165,7 +165,13 @@ class ShaderCache final {
 
   struct Hasher {
     inline size_t operator()(const ShaderInfo& source) const {
-      return c10::get_hash(source.src_code.bin, source.src_code.size);
+      size_t seed = 0;
+      seed = utils::hash_combine(
+          seed, std::hash<const uint32_t*>()(source.src_code.bin));
+      seed = utils::hash_combine(
+          seed, std::hash<uint32_t>()(source.src_code.size));
+
+      return seed;
     }
   };
 
@@ -175,7 +181,7 @@ class ShaderCache final {
   std::mutex cache_mutex_;
 
   VkDevice device_;
-  ska::flat_hash_map<Key, Value, Hasher> cache_;
+  std::unordered_map<Key, Value, Hasher> cache_;
 
  public:
   VkShaderModule retrieve(const Key&);

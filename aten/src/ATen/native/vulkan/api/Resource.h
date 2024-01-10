@@ -8,10 +8,10 @@
 #include <ATen/native/vulkan/api/Utils.h>
 
 #include <c10/core/ScalarType.h>
-#include <c10/util/flat_hash_map.h>
 #include <c10/util/typeid.h>
 
 #include <stack>
+#include <unordered_map>
 
 namespace at {
 namespace native {
@@ -359,7 +359,7 @@ class SamplerCache final {
   std::mutex cache_mutex_;
 
   VkDevice device_;
-  ska::flat_hash_map<Key, Value, Hasher> cache_;
+  std::unordered_map<Key, Value, Hasher> cache_;
 
  public:
   VkSampler retrieve(const Key&);
