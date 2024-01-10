@@ -10,7 +10,6 @@ import traceback
 from contextlib import nullcontext
 from enum import Enum
 from functools import partial
-from inspect import signature
 from typing import (
     Any,
     Callable,
@@ -3557,7 +3556,7 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def process_kernel(cls, kernel, *args, **kwargs):
-        binded_args = signature(kernel).bind(*args, **kwargs).arguments
+        binded_args = {"args": args, "kwargs": kwargs}
 
         args_flat, args_spec = pytree.tree_flatten(binded_args)
 
@@ -4746,12 +4745,7 @@ class FallbackKernel(ExternKernelAlloc):
                 self.python_kernel_name = str(kernel)
 
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
-            if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
-                self.python_kernel_name = f"torch._prims.rng_prims.{kernel.__name__}"
-            else:
-                raise NotImplementedError(
-                    "Unable to find HigherOrderOperator kernel name"
-                )
+            self.python_kernel_name = f"torch.ops.higher_order.{kernel.__name__}"
         else:
             # For non-aten OpOverload, i.e. custom ops
             if V.graph.cpp_wrapper:
