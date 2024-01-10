@@ -1381,6 +1381,16 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_can_load_older_state_dict",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
+                "TestOptimRenewed",
+                "test_load_nontensor_step",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
+                "TestOptimRenewed",
+                "test_state_dict_with_cuda_params",
+            ),
         ),
     ),
 ]
