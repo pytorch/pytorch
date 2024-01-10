@@ -605,7 +605,7 @@ def run_test(
         os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    num_retries = 0 if "--subprocess" in command or RERUN_DISABLED_TESTS else 2
+    should_retry = not "--subprocess" in command and not RERUN_DISABLED_TESTS
     is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
         "BUILD_ENVRIONMENT", ""
     )
@@ -613,7 +613,7 @@ def run_test(
         THRESHOLD * 6
         if is_slow
         else THRESHOLD * 3
-        if num_retries > 0
+        if should_retry
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
         else None
@@ -625,8 +625,7 @@ def run_test(
         if IS_CI:
             output = stack.enter_context(open(log_path, "w"))
 
-        if "--subprocess" not in command:
-            # I think subprocess is better handled by common_utils? but it's not working atm
+        if should_retry:
             ret_code, was_rerun = run_test_retries(
                 command,
                 test_directory,
@@ -645,7 +644,6 @@ def run_test(
                 stderr=output,
                 env=env,
                 timeout=timeout,
-                retries=num_retries,
             )
 
             # Pytest return code 5 means no test is collected. This is needed
@@ -705,7 +703,7 @@ def run_test_retries(
         if ret_code == 0:
             break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
-        print_to_file(f"Got exit code {ret_code}{signal_name}, retrying...")
+        print_to_file(f"Got exit code {ret_code}{signal_name}")
 
         # Read what just failed
         with open(
@@ -721,14 +719,15 @@ def run_test_retries(
             sc_command = f"--scs={stepcurrent_key}"
         else:
             sc_command = f"--sc={stepcurrent_key}"
+        print_to_file("Retrying...")
         print_items = []  # do not continue printing them, massive waste of space
 
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
     flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
     if len(flaky_failures) > 0:
         print_to_file(
-            "The following tests failed flakily (had to be rerun in a new process,"
-            + f" doesn't include reruns froms same process): {flaky_failures}",
+            "The following tests failed and then succeeded when run in a new process"
+            + f"{flaky_failures}",
         )
     if len(consistent_failures) > 0:
         print_to_file(f"The following tests failed consistently: {consistent_failures}")
