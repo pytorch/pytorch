@@ -4392,6 +4392,11 @@ def floor_divide(self, other):
     return torch.div(self, other, rounding_mode="floor")
 
 
+@register_decomposition(aten.sym_numel)
+def sym_numel(t):
+    return functools.reduce(operator.mul, t.shape, 1)
+
+
 @register_decomposition([aten.sum.default, aten.sum.out])
 def sum_default(
     self: Tensor,
