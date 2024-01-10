@@ -526,6 +526,23 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
+    @parametrize("min,max", ((0.1, 0.9), (None, 0.9), (0.1, None)))
+    def test_foreach_clamp(self, min, max):
+        def fn(t0, t1, min, max):
+            return torch._foreach_clamp([t0, t1], min, max)
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(10, 10, device="cuda"),
+                torch.rand(20, 20, device="cuda"),
+                min,
+                max,
+            ),
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda()
     def test_fuse_concat(self):
         def fn(x1, x2, x3, w1, w2, w3):
             x = torch.stack([x1, x2, x3])
