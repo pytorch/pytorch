@@ -9,7 +9,7 @@ from .ctx_manager import (
     InferenceModeVariable,
     StreamContextVariable,
     StreamVariable,
-    VmapCtxManagerVariable,
+    VmapIncrementNestingCtxManagerVariable,
     WithExitFunctionVariable,
 )
 from .dicts import (
