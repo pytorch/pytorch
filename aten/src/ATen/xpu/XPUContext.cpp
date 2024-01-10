@@ -23,7 +23,7 @@ std::deque<c10::once_flag> device_prop_flags;
 std::vector<DeviceProp> device_properties;
 
 std::deque<c10::once_flag> device_global_idx_flags;
-std::vector<int> device_global_idxs;
+std::vector<DeviceIndex> device_global_idxs;
 
 void initXPUContextVectors() {
   num_gpus = c10::xpu::device_count();
@@ -33,13 +33,13 @@ void initXPUContextVectors() {
   device_global_idxs.resize(num_gpus);
 }
 
-void initDeviceProperty(int device) {
+void initDeviceProperty(DeviceIndex device) {
   DeviceProp device_prop;
   c10::xpu::get_device_properties(&device_prop, device);
   device_properties[device] = device_prop;
 }
 
-void initDeviceGlobalIdx(int device) {
+void initDeviceGlobalIdx(DeviceIndex device) {
   sycl::device& raw_device = c10::xpu::get_raw_device(device);
   // Get all SYCL devices associated with the SYCL platform.
   auto devices = sycl::device::get_devices();
@@ -50,7 +50,7 @@ void initDeviceGlobalIdx(int device) {
   TORCH_CHECK(
       it != devices.end(), "Cant't find the global index of XPU device.");
   device_global_idxs[device] =
-      static_cast<int>(std::distance(devices.begin(), it));
+      static_cast<DeviceIndex>(std::distance(devices.begin(), it));
 }
 
 } // anonymous namespace
@@ -60,7 +60,7 @@ DeviceProp* getCurrentDeviceProperties() {
   return getDeviceProperties(device);
 }
 
-DeviceProp* getDeviceProperties(int device) {
+DeviceProp* getDeviceProperties(DeviceIndex device) {
   c10::call_once(init_flag, initXPUContextVectors);
   if (device == -1)
     device = c10::xpu::current_device();
@@ -77,7 +77,7 @@ DeviceProp* getDeviceProperties(int device) {
 
 // Return the global index enumerated by sycl::device::get_devices based on the
 // index of a XPU device in the framework.
-int getGlobalIdxFromDevice(int device) {
+DeviceIndex getGlobalIdxFromDevice(DeviceIndex device) {
   c10::call_once(init_flag, initXPUContextVectors);
   TORCH_CHECK(
       device >= 0 && device < num_gpus,
