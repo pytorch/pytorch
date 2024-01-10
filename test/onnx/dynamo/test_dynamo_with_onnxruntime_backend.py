@@ -435,10 +435,11 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @parameterized.expand(
         [
-            (True,),
+            (True, False),
+            (True, True),
         ]
     )
-    def test_llama_decoder_with_local_backend(self, test_local_backend: bool):
+    def test_llama_decoder_with_local_backend(self, test_local_backend: bool, test_backward: bool):
         from transformers import LlamaConfig  # noqa: F811
         from transformers.models.llama.modeling_llama import (  # noqa: F811
             LlamaDecoderLayer,
@@ -502,16 +503,18 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             local_aot_ort,
             example_args_collection,
             fullgraph=True,
-            test_backward=True,
+            test_backward=test_backward,
         )
 
         if test_local_backend:
             assert local_ort is not None
+            number_of_captured_graphs = 2 if test_backward else 1
+            execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
                 local_ort,
-                expected_execution_count=len(example_args_collection),
-                number_of_cached_graph_modules=1,
-                number_of_exported_onnx_models_for_all_graph_modules=(1,),
+                expected_execution_count=execution_count,
+                number_of_cached_graph_modules=number_of_captured_graphs,
+                number_of_exported_onnx_models_for_all_graph_modules=(1,) * number_of_captured_graphs,
             )
 
     @parameterized.expand(
