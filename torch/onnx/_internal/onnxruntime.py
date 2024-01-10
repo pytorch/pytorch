@@ -121,8 +121,8 @@ def _get_ort_device_type(device_type: str):
 
 logger = logging.getLogger(__name__)
 # Uncomment the following lines to print out development info.
-#logging.basicConfig(level=logging.WARNING)
-#logger.setLevel(logging.WARNING)
+# logging.basicConfig(level=logging.WARNING)
+# logger.setLevel(logging.WARNING)
 
 
 class OrtOperatorSupport(OperatorSupport):
