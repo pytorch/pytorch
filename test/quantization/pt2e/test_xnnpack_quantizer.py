@@ -181,11 +181,10 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
                 example_inputs,
                 quantizer,
                 node_occurrence,
-                [], # node_list
-                False, # executorch_backend_config() does not fuse linear-relu
+                [],  # node_list
+                False,  # executorch_backend_config() does not fuse linear-relu
                 qconfig_mapping,
             )
-
 
     def test_conv_linear_no_permute(self):
         quantizer = XNNPACKQuantizer()
