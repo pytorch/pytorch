@@ -122,7 +122,11 @@ Tensor transpose(const Tensor& self, int64_t index0, int64_t index1) {
   newSizes[new_index1] = oldSizes[new_index0];
 
   IntArrayRef output_size(newSizes);
-  vTensor v_output{api::context(), output_size.vec(), self.scalar_type()};
+  vTensor v_output{
+      api::context(),
+      output_size.vec(),
+      convert_dtype(self.scalar_type()),
+  };
 
   return transpose_4d(self, in_size, out_size, out_dims, v_output);
 }
