@@ -671,13 +671,13 @@ class BCEWithLogitsLoss(_Loss):
         >>> criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         >>> criterion(output, target)  # -log(sigmoid(1.5))
         tensor(0.20...)
-        
+
     In the above example, the `pos_weight` tensor's elements correspond to the 64 distinct classes
     in a multi-label binary classification scenario. Each element in `pos_weight` is designed to adjust the
     loss function based on the imbalance between negative and positive samples for the respective class.
     This approach is useful in datasets with varying levels of class imbalance, ensuring that the loss
-    calculation accurately accomodates the distribution in each class.
-    
+    calculation accurately accounts for the distribution in each class.
+
     Args:
         weight (Tensor, optional): a manual rescaling weight given to the loss
             of each batch element. If given, has to be a Tensor of size `nbatch`.
