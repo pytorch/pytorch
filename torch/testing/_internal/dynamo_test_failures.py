@@ -93,6 +93,7 @@ FIXME_default_non_strict = {
     "test_ops_fwd_gradients",
     "test_ops_gradients",
     "test_ops_jit",
+    "test_legacy_vmap",
     "test_package",
     "test_public_bindings",
     "test_python_dispatch",
@@ -4116,93 +4117,6 @@ dynamo_expected_failures = {
     "TestTorchFunctionOverride.test_Tensor_floor_divide",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor_ceil_",  # test_overrides
     "TestNamedTupleAPI.test_namedtuple_return",  # test_namedtuple_return_api
-    "TestVmapBatchedGradientCPU.test_log_cpu",  # test_legacy_vmap
-    "TestVmapAPI.test_single_input",  # test_legacy_vmap
-    "TestVmapAPI.test_out_dim_out_of_bounds_err_msg",  # test_legacy_vmap
-    "TestVmapOperators.test_result_type",  # test_legacy_vmap
-    "TestVmapOperators.test_clamp",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_index_cpu",  # test_legacy_vmap
-    "TestVmapOperators.test_view_as",  # test_legacy_vmap
-    "TestVmapOperators.test_new_zeros",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_min_cpu",  # test_legacy_vmap
-    "TestVmapAPI.test_grad_unsupported_interaction",  # test_legacy_vmap
-    "TestVmapAPI.test_multiple_out_dims",  # test_legacy_vmap
-    "TestVmapAPI.test_inplace_fallback_unary",  # test_legacy_vmap
-    "TestVmapOperators.test_transpose",  # test_legacy_vmap
-    "TestVmapOperators.test_as_strided",  # test_legacy_vmap
-    "TestVmapOperators.test_no_random_op_support",  # test_legacy_vmap
-    "TestVmapAPI.test_out_dims_and_num_outputs_mismatch_err_msg",  # test_legacy_vmap
-    "TestVmapOperators.test_select",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_permute_cpu",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_unrelated_output_multiple_grad_cpu",  # test_legacy_vmap
-    "TestVmapOperators.test_fill_and_zero_inplace",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_log1p_cpu",  # test_legacy_vmap
-    "TestVmapOperators.test_expand_as",  # test_legacy_vmap
-    "TestVmapAPI.test_functools_partial",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_mul_cpu",  # test_legacy_vmap
-    "TestVmapOperators.test_T_numpy",  # test_legacy_vmap
-    "TestVmapAPI.test_out_dims_edge_case",  # test_legacy_vmap
-    "TestVmapOperators.test_is_contiguous",  # test_legacy_vmap
-    "TestVmapAPI.test_non_tensor_output_raises",  # test_legacy_vmap
-    "TestVmapOperators.test_chunk",  # test_legacy_vmap
-    "TestVmapAPI.test_multiple_outputs",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_expand_cpu",  # test_legacy_vmap
-    "TestVmapOperators.test_unfold",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_add_cpu",  # test_legacy_vmap
-    "TestVmapAPI.test_multiple_outputs_error_cases",  # test_legacy_vmap
-    "TestVmapOperators.test_split",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_slice_cpu",  # test_legacy_vmap
-    "TestVmapOperators.test_new_empty",  # test_legacy_vmap
-    "TestVmapAPI.test_noop_in_inner_vmap",  # test_legacy_vmap
-    "TestVmapOperators.test_view",  # test_legacy_vmap
-    "TestVmapOperators.test_diagonal",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_unrelated_output_cpu",  # test_legacy_vmap
-    "TestVmapOperators.test_slice",  # test_legacy_vmap
-    "TestVmapOperators.test_to",  # test_legacy_vmap
-    "TestVmapOperators.test_contiguous",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_diagonal_cpu",  # test_legacy_vmap
-    "TestVmapOperators.test_is_floating_point",  # test_legacy_vmap
-    "TestVmapAPI.test_non_default_in_dims_out_dims",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_inplace_on_view_cpu",  # test_legacy_vmap
-    "TestVmapAPI.test_backward_unsupported_interaction",  # test_legacy_vmap
-    "TestVmapOperators.test_unbind",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_max_cpu",  # test_legacy_vmap
-    "TestVmapAPI.test_fallback_with_undefined_grad",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_logsumexp_cpu",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_binary_cross_entropy_cpu",  # test_legacy_vmap
-    "TestVmapAPI.test_accepts_nested_inputs",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_threshold_cpu",  # test_legacy_vmap
-    "TestVmapAPI.test_non_zero_in_dims",  # test_legacy_vmap
-    "TestVmapOperators.test_new_empty_strided",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_median_cpu",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_select_cpu",  # test_legacy_vmap
-    "TestVmapAPI.test_inplace_fallback_nary_same_levels",  # test_legacy_vmap
-    "TestVmapOperators.test_reshape_as",  # test_legacy_vmap
-    "TestVmapOperators.test_stack",  # test_legacy_vmap
-    "TestVmapAPI.test_inplace_fallback_nary_different_levels",  # test_legacy_vmap
-    "TestVmapAPI.test_unsupported_op_err_msg",  # test_legacy_vmap
-    "TestVmapOperators.test_binary_pointwise_ops",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_sub_cpu",  # test_legacy_vmap
-    "TestVmapOperators.test_stride",  # test_legacy_vmap
-    "TestVmapOperators.test_reshape",  # test_legacy_vmap
-    "TestVmapOperators.test_comparison_ops",  # test_legacy_vmap
-    "TestVmapAPI.test_nonzero_out_dims",  # test_legacy_vmap
-    "TestVmapOperators.test_clone",  # test_legacy_vmap
-    "TestVmapOperators.test_cat",  # test_legacy_vmap
-    "TestVmapOperators.test_is_complex",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_sigmoid_cpu",  # test_legacy_vmap
-    "TestVmapOperators.test_tensor_split",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_div_cpu",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_lgamma_cpu",  # test_legacy_vmap
-    "TestVmapAPI.test_in_dim_not_in_tensor_err_msg",  # test_legacy_vmap
-    "TestVmapAPI.test_batched_gradient_basic",  # test_legacy_vmap
-    "TestVmapOperators.test_sum_dim",  # test_legacy_vmap
-    "TestVmapAPI.test_nested_out_dims",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_stack_cpu",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_inplace_manyview_cpu",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_trace_cpu",  # test_legacy_vmap
-    "TestVmapBatchedGradientCPU.test_reshape_cpu",  # test_legacy_vmap
-    "TestVmapAPI.test_nested_with_different_map_dim",  # test_legacy_vmap
 }
 
 dynamo_skips = {
