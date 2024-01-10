@@ -386,7 +386,7 @@ def _adjust_scalar_from_fx_to_onnx(
         float,
         bool,
     ],
-    value_info: "onnx.ValueInfoProto",
+    value_info: "onnx.ValueInfoProto",  # type: ignore[name-defined]
 ) -> torch.Tensor:
     if (
         isinstance(dynamo_value, torch.Tensor)
@@ -401,7 +401,8 @@ def _adjust_scalar_from_fx_to_onnx(
     elif isinstance(dynamo_value, bool):
         return torch.tensor(dynamo_value, dtype=torch.bool)
     else:
-        return dynamo_value
+        assert isinstance(dynamo_value, torch.Tensor)
+        return dynamo_value.contiguous()
 
 
 def _adjust_scalar_from_onnx_to_fx(
@@ -444,7 +445,6 @@ def _run_onnx_session_with_ortvaluevector(
     ],
 ) -> Tuple[Union[torch.Tensor, int, float, bool], ...]:
     _nvtx_range_push("contiguous")
-    inputs = tuple(a.contiguous() for a in inputs)
     inputs = tuple(
         _adjust_scalar_from_fx_to_onnx(arg, value_info)
         for arg, value_info in zip(inputs, input_value_infos)

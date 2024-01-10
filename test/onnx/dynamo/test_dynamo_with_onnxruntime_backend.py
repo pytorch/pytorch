@@ -128,6 +128,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         dynamo_backend,
         example_args_collection,
         fullgraph: bool = False,
+        test_backward: bool = False,
     ):
         """Run original and compiled model and compare the results.
 
@@ -157,7 +158,17 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             result = compiled_model(*example_args)
             if isinstance(baseline_result, torch.Tensor):
                 torch.testing.assert_close(baseline_result, result)
+                if test_backward:
+                    baseline_result.sum().backward()
+                    result.sum().backward()
+                    for baseline_param, param in zip(
+                        model.parameters(), compiled_model.parameters()
+                    ):
+                        torch.testing.assert_close(baseline_param.grad, param.grad)
             else:
+                assert (
+                    test_backward is False
+                ), "Calculating backward with multiple outputs is not supported yet."
                 for baseline_elem, result_elem in zip(baseline_result, result):
                     torch.testing.assert_close(baseline_elem, result_elem)
 
@@ -333,10 +344,13 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @parameterized.expand(
         [
-            (True,),
+            (True, True),
+            (True, False),
         ]
     )
-    def test_llama_attention_with_local_backend(self, test_local_backend: bool):
+    def test_llama_attention_with_local_backend(
+        self, test_local_backend: bool, test_backward: bool
+    ):
         from transformers import LlamaConfig  # noqa: F811
         from transformers.models.llama.modeling_llama import (  # noqa: F811
             LlamaAttention,
@@ -398,22 +412,22 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             local_aot_ort,
             example_args_collection,
             fullgraph=True,
+            test_backward=test_backward,
         )
 
         if test_local_backend:
             assert local_ort is not None
+            number_of_captured_graphs = 2 if test_backward else 1
+            execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
                 local_ort,
-                # The whole attention is captured and executed
-                # as a single graph. Thus, the # of test cases
-                # is the # of session runs.
-                expected_execution_count=len(example_args_collection),
-                # This should be one because there is no graph break.
-                # If you have 1 graph break, this value should be 2.
-                number_of_cached_graph_modules=1,
-                # Since dynamic shape is enabled, we should only have
-                # one ONNX model to support different batch sizes.
-                number_of_exported_onnx_models_for_all_graph_modules=(1,),
+                # Number of InferenceSession runs.
+                expected_execution_count=execution_count,
+                # Number of GraphModule's seen by ORT.
+                number_of_cached_graph_modules=number_of_captured_graphs,
+                # Number of InferenceSession's created per GraphModule.
+                number_of_exported_onnx_models_for_all_graph_modules=(1,)
+                * number_of_captured_graphs,
             )
 
     @parameterized.expand(
@@ -487,21 +501,15 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             local_aot_ort,
             example_args_collection,
             fullgraph=True,
+            test_backward=True,
         )
 
         if test_local_backend:
             assert local_ort is not None
             self._assert_counting_information(
                 local_ort,
-                # The whole attention is captured and executed
-                # as a single graph. Thus, the # of test cases
-                # is the # of session runs.
                 expected_execution_count=len(example_args_collection),
-                # This should be one because there is no graph break.
-                # If you have 1 graph break, this value should be 2.
                 number_of_cached_graph_modules=1,
-                # Since dynamic shape is enabled, we should only have
-                # one ONNX model to support different batch sizes.
                 number_of_exported_onnx_models_for_all_graph_modules=(1,),
             )
 
@@ -569,21 +577,15 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             local_aot_ort,
             example_args_collection,
             fullgraph=True,
+            test_backward=True,
         )
 
         if test_local_backend:
             assert local_ort is not None
             self._assert_counting_information(
                 local_ort,
-                # The whole attention is captured and executed
-                # as a single graph. Thus, the # of test cases
-                # is the # of session runs.
                 expected_execution_count=len(example_args_collection),
-                # This should be one because there is no graph break.
-                # If you have 1 graph break, this value should be 2.
                 number_of_cached_graph_modules=1,
-                # Since dynamic shape is enabled, we should only have
-                # one ONNX model to support different batch sizes.
                 number_of_exported_onnx_models_for_all_graph_modules=(1,),
             )
 
