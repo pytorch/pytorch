@@ -86,7 +86,6 @@ FIXME_default_non_strict = {
     "test_decomp",
     "test_foreach",
     "test_fx",
-    "test_fx_experimental",
     "test_jit",
     "test_jit_fuser_te",
     "test_jit_llga_fuser",
@@ -8612,4 +8611,5 @@ dynamo_skips = {
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_int8",  # known py38 fail
     "TestBinaryUfuncsCPU.test_long_tensor_pow_floats_cpu",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int32",  # known py38 fail
+    "TestFXExperimental.test_optimize_for_inference_cpu",  # known py38 fail
 }
