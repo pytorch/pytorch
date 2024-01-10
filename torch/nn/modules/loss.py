@@ -672,10 +672,10 @@ class BCEWithLogitsLoss(_Loss):
         >>> criterion(output, target)  # -log(sigmoid(1.5))
         tensor(0.20...)
         
-    In the above example, the `pos_weight` tensor's elements correspond to the 64 distinct classes 
-    in a multi-label binary classification scenario. Each element in `pos_weight` is designed to adjust the 
-    loss function based on the imbalance between negative and positive samples for the respective class. 
-    This approach is useful in datasets with varying levels of class imbalance, ensuring that the loss 
+    In the above example, the `pos_weight` tensor's elements correspond to the 64 distinct classes
+    in a multi-label binary classification scenario. Each element in `pos_weight` is designed to adjust the
+    loss function based on the imbalance between negative and positive samples for the respective class.
+    This approach is useful in datasets with varying levels of class imbalance, ensuring that the loss
     calculation accurately accomodates the distribution in each class.
     
     Args:
