@@ -1268,6 +1268,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   int heartBeatTimeout = (dumpOnTimeout_ && uid_ == 0)
       ? timeoutCheckIntervalMilSec_ * 1000
       : heartbeatTimeoutInSec_;
+  auto lastTimePollStore = std::chrono::steady_clock::now();
+  std::future<bool> asyncDebugDump;
   while (true) {
     // This won't have any lock since this lock is only used here.
     // Please be aware that mutex `monitorMutex_` should not be used
@@ -1300,11 +1302,10 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
           timeSinceLastPollStore >= timeoutCheckIntervalMilSec_) {
         lastTimePollStore = currentTime;
-        if (globalStore_->check({std::string(TIMEOUT_DUMP)}) &&
-            !optAsyncDebugDump) {
+        if (globalStore_->check({std::string(TIMEOUT_DUMP)})) {
           auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
-          optAsyncDebugDump = launchAsyncDebugDump();
-          waitForDumpOrTimeout(*optAsyncDebugDump, wakeUpTime);
+          asyncDebugDump = launchAsyncDebugDump();
+          waitForDumpOrTimeout(asyncDebugDump, wakeUpTime);
           const auto exitMsg = c10::str(
               logPrefix(),
               "Another rank reported a timeout and signaled a global abort.");
@@ -1357,7 +1358,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)
-  std::future<bool> asyncDebugDump = launchAsyncDebugDump();
+  asyncDebugDump = launchAsyncDebugDump();
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
@@ -1545,7 +1546,6 @@ const int& ProcessGroupNCCL::globalRank() const {
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
-  auto lastTimePollStore = std::chrono::steady_clock::now();
   c10::optional<std::future<bool>> optAsyncDebugDump;
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
