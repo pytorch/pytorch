@@ -8895,6 +8895,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
             ref = f(x)
             actual, (code,) = run_and_get_code(torch.compile(f), x)
             self.assertTrue(torch.allclose(ref, actual))
+            self.assertTrue("# make sure graph inputs are not nan/inf" in code)
             self.assertTrue(
                 re.search(r"assert not .*\.isnan\(\)\.any\(\).item\(\)", code)
                 is not None
