@@ -79,9 +79,8 @@ struct CudaIPCRefCountersFile final {
       std::string handle,
       uint64_t size,
       at::DataPtr data_ptr)
-      : next_offset_(0),
-        size_(size),
-        used_slots_(0),
+      : size_(size),
+
         handle_(std::move(handle)),
         refcounted_shared_mem_(std::move(data_ptr)) {}
 
@@ -119,9 +118,9 @@ struct CudaIPCRefCountersFile final {
   }
 
  private:
-  uint64_t next_offset_;
+  uint64_t next_offset_{0};
   uint64_t size_;
-  uint64_t used_slots_;
+  uint64_t used_slots_{0};
   std::string handle_;
   at::DataPtr refcounted_shared_mem_;
 };
