@@ -2052,7 +2052,20 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
 
         ci = torch._C._functorch.peek_interpreter_stack()
-        if ci is not None and ci.key() == torch._C._functorch.TransformType.Vmap:
+        compiler_is_eager = False
+        if hasattr(compiler_fn, 'compiler_name'):
+            compiler_is_eager= compiler_fn.compiler_name == 'eager'
+        elif hasattr(compiler_fn, '__name__'):
+            compiler_name = compiler_fn.__name__ == 'eager'
+        else:
+            # aot_eager won't match here as it has a "compiler_name" attribute
+            compiler_is_eager = 'eager' in str(compiler_fn)
+
+        if (
+            ci is not None
+            and ci.key() == torch._C._functorch.TransformType.Vmap
+            and compiler_is_eager
+        ):
             unimplemented("functorch transform partial graph")
 
         # as soon as we create the tracing context we should keep it active, so any calls

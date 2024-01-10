@@ -148,12 +148,12 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         return x
 
 
-class VmapCtxManagerVariable(ContextWrappingVariable):
+class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     """represents torch VMap increment/decrement nesting"""
 
     @staticmethod
     def create(tx, target_values, **kwargs):
-        var = VmapCtxManagerVariable(
+        var = VmapIncrementNestingCtxManagerVariable(
             target_values=target_values,
             initial_values=None,
             **kwargs,
