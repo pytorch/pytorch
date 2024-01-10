@@ -38,7 +38,7 @@ Tensor pad2d(
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
   const vTensor& v_self = convert(self);
 
-  c10::SmallVector<int64_t, 4> output_size(input_dim);
+  std::vector<int64_t> output_size(input_dim);
   for (const auto d : c10::irange(input_dim)) {
     if (d == input_dim - 1) {
       output_size[d] = input_size[d] + pad_right + pad_left;
