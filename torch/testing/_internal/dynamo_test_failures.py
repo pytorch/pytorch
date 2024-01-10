@@ -100,7 +100,6 @@ FIXME_default_non_strict = {
     "test_public_bindings",
     "test_python_dispatch",
     "test_quantization",
-    "test_spectral_ops",
     "test_tensorexpr",
     "test_tensorexpr_pybind",
     "test_torch",
