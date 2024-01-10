@@ -24,9 +24,7 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .higher_order_ops import (
-    TorchHigherOrderOperatorVariable,
-)
+from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
