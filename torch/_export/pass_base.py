@@ -434,13 +434,3 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             result = self.call_submodule(graph_module, tuple(inputs))
 
         return result
-
-# TODO This hack is necessary until executorch can update their pin in pytorch CI.
-import os
-
-if (
-    os.environ.get("CI", None) == "true"
-    and os.environ.get("GITHUB_ACTIONS", None) == "true"
-):
-    _ExportPassBase = _ExportPassBaseDeprecatedDoNotUse
-    __all__.append("_ExportPassBase")
