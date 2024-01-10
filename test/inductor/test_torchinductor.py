@@ -2681,6 +2681,7 @@ class CommonTemplate:
             check_lowp=False,  # cpu doesn't understand fp16, and there are explicit .cpu() calls
         )
 
+    @skipIfRocm
     @requires_multigpu()
     def test_multi_gpu_device(self):
         # TODO: https://github.com/pytorch/pytorch/issues/92627
@@ -7814,6 +7815,10 @@ class CommonTemplate:
     def test_scaled_dot_product_attention(self):
         if self.device == "cuda" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
             raise unittest.SkipTest("Can't run flash attention on this platform")
+        if self.device == "cuda" and TEST_WITH_ROCM:
+            raise unittest.SkipTest(
+                "Flash attention support is incomplete on this platform"
+            )
 
         def fn(q, k, v):
             return torch.nn.functional.scaled_dot_product_attention(

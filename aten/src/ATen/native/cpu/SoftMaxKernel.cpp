@@ -42,9 +42,10 @@ inline void _vec_log_softmax_lastdim(
   // size of L1D cache on many processors. Some processors have 48 KB L1D cache
   // nowadays, so maybe in the future, we can leverage the knowledge of a
   // machine's L1D cache size.
-  int64_t CHUNK_SIZE = std::max<int64_t>(
+  int64_t MAX_CHUNK_SIZE = std::max<int64_t>(
       1,
       at::internal::GRAIN_SIZE / (sizeof(scalar_t) * dim_size));
+  int64_t CHUNK_SIZE = std::min<int64_t>(MAX_CHUNK_SIZE, outer_size);
 
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
 
