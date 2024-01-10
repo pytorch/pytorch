@@ -18,6 +18,47 @@ IF(NOT MKLDNN_FOUND)
 
   SET(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
   SET(MKLDNN_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn")
+
+  if(USE_XPU) # Build oneDNN GPU library
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      set(DNNL_HOST_COMPILER "g++")
+      # g++ is soft linked to /usr/bin/cxx, oneDNN would not treat it as an absolute path
+    else()
+      set(DNNL_HOST_COMPILER DEFAULT)
+    endif()
+
+    set(MAKE_COMMAND "cmake" "--build" ".")
+    ExternalProject_Add(xpu_mkldnn_proj
+      SOURCE_DIR ${MKLDNN_ROOT}
+      BUILD_IN_SOURCE 0
+      CMAKE_ARGS  -DCMAKE_C_COMPILER=icx
+      -DCMAKE_CXX_COMPILER=icpx
+      -DCMAKE_CXX_COMPILER_ID=IntelLLVM
+      -DDNNL_GPU_RUNTIME=SYCL
+      -DDNNL_CPU_RUNTIME=THREADPOOL
+      -DDNNL_BUILD_TESTS=OFF
+      -DDNNL_BUILD_EXAMPLES=OFF
+      -DDNNL_LIBRARY_TYPE=STATIC
+      -DDNNL_DPCPP_HOST_COMPILER=${DNNL_HOST_COMPILER} # Use global cxx compiler as host compiler
+      -G ${CMAKE_GENERATOR} # Align Generator to Torch
+      BUILD_COMMAND ${MAKE_COMMAND}
+      INSTALL_COMMAND ""
+    )
+
+    ExternalProject_Get_Property(xpu_mkldnn_proj BINARY_DIR)
+    set(__XPU__MKLDNN_BUILD_DIR ${BINARY_DIR})
+    set(XPU_MKLDNN_LIBRARIES ${__XPU_MKLDNN_BUILD_DIR}/src/libdnnl.a)
+    set(XPU_MKLDNN_INCLUDE ${__XPU_MKLDNN_BUILD_DIR}/src/include)
+    set(xpu_mkldnn_dep xpu_mkldnn_proj)
+    # This target would be further linked to libtorch_xpu.so.
+    # The libtorch_xpu.so would contain Conv&GEMM operators that depend on
+    # oneDNN primitive implementations inside libdnnl.a.
+    add_library(xpu_mkldnn INTERFACE)
+    add_dependencies(xpu_mkldnn xpu_mkldnn_dep)
+    target_link_libraries(xpu_mkldnn INTERFACE ${__XPU_MKLDNN_BUILD_DIR}/src/libdnnl.a)
+    target_include_directories(xpu_mkldnn INTERFACE ${XPU_MKLDNN_INCLUDE})
+  endif()
+
   IF(NOT APPLE AND NOT WIN32 AND NOT BUILD_LITE_INTERPRETER)
     MESSAGE("-- Will build oneDNN Graph")
     SET(LLGA_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn")
