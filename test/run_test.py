@@ -300,7 +300,6 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "dynamo/test_activation_checkpointing",
 ]
 
 # The tests inside these files should never be run in parallel with each other
@@ -1655,6 +1654,8 @@ def main():
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
 
+    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
+
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
@@ -1662,13 +1663,17 @@ def main():
         unranked_tests=selected_tests
     )
 
-    if IS_CI:
-        # downloading test cases configuration to local environment
-        get_test_case_configs(dirpath=test_directory)
-        aggregated_heuristics = get_test_prioritizations(selected_tests)
+    with open(
+        REPO_ROOT / "test" / "test-reports" / "td_heuristic_rankings.log", "w"
+    ) as f:
+        if IS_CI:
+            # downloading test cases configuration to local environment
+            get_test_case_configs(dirpath=test_directory)
+            aggregated_heuristics = get_test_prioritizations(selected_tests, file=f)
 
-    test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
-    test_prioritizations.print_info()
+        test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
+
+        f.write(test_prioritizations.get_info_str())
 
     test_file_times_dict = load_test_file_times()
     test_class_times_dict = load_test_class_times()
@@ -1747,8 +1752,6 @@ def main():
 
     if not options.no_translation_validation:
         os.environ["PYTORCH_TEST_WITH_TV"] = "1"
-
-    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
     try:
         # Actually run the tests
