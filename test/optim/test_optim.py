@@ -247,28 +247,6 @@ class TestOptim(TestCase):
         for _i in range(20):
             optimizer.step(fn)
 
-        # Make sure that optimizers that support maximize can load older models
-        old_state_dict = deepcopy(optimizer.state_dict())
-        state_dict_no_maximize = deepcopy(optimizer.state_dict())
-        if "maximize" in state_dict_no_maximize["param_groups"][0]:
-            for group in state_dict_no_maximize["param_groups"]:
-                del group["maximize"]
-            optimizer.load_state_dict(state_dict_no_maximize)
-            # Make sure we can still step
-            optimizer.step()
-            # Undo these changes before proceeding!
-            optimizer.load_state_dict(old_state_dict)
-        # Make sure that optimizers that support foreach can load older models
-        state_dict_no_foreach = deepcopy(optimizer.state_dict())
-        if "foreach" in state_dict_no_foreach["param_groups"][0]:
-            for group in state_dict_no_foreach["param_groups"]:
-                del group["foreach"]
-            optimizer.load_state_dict(state_dict_no_foreach)
-            # Make sure we can still step
-            optimizer.step()
-            # Undo these changes before proceeding!
-            optimizer.load_state_dict(old_state_dict)
-
         # Make sure that loading optimizers with step not wrapped in tensor can work
         state_dict = optimizer.state_dict()
         if "step" in state_dict["state"][0] and torch.is_tensor(

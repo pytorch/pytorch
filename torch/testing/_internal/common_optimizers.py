@@ -1110,6 +1110,12 @@ optim_db: List[OptimizerInfo] = [
         step_requires_closure=True,
         supports_param_groups=False,
         supports_multiple_devices=False,
+        skips=(
+            # Fails on MacOS 13.2.1 in CI https://github.com/pytorch/pytorch/issues/117094
+            DecorateInfo(
+                skipIfMps, "TestOptimRenewed", "test_can_load_older_state_dict"
+            ),
+        ),
     ),
     OptimizerInfo(
         NAdam,
@@ -1137,6 +1143,14 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116499"
+                ),
+                "TestOptimRenewed",
+                "test_can_load_older_state_dict",
+                device_type="cuda",
             ),
         ),
     ),
@@ -1309,6 +1323,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
+            ),
+            DecorateInfo(
+                unittest.skip(
+                    "SparseAdam does not support dense gradients, see #116507"
+                ),
+                "TestOptimRenewed",
+                "test_can_load_older_state_dict",
             ),
         ),
     ),
