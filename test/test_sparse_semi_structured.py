@@ -251,7 +251,7 @@ class TestSparseSemiStructured(TestCase):
         if dtype is torch.int8:
             # This should fail
             if backend == "cutlass":
-                with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_cutlass_dispatch_layouts"):
+                with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_dispatch_layouts"):
                     sparse_result = torch.mm(A_sparse, B)
             else:
                 with self.assertRaisesRegex(RuntimeError,
@@ -282,7 +282,7 @@ class TestSparseSemiStructured(TestCase):
             # padding with int8 throws an error because transposing B yields a contiguous output
             # and row-row 2:4 sparse @ dense with NN is not supported by cuSPARSELt or CUTLASS.
             if backend == "cutlass":
-                with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_cutlass_dispatch_layouts"):
+                with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_dispatch_layouts"):
                     sparse_result = torch.mm(A_sparse, B.t())
             else:
                 with self.assertRaisesRegex(RuntimeError,
