@@ -498,6 +498,7 @@ class DeferredLine(DeferredLineBase):
     def __init__(self, name, line):
         super().__init__(line)
         self.name = name
+        assert not isinstance(line, DeferredLineBase)
 
     def __call__(self):
         if all(
@@ -671,6 +672,8 @@ class KernelArgs:
             arg_defs.append(f"const {INDEX_TYPE} {inner}")
             call_args.append(self.wrap_size_arg(outer))
             arg_types.append(f"const {INDEX_TYPE}")
+            if V.graph.wrapper_code:
+                V.graph.wrapper_code.ensure_size_computed(outer)
         return arg_defs, call_args, arg_types
 
     def python_argdefs(self):
@@ -704,6 +707,8 @@ class KernelArgs:
             arg_defs.append(inner)
             call_args.append(outer)
             precompile_args.append(SizeArg(inner, outer))
+            if V.graph.wrapper_code:
+                V.graph.wrapper_code.ensure_size_computed(outer)
 
         return arg_defs, call_args, precompile_args
 

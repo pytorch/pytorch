@@ -440,17 +440,17 @@ template <typename To, typename From>
 std::enable_if_t<std::is_integral_v<From> && !std::is_same_v<From, bool>, bool>
 overflows(From f, bool strict_unsigned = false) {
   using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
-  if (!strict_unsigned && !limit::is_signed &&
-      std::numeric_limits<From>::is_signed) {
+  if constexpr (!limit::is_signed && std::numeric_limits<From>::is_signed) {
     // allow for negative numbers to wrap using two's complement arithmetic.
     // For example, with uint8, this allows for `a - b` to be treated as
     // `a + 255 * b`.
-    return greater_than_max<To>(f) ||
-        (c10::is_negative(f) &&
-         -static_cast<uint64_t>(f) > static_cast<uint64_t>(limit::max()));
-  } else {
-    return c10::less_than_lowest<To>(f) || greater_than_max<To>(f);
+    if (!strict_unsigned) {
+      return greater_than_max<To>(f) ||
+          (c10::is_negative(f) &&
+           -static_cast<uint64_t>(f) > static_cast<uint64_t>(limit::max()));
+    }
   }
+  return c10::less_than_lowest<To>(f) || greater_than_max<To>(f);
 }
 
 template <typename To, typename From>
