@@ -65,7 +65,7 @@ void ArithmeticPrepack::encode_prepack(ComputeGraph* graph) const {
   api::StorageBuffer staging(
       graph->context(), packed.dtype(), packed.gpu_nbytes());
 
-  size_t numel = c10::multiply_integers(tref.sizes);
+  size_t numel = api::utils::multiply_integers(tref.sizes);
   size_t nbytes = numel * c10::elementSize(tref.dtype);
   copy_ptr_to_staging(tref.data, staging, nbytes);
 
