@@ -326,21 +326,20 @@ class TritonTemplateKernel(TritonKernel):
         self,
         index: sympy.Expr,
         *,
-        copy_shape=None,
         dense_indexing=False,
+        copy_shape=None,
         override_mask=None,
     ):
         """
         Override the default indexing to use our custom mask and force
         dense indexing.
         """
-        result, *mask = super().indexing(
+        return super().indexing(
             index,
             dense_indexing=False,
             copy_shape=self.template_mask,
             override_mask=self.template_mask,
         )
-        return (result, *mask)
 
     def initialize_range_tree(self, pid_cache):
         super().initialize_range_tree(pid_cache)
