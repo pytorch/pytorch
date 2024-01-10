@@ -1503,8 +1503,7 @@ Tensor permute_sparse_coo(const Tensor& self, IntArrayRef dims) {
       }
       return old_values.permute(values_perm);
     }();
-
-  const auto is_coalesced = self.is_coalesced() && (dims[0] == 0);
+  const auto is_coalesced = self.is_coalesced() && (dims.empty() || dims[0] == 0);
   // TODO: apply `is_coalesced ||= new_values.size(0) < 2`.
   return _sparse_coo_tensor_with_dims_and_tensors(
        sparse_ndim, dense_ndim, new_sizes, new_indices, new_values, self.options(), is_coalesced);
