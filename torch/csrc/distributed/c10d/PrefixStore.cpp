@@ -120,6 +120,9 @@ c10::intrusive_ptr<Store> PrefixStore::getUnderlyingNonPrefixStore() {
       break; // We've reached a non-PrefixStore
     }
   }
+
+  TORCH_CHECK(
+      store != nullptr, "Underlying Non-PrefixStore shouldn't be null.");
   return store;
 }
 
