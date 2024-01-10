@@ -697,6 +697,9 @@ class VariableBuilder:
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
+        # Don't use istype, since some python modules are not subclasses of types.ModuleType directly.
+        # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,
+        # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
         elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonModuleVariable(
