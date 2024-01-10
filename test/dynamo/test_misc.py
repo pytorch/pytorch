@@ -3550,7 +3550,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.op_count, 2)
 
     def test_set_grad_from_input_to_intermed(self):
-        param = torch.rand(2, 3, dtype=torch.float32, device="cuda")
+        param = torch.rand(2, 3)
 
         def f(p):
             p.grad = torch.rand_like(p)
