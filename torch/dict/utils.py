@@ -5,11 +5,18 @@
 
 from __future__ import annotations
 
+import collections
+import concurrent.futures
 import dataclasses
 import inspect
+import logging
 
 import math
+
+import sys
 import time
+
+import warnings
 from collections import defaultdict, OrderedDict
 from collections.abc import KeysView
 from copy import copy
@@ -17,16 +24,50 @@ from functools import wraps
 from importlib import import_module
 from numbers import Number
 from textwrap import indent
-from typing import Any, Callable, Iterator, List, Sequence, Tuple, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Sequence,
+    Tuple,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 
 import numpy as np
 from packaging.version import parse
+from tensordict._tensordict import (  # noqa: F401
+    _unravel_key_to_tuple,
+    unravel_key,
+    unravel_key_list,
+    unravel_keys,
+)
 
 import torch
 from torch import Tensor
 from torch._C import _disabled_torch_function_impl
 from torch._C._functorch import get_unwrapped, is_batchedtensor
 from torch.nn.parameter import _ParameterMeta
+from torch.utils.data._utils.worker import _generate_state
+
+if TYPE_CHECKING:
+    from .base import TensorDictBase
+
+TORCHREC_ERR = None
+try:
+    from torchrec import KeyedJaggedTensor
+
+    _has_torchrec = True
+except ImportError as err:
+    _has_torchrec = False
+
+    class KeyedJaggedTensor:  # noqa: D103, D101
+        pass
+
+    TORCHREC_ERR = err
 
 T = TypeVar("T", bound="TensorDictBase")
 
@@ -375,10 +416,7 @@ def _dtype(tensor: Tensor) -> torch.dtype:
 
 
 def _get_item(tensor: Tensor, index: IndexType) -> Tensor:
-    if isinstance(tensor, Tensor):
-        return tensor[index]
-    else:
-        return tensor[index]
+    return tensor[index]
 
 
 def _set_item(tensor: Tensor, index: IndexType, value: Tensor, *, validated) -> Tensor:
@@ -442,7 +480,7 @@ class timeit:
             strings.append(
                 f"{name} took {timeit._REG[name][0] * 1000:4.4} msec (total = {timeit._REG[name][1]} sec)"
             )
-            print(" -- ".join(strings))
+            logging.info(" -- ".join(strings))
 
     @staticmethod
     def erase():
@@ -547,6 +585,7 @@ class implement_for:
     # Stores pointers to fitting implementations: dict[func_name] = func_pointer
     _implementations = {}
     _setters = []
+    _cache_modules = {}
 
     def __init__(
         self,
@@ -570,33 +609,83 @@ class implement_for:
         """Returns the class of a method, if it is defined, and None otherwise."""
         return f.__globals__.get(f.__qualname__.split(".")[0], None)
 
-    @property
-    def func_name(self):
-        return self.fn.__name__
+    @classmethod
+    def get_func_name(cls, fn):
+        # produces a name like torchrl.module.Class.method or torchrl.module.function
+        first = str(fn).split(".")[0][len("<function ") :]
+        last = str(fn).split(".")[1:]
+        if last:
+            first = [first]
+            last[-1] = last[-1].split(" ")[0]
+        else:
+            last = [first.split(" ")[0]]
+            first = []
+        return ".".join([fn.__module__] + first + last)
 
-    def module_set(self):
-        """Sets the function in its module, if it exists already."""
-        cls = self.get_class_that_defined_method(self.fn)
+    def _get_cls(self, fn):
+        cls = self.get_class_that_defined_method(fn)
         if cls is None:
             # class not yet defined
             return
         if cls.__class__.__name__ == "function":
-            cls = inspect.getmodule(self.fn)
+            cls = inspect.getmodule(fn)
+        return cls
+
+    def module_set(self):
+        """Sets the function in its module, if it exists already."""
+        prev_setter = type(self)._implementations.get(self.get_func_name(self.fn), None)
+        if prev_setter is not None:
+            prev_setter.do_set = False
+        type(self)._implementations[self.get_func_name(self.fn)] = self
+        cls = self.get_class_that_defined_method(self.fn)
+        if cls is not None:
+            if cls.__class__.__name__ == "function":
+                cls = inspect.getmodule(self.fn)
+        else:
+            # class not yet defined
+            return
         setattr(cls, self.fn.__name__, self.fn)
 
-    @staticmethod
-    def import_module(module_name: Union[Callable, str]) -> str:
+    @classmethod
+    def import_module(cls, module_name: Union[Callable, str]) -> str:
         """Imports module and returns its version."""
         if not callable(module_name):
-            module = import_module(module_name)
+            module = cls._cache_modules.get(module_name, None)
+            if module is None:
+                if module_name in sys.modules:
+                    sys.modules[module_name] = module = import_module(module_name)
+                else:
+                    cls._cache_modules[module_name] = module = import_module(
+                        module_name
+                    )
         else:
             module = module_name()
         return module.__version__
 
-    def __call__(self, fn):
-        self.fn = fn
+    _lazy_impl = collections.defaultdict(list)
 
+    def _delazify(self, func_name):
+        for local_call in implement_for._lazy_impl[func_name]:
+            out = local_call()
+        return out
+
+    def __call__(self, fn):
+        # function names are unique
+        self.func_name = self.get_func_name(fn)
+        self.fn = fn
+        implement_for._lazy_impl[self.func_name].append(self._call)
+
+        @wraps(fn)
+        def _lazy_call_fn(*args, **kwargs):
+            # first time we call the function, we also do the replacement.
+            # This will cause the imports to occur only during the first call to fn
+            return self._delazify(self.func_name)(*args, **kwargs)
+
+        return _lazy_call_fn
+
+    def _call(self):
         # If the module is missing replace the function with the mock.
+        fn = self.fn
         func_name = self.func_name
         implementations = implement_for._implementations
 
@@ -606,41 +695,50 @@ class implement_for:
                 f"Supported version of '{func_name}' has not been found."
             )
 
-        do_set = False
+        self.do_set = False
         # Return fitting implementation if it was encountered before.
         if func_name in implementations:
             try:
                 # check that backends don't conflict
                 version = self.import_module(self.module_name)
                 if self.check_version(version, self.from_version, self.to_version):
-                    do_set = True
-                if not do_set:
-                    return implementations[func_name]
+                    self.do_set = True
+                if not self.do_set:
+                    return implementations[func_name].fn
             except ModuleNotFoundError:
                 # then it's ok, there is no conflict
-                return implementations[func_name]
+                return implementations[func_name].fn
         else:
             try:
                 version = self.import_module(self.module_name)
                 if self.check_version(version, self.from_version, self.to_version):
-                    do_set = True
+                    self.do_set = True
             except ModuleNotFoundError:
                 return unsupported
-        if do_set:
-            implementations[func_name] = fn
+        if self.do_set:
             self.module_set()
             return fn
         return unsupported
 
     @classmethod
-    def reset(cls, setters=None):
-        if setters is None:
-            setters = copy(cls._setters)
-        cls._setters = []
-        cls._implementations = {}
-        for setter in setters:
-            setter(setter.fn)
-            cls._setters.append(setter)
+    def reset(cls, setters_dict: Dict[str, implement_for] = None):
+        """Resets the setters in setter_dict.
+
+        ``setter_dict`` is a copy of implementations. We just need to iterate through its
+        values and call :meth:`~.module_set` for each.
+
+        """
+        if setters_dict is None:
+            setters_dict = copy(cls._implementations)
+        for setter in setters_dict.values():
+            setter.module_set()
+
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}("
+            f"module_name={self.module_name}({self.from_version, self.to_version}), "
+            f"fn_name={self.fn.__name__}, cls={self._get_cls(self.fn)}, is_set={self.do_set})"
+        )
 
 
 def _unfold_sequence(seq):
@@ -796,18 +894,28 @@ class as_decorator:
         self.attr = attr
 
     def __call__(self, func):
-        @wraps(func)
-        def new_func(_self, *args, **kwargs):
-            if self.attr is not None:
+        if self.attr is not None:
+
+            @wraps(func)
+            def new_func(_self, *args, **kwargs):
                 _attr_pre = getattr(_self, self.attr)
-            out = func(_self, *args, **kwargs)
-            if self.attr is not None:
+                out = func(_self, *args, **kwargs)
                 _attr_post = getattr(_self, self.attr)
-            if self.attr is None or (_attr_post is not _attr_pre):
-                out._last_op = (new_func.__name__, (args, kwargs, _self))
-            else:
-                out._last_op = None
-            return out
+                if out is not None:
+                    if _attr_post is not _attr_pre:
+                        out._last_op = (new_func.__name__, (args, kwargs, _self))
+                    else:
+                        out._last_op = None
+                return out
+
+        else:
+
+            @wraps(func)
+            def new_func(_self, *args, **kwargs):
+                out = func(_self, *args, **kwargs)
+                if out is not None:
+                    out._last_op = (new_func.__name__, (args, kwargs, _self))
+                return out
 
         return new_func
 
@@ -823,6 +931,8 @@ def _split_tensordict(td, chunksize, num_chunks, num_workers, dim):
         num_chunks = min(td.shape[dim], num_chunks)
         return td.chunk(num_chunks, dim=dim)
     else:
+        if chunksize == 0:
+            return td.unbind(dim=dim)
         chunksize = min(td.shape[dim], chunksize)
         return td.split(chunksize, dim=dim)
 
@@ -948,6 +1058,15 @@ def assert_allclose_td(
     ):
         raise TypeError("assert_allclose inputs must be of TensorDict type")
 
+    from ._lazy import LazyStackedTensorDict
+
+    if isinstance(actual, LazyStackedTensorDict) and isinstance(
+        expected, LazyStackedTensorDict
+    ):
+        for sub_actual, sub_expected in zip(actual.tensordicts, expected.tensordicts):
+            assert_allclose_td(sub_actual, sub_expected, rtol=rtol, atol=atol)
+        return True
+
     set1 = set(actual.keys())
     set2 = set(expected.keys())
     if not (len(set1.difference(set2)) == 0 and len(set2) == len(set1)):
@@ -1020,8 +1139,13 @@ def _td_fields(td: T, keys=None) -> str:
             # we know td is lazy stacked and the key is a leaf
             # so we can get the shape and escape the error
             temp_td = td
+            from torch.dict import LazyStackedTensorDict, TensorDictBase
+
+            while isinstance(
+                temp_td, LazyStackedTensorDict
+            ):  # we need to grab the het tensor from the inner nesting level
+                temp_td = temp_td.tensordicts[0]
             tensor = temp_td.get(key)
-            from torch.dict import TensorDictBase
 
             if isinstance(tensor, TensorDictBase):
                 substr = _td_fields(tensor)
@@ -1083,12 +1207,9 @@ def _expand_to_match_shape(
         )
     else:
         # tensordict
-        from torch.dict import TensorDict
-
-        out = TensorDict(
-            {},
-            [*parent_batch_size, *_shape(tensor)[self_batch_dims:]],
-            device=self_device,
+        out = tensor.empty()
+        out.batch_size = torch.Size(
+            [*parent_batch_size, *_shape(tensor)[self_batch_dims:]]
         )
         return out
 
@@ -1154,10 +1275,20 @@ def _expand_index(index, batch_size):
     return index
 
 
+def _renamed_inplace_method(fn):
+    def wrapper(*args, **kwargs):
+        warnings.warn(
+            f"{fn.__name__.rstrip('_')} has been deprecated, use {fn.__name__} instead"
+        )
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
 def _broadcast_tensors(index):
     # tensors and range need to be broadcast
     tensors = {
-        i: tensor if isinstance(tensor, Tensor) else Tensor(tensor)
+        i: tensor if isinstance(tensor, Tensor) else torch.tensor(tensor)
         for i, tensor in enumerate(index)
         if isinstance(tensor, (range, list, np.ndarray, Tensor))
     }
@@ -1357,3 +1488,58 @@ def _getitem_batch_size(batch_size, index):
     if batch_size[count:]:
         out.extend(batch_size[count:])
     return torch.Size(out)
+
+
+# Process initializer for map
+def _proc_init(base_seed, queue):
+    worker_id = queue.get(timeout=10)
+    seed = base_seed + worker_id
+    torch.manual_seed(seed)
+    np_seed = _generate_state(base_seed, worker_id)
+    np.random.seed(np_seed)
+
+
+def _prune_selected_keys(keys_to_update, prefix):
+    if keys_to_update is None:
+        return None
+    return tuple(
+        key[1:] for key in keys_to_update if isinstance(key, tuple) and key[0] == prefix
+    )
+
+
+class TensorDictFuture:
+    """A custom future class for TensorDict multithreaded operations.
+
+    Args:
+        futures (list of futures): a list of concurrent.futures.Future objects to wait for.
+        resulting_td (TensorDictBase): instance that will result from the futures
+            completing.
+
+    """
+
+    def __init__(self, futures, resulting_td):
+        self.futures = futures
+        self.resulting_td = resulting_td
+
+    def result(self):
+        """Wait and returns the resulting tensordict."""
+        concurrent.futures.wait(self.futures)
+        return self.resulting_td
+
+
+def _is_json_serializable(item):
+    if isinstance(item, dict):
+        for key, val in item.items():
+            # Per se, int, float and bool are serializable but not recoverable
+            # as such
+            if not isinstance(key, (str,)) or not _is_json_serializable(val):
+                return False
+        else:
+            return True
+    if isinstance(item, (list, tuple, set)):
+        for val in item:
+            if not _is_json_serializable(val):
+                return False
+        else:
+            return True
+    return isinstance(item, (str, int, float, bool)) or item is None

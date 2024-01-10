@@ -4,3 +4,4 @@ from .params import TensorDictParams
 from .tensorclass import tensorclass
 from .tensordict import TensorDict
 from ._pytree import *
+from ._lazy import LazyStackedTensorDict
