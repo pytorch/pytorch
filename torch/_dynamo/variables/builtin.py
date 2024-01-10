@@ -1203,7 +1203,7 @@ class BuiltinVariable(VariableTracker):
                                 #   -k test_dropout_backward_layout_torch_jagged_cpu
                                 unimplemented(str(te))
 
-                        if _grad_changed(old_grad, new_grad):
+                        def _apply_grad():
                             if new_grad is not None:
                                 grad_shape_specialized = [
                                     int(x) for x in new_grad.shape
@@ -1214,10 +1214,41 @@ class BuiltinVariable(VariableTracker):
                                 grapharg.example.grad = torch.zeros(
                                     grad_shape_specialized, device=new_grad.device
                                 )
-                            else:
-                                grapharg.example.grad = None
-                        return VariableBuilder(tx, source)(grapharg.example.grad)
 
+                        # Check if grad changed via direct setting, such as an inplace op, see
+                        # https://github.com/pytorch/pytorch/pull/112811
+                        if _grad_changed(old_grad, new_grad):
+                            _apply_grad()
+                        else:
+                            # Check if grad changed via attr mutation
+                            if (
+                                obj.mutable_local
+                                and obj.mutable_local
+                                in tx.output.side_effects.store_attr_mutations
+                            ):
+                                mutations = tx.output.side_effects.store_attr_mutations[
+                                    obj.mutable_local
+                                ]
+                                if "grad" in mutations:
+                                    if mutations["grad"] is not None:
+                                        new_grad = (
+                                            mutations["grad"]
+                                            .as_proxy()
+                                            .node.meta["example_value"]
+                                        )
+                                    else:
+                                        new_grad = None
+                                if _grad_changed(old_grad, new_grad):
+                                    # _apply_grad()
+                                    # TODO(voz): We want to support this properly, but DO NOT want
+                                    # setattr in the graph - we need to sit down here and think about
+                                    # a design. Potentially a set_grad op?
+                                    unimplemented(
+                                        "Direct grad setting outside of an op - NYI"
+                                    )
+                                else:
+                                    grapharg.example.grad = None
+                        return VariableBuilder(tx, source)(grapharg.example.grad)
                 return obj.dynamic_getattr(tx, name)
             else:
                 example_value = obj.as_proxy().node.meta["example_value"]
