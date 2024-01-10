@@ -2144,6 +2144,7 @@ dynamo_expected_failures = {
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_conv1d_cpu_float64",  # test_expanded_weights  # noqa: B950
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_layer_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
     "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_conv2d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_unsupported_expand_weights_nn_functional_conv1d_cpu_float64",  # test_expanded_weights  # noqa: B950
     "TestTorchDlPackCPU.test_dlpack_export_non_strided_cpu",  # test_dlpack
     "TestIterDataPipeGraphFastForward.test_simple_snapshot_custom_self_next",  # test_datapipe
     "TestIterDataPipeGraphFastForward.test_simple_snapshot_custom_non_generator",  # test_datapipe
