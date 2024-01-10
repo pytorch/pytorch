@@ -35,7 +35,7 @@ Tensor unsqueeze(const at::Tensor& self, int64_t dim) {
   const vTensor& v_input = convert(input);
 
   // Create the output texture. For unsqueeze, add a dimension.
-  std::vector<int64_t> output_size = self.sizes().vec();
+  std::vector<int64_t> output_size = v_input.sizes();
   if (dim < 0) {
     dim += (self.dim() + 1);
   }
