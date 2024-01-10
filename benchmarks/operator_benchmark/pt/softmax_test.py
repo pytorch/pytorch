@@ -86,7 +86,7 @@ class SoftmaxBenchmark(op_bench.TorchBenchmarkBase):
 
 
 class Softmax2DimsBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, N, seq_len, dim, device, op_func):
+    def init(self, M, N, dim, device, op_func):
         self.inputs = {"input": torch.rand(M, N, device=device)}
         self.op_func = op_func(dim=dim)
 
