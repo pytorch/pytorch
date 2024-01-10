@@ -384,7 +384,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     """)  # noqa: B950
 
     def _wrap_with_functionalize(self, fn, func_type):
-        mode = contextlib.nullcontext()
+        mode = None
         if func_type == "cpp":
             fn = CppFunctionalizeAPI().functionalize(fn)
         elif func_type == "python":
@@ -400,6 +400,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     def test_while_loop_simple_functionalize_check_graph(self, func_type):
         fn, inp = _while_loop_tests()["simple_with_mutation"]
         fn, mode = self._wrap_with_functionalize(fn, func_type)
+        mode = mode if mode is not None else contextlib.nullcontext()
         with mode:
             graphs = self._check_tracing(fn, inp)
         if func_type == "no":
@@ -485,6 +486,7 @@ def forward(self, arg0_1):
     def test_while_loop_functionalize(self, func_type):
         for fn, inp in _while_loop_tests().values():
             fn, mode = self._wrap_with_functionalize(fn, func_type)
+            mode = mode if mode is not None else contextlib.nullcontext()
             with mode:
                 self._check_tracing(fn, inp)
 
