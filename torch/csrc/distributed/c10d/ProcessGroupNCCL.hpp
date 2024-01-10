@@ -59,16 +59,24 @@ static std::vector<std::string> TORCH_NCCL_DESYNC_DEBUG = {
     "TORCH_NCCL_DESYNC_DEBUG",
     "NCCL_DESYNC_DEBUG"};
 
+// Environment variable to enable whether to record and check the start
+// time of one collective on CUDA.
 static std::vector<std::string> TORCH_NCCL_ENABLE_TIMING = {
     "TORCH_NCCL_ENABLE_TIMING",
     "NCCL_ENABLE_TIMING"};
 
+// Environment variable to enable monitoring thread which abort the process
+// when no heartbeat is detected after TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC.
 static std::vector<std::string> TORCH_NCCL_ENABLE_MONITORING = {
     "TORCH_NCCL_ENABLE_MONITORING"};
 
+// Environment variable to control the watchdog heartbeat timeout period after
+// which the monitoring thread will abort the process.
 static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
     "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"};
 
+// Environment variable to configure the maximum number of collectives that we
+// cache the flight recorder for in the global ring buffer.
 static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
     "TORCH_NCCL_TRACE_BUFFER_SIZE"};
 
