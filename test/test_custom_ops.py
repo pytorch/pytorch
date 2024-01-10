@@ -1491,7 +1491,9 @@ def forward(self, x_1):
 
         self.assertEqual(
             dict(counters["graph_break"]),
-            {"dynamic shape operator: _torch_testing.numpy_nonzero.default": 1},
+            {
+                "dynamic shape operator: _torch_testing.numpy_nonzero.default; to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True": 1  # noqa: B950
+            },
         )
 
     # pre-existing problem: torch.compile(dynamic=True) will, by default,
