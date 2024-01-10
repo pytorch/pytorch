@@ -157,11 +157,6 @@ class OrtOperatorSupport(OperatorSupport):
                 type(node.target),
             )
             return True
-        logger.warning(
-            "support_dict doesn't support node.target: %s (type: %s)",
-            node.target,
-            type(node.target),
-        )
         # If node.target is not in support_dict, we still want to check if torch.jit.script
         # can convert it to ONNX equivalence. Let's use base mechanism to do this.
         # See extra_support_dict  for supported ops.
@@ -173,7 +168,7 @@ class OrtOperatorSupport(OperatorSupport):
             )
             return True
         logger.warning(
-            "extra_support_dict doesn't support node.target: %s (type: %s)",
+            "support_dict and extra_support_dict don't support node.target: %s (type: %s)",
             node.target,
             type(node.target),
         )
