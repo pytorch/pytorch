@@ -535,6 +535,20 @@ class TestDecomp(TestCase):
         res = torch._decomp.decompositions.uniform(x, low=low, high=high)
         self.assertEqual(ref, res)
 
+    def test_broadcasting_index_copy(self, device):
+        x = torch.zeros([1, 10], device=device)
+        xs = torch.ones([2, 10], device=device)
+
+        def index_copy(xs, x):
+            torch._decomp.decompositions.index_copy_(xs, 0, torch.tensor(0).to(device), x)
+
+        index_copy(xs, x)
+
+        xs_two = torch.ones([2, 10], device=device)
+        xs_two[0] = x
+
+        self.assertEqual(xs, xs_two)
+
     def test_rrelu_with_noise(self, device):
         # rrelu_with_noise behavior depends on a) whether elements in the input
         # are <= 0, and b) whether we're in training mode. Cover all cases:
