@@ -1558,5 +1558,22 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(d_kwargs.index, 0)
 
 
+    def test_torch_compile_fallback(self):
+        class Mul2ModeF(torch.overrides.TorchFunctionMode):
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                out = func(*args, **kwargs)
+                return out * 2
+
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x.view(-1)
+
+        x = torch.ones(3, device='cuda')
+        with Mul2ModeF():
+            _ = f(x)
+
+
 if __name__ == '__main__':
     run_tests()

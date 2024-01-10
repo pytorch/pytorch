@@ -7,6 +7,7 @@ import random
 import types
 import typing
 import weakref
+
 from typing import Any, Callable, Dict, List, Optional, Set
 
 try:
@@ -16,6 +17,7 @@ except ModuleNotFoundError:
 
 import torch
 import torch._logging
+from torch._C import _is_torch_function_mode_enabled
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import (
@@ -483,7 +485,6 @@ def _compile(
             frame_state=frame_state,
             speculation_log=speculation_log,
         )
-
         try:
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
@@ -640,6 +641,8 @@ def _compile(
 
     with compile_context(CompileContext(compile_id)):
         try:
+            if _is_torch_function_mode_enabled:
+                raise Unsupported("asd")
             guarded_code = compile_inner(code, one_graph, hooks, transform)
             return guarded_code
         except (
