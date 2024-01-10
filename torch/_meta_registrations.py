@@ -3294,7 +3294,7 @@ def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
 
 
 @register_meta([aten._foreach_clamp.default])
-def meta__foreach_clamp(self, min, max):
+def meta__foreach_clamp(self, min=None, max=None):
     torch._check(
         isinstance(self, list),
         lambda: f"self must be a tensor list but got {type(self)}",
@@ -3307,7 +3307,7 @@ def meta__foreach_clamp(self, min, max):
 
 
 @register_meta([aten._foreach_clamp_.default])
-def meta__foreach_clamp_(self, min, max):
+def meta__foreach_clamp_(self, min=None, max=None):
     torch._check(
         isinstance(self, list),
         lambda: f"self must be a tensor list but got {type(self)}",
