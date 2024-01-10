@@ -283,10 +283,6 @@ class GraphLowering(torch.fx.Interpreter):
         if nconv == 0:
             return False
 
-        # NHWC perf issue on ROCm5.7 first noted here https://github.com/pytorch/pytorch/pull/110319
-        if torch.version.hip and torch.cuda.is_available():
-            return False
-
         # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
         if (
             all(
