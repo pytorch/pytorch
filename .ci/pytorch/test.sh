@@ -283,10 +283,8 @@ test_dynamo_shard() {
       test_dataloader \
       test_reductions \
       test_namedtensor \
-      test_namedtuple_return_api \
       profiler/test_profiler \
       profiler/test_profiler_tree \
-      test_overrides \
       test_python_dispatch \
       test_fx \
       test_package \
