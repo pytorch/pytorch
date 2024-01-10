@@ -50,9 +50,13 @@ nn/qat/ @jerryzh168
 /torch/onnx/ @bowenbao @abock @thiagocrepaldi @wschin
 /test/onnx/ @bowenbao @abock @thiagocrepaldi @wschin
 
+# CI
+/.ci  @pytorch/pytorch-dev-infra
+
 # Docker
 /.ci/docker/ @jeffdaily
 /.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @bertmaher @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+/.ci/docker/ci_commit_pins/triton-rocm.txt @jeffdaily @jataylo @jithunnair-amd @pruthvistony
 
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
@@ -112,6 +116,16 @@ torch/utils/data/ @ejguan
 # hipify
 torch/utils/hipify/ @jeffdaily @jithunnair-amd
 tools/amd_build/ @jeffdaily @jithunnair-amd
+
+# ROCm-specific files
+aten/src/ATen/hip/ @jeffdaily @jithunnair-amd
+aten/src/ATen/miopen/ @jeffdaily @jithunnair-amd
+aten/src/ATen/native/miopen/ @jeffdaily @jithunnair-amd
+c10/hip @jeffdaily @jithunnair-amd
+caffe2/core/hip @jeffdaily @jithunnair-amd
+caffe2/operators/hip @jeffdaily @jithunnair-amd
+caffe2/operators/rnn/hip @jeffdaily @jithunnair-amd
+caffe2/utils/hip @jeffdaily @jithunnair-amd
 
 # torch.export
 /torch/export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17

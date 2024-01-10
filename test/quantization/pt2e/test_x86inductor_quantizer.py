@@ -282,6 +282,24 @@ class TestHelperModules:
                 tmp = self.bn(self.conv(x))
                 return tmp + self.bn2(self.conv2(tmp))
 
+    class SelfAttnLikeModule(torch.nn.Module):
+        def __init__(self, input_dim) -> None:
+            super().__init__()
+            self.input_dim = input_dim
+            self.q_proj = nn.Linear(input_dim, input_dim, bias=False)
+            self.k_proj = nn.Linear(input_dim, input_dim, bias=False)
+            self.v_proj = nn.Linear(input_dim, input_dim, bias=False)
+            self.softmax = nn.Softmax(dim=-1)
+
+        def forward(self, x):
+            q = self.q_proj(x)
+            k = self.k_proj(x)
+            v = self.v_proj(x)
+            scores = torch.bmm(q, k.transpose(1, 2)) / (self.input_dim ** 0.5)
+            attention = self.softmax(scores)
+            weighted = torch.bmm(attention, v)
+            return weighted
+
 class X86InductorQuantTestCase(QuantizationTestCase):
     def _test_quantizer(
         self,
@@ -616,7 +634,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, single_op_node.args[0].target
                 )
                 output_obs_of_single_op = getattr(
-                    prepare_model, list(single_op_node.users)[0].target
+                    prepare_model, next(iter(single_op_node.users)).target
                 )
             elif (
                 node.op == "call_function"
@@ -722,7 +740,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, node.all_input_nodes[1].target
                 )
                 cat_out_obs = getattr(
-                    prepare_model, list(node.users)[0].target
+                    prepare_model, next(iter(node.users)).target
                 )
             elif (
                 node.op == "call_function"
@@ -733,7 +751,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, maxpool_node.args[0].target
                 )
                 output_obs_of_maxpool = getattr(
-                    prepare_model, list(maxpool_node.users)[0].target
+                    prepare_model, next(iter(maxpool_node.users)).target
                 )
         self.assertTrue(isinstance(cat_act_obs0, ObserverBase))
         self.assertTrue(isinstance(cat_act_obs1, ObserverBase))
@@ -794,7 +812,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, node.args[0][1].target
                 )
                 cat_out_obs = getattr(
-                    prepare_model, list(node.users)[0].target
+                    prepare_model, next(iter(node.users)).target
                 )
         self.assertTrue(isinstance(cat_act_obs0, ObserverBase))
         self.assertTrue(isinstance(cat_act_obs1, ObserverBase))
@@ -848,7 +866,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, node.args[0][0].target
                 )
                 cat_out_obs = getattr(
-                    prepare_model, list(node.users)[0].target
+                    prepare_model, next(iter(node.users)).target
                 )
         self.assertTrue(isinstance(cat_act_obs0, ObserverBase))
         self.assertTrue(isinstance(cat_out_obs, ObserverBase))
@@ -900,14 +918,14 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, avgpool_node.args[0].target
                 )
                 output_obs_of_avgpool = getattr(
-                    prepare_model, list(avgpool_node.users)[0].target
+                    prepare_model, next(iter(avgpool_node.users)).target
                 )
             elif (
                 node.op == "call_function"
                 and node.target is torch.ops.aten.conv2d.default
             ):
                 conv_node = node
-                output_obs_of_conv = getattr(prepare_model, list(conv_node.users)[0].target)
+                output_obs_of_conv = getattr(prepare_model, next(iter(conv_node.users)).target)
         self.assertTrue(isinstance(input_obs_of_avgpool, ObserverBase))
         self.assertTrue(isinstance(output_obs_of_avgpool, ObserverBase))
         self.assertTrue(isinstance(output_obs_of_conv, ObserverBase))
@@ -1190,6 +1208,78 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 torch.ops.aten.add.Tensor,
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+                is_qat=True,
+            )
+
+    @skipIfNoX86
+    def test_dynamic_quant_linear(self):
+        """
+        Test pattern of dynamic quantization of linear with X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.SelfAttnLikeModule(input_dim=64).eval()
+            example_inputs = (torch.randn(1, 4, 64),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config(is_dynamic=True)
+            )
+            node_occurrence = {
+                torch.ops.quantized_decomposed.choose_qparams.tensor: 1,
+                torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
+                # quantize_per_channel for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
+            }
+            node_list = [
+                torch.ops.quantized_decomposed.choose_qparams.tensor,
+                torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default,
+                torch.ops.aten.linear.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+            )
+
+    @skipIfNoX86
+    def test_qat_dynamic_quant_linear(self):
+        """
+        Test pattern of qat dynamic quantization of linear with X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.SelfAttnLikeModule(input_dim=64).eval()
+            example_inputs = (torch.randn(1, 4, 64),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config(
+                    is_qat=True,
+                    is_dynamic=True
+                )
+            )
+            node_occurrence = {
+                torch.ops.quantized_decomposed.choose_qparams.tensor: 1,
+                torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
+                # quantize_per_channel for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
+            }
+            node_list = [
+                torch.ops.quantized_decomposed.choose_qparams.tensor,
+                torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default,
+                torch.ops.aten.linear.default,
             ]
             self._test_quantizer(
                 m,

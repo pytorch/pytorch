@@ -213,8 +213,7 @@
 #include <utility>
 #include <vector>
 
-namespace at {
-namespace meta {
+namespace at::meta {
 inline void cat_check_no_zero_dim(const MaterializedITensorListRef& tensors) {
   size_t i = 0;
   for (const Tensor& t : tensors) {
@@ -345,9 +344,9 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
       .set_all_same_sizes_and_stride(all_same_sizes_and_stride)
       .set_memory_format(memory_format);
 }
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(cat_serial_stub);
 DEFINE_DISPATCH(stack_serial_stub);
@@ -372,6 +371,7 @@ Tensor& set_(Tensor& result, Storage source) {
       static_cast<int64_t>(source.nbytes() / result.dtype().itemsize());
   return result.set_(std::move(source), 0, new_size, {});
 }
+
 
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
 Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
@@ -525,10 +525,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   Tensor new_values = values.expand(broadcast_dense_sizes).repeat_interleave(nnz_factor, 0);
   Tensor new_indices = indices.new_empty(new_indices_size);
   if (!broadcast_sizes.empty()) {
-    // ones(broadcast_sizes).nonzero() is equivalent to
-    // product(map(arange, broadcast_sizes)) but avoids creating
-    // auxilary arange tensors
-    Tensor broadcast_indices = at::native::new_ones(indices, broadcast_sizes).nonzero().transpose(0, 1).tile(nnz);
+    Tensor broadcast_indices = at::sparse::full_coo_indices(broadcast_sizes, indices.options()).tile(nnz);
     new_indices.narrow(0, 0, sparse_extra_ndim).copy_(broadcast_indices.narrow(0, 0, sparse_extra_ndim));
     for (size_t i=0; i<broadcast_dims.size(); i++) {
       int64_t j=broadcast_dims[i];
@@ -1503,8 +1500,7 @@ Tensor permute_sparse_coo(const Tensor& self, IntArrayRef dims) {
       }
       return old_values.permute(values_perm);
     }();
-
-  const auto is_coalesced = self.is_coalesced() && (dims[0] == 0);
+  const auto is_coalesced = self.is_coalesced() && (dims.empty() || dims[0] == 0);
   // TODO: apply `is_coalesced ||= new_values.size(0) < 2`.
   return _sparse_coo_tensor_with_dims_and_tensors(
        sparse_ndim, dense_ndim, new_sizes, new_indices, new_values, self.options(), is_coalesced);
@@ -1828,7 +1824,11 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
   }
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.sym_sizes()[dim];
-  if (size < -index || size <= index) {
+  // Note: `size < -index` is not equivalent to `size <= -1 - index` if index is INT64_MIN
+  // For std::numeric_limits<int64_t>::min() result of unary minus is undefined by the standard
+  // but in practice is equal to self. On the other hand, indexing wraping is valid for all
+  // negative int64_t values, as x[INT64_MIN] is the same as x[INT64_MAX]
+  if (size <= -1 - index || size <= index) {
     if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
       TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
                      self.sizes(), " at dimension ", self.names()[dim]);
@@ -3064,14 +3064,12 @@ static inline Tensor sparse_compressed_transpose(
           return self.values().transpose(-2 - dense_dim, -1 - dense_dim);
         });
   }
-  return at::native::_sparse_compressed_tensor_unsafe(
+  return at::_sparse_compressed_tensor_unsafe(
       compressed_inds,
       plain_inds,
       result_vals,
       result_sizes,
-      self.scalar_type(),
-      result_layout,
-      self.device());
+      self.options().layout(result_layout));
 }
 } // namespace
 
@@ -4035,5 +4033,4 @@ int64_t dense_dim_strided(const at::Tensor& self) {
   return self.dim();
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
