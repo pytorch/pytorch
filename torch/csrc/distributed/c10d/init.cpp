@@ -51,6 +51,22 @@
 
 namespace {
 
+#ifdef USE_C10D_NCCL
+bool registerGilChecker() {
+  c10d::get_gil_checker().emplace([]() {
+    // basically if this function can acquire the gil, it will return quickly.
+    // if not, it will hang forever.  The idea is to call this from a thread
+    // wrapped in a future, and then check the future after a timeout, to
+    // determine whether we're facing gil contention.
+    pybind11::gil_scoped_acquire gil;
+    return true;
+  });
+  return true;
+}
+
+static bool registered = registerGilChecker();
+#endif // USE_C10D_NCCL
+
 // Wrapper to ensure GIL is released before destructing ProcessGroupGloo
 // TODO: move this somewhere more generally useful
 template <typename T>
@@ -2792,6 +2808,16 @@ such as `dist.all_reduce(tensor, async_op=True)`.
            )");
 
 #ifdef USE_C10D_NCCL
+  module.def(
+      "_hash_tensors",
+      [](const std::vector<at::Tensor>& tensors) {
+        return ::c10d::hashTensors(tensors);
+      },
+      py::arg("tensors"),
+      R"(
+        Arguments:
+          tensors(List[torch.Tensor]): List of tensors we want to hash.
+      )");
   module.def("_dump_nccl_trace", []() {
     return py::bytes(::c10d::dump_nccl_trace());
   });

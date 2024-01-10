@@ -18,6 +18,7 @@ class ModuleRecord:
 @dataclasses.dataclass
 class DummyModule:
     name: str
+    is_torch: bool = False
 
 
 @dataclasses.dataclass
@@ -40,7 +41,6 @@ class ExecutionRecord:
 
 @dataclasses.dataclass
 class ExecutionRecorder:
-    MOD_EXCLUDES = ["torch", "torch.fx", "torch.fx.passes"]
     LOCAL_MOD_PREFIX = "___local_mod_"
 
     code: CodeType
@@ -52,30 +52,22 @@ class ExecutionRecorder:
 
     def add_local_var(self, name, var):
         if isinstance(var, ModuleType):
-            if self._is_excl(var):
-                return
             self.locals[name] = self._add_mod(var)
         else:
             self.locals[name] = var
 
     def add_global_var(self, name, var):
         if isinstance(var, ModuleType):
-            if self._is_excl(var):
-                return
             self.globals[name] = self._add_mod(var)
         else:
             self.globals[name] = var
 
     def add_local_mod(self, name, mod):
         assert isinstance(mod, ModuleType)
-        if self._is_excl(mod):
-            return
 
         self.add_global_var(name, mod)
 
     def record_module_access(self, mod, name, val):
-        if self._is_excl(mod):
-            return
         if isinstance(val, ModuleType):
             self.name_to_modrec[mod.__name__].accessed_attrs[name] = self._add_mod(val)
             return
@@ -97,10 +89,6 @@ class ExecutionRecorder:
             self.name_to_modrec[mod.__name__] = ModuleRecord(mod)
 
         return self.name_to_modrec[mod.__name__]
-
-    @classmethod
-    def _is_excl(cls, mod):
-        return any(mod.__name__ == excl for excl in cls.MOD_EXCLUDES)
 
     # Convert ModuleRecords -> DummyModule tree
     @classmethod
