@@ -176,7 +176,7 @@ def foreach_all_gather_copy_out(
         fsdp_param.alloc_unsharded_param()
         unsharded_param_datas.append(fsdp_param._unsharded_param_data)
     torch.ops.c10d.fsdp_all_gather_copy_out(
-        unsharded_param_datas, all_gather_output, world_size, max_blocks_per_shard=32
+        unsharded_param_datas, all_gather_output, world_size
     )
 
 
@@ -262,23 +262,21 @@ def foreach_reduce_scatter(
                 cpu_sharded_grad.copy_(
                     gpu_sharded_grad, non_blocking=not to_accumulate_grad
                 )
-                new_sharded_grad = cpu_sharded_grad
                 # Since the GPU sharded gradient is allocated in the RS stream,
                 # we can free it here (by not keeping the reference) without
                 # waiting for the D2H copy since future ops in the RS stream
-                # (i.e. copy-in/RS) are serialized to run after the copy
-            new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(new_sharded_grad)
-            if to_accumulate_grad:
-                fsdp_param.sharded_param.grad += new_sharded_dtensor_grad
-            elif new_sharded_dtensor_grad._local_tensor.numel() > 0:
-                fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
-            # Else the parameter is padding-only
-            if fsdp_param.offload_to_cpu:
+                # (i.e. copy-in/RS) are serialized to run after the D2H copy
+                new_sharded_grad = cpu_sharded_grad
                 # Record an event on which to block the CPU thread to ensure
                 # that the D2H gradient offload completes before the optimizer
                 grad_offload_event = torch.cuda.Event()
                 grad_offload_event.record()
                 fsdp_param._grad_offload_event = grad_offload_event
+            new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(new_sharded_grad)
+            if to_accumulate_grad:
+                fsdp_param.sharded_param.grad += new_sharded_dtensor_grad
+            elif new_sharded_dtensor_grad._local_tensor.numel() > 0:
+                fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
             flat_grad_offset += padded_sharded_numel
         reduce_scatter_view_out_event = torch.cuda.Event()
         reduce_scatter_view_out_event.record()
