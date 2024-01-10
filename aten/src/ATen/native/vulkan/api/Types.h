@@ -1,6 +1,9 @@
 #pragma once
 
 #ifdef USE_VULKAN_API
+
+#include <cstdint>
+
 namespace at {
 namespace native {
 namespace vulkan {

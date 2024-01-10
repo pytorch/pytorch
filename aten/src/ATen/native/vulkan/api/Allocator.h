@@ -7,8 +7,6 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
-
 #define VMA_VULKAN_VERSION 1000000
 
 #ifdef USE_VULKAN_WRAPPER
