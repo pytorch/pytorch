@@ -1350,7 +1350,7 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
         ...
 
     """
-    assert isinstance(msg, str), "Are you using s skipIfTorchDynamno correctly?"
+    assert isinstance(msg, str), "Are you using skipIfTorchDynamo correctly?"
 
     def decorator(fn):
         if not isinstance(fn, type):
