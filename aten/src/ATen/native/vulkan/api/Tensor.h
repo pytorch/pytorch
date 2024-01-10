@@ -34,7 +34,7 @@ class vTensorStorage final {
       api::Context* context,
       const api::StorageType storage_type,
       const api::GPUMemoryLayout gpu_memory_layout,
-      const IntArrayRef sizes,
+      const std::vector<int64_t>& sizes,
       const at::ScalarType dtype);
 
   vTensorStorage(const vTensorStorage&) = delete;
@@ -88,7 +88,7 @@ class vTensor final {
   // Default constructor
   vTensor(
       api::Context* context,
-      IntArrayRef sizes,
+      const std::vector<int64_t>& sizes,
       const c10::ScalarType dtype,
       const api::StorageType storage_type,
       const api::GPUMemoryLayout memory_layout);
@@ -96,7 +96,7 @@ class vTensor final {
   // Default constructor for quantized vTensor
   vTensor(
       api::Context* const context,
-      const IntArrayRef sizes,
+      const std::vector<int64_t>& sizes,
       double q_scale,
       int64_t q_zero_point,
       const c10::ScalarType dtype,
@@ -106,7 +106,7 @@ class vTensor final {
   // Allows construction of vTensor from aten Tensor params
   vTensor(
       api::Context* context,
-      IntArrayRef sizes,
+      const std::vector<int64_t>& sizes,
       const c10::ScalarType dtype = c10::kFloat,
       const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
       const c10::MemoryFormat memory_format = c10::MemoryFormat::Contiguous);
@@ -114,7 +114,7 @@ class vTensor final {
   // Allows construction of quantized vTensor from aten Tensor params
   vTensor(
       api::Context* const context,
-      const IntArrayRef sizes,
+      const std::vector<int64_t>& sizes,
       double q_scale,
       int64_t q_zero_point,
       const c10::ScalarType dtype = c10::kQUInt8,
@@ -239,19 +239,19 @@ class vTensor final {
     return static_cast<uint32_t>(memory_layout_);
   }
 
-  inline IntArrayRef sizes() const {
+  inline const std::vector<int64_t>& sizes() const {
     return sizes_;
   }
 
-  inline IntArrayRef strides() const {
+  inline const std::vector<int64_t>& strides() const {
     return strides_;
   }
 
-  inline IntArrayRef gpu_sizes() const {
+  inline const std::vector<int64_t>& gpu_sizes() const {
     return gpu_sizes_;
   }
 
-  inline IntArrayRef gpu_strides() const {
+  inline const std::vector<int64_t>& gpu_strides() const {
     return gpu_strides_;
   }
 

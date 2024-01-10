@@ -28,7 +28,7 @@ ComputeGraph::~ComputeGraph() {
 }
 
 ValueRef ComputeGraph::add_tensor(
-    const IntArrayRef sizes,
+    const std::vector<int64_t>& sizes,
     const c10::ScalarType dtype) {
   ValueRef idx(static_cast<int>(values_.size()));
   values_.emplace_back(vTensor(context(), sizes, dtype));
@@ -36,7 +36,7 @@ ValueRef ComputeGraph::add_tensor(
 }
 
 ValueRef ComputeGraph::add_tensorref(
-    const IntArrayRef sizes,
+    const std::vector<int64_t>& sizes,
     const c10::ScalarType dtype,
     const void* const data) {
   ValueRef idx(static_cast<int>(values_.size()));

@@ -25,7 +25,7 @@ Tensor flip(const at::Tensor& self, const IntArrayRef dim_list) {
   // Create the output texture
   vTensor v_output{
       context,
-      self.sizes().vec(),
+      v_input.sizes(),
       self.scalar_type(),
   };
 
