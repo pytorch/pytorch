@@ -641,8 +641,9 @@ def _compile(
 
     with compile_context(CompileContext(compile_id)):
         try:
+            # TODO: should this be somewhere else?
             if _is_torch_function_mode_enabled:
-                raise Unsupported("asd")
+                raise Unsupported("Torch function overrides are not supported")
             guarded_code = compile_inner(code, one_graph, hooks, transform)
             return guarded_code
         except (
