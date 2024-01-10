@@ -2717,7 +2717,6 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 strict_mode = test_cls.dynamo_strict
             else:
                 strict_mode = strict_default
-        strict_mode = getattr(test_cls, "dynamo_strict", strict_default) and compiled
         nopython = getattr(test_cls, "dynamo_strict_nopython", False) and compiled
 
         if strict_mode:
