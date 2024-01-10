@@ -2,7 +2,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 import torch
-from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 from torch.distributed.checkpoint.stateful import StatefulT
 
@@ -35,7 +34,6 @@ class BytesStorageMetadata:
     pass
 
 
-TENSOR_TYPE = Union[torch.Tensor, ShardedTensor]
 STORAGE_TYPES = Union[TensorStorageMetadata, BytesStorageMetadata]
 STATE_DICT_TYPE = Dict[str, Union[StatefulT, Any]]
 
