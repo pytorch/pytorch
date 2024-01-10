@@ -67,7 +67,7 @@ jobs:
 
       - name: configure aws credentials
         id: aws_creds
-        uses: aws-actions/configure-aws-credentials@v1.7.0
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_pytorch_artifacts
           aws-region: us-east-1
