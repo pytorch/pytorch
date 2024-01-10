@@ -1265,18 +1265,53 @@ void ProcessGroupNCCL::terminateProcess(std::string errMsg) {
 
 void ProcessGroupNCCL::heartbeatMonitor() {
   uint64_t heartBeatCounter = 0ULL;
+  int heartBeatTimeout = (dumpOnTimeout_ && uid_ == 0)
+      ? timeoutCheckIntervalMilSec_ * 1000
+      : heartbeatTimeoutInSec_;
   while (true) {
     // This won't have any lock since this lock is only used here.
     // Please be aware that mutex `monitorMutex_` should not be used
     // somewhere else to avoid the deadlock.
     std::unique_lock<std::mutex> lock(monitorMutex_);
     if (monitorWakeUpCV_.wait_for(
-            lock, std::chrono::seconds(heartbeatTimeoutInSec_), [&] {
+            lock, std::chrono::seconds(heartBeatTimeout), [&] {
               return terminateHeartbeatMonitorThread_.load();
             })) {
       // For the normal complete or user interception, monitorWakeUpCV_
       // will get notified, we early return and exit heartbeatMonitor.
       return;
+    }
+
+    // Assuming that we always init a process group containing all ranks,
+    // we only use the default PG listen to the global signal to dump
+    // and abort. We poll store to see if some ranks have flagged a timeout when
+    // we haven't polled for `heartbeat_timeout` seconds and there haven't
+    // any work added or removed for `watchdog_timeout` seconds.
+    if (dumpOnTimeout_ && uid_ == 0) {
+      auto currentTime = std::chrono::steady_clock::now();
+      auto timeSinceLastWorkListUpdate =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              (currentTime - lastWorkListUpdateTime_))
+              .count();
+      auto timeSinceLastPollStore =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              (currentTime - lastTimePollStore))
+              .count();
+      if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
+          timeSinceLastPollStore >= timeoutCheckIntervalMilSec_) {
+        lastTimePollStore = currentTime;
+        if (globalStore_->check({std::string(TIMEOUT_DUMP)}) &&
+            !optAsyncDebugDump) {
+          auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
+          optAsyncDebugDump = launchAsyncDebugDump();
+          waitForDumpOrTimeout(*optAsyncDebugDump, wakeUpTime);
+          const auto exitMsg = c10::str(
+              logPrefix(),
+              "Another rank reported a timeout and signaled a global abort.");
+          LOG(ERROR) << exitMsg;
+          C10_THROW_ERROR(DistBackendError, exitMsg);
+        }
+      }
     }
 
     // Check the heart beat of watchdog thread.
@@ -1532,38 +1567,6 @@ void ProcessGroupNCCL::watchdogHandler() {
         [&]() -> bool { return terminateProcessGroup_.load(); });
     // Bump up heart beat by one.
     heartbeat_++;
-
-    // Assuming that we always init a process group containing all ranks,
-    // we only use the watchdog thread to listen for the global signal to dump
-    // and abort. We poll store to see if some ranks have flagged a timeout when
-    // we haven't polled for `heartbeat_timeout` seconds and there haven't
-    // any work added or removed for `watchdog_timeout` seconds.
-    if (dumpOnTimeout_ && uid_ == 0) {
-      auto currentTime = std::chrono::steady_clock::now();
-      auto timeSinceLastWorkListUpdate =
-          std::chrono::duration_cast<std::chrono::milliseconds>(
-              (currentTime - lastWorkListUpdateTime_))
-              .count();
-      auto timeSinceLastPollStore =
-          std::chrono::duration_cast<std::chrono::milliseconds>(
-              (currentTime - lastTimePollStore))
-              .count();
-      if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
-          timeSinceLastPollStore >= timeoutCheckIntervalMilSec_) {
-        lastTimePollStore = currentTime;
-        if (globalStore_->check({std::string(TIMEOUT_DUMP)}) &&
-            !optAsyncDebugDump) {
-          auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
-          optAsyncDebugDump = launchAsyncDebugDump();
-          waitForDumpOrTimeout(*optAsyncDebugDump, wakeUpTime);
-          const auto exitMsg = c10::str(
-              logPrefix(),
-              "Another rank reported a timeout and signaled a global abort.");
-          LOG(ERROR) << exitMsg;
-          C10_THROW_ERROR(DistBackendError, exitMsg);
-        }
-      }
-    }
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
