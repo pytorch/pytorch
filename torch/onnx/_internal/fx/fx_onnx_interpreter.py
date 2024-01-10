@@ -128,17 +128,30 @@ def _retrieve_or_adapt_input_to_graph_set(
                 List[int],
             ]
         ] = []
+        # onnx_tensor contains a list of scalars which could be one of
+        #   - tensor with empty shape,
+        #   - tensor with tensor with shape (1,),
+        #   - torch.SymInt,
+        #   - int
+        #   - ...
+        # They should all be promoted to tensor with shape (1,)
+        # in order to call ONNX's Concat.
         for tensor in onnx_tensor:
             if isinstance(
                 tensor, torch.fx.Node
             ) and fx_type_utils.is_torch_symbolic_type(tensor.meta.get("val")):
                 element_value = fx_name_to_onnxscript_value[tensor.name]
+                sequence_mixed_elements.append(fx_name_to_onnxscript_value[tensor.name])
                 if (
                     isinstance(
                         element_value, onnxscript_graph_building.TorchScriptTensor
                     )
                     and element_value.rank == 0
                 ):
+                    # All elements sequence_mixed_elements will be send to onnx's Concat
+                    # as inputs. Therefore, they are required to have the same rank.
+                    # Since tensors with rank=0 (i.e., scalar) cannot be concated, all
+                    # scalars are promoted to tensors with shape (1,).
                     with onnxscript.evaluator.default_as(tracer):
                         element_value = onnxscript.opset18.Unsqueeze(element_value, axes=0)  # type: ignore[arg-type, type-var]
                 sequence_mixed_elements.append(element_value)
