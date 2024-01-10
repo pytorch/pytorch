@@ -1988,7 +1988,8 @@
     "sympy_is_channels_last_strides_generic",
     "is_contiguous",
     "sympy_is_contiguous",
-    "sympy_is_contiguous_generic"
+    "sympy_is_contiguous_generic",
+    "sym_sqrt"
   ],
   "torch.fx.experimental.symbolic_shapes": [
     "Constraint",

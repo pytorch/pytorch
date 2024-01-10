@@ -934,6 +934,7 @@ coverage_ignore_functions = [
     "sympy_is_contiguous_generic",
     "to_node",
     "wrap_node",
+    "sym_sqrt",
     "sym_ite",
     # torch.fx.experimental.symbolic_shapes
     "bind_symbols",
