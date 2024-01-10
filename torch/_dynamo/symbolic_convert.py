@@ -2064,7 +2064,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         if (
             ci is not None
             and ci.key() == torch._C._functorch.TransformType.Vmap
-            and compiler_is_eager
+            and not compiler_is_eager
         ):
             unimplemented("functorch transform partial graph")
 
