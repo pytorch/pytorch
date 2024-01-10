@@ -48,7 +48,7 @@ TEST(XpuDeviceTest, getGlobalIdxFromDevice) {
   }
 
   int target_device = 0;
-  int global_index = at::xpu::getGlobalIdxFromDevice(target_device);
+  auto global_index = at::xpu::getGlobalIdxFromDevice(target_device);
   auto devices = sycl::device::get_devices();
   ASSERT_EQ_XPU(devices[global_index], at::xpu::get_raw_device(target_device));
 
