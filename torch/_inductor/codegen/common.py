@@ -17,6 +17,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -39,6 +40,9 @@ from ..utils import (
     unique,
 )
 from ..virtualized import ops, OpsValue, V
+
+if TYPE_CHECKING:
+    from ..ir import TensorBox
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
@@ -97,6 +101,16 @@ def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
 
     # added contiguous index prevents reordering
     return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
+
+
+def get_device_op_overrides(device: str):
+    assert isinstance(device, str)
+    if device == "cuda":
+        from .cuda.device_op_overrides import CUDADeviceOpOverrides
+
+        return CUDADeviceOpOverrides()
+
+    return DeviceOpOverrides()
 
 
 @functools.lru_cache(None)
@@ -461,6 +475,20 @@ class OpOverrides:
         return ops.load(name, sympy.Integer(offset))
 
 
+class DeviceOpOverrides:
+    def import_get_raw_stream_as(self, name):
+        raise NotImplementedError()
+
+    def set_device(self, device_idx):
+        raise NotImplementedError()
+
+    def synchronize(self):
+        raise NotImplementedError()
+
+    def device_guard(self, device_idx):
+        raise NotImplementedError()
+
+
 class DeferredLine(DeferredLineBase):
     """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
 
@@ -799,7 +827,7 @@ class CSE:
     def generate(
         self,
         buffer: IndentedBuffer,
-        expr: Union[str, CSEVariable, OpsValue],
+        expr: Union[str, CSEVariable, OpsValue, IndentedBuffer],
         *,
         bounds: ValueRanges = ValueRanges.unknown(),
         write=True,
@@ -808,7 +836,7 @@ class CSE:
         if isinstance(expr, OpsValue):
             expr = expr.value
 
-        assert isinstance(expr, (str, CSEVariable)), type(expr)
+        assert isinstance(expr, (str, CSEVariable, IndentedBuffer)), type(expr)
         assert write or assignment
         if isinstance(expr, CSEVariable):
             # If the expressions were always created with all the information, we could
@@ -816,7 +844,7 @@ class CSE:
             # with the loose ValueRanges.unknown(), so we need to tighten the bounds
             expr.bounds = expr.bounds.tighten(bounds)
             return expr
-        cache_key = expr
+        cache_key = expr.getvalue() if isinstance(expr, IndentedBuffer) else expr
         var = self.cache.get(cache_key, None)
         if not var:
             var = self.newvar(bounds) if assignment else None
@@ -826,11 +854,17 @@ class CSE:
                     V.kernel.current_node.codegen_originating_info(
                         buffer, only_once=True
                     )
-                if assignment:
-                    line = f"{self.prefix}{var} = {expr}{self.suffix}"
+                if isinstance(expr, IndentedBuffer):
+                    if assignment:
+                        buffer.writeline(f"{self.prefix}{var} =")
+                    buffer.splice(expr)
+                    buffer.writeline(self.suffix)
                 else:
-                    line = f"{expr}{self.suffix}"
-                buffer.writeline(line)
+                    if assignment:
+                        line = f"{self.prefix}{var} = {expr}{self.suffix}"
+                    else:
+                        line = f"{expr}{self.suffix}"
+                    buffer.writeline(line)
         else:
             var.bounds = var.bounds.tighten(bounds)
 
@@ -1213,7 +1247,6 @@ class OptimizationContext:
 
     dtype: Optional[torch.dtype] = None
     ops_name: str = ""
-    is_most_inner_loop_irrevelant: bool = False
 
     # Load uint8 value as float32
     is_load_uint8_as_float: bool = False
@@ -1259,7 +1292,7 @@ class ChoiceCaller:
     def hash_key(self) -> str:
         raise NotImplementedError()
 
-    def output_node(self) -> "TensorBox":  # type: ignore[name-defined]
+    def output_node(self) -> "TensorBox":
         raise NotImplementedError()
 
 
