@@ -1248,12 +1248,25 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="fixme: kwargs dtpye=complex64 is not supported in ONNX."
     ),
     # SLOW TESTS (All are xfails if we run them)
+    # TODO: https://github.com/pytorch/pytorch/issues/117118
     skip_slow(
         "cdist",
         reason="fixme: Test sets are too many.",
     ),
     skip_slow(
         "histogram",
+        reason="fixme: Test sets are too many.",
+    ),
+    skip_slow(
+        "histogramdd",
+        reason="fixme: Test sets are too many.",
+    ),
+    skip_slow(
+        "linalg.lu_solve",
+        reason="fixme: Test sets are too many.",
+    ),
+    skip_slow(
+        "linalg.solve_triangular",
         reason="fixme: Test sets are too many.",
     ),
     skip_slow(
@@ -1307,9 +1320,17 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="fixme: Test sets are too many.",
     ),
     skip_slow(
+        "ormqr",
+        reason="fixme: Test sets are too many.",
+    ),
+    skip_slow(
         "searchsorted",
         reason="fixme: Test sets are too many.",
-    )
+    ),
+    skip_slow(
+        "svd",
+        reason="fixme: Test sets are too many.",
+    ),
 )
 # fmt: on
 
