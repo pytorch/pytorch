@@ -54,7 +54,12 @@ def _get_subclass_type_var(tx, var):
     if isinstance(var, TensorWithTFOverrideVariable):
         return var.class_type_var()
     elif isinstance(var, UserDefinedObjectVariable):
-        return var.var_getattr(tx, "__class__")
+        from .builder import SourcelessBuilder, VariableBuilder
+
+        if var.source:
+            return VariableBuilder(tx, var.source)(var.python_type())
+        else:
+            return SourcelessBuilder()(tx, var.python_type())
 
 
 def _is_attr_overidden(tx, var, name):
