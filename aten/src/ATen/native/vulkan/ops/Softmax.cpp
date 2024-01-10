@@ -107,7 +107,7 @@ Tensor softmax_internal(
   vTensor v_output{
       context,
       v_input.sizes(),
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
   const api::utils::uvec3 global_workgroup_extents = v_output.extents();
   api::utils::ivec4 input_shader_extents = {
