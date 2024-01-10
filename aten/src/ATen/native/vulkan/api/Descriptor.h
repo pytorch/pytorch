@@ -7,7 +7,7 @@
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
-#include <c10/util/flat_hash_map.h>
+#include <unordered_map>
 
 namespace at {
 namespace native {
@@ -114,7 +114,7 @@ class DescriptorPool final {
   DescriptorPoolConfig config_;
   // New Descriptors
   std::mutex mutex_;
-  ska::flat_hash_map<VkDescriptorSetLayout, DescriptorSetPile> piles_;
+  std::unordered_map<VkDescriptorSetLayout, DescriptorSetPile> piles_;
 
  public:
   DescriptorSet get_descriptor_set(
