@@ -95,9 +95,9 @@ def _while_loop_tests():
         return while_loop(outer_cond_fn, outer_body_fn, [out_iter, it, y])
 
 
-    x = torch.zeros(1, device="cuda")
-    y = torch.zeros(1, device="cuda")
-    z = torch.zeros(1, device="cuda")
+    x = torch.zeros(1)
+    y = torch.zeros(1)
+    z = torch.zeros(1)
     return {"simple": (simple, (x,)),
             "nested": (nested, (x, y, z)),
             "simple_with_mutation": (simple_with_mutation, (x,))}
