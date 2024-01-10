@@ -95,6 +95,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return ConstantVariable.create(self.value.__name__)
 
         source = AttrSource(self.source, name) if self.source is not None else None
+
+        if self.value is torch.nn.Module:
+            if name == "__call__":
+                unimplemented("torch.nn.Module.__call__")
+            elif name == "__getattr__":
+                unimplemented("torch.nn.Module.__getattr__")
+
         try:
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
