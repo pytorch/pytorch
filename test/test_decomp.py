@@ -1015,6 +1015,13 @@ class HasDecompTest(TestCase):
         core_aten_ops = useful_decomps - core_decomps
         self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
 
+    def test_compile_rrelu(self):
+        def f(x):
+            return torch.rrelu(x)
+
+        inp = torch.rand(1, 2, 3)
+        self.assertEqual(f(inp), torch.compile(f)(inp))
+
 
 if __name__ == "__main__":
     run_tests()
