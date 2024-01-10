@@ -635,7 +635,7 @@ class OptimizeForInferenceTemplate(TestCase):
 
 
 if TEST_WITH_ROCM:
-    torch._inductor.config.force_layout_optimization=1
+    torch._inductor.config.force_layout_optimization = 1
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
 
 if HAS_CPU and not torch.backends.mps.is_available():
