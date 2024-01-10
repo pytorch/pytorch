@@ -57,15 +57,25 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PR_BODY: ${{ github.event.pull_request.body }}
-      PYTORCH_RETRY_TEST_CASES: 1
-      PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
     steps:
+      - name: Print runner OS/HW info
+        run: |
+          sysctl machdep.cpu.brand_string kern.osproductversion
+
       - name: Clean up leftover processes on MacOS pet runner
         continue-on-error: true
         run: |
           for PROCESS in "python" "conda" "ninja" "clang"; do
             echo "Cleaning up all remaining ${PROCESS} process"
             pkill "${PROCESS}" || true
+          done
+
+      - name: Clean up leftover local python3 site-packages on MacOS pet runner
+        continue-on-error: true
+        run: |
+          for dir in  ~/.local/lib/python3.*/site-packages; do
+            echo "Cleaning up ${dir}"
+            rm -rf "${dir}"
           done
 
       - name: Clean up disk space before running MacOS workflow
@@ -146,6 +156,7 @@ jobs:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
           JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
         run: |
           # shellcheck disable=SC1090

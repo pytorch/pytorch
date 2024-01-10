@@ -47,7 +47,8 @@ def tensor_parallel_transformation(
     .. warning::
         This API is experimental and subject to change.
     """
-    return exported_program._transform(
+    # TODO Migrate this to plain function call.
+    return exported_program._transform_do_not_use(
         TensorParallelTransformPass(
             rank,
             world_size,
@@ -202,7 +203,7 @@ def _mark_sharding(
                 placement_strategies[node] = _create_placement_strategy(
                     node,
                     mesh,
-                    placements=arg_strategy.output_spec.placements,
+                    placements=arg_strategy.out_spec.placements,
                     input_specs=_get_input_node_specs(node, placement_strategies),
                 )
                 node.meta["sharding"] = placement_strategies[node]
@@ -211,8 +212,10 @@ def _mark_sharding(
 
                 # get DTensor specs for inputs and outputs
                 if (
-                    op_schema.op not in DTensor._propagator.op_strategy_funcs
-                    and op_schema.op not in DTensor._propagator.op_to_rules
+                    op_schema.op
+                    not in DTensor._op_dispatcher.sharding_propagator.op_strategy_funcs
+                    and op_schema.op
+                    not in DTensor._op_dispatcher.sharding_propagator.op_to_rules
                 ):
                     # Mark all as replicated
                     output_sharding = _generate_default_output_sharding(
@@ -221,7 +224,7 @@ def _mark_sharding(
                         op_schema,
                     )
                 else:
-                    output_sharding = DTensor._propagator.propagate_op_sharding(
+                    output_sharding = DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding(
                         op_schema,
                     )
                 placement_strategies[node] = PlacementStrategy(
@@ -408,7 +411,7 @@ def _partition_val(val: Any, spec: DTensorSpec) -> Any:
         for idx, placement in enumerate(spec.placements):
             if placement.is_shard():
                 placement = cast(Shard, placement)
-                num_chunks = spec.mesh.size(dim=idx)
+                num_chunks = spec.mesh.size(mesh_dim=idx)
                 my_coord = spec.mesh.get_coordinate()
                 assert my_coord is not None, "current rank not in mesh!"
                 my_coord_on_mesh_dim = my_coord[idx]
@@ -478,7 +481,9 @@ def _get_input_node_specs(
     input_specs_list: List[DTensorSpec] = []
     for input_arg in node.all_input_nodes:
         if input_arg in placement_strategies:
-            input_specs_list.append(placement_strategies[input_arg].output_spec)
+            output_spec = placement_strategies[input_arg].output_spec
+            assert isinstance(output_spec, DTensorSpec)
+            input_specs_list.append(output_spec)
         else:
             raise ValueError(f"{input_arg} does not have output_spec populated.")
     return tuple(input_specs_list)
@@ -522,6 +527,7 @@ def _shard_state_dict(
         assert fqn in state_dict, f"{fqn} not found in state dict: {state_dict.keys()}"
 
         original_param = state_dict[fqn]
+        assert isinstance(placement_strategy.output_spec, DTensorSpec)
         dtensor_param = distribute_tensor(
             original_param,
             mesh,

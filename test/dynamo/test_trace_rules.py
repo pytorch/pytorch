@@ -1,26 +1,33 @@
 # Owner(s): ["module: dynamo"]
-import collections
-import copy
+import dataclasses
 import importlib
 import inspect
 import math
 import types
 import unittest
 import warnings
+from typing import Any, Dict, Set
 
 import torch
 import torch._dynamo.config as config
 import torch._dynamo.test_case
 import torch._functorch.deprecated as deprecated_func
-from torch._dynamo.external_utils import is_compiling
 from torch._dynamo.skipfiles import (
     FUNC_INLINELIST,
     LEGACY_MOD_INLINELIST,
     MOD_INLINELIST,
 )
-from torch._dynamo.trace_rules import get_torch_obj_rule_map, load_object
-from torch._dynamo.utils import is_safe_constant, istype
-from torch.fx._symbolic_trace import is_fx_tracing
+from torch._dynamo.trace_rules import (
+    load_object,
+    torch_c_binding_in_graph_functions,
+    torch_ctx_manager_classes,
+    torch_non_c_binding_in_graph_functions,
+)
+from torch._dynamo.utils import hashable, is_safe_constant, istype
+from torch._dynamo.variables import (
+    TorchCtxManagerClassVariable,
+    TorchInGraphFunctionVariable,
+)
 
 try:
     from .utils import create_dummy_module_and_function
@@ -28,7 +35,7 @@ except ImportError:
     from utils import create_dummy_module_and_function
 
 
-ignored_torch_name_rule_set = {
+ignored_ctx_manager_class_names = {
     "torch.ExcludeDispatchKeyGuard",
     "torch._C.DisableTorchFunction",
     "torch._C._AutoDispatchBelowAutograd",
@@ -45,9 +52,6 @@ ignored_torch_name_rule_set = {
     "torch._C._InferenceMode",
     "torch._C._RestorePythonTLSSnapshot",
     "torch._C._SetExcludeDispatchKeyGuard",
-    "torch._C._profiler._RecordFunctionFast",
-    "torch._subclasses.fake_tensor.FakeTensorMode",
-    "torch._subclasses.functional_tensor.FunctionalTensorMode",
     "torch.ao.nn.sparse.quantized.utils.LinearBlockSparsePattern",
     "torch.autograd.anomaly_mode.detect_anomaly",
     "torch.autograd.anomaly_mode.set_detect_anomaly",
@@ -56,119 +60,143 @@ ignored_torch_name_rule_set = {
     "torch.autograd.grad_mode._force_original_view_tracking",
     "torch.autograd.grad_mode._unsafe_preserve_version_counter",
     "torch.autograd.grad_mode.set_multithreading_enabled",
+    "torch.autograd.graph._CloneArgBeforeMutateMode",
+    "torch.autograd.graph._swap_with_cloned",
+    "torch.autograd.graph.save_on_cpu",
     "torch.autograd.graph.saved_tensors_hooks",
-    "torch.autograd.profiler.emit_itt",
-    "torch.autograd.profiler.emit_nvtx",
-    "torch.autograd.profiler_legacy.profile",
     "torch.backends.mkl.verbose",
     "torch.backends.mkldnn.verbose",
     "torch.cpu.StreamContext",
     "torch.cuda.StreamContext",
     "torch.cuda._DeviceGuard",
     "torch.cuda.device",
+    "torch.cuda.device_of",
     "torch.cuda.graphs.graph",
-    "torch.device",  # constant folding
-    "torch.distributed.autograd.context",
-    "torch.hub._Faketqdm",
-    "torch.jit._ir_utils._InsertPoint",
-    "torch.jit._script.RecursiveScriptClass",
-    "torch.jit.strict_fusion",
-    "torch.onnx._internal.diagnostics.infra.context.DiagnosticContext",
-    "torch.onnx._internal.fx.patcher.ONNXTorchPatcher",
-    "torch.overrides.TorchFunctionMode",
-    "torch.package.package_exporter.PackageExporter",
-    "torch.serialization._opener",
+    "torch.device",  # as constant folding function
     "torch.sparse.check_sparse_tensor_invariants",
-    "torch.utils._config_module.ContextDecorator",
-    "torch.utils._contextlib._DecoratorContextManager",
-    "torch.utils._device.DeviceContext",
-    "torch.utils._python_dispatch.TorchDispatchMode",
-    "torch.utils.data.datapipes._decorator.guaranteed_datapipes_determinism",
-    "torch.utils.data.datapipes._decorator.runtime_validation_disabled",
-    "torch.utils.data.datapipes.dataframe.dataframes.CaptureLikeMock",
-    "torch.utils.hooks.RemovableHandle",
 }
 
-
-if torch.distributed.is_available():
-    ignored_torch_name_rule_set |= {
-        "torch.distributed.rpc.server_process_global_profiler._server_process_global_profile",
+ignored_c_binding_in_graph_function_names = {
+    # Ignored because they have manual rules defined at `trace_rules.manual_torch_name_rule_map`.
+    "torch._nested_tensor_from_mask",
+    "torch._nested_from_padded",
+    # Ignored and go through rules defined at `skipfiles.check`.
+    "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode",
+    "torch._cslt_sparse_mm_search",
+    "torch._C._abort",
+    "torch._C._mps_is_on_macos_or_newer",
+    "torch._C._swap_tensor_impl",
+    "torch._C._unsafe_reset_storage",
+    "torch._dynamo.eval_frame.reset_code",
+    "torch._C.autocast_decrement_nesting",
+    "torch._C.autocast_increment_nesting",
+    "torch._C.clear_autocast_cache",
+    "torch._C.set_anomaly_enabled",
+    "torch._C.set_autocast_cache_enabled",
+    "torch._C.set_autocast_cpu_dtype",
+    "torch._C.set_autocast_cpu_enabled",
+    "torch._C.set_autocast_enabled",
+    "torch._C.set_autocast_gpu_dtype",
+    "torch._C.set_autocast_ipu_dtype",
+    "torch._C.set_autocast_ipu_enabled",
+    "torch._C.set_autocast_xla_dtype",
+    "torch._C.set_autocast_xla_enabled",
+    "torch.resize_as_",
+    "torch.resize_as_sparse_",
+}
+if torch._C._llvm_enabled():
+    ignored_c_binding_in_graph_function_names |= {
+        "torch._C._te.set_llvm_aot_workflow",
+        "torch._C._te.set_llvm_target_cpu",
+        "torch._C._te.set_llvm_target_attrs",
+        "torch._C._te.set_llvm_target_triple",
     }
 
 
-def gen_get_func_inlinelist(dummy_func_inlinelist):
-    def get_func_inlinelist():
-        inlinelist = set()
-        for f in dummy_func_inlinelist:
-            module_name, fn_name = f.rsplit(".", 1)
-            m = importlib.import_module(module_name)
-            fn = getattr(m, fn_name)
-            inlinelist.add(fn.__code__)
-        return inlinelist
-
-    return get_func_inlinelist
+# Helper function to dump the torch name rule map generated based on
+# the heuristic defined in gen_allowed_objs_and_ids.
+def dump_allowed_torch_name_rule_map() -> None:
+    m = gen_allowed_objs_and_ids(record=True, c_binding_only=False).name_rule_map
+    for k, v in m.items():
+        print(f'"{k}": {v.__name__},')
 
 
-def _disallowed_function_ids():
-    remove = [
-        True,
-        False,
-        None,
-        collections.OrderedDict,
-        copy.copy,
-        copy.deepcopy,
-        inspect.signature,
-        math.__package__,
-        torch.__builtins__,
-        torch.autocast_decrement_nesting,
-        torch.autocast_increment_nesting,
-        torch.autograd.grad,
-        torch.clear_autocast_cache,
-        torch.cuda.current_device,
-        torch.cuda.set_device,
-        torch.distributions.constraints.is_dependent,
-        torch.distributions.normal.Normal,
-        torch.inference_mode,
-        torch.jit.isinstance,
-        torch.set_anomaly_enabled,
-        torch.set_autocast_cache_enabled,
-        torch.set_autocast_cpu_dtype,
-        torch.set_autocast_cpu_enabled,
-        torch.set_autocast_enabled,
-        torch.set_autocast_gpu_dtype,
-        warnings.warn,
-        torch._C._dynamo.eval_frame.unsupported,
-        torch.Tensor.__init__,
-    ]
+@dataclasses.dataclass
+class AllowedObjects:
+    """
+    Track the objects, object id - name pairs, and name - dynamo wrapping rule pairs
+    from the heuristic defined in `gen_allowed_objs_and_ids`.
+    """
 
-    # extract all dtypes from torch
-    dtypes = [
-        obj for obj in torch.__dict__.values() if isinstance(obj, type(torch.float32))
-    ]
-    remove += dtypes
-    storage = [
-        obj
-        for obj in torch.__dict__.values()
-        if isinstance(obj, type(torch.FloatStorage))
-    ]
-    remove += storage
-
-    # Distributed APIs don't work well with torch.compile.
-    if torch.distributed.is_available():
-        remove.extend(
-            torch.distributed.distributed_c10d.dynamo_unsupported_distributed_c10d_ops
-        )
-
-    return {id(x) for x in remove}
+    object_ids: Dict[int, str]
+    ctx_mamager_classes: Set[Any]
+    c_binding_in_graph_functions: Set[Any]
+    non_c_binding_in_graph_functions: Set[Any]
+    name_rule_map: Dict[str, Any]
 
 
-def generate_allow_list():
+def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObjects:
     """
     Walk torch.* and get the ids of all the stuff in it
     """
+
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     torch_object_ids = dict()
-    torch_objects = set()
+    ctx_mamager_classes = set()
+    c_binding_in_graph_functions = set()
+    non_c_binding_in_graph_functions = set()
+    torch_name_rule_map = dict()
+
+    # Add obj to ctx_mamager_classes set if it's a torch context manager class.
+    # This is used to generate the ctx manager class list based on heuristic.
+    def heuristic_record_if_ctx_manager(obj, module, name):
+        if (
+            issubclass(type(obj), type)
+            and hasattr(obj, "__enter__")
+            and hasattr(obj, "__exit__")
+        ):
+            torch_name_rule_map[
+                f"{module.__name__}.{name}"
+            ] = TorchCtxManagerClassVariable
+            ctx_mamager_classes.add(obj)
+
+    # In some platforms, these functions were loaded as classes instead of functions.
+    # To mitigate these weired cases, we need this special check.
+    def is_special_functions(obj):
+        return hashable(obj) and obj in {
+            torch._C._cuda_isCurrentStreamCapturing,
+            torch._C._graph_pool_handle,
+        }
+
+    # Add obj to c_binding_in_graph_functions set or non_c_binding_in_graph_functions set
+    # if it's a torch function or method.
+    # This is used to generate the in graph function list based on heuristic.
+    def heuristic_record_if_in_graph_function(obj, module, name):
+        try:
+            if hasattr(obj, "__wrapped__"):
+                obj = obj.__wrapped__
+        except Exception:
+            pass
+        if isinstance(
+            obj,
+            (
+                types.FunctionType,
+                types.BuiltinFunctionType,
+                types.MethodDescriptorType,
+                types.WrapperDescriptorType,
+            ),
+        ) or is_special_functions(obj):
+            torch_name_rule_map[
+                f"{module.__name__}.{name}"
+            ] = TorchInGraphFunctionVariable
+            if c_binding_only:
+                if not hasattr(obj, "__code__"):
+                    c_binding_in_graph_functions.add(obj)
+            else:
+                if hasattr(obj, "__code__"):
+                    non_c_binding_in_graph_functions.add(obj)
+                else:
+                    c_binding_in_graph_functions.add(obj)
 
     def _is_allowed_module_prefix(obj):
         allowed_modules = ("torch", "math")
@@ -179,23 +207,68 @@ def generate_allow_list():
         # these functions, rather than keep them opaque-ly in the graph.
         disallowed_modules = [
             "torch.optim.",
-            "torch.utils._foreach_utils",  # omit the period so we match all the functions in this module
-            "torch.utils._pytree",
             "torch.nn.modules.rnn.",
             "torch._dynamo.",
             "torch._C._dynamo.",
             "torch._inductor.",
             "torch._C.inductor.",
             "torch.fx.",
-            "torch.distributed.fsdp.",
-            "torch.distributed._tensor.",
-            # Inline through the ActivationWrapper in
-            # torch.distributed.algorithms._checkpoint.checkpoint_wrapper. This
-            # nn module calls torch.utils.checkpoint internally. If Dynamo does
-            # not trace this, AOT Autograd will try to trace this and can cause
-            # issues observed in
-            # https://github.com/pytorch/pytorch/issues/108269
-            "torch.distributed.algorithms.",
+            "torch._C._autograd",
+            "torch._C._cudart",
+            "torch._C._distributed_autograd",
+            "torch._C._distributed_c10d",
+            "torch._C._distributed_rpc",
+            "torch._C._functorch",
+            "torch._C._monitor",
+            "torch._C._nvtx",
+            "torch._C._lazy",
+            "torch._C._profiler",
+            "torch.__config__",
+            "torch._custom_op",
+            "torch._decomp",
+            "torch._dispatch",
+            "torch._export",
+            "torch._functorch.make_functional",
+            "torch._functorch.compile_utils",
+            "torch._functorch.partitioners",
+            "torch._functorch.aot_autograd",
+            "torch._functorch.compilers",
+            "torch._functorch.fx_minifier",
+            "torch.autograd.profiler_util",
+            "torch.autograd.profiler",
+            "torch._jit_internal",
+            "torch._library",
+            "torch._lobpcg",
+            "torch._logging",
+            "torch._meta_registrations",
+            "torch._namedtensor_internals",
+            "torch._numpy",
+            "torch._sources",
+            "torch._subclasses",
+            "torch._tensor",
+            "torch._tensor_str",
+            "torch._utils",
+            "torch._utils_internal",
+            "torch._vmap_internals",
+            "torch.compiler",
+            "torch.distributed",
+            "torch.export",
+            "torch.hub",
+            "torch.jit",
+            "torch.library",
+            "torch.masked.maskedtensor",
+            "torch.nn.init",
+            "torch.nn.modules.module",
+            "torch.nn.parallel",
+            "torch.nn.utils",
+            "torch.multiprocessing",
+            "torch.onnx",
+            "torch.overrides",
+            "torch.package",
+            "torch.profiler",
+            "torch.serialization",
+            "torch.storage",
+            "torch.utils",
         ]
         if config.trace_distributed:
             disallowed_modules.append("torch.distributed.")
@@ -250,57 +323,58 @@ def generate_allow_list():
                         torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
+                    if record:
+                        heuristic_record_if_ctx_manager(obj, module, name)
+                        heuristic_record_if_in_graph_function(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
-                    if (
-                        issubclass(type(obj), type)
-                        and "__enter__" in obj.__dict__
-                        and "__exit__" in obj.__dict__
-                    ):
-                        torch_objects.add(obj)
                 elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
+                    if record:
+                        heuristic_record_if_ctx_manager(obj, module, name)
+                        heuristic_record_if_in_graph_function(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
-                    if (
-                        issubclass(type(obj), type)
-                        and "__enter__" in obj.__dict__
-                        and "__exit__" in obj.__dict__
-                    ):
-                        torch_objects.add(obj)
 
     _find_torch_objects(torch)
     _find_torch_objects(math)
 
-    if config.trace_distributed:
-        from torch.distributed import _functional_collectives_impl as fci
+    return AllowedObjects(
+        torch_object_ids,
+        ctx_mamager_classes,
+        c_binding_in_graph_functions,
+        non_c_binding_in_graph_functions,
+        torch_name_rule_map,
+    )
 
-        for f in [
-            fci._all_gather_into_tensor,
-            fci._all_reduce,
-            fci._reduce_scatter_tensor,
-            fci._all_reduce_coalesced,
-            fci._all_gather_into_tensor_coalesced,
-            fci._reduce_scatter_tensor_coalesced,
-        ]:
-            torch_object_ids[id(f)] = repr(f)
 
-    # torch.Tensor.{fn}
-    for name in dir(torch.Tensor):
-        method = getattr(torch.Tensor, name)
-        if isinstance(
-            method, (types.MethodDescriptorType, types.WrapperDescriptorType)
-        ):
-            torch_object_ids[id(method)] = f"torch.Tensor.{name}"
+def gen_get_func_inlinelist(dummy_func_inlinelist):
+    def get_func_inlinelist():
+        inlinelist = set()
+        for f in dummy_func_inlinelist:
+            module_name, fn_name = f.rsplit(".", 1)
+            m = importlib.import_module(module_name)
+            fn = getattr(m, fn_name)
+            inlinelist.add(fn.__code__)
+        return inlinelist
 
-    for idx in _disallowed_function_ids():
-        if idx in torch_object_ids:
-            del torch_object_ids[idx]
-
-    for extra in (is_fx_tracing, is_compiling):
-        torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
-
-    return torch_objects
+    return get_func_inlinelist
 
 
 class TraceRuleTests(torch._dynamo.test_case.TestCase):
+    def _check_set_equality(self, generated, used, rule_map, ignored_set):
+        x = generated - used
+        y = used - generated
+        msg1 = (
+            f"New torch objects: {x} "
+            f"were not added to `trace_rules.{rule_map}` or `test_trace_rules.{ignored_set}`. "
+            "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
+        )
+        msg2 = (
+            f"Existing torch objects: {y} were removed. "
+            f"Please remove them from `trace_rules.{rule_map}` or `test_trace_rules.{ignored_set}`. "
+            "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
+        )
+        self.assertTrue(len(x) == 0, msg1)
+        self.assertTrue(len(y) == 0, msg2)
+
     # We are using python function and module string names for these inlinelist,
     # this unit test is to make sure the functions/modules can be correctly imported
     # or loaded in case there is typo in the strings.
@@ -318,28 +392,54 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                 f"{f} from skipfiles.FUNC_INLINELIST is not a python function, please check and correct it.",
             )
 
-    def test_torch_name_rule_map(self):
-        generated_torch_name_rule_set = generate_allow_list()
-        ignored_torch_obj_rule_set = {
-            load_object(x) for x in ignored_torch_name_rule_set
-        }
-        used_torch_name_rule_set = (
-            set(get_torch_obj_rule_map().keys()) | ignored_torch_obj_rule_set
+    def test_torch_name_rule_map_updated(self):
+        # Generate the allowed objects based on heuristic defined in `allowed_functions.py`,
+        objs = gen_allowed_objs_and_ids(record=True, c_binding_only=True)
+        # Test ctx manager classes are updated in torch_name_rule_map.
+        generated = objs.ctx_mamager_classes
+        used = set()
+        for x in (
+            set(torch_ctx_manager_classes.keys()) | ignored_ctx_manager_class_names
+        ):
+            obj = load_object(x)
+            if obj is not None:
+                used.add(obj)
+        self._check_set_equality(
+            generated,
+            used,
+            "torch_ctx_manager_classes",
+            "ignored_ctx_manager_class_names",
         )
-        x = generated_torch_name_rule_set - used_torch_name_rule_set
-        y = used_torch_name_rule_set - generated_torch_name_rule_set
-        msg1 = (
-            f"New torch objects: {x} "
-            "were not added to trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "
-            "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
+        # Test C binding in graph functions are updated in torch_name_rule_map.
+        generated = objs.c_binding_in_graph_functions
+        used = set()
+        for x in (
+            set(torch_c_binding_in_graph_functions.keys())
+            | ignored_c_binding_in_graph_function_names
+        ):
+            obj = load_object(x)
+            if obj is not None:
+                used.add(obj)
+        self._check_set_equality(
+            generated,
+            used,
+            "torch_c_binding_in_graph_functions",
+            "ignored_c_binding_in_graph_function_names",
         )
-        msg2 = (
-            f"Existing torch objects: {y} were removed. "
-            "Please remove them from trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "
-            "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
-        )
-        self.assertTrue(len(x) == 0, msg1)
-        self.assertTrue(len(y) == 0, msg2)
+        # For non C binding in graph functions, we only test if they can be loaded successfully.
+        for f in torch_non_c_binding_in_graph_functions:
+            self.assertTrue(
+                isinstance(
+                    load_object(f),
+                    (
+                        types.FunctionType,
+                        types.MethodType,
+                        types.BuiltinFunctionType,
+                        types.MethodDescriptorType,
+                        types.WrapperDescriptorType,
+                    ),
+                )
+            )
 
     def test_func_inlinelist_torch_function(self):
         def fn(x):

@@ -1,13 +1,14 @@
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
-from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed.device_mesh import DeviceMesh
 
 try:
-    from torch.utils._pytree.api.cxx import tree_map_only, TreeSpec
+    from torch.utils._cxx_pytree import tree_map_only, TreeSpec
 except ImportError:
     from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
         tree_map_only,
@@ -24,7 +25,7 @@ OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
 
 
 def _rebuild_tensor_from_dtensor_meta(arg) -> object:
-    """ "
+    """
     This is used to propagate tensor metadata, must be under fake mode
     """
     assert arg.tensor_meta is not None, "DTensorSpec does not contain tensor_meta."
@@ -49,14 +50,29 @@ def _is_out_variant_op(op: OpOverload):
     return "out" in op._schema.overload_name
 
 
+def _pretty_print_spec(spec: object) -> str:
+    if spec is None:
+        return "None"
+    elif isinstance(spec, DTensorSpec):
+        return "".join([str(p) for p in spec.placements])
+    elif isinstance(spec, Sequence):
+        return "(" + ", ".join([_pretty_print_spec(s) for s in spec]) + ")"
+    else:
+        raise RuntimeError(f"Unknown spec type to print: spec={spec}")
+
+
 @dataclass
 class PlacementStrategy:
     """
     A placement strategy describes an acceptable sharding placements of the output
     and the tensor arguments of an operation.
+
+    note: when the op return value is a single DTensor object, output_spec is
+    DTensorSpec; when the return value is a sequence of Optional[DTensor],
+    output_spec is a sequence of Optional[DTensorSpec].
     """
 
-    output_spec: DTensorSpec
+    output_spec: Union[DTensorSpec, Tuple[Optional[DTensorSpec], ...]]
     input_specs: Optional[Sequence[DTensorSpec]] = None
 
     # redistribute costs for this op placement strategy
@@ -65,25 +81,23 @@ class PlacementStrategy:
     # this operator it might have multiple placement strategies
     redistribute_cost: Optional[List[List[float]]] = None
 
-    def pretty_print_placements(self, placements):
-        return "".join([str(p) for p in placements])
+    @cached_property
+    def out_spec(self) -> DTensorSpec:
+        if isinstance(self.output_spec, DTensorSpec):
+            return self.output_spec
+        else:
+            assert len(self.output_spec) > 0, "empty output_spec!"
+            spec = self.output_spec[0]
+            assert isinstance(
+                spec, DTensorSpec
+            ), "If the operator returns a tuple, PlacementStrategy requires the first"
+            f"element in tuple be not None but got: {spec}."
+            return spec
 
     def __str__(self) -> str:
-        if self.input_specs is None:
-            input_specs_str = ""
-        else:
-            input_specs_str = (
-                "("
-                + ", ".join(
-                    [
-                        self.pretty_print_placements(spec.placements)
-                        for spec in self.input_specs
-                    ]
-                )
-                + ") -> "
-            )
-        output_spec_str = self.pretty_print_placements(self.output_spec.placements)
-        return f"{input_specs_str}{output_spec_str}"
+        input_specs_str = _pretty_print_spec(self.input_specs)
+        output_spec_str = _pretty_print_spec(self.output_spec)
+        return f"{input_specs_str} -> {output_spec_str}"
 
 
 class StrategyType:
@@ -106,22 +120,26 @@ class OpStrategy(StrategyType):
 
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
-        mesh_shape = self.strategies[0].output_spec.mesh.shape
+        mesh_shape = self.output_mesh_shape
         return f"OpStrategy:[{strategy_list_str}] @mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
         """
         Returns the max number of shards across all placement strategies
         """
-        return max([strategy.output_spec.num_shards for strategy in self.strategies])
+        return max([strategy.out_spec.num_shards for strategy in self.strategies])
 
     @property
-    def output_shape(self):
-        return self.strategies[0].output_spec.shape
+    def output_mesh_shape(self):
+        return self.strategies[0].out_spec.mesh.shape
 
     @property
     def output_ndim(self):
-        return self.strategies[0].output_spec.ndim
+        return self.strategies[0].out_spec.ndim
+
+    @property
+    def output_shape(self):
+        return self.strategies[0].out_spec.shape
 
 
 class TupleStrategy(StrategyType):
@@ -219,13 +237,12 @@ class OpSchema:
                 mesh_shape = arg.mesh.shape
             elif isinstance(arg, OpStrategy):
                 assert len(arg.strategies) == 1
-                arg_spec = arg.strategies[0].output_spec
-                args_sharding.append(str(arg_spec))
-                mesh_shape = arg_spec.mesh.shape
+                args_sharding.append(_pretty_print_spec(arg.strategies[0].output_spec))
+                mesh_shape = arg.output_mesh_shape
             elif isinstance(arg, TupleStrategy):
                 first_op_strtgy = arg.childs[0]
                 assert isinstance(first_op_strtgy, OpStrategy)
-                mesh_shape = first_op_strtgy.strategies[0].output_spec.mesh.shape
+                mesh_shape = first_op_strtgy.output_mesh_shape
                 args_sharding.append(str(arg))
             else:
                 args_sharding.append(str(arg))
@@ -257,6 +274,12 @@ class OpSchema:
         return len(return_types) > 1 and isinstance(
             return_types[0].type, torch.TensorType
         )
+
+    def return_type_tensor(self) -> bool:
+        return_types = self.op._schema.returns
+        # all dispatch ops only return Tensor or Tuple[Tensor] for tensor like
+        # return types, so this check is enough for tensor like types
+        return isinstance(return_types[0].type, torch.TensorType)
 
     def __hash__(self) -> int:
         # Only hash args and kwargs that op indicates to hash

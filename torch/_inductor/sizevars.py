@@ -1,7 +1,7 @@
 import functools
 import itertools
 import logging
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import sympy
 from sympy import Expr
@@ -328,6 +328,21 @@ class SizeVarAllocator:
     def guard_lt(self, left: Expr, right: Expr) -> None:
         assert self.shape_env.evaluate_expr(sympy.Lt(left, right))
 
+    def expect_true(self, expr: Expr, *, msg: str) -> None:
+        expr = sympy_subs(expr, self.inv_precomputed_replacements)
+        self.shape_env.defer_runtime_assert(expr, msg, fx_node=V.graph.current_node)
+
+    def expect_equals(self, left: Expr, right: Expr, *, msg: str) -> Expr:
+        # Prefer returning the expression without unbacked symints
+        if self.shape_env.is_unbacked_symint(left):
+            self.expect_true(sympy.Eq(left, right), msg=msg)
+            return right
+        elif self.shape_env.is_unbacked_symint(right):
+            self.expect_true(sympy.Eq(left, right), msg=msg)
+            return left
+        else:
+            return self.guard_equals(left, right)
+
     # The evaluate functions evaluate some symbolic sympy expression
     # (NB: not necessarily an Expr) and return what the concrete result
     # is, guarding on the expression being that result
@@ -344,13 +359,11 @@ class SizeVarAllocator:
         """return the smaller of left and right, and guard on that choice"""
         lv = self.size_hint(left)
         rv = self.size_hint(right)
-        if lv == rv:
-            return self.guard_equals(left, right)
-        elif lv < rv:
-            self.guard_lt(left, right)
+        if lv <= rv:
+            self.guard_leq(left, right)
             return left
         else:
-            self.guard_lt(right, left)
+            self.guard_leq(right, left)
             return right
 
     def evaluate_static_shape(self, left: Expr) -> int:
@@ -361,6 +374,11 @@ class SizeVarAllocator:
     def evaluate_static_shapes(self, left: List[Expr]) -> List[int]:
         return [self.evaluate_static_shape(x) for x in left]
 
+    def remove_precomputed_replacements(self, expr: Expr) -> Expr:
+        if any(s.name.startswith("ps") for s in expr.free_symbols):
+            return sympy_subs(expr, self.inv_precomputed_replacements)
+        return expr
+
     def symbolic_hint(self, expr: Expr) -> Expr:
         # Substitute all hints into expr, but leave unbacked symints alone
         if not isinstance(expr, Expr):
@@ -369,9 +387,7 @@ class SizeVarAllocator:
         free_symbols = expr.free_symbols
         if not free_symbols:
             return int(expr)
-        while any(s.name.startswith("ps") for s in free_symbols):
-            expr = sympy_subs(expr, self.inv_precomputed_replacements)
-            free_symbols = expr.free_symbols
+        expr = self.remove_precomputed_replacements(expr)
         return sympy_subs(expr, self.var_to_val)
 
     def size_hint(self, expr: Expr, *, fallback: Optional[int] = None) -> int:
@@ -395,7 +411,7 @@ class SizeVarAllocator:
 
     def size_hints(
         self,
-        exprs: List[Expr],
+        exprs: Iterable[Expr],
         *,
         fallback: Optional[int] = None,
     ) -> Tuple[int, ...]:
@@ -493,14 +509,19 @@ class SizeVarAllocator:
         return result
 
     def stride_order(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
-        strides = tuple(
-            map(abs, self.stride_hints(index, vars))  # type: ignore[arg-type]
-        )
+        strides = tuple(map(abs, self.stride_hints(index, vars)))
         order = list(range(len(strides)))
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
         return order
 
     def lookup_precomputed_size(self, expr: Expr) -> sympy.Symbol:
+        if (
+            isinstance(expr, (int, sympy.Symbol, sympy.Number))
+            or expr.is_number
+            or expr.is_symbol
+        ):
+            return expr
+        expr = self.remove_precomputed_replacements(expr)
         if expr not in self.precomputed_replacements:
             sym = sympy_symbol(f"ps{len(self.precomputed_replacements)}")
             self.precomputed_replacements[expr] = sym

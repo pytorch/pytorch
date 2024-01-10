@@ -43,13 +43,13 @@ api::GPUMemoryLayout get_gpu_memory_layout(
  * TensorImpl.h was used as a reference.
  */
 c10::SmallVector<int64_t, 6u> calc_contiguous_strides(const IntArrayRef sizes) {
-  int64_t ndim = sizes.size();
+  int64_t ndim = static_cast<int64_t>(sizes.size());
   c10::SmallVector<int64_t, 6u> strides(ndim);
 
   int64_t running_product = 1;
   if (ndim >= 1) {
     strides[ndim - 1] = running_product;
-    for (int i = sizes.size() - 2; i >= 0; --i) {
+    for (int i = static_cast<int>(sizes.size()) - 2; i >= 0; --i) {
       running_product *= sizes[i + 1];
       strides[i] = running_product;
     }
@@ -272,6 +272,7 @@ c10::SmallVector<int64_t, 6u> calc_gpu_sizes(
             gpu_sizes[1] = sizes[1];
             gpu_sizes[2] = sizes[3];
             gpu_sizes[3] = api::utils::align_up(sizes[3], INT64_C(4));
+            break;
           case api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED:
             gpu_sizes[0] = sizes[0];
             gpu_sizes[1] = sizes[1];
@@ -320,12 +321,17 @@ api::utils::uvec3 create_image_extents(
       case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
         TORCH_CHECK(width % 4 == 0, "Channels must be divisible by 4!")
         width /= 4;
+        break;
       case api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED:
         TORCH_CHECK(height % 4 == 0, "Channels must be divisible by 4!")
         height /= 4;
+        break;
       case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
         TORCH_CHECK(channels % 4 == 0, "Channels must be divisible by 4!")
         channels /= 4;
+        break;
+      default:
+        TORCH_CHECK(false, "Invalid memory format used!");
     }
 
     return {width, height, batch * channels};

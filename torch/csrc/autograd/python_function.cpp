@@ -56,16 +56,14 @@ PyObject* THPGradientEdgeClass = nullptr;
 // Anonymous namespace for helpful functions used in this file
 namespace {
 
-// Throw a python_error with the PyErr state persisted, so that we
-// don't lose the error state if the GIL is released when we don't
-// have a PyThreadState created beforehand, this is made so that
-// even for pure C++ thread without a pre-created PyThreadState could
-// also capture the correct error message.
-// TODO: This is a temporary approach to allow C++ thread to correctly
-// capture Python Error in autograd, remove this when c10 thread pool
-// allow to do one time initialization.
-// see discussion in https://github.com/pytorch/pytorch/pull/34845
-// Follow up issue: https://github.com/pytorch/pytorch/issues/35006
+// TODO: We shouldn't need to call this function because the engine
+// can already persist the errors for us. This still seems to be
+// needed for the DistEngine however.
+//
+// python test/distributed/rpc/test_tensorpipe_agent.py -k
+// test_backward_autograd_engine_error
+//
+// See Note [ Persisting PyErr state across autograd engine threads ]
 void throw_python_error() {
   python_error err;
   err.persist();
@@ -376,7 +374,7 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction* self) {
       PyTuple_Check(self->dirty_tensors),
       "autograd "
       "internal error: dirty_tensors attribute is expected to be a tuple "
-      "but is %s",
+      "but is ",
       THPUtils_typename(self->dirty_tensors));
   Py_ssize_t num_dirty = PyTuple_GET_SIZE(self->dirty_tensors);
   dirty_inputs.reserve(num_dirty);
@@ -385,8 +383,9 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction* self) {
     THPFunction_assert(
         THPVariable_Check(obj),
         "mark_dirty can "
-        "only accept variables, but argument %d is of type %s",
+        "only accept variables, but argument ",
         i,
+        " is of type ",
         THPUtils_typename(obj));
 
     const auto& tensor = THPVariable_Unpack(obj);
@@ -545,8 +544,10 @@ static void _wrap_outputs(
       PyTuple_SetItem(outputs, i, obj);
     } else {
       if (is_executable) {
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         self->output_info.emplace_back(*wrapped_outputs[i]);
       }
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       PyTuple_SetItem(outputs, i, THPVariable_Wrap(*wrapped_outputs[i]));
     }
   }
@@ -564,7 +565,7 @@ static void _get_tensors_to_save(
     THPFunction_assert(
         PyTuple_Check(self->saved_for_forward),
         "autograd internal "
-        "error: saved_for_forward attribute is expected to be a tuple but is %s",
+        "error: saved_for_forward attribute is expected to be a tuple but is ",
         THPUtils_typename(self->saved_for_forward));
     Py_ssize_t num_saved_for_forward =
         PyTuple_GET_SIZE(self->saved_for_forward);
@@ -580,7 +581,7 @@ static void _get_tensors_to_save(
     THPFunction_assert(
         PyTuple_Check(self->to_save),
         "autograd internal "
-        "error: to_save attribute is expected to be a tuple but is %s",
+        "error: to_save attribute is expected to be a tuple but is ",
         THPUtils_typename(self->to_save));
 
     Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
@@ -602,7 +603,7 @@ static void _get_tensors_to_save(
           // TODO: We should really just ALWAYS throw an error here, but
           // doing so will break some internal tests. We should fix those.
           throw torch::TypeError(
-              "save_for_backward can only save variables, but argument %zu is of "
+              "save_for_backward can only save variables, but argument %ld is of "
               "type %s",
               i,
               Py_TYPE(obj)->tp_name);
@@ -645,7 +646,7 @@ static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
       PyTuple_Check(self->non_differentiable),
       "autograd "
       "internal error: non_differentiable attribute is expected to be a "
-      "tuple but is %s",
+      "tuple but is ",
       THPUtils_typename(self->non_differentiable));
   Py_ssize_t num_nondiff = PyTuple_GET_SIZE(self->non_differentiable);
   set.reserve(num_nondiff);
@@ -654,7 +655,7 @@ static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
     THPFunction_assert(
         THPVariable_Check(t),
         "mark_non_differentiable "
-        "only accepts variable arguments, but got %s",
+        "only accepts variable arguments, but got ",
         THPUtils_typename(t));
     set.insert(THPVariable_Unpack(t).unsafeGetTensorImpl());
   }
@@ -692,7 +693,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
       // Python
       if (enforce_variables) {
         THPUtils_setError(
-            "expected a Tensor argument, but got %s", THPUtils_typename(arg));
+            "expected a Tensor argument, but got ", THPUtils_typename(arg));
         throw python_error();
       }
       Py_INCREF(Py_False);
@@ -966,6 +967,14 @@ PyObject* THPFunction_sequence_nr(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPFunction*)self)->cdata.lock();
+  cdata->set_sequence_nr(THPUtils_unpackUInt64(sequence_nr));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPFunction_maybe_clear_saved_tensors(
     PyObject* self,
     PyObject* noargs) {
@@ -1164,8 +1173,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
 
 PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
-      THPVariable_Check(_var), "_register_hook_dict expected a Tensor");
+  TORCH_CHECK(THPVariable_Check(_var), "_register_hook_dict expected a Tensor");
   THPVariable* var = reinterpret_cast<THPVariable*>(_var);
   const auto& tensor = THPVariable_Unpack(var);
   std::unique_ptr<FunctionPreHook> hook(
@@ -1259,7 +1267,8 @@ int THPFunction_set_materialize_non_diff_grads(
 static PyObject* unpack_saved_variables(
     THPFunction* self,
     const std::function<PyObject*(const Variable&)>& unpack_fn) {
-  THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
   auto& saved_variables = self->saved_variables;
   if (saved_variables.empty())
     return PyTuple_New(0);
@@ -1289,6 +1298,7 @@ static PyObject* unpack_saved_variables(
     PyTuple_SET_ITEM(saved.get(), i, value.release());
   }
   return saved.release();
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {
@@ -1351,7 +1361,7 @@ PyObject* THPFunction_get_compiled_autograd_symints(
 PyObject* THPFunction_raw_saved_tensors(THPFunction* self, void* _unused) {
   HANDLE_TH_ERRORS
   // User tries to access saved variables after they have been freed
-  THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
+  TORCH_CHECK(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
   const auto& saved_variables = self->saved_variables;
   if (saved_variables.empty())
     return PyTuple_New(0);
@@ -1534,6 +1544,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
 static struct PyMethodDef THPFunction_methods[] = {
     {(char*)"name", THPFunction_name, METH_NOARGS, nullptr},
     {(char*)"_sequence_nr", THPFunction_sequence_nr, METH_NOARGS, nullptr},
+    {(char*)"_set_sequence_nr", THPFunction_set_sequence_nr, METH_O, nullptr},
     {(char*)"maybe_clear_saved_tensors",
      THPFunction_maybe_clear_saved_tensors,
      METH_NOARGS,

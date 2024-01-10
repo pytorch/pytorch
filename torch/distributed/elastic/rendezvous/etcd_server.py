@@ -27,8 +27,7 @@ log = logging.getLogger(__name__)
 
 def find_free_port():
     """
-    Finds a free port and binds a temporary socket to it so that
-    the port can be "reserved" until used.
+    Find a free port and binds a temporary socket to it so that the port can be "reserved" until used.
 
     .. note:: the returned socket must be closed before using the port,
               otherwise a ``address already in use`` error will happen.
@@ -76,7 +75,7 @@ def stop_etcd(subprocess, data_dir: Optional[str] = None):
 
 class EtcdServer:
     """
-    .. note:: tested on etcd server v3.4.3
+    .. note:: tested on etcd server v3.4.3.
 
     Starts and stops a local standalone etcd server on a random free
     port. Useful for single node, multi-worker launches or testing,
@@ -133,24 +132,15 @@ class EtcdServer:
             return self._etcd_proc
 
     def get_port(self) -> int:
-        """
-        Returns:
-            the port the server is running on.
-        """
+        """Return the port the server is running on."""
         return self._port
 
     def get_host(self) -> str:
-        """
-        Returns:
-            the host the server is running on.
-        """
+        """Return the host the server is running on."""
         return self._host
 
     def get_endpoint(self) -> str:
-        """
-        Returns:
-            the etcd server endpoint (host:port)
-        """
+        """Return the etcd server endpoint (host:port)."""
         return f"{self._host}:{self._port}"
 
     def start(
@@ -160,8 +150,7 @@ class EtcdServer:
         stderr: Union[int, TextIO, None] = None,
     ) -> None:
         """
-        Starts the server, and waits for it to be ready. When this function
-        returns the sever is ready to take requests.
+        Start the server, and waits for it to be ready. When this function returns the sever is ready to take requests.
 
         Args:
             timeout: time (in seconds) to wait for the server to be ready
@@ -226,11 +215,7 @@ class EtcdServer:
         self._wait_for_ready(timeout)
 
     def get_client(self):
-        """
-        Returns:
-           An etcd client object that can be used to make requests to
-           this server.
-        """
+        """Return an etcd client object that can be used to make requests to this server."""
         return etcd.Client(
             host=self._host, port=self._port, version_prefix="/v2", read_timeout=10
         )
@@ -256,8 +241,6 @@ class EtcdServer:
         raise TimeoutError("Timed out waiting for etcd server to be ready!")
 
     def stop(self) -> None:
-        """
-        Stops the server and cleans up auto generated resources (e.g. data dir)
-        """
+        """Stop the server and cleans up auto generated resources (e.g. data dir)."""
         log.info("EtcdServer stop method called")
         stop_etcd(self._etcd_proc, self._base_data_dir)

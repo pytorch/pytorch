@@ -68,6 +68,7 @@ static std::unordered_map<std::string, at::ClassTypePtr>& customClasses() {
 
 void registerCustomClass(at::ClassTypePtr class_type) {
   TORCH_INTERNAL_ASSERT(class_type->name());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto name = class_type->name()->qualifiedName();
   TORCH_CHECK(
       !customClasses().count(name),
@@ -96,6 +97,7 @@ const std::unordered_set<std::string> getAllCustomClassesNames() {
 
 bool isCustomClass(const c10::IValue& v) {
   return v.isObject() && v.toObject()->type()->name() &&
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       getCustomClass(v.toObject()->type()->name()->qualifiedName());
 }
 

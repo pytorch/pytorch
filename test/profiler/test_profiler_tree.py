@@ -22,7 +22,7 @@ KEEP_ELLIPSES = 2
 KEEP_NAME_AND_ELLIPSES = 3
 
 PRUNE_FUNCTIONS = {
-    "torch/utils/_pytree/api/python.py(...): tree_map": KEEP_NAME_AND_ELLIPSES,
+    "torch/utils/_pytree.py(...): tree_map": KEEP_NAME_AND_ELLIPSES,
     "torch/profiler/profiler.py(...): start": KEEP_ELLIPSES,
     "torch/profiler/profiler.py(...): stop_trace": KEEP_ELLIPSES,
     "torch/profiler/profiler.py(...): _transit_action": KEEP_ELLIPSES,
@@ -469,47 +469,49 @@ class TestProfilerTree(TestCase):
                             [memory]
                         aten::fill_
                     <built-in method append of list object at 0xXXXXXXXXXXXX>
-                  <built-in method run_backward of torch._C._EngineBase object at 0xXXXXXXXXXXXX>
-                    autograd::engine::evaluate_function: PowBackward0
-                      PowBackward0
-                        aten::pow
-                          aten::result_type
-                          aten::to
-                          [memory]
-                          aten::copy_
-                        aten::mul
-                          [memory]
-                          aten::mul
+                  torch/autograd/graph.py(...): _engine_run_backward
+                    logging/__init__.py(...): getEffectiveLevel
+                    <built-in method run_backward of torch._C._EngineBase object at 0xXXXXXXXXXXXX>
+                      autograd::engine::evaluate_function: PowBackward0
+                        PowBackward0
+                          aten::pow
+                            aten::result_type
                             aten::to
-                              aten::_to_copy
-                                aten::empty_strided
-                                  [memory]
-                                aten::copy_
                             [memory]
+                            aten::copy_
+                          aten::mul
+                            [memory]
+                            aten::mul
+                              aten::to
+                                aten::_to_copy
+                                  aten::empty_strided
+                                    [memory]
+                                  aten::copy_
+                              [memory]
+                              [memory]
+                            [memory]
+                          aten::mul
                             [memory]
                           [memory]
-                        aten::mul
                           [memory]
                         [memory]
-                        [memory]
-                      [memory]
-                    autograd::engine::evaluate_function: SubBackward0
-                      SubBackward0
-                        aten::neg
-                          [memory]
-                      [memory]
-                    autograd::engine::evaluate_function: AddBackward0
-                      AddBackward0
-                    autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
-                      torch::autograd::AccumulateGrad
-                        aten::new_empty_strided
-                          aten::empty_strided
+                      autograd::engine::evaluate_function: SubBackward0
+                        SubBackward0
+                          aten::neg
                             [memory]
-                        aten::copy_
-                    autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
-                      torch::autograd::AccumulateGrad
-                        aten::detach
-                          detach
+                        [memory]
+                      autograd::engine::evaluate_function: AddBackward0
+                        AddBackward0
+                      autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
+                        torch::autograd::AccumulateGrad
+                          aten::new_empty_strided
+                            aten::empty_strided
+                              [memory]
+                          aten::copy_
+                      autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
+                        torch::autograd::AccumulateGrad
+                          aten::detach
+                            detach
                 [memory]
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
@@ -699,14 +701,14 @@ class TestProfilerTree(TestCase):
                 ...
               aten::add
                 test_profiler_tree.py(...): __torch_dispatch__
-                  torch/utils/_pytree/api/python.py(...): tree_map
+                  torch/utils/_pytree.py(...): tree_map
                     ...
-                  torch/utils/_pytree/api/python.py(...): tree_map
+                  torch/utils/_pytree.py(...): tree_map
                     ...
                   torch/_ops.py(...): __call__
                     <built-in method  of PyCapsule object at 0xXXXXXXXXXXXX>
                       aten::add
-                  torch/utils/_pytree/api/python.py(...): tree_map
+                  torch/utils/_pytree.py(...): tree_map
                     ...
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop

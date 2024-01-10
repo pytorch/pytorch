@@ -264,9 +264,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         return res
 
     @staticmethod
-    def cutlass_layout(torch_layout) -> "Optional[cutlass_lib.LayoutType]":  # type: ignore[name-defined]
+    def cutlass_layout(torch_layout) -> "Optional[cutlass_lib.LayoutType]":  # type: ignore[name-defined]  # noqa: F821
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib
 
         if torch_layout.stride[-1] == 1:
             return cutlass_lib.LayoutType.RowMajor
@@ -277,10 +277,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     @staticmethod
     def flip_cutlass_layout(
-        cutlass_layout: "cutlass_lib.LayoutType",  # type: ignore[name-defined]
-    ) -> "cutlass_lib.LayoutType":  # type: ignore[name-defined]
+        cutlass_layout: "cutlass_lib.LayoutType",  # type: ignore[name-defined]  # noqa: F821
+    ) -> "cutlass_lib.LayoutType":  # type: ignore[name-defined]  # noqa: F821
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib
 
         if cutlass_layout == cutlass_lib.LayoutType.RowMajor:
             return cutlass_lib.LayoutType.ColumnMajor
@@ -303,7 +303,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
     @staticmethod
     def has_tma_epilogue(op) -> bool:
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib
 
         result = False
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
@@ -312,7 +312,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         return result
 
     @staticmethod
-    def supports_evt(op: "cutlass_library.gemm_op.GemmOperation") -> bool:  # type: ignore[name-defined]
+    def supports_evt(op: "cutlass_library.gemm_op.GemmOperation") -> bool:  # type: ignore[name-defined]  # noqa: F821
         """
         returns True if the op is capable of flexible epilogue fusions
         using epilogue visitor trees.
@@ -320,7 +320,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         See https://github.com/NVIDIA/cutlass/blob/e01b9b5029b7caca5a43c29f7d2714d7cf1dcae8/examples/49_hopper_gemm_with_collective_builder/49_collective_builder.cu#L283-L285 # noqa: B950
         """
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib
 
         if op.gemm_kind != cutlass_lib.GemmKind.Universal3x:
             return False
@@ -345,13 +345,13 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     def define_gemm_instance(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]
+        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
         output_buffer_name: str,
         epilogue_nodes: Optional[List[IRNode]] = None,
     ) -> Tuple[str, str]:
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.gemm_operation as cutlass_gemm_op  # type: ignore[import]
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.gemm_operation as cutlass_gemm_op
+        import cutlass_library.library as cutlass_lib
 
         from torch._inductor.codegen.cuda.cutlass_lib_extensions.gemm_operation_extensions import (
             EmitGemmUniversal3xInstanceWithEVT,
@@ -408,8 +408,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     @staticmethod
     def swap_XW(
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]
-    ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]
+        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+    ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]  # noqa: F821
         # Swap X and W in GemmOperation.
         new_op = copy.deepcopy(op)
         new_op.A.layout = CUTLASSGemmTemplate.flip_cutlass_layout(new_op.A.layout)
@@ -421,10 +421,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     def filter_op(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]
-    ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]
+        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+    ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]  # noqa: F821
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib
 
         # Skip simt kernels
         if (
@@ -508,10 +508,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             return None
         return op
 
-    def gen_ops(self) -> "List[cutlass_gemm_op.GemmOperation]":  # type: ignore[name-defined]
+    def gen_ops(self) -> "List[cutlass_gemm_op.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.gemm_operation as cutlass_gemm_op  # type: ignore[import]
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.gemm_operation as cutlass_gemm_op
+        import cutlass_library.library as cutlass_lib
 
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
         res: Dict[str, cutlass_gemm_op.GemmOperation] = dict()
@@ -619,7 +619,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
     def render(  # type: ignore[override]
         self,
         kernel: CUDATemplateKernel,
-        op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]
+        op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]  # noqa: F821
         template_buffer_node: Optional[CUDATemplateBuffer] = None,
         epilogue_nodes: Optional[List[IRNode]] = None,
         **kwargs,
@@ -645,8 +645,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         )
 
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.gemm_operation as cutlass_gemm_op  # type: ignore[import]
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.gemm_operation as cutlass_gemm_op
+        import cutlass_library.library as cutlass_lib
 
         assert isinstance(
             op, cutlass_gemm_op.GemmOperation

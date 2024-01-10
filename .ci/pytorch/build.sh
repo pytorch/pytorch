@@ -28,6 +28,8 @@ echo "Environment variables:"
 env
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  # Use jemalloc during compilation to mitigate https://github.com/pytorch/pytorch/issues/116289
+  export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
   echo "NVCC version:"
   nvcc --version
 fi
@@ -61,6 +63,12 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
 else
   export USE_LLVM=/opt/llvm
   export LLVM_DIR=/opt/llvm/lib/cmake/llvm
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *executorch* ]]; then
+  # To build test_edge_op_registration
+  export BUILD_EXECUTORCH=ON
+  export USE_CUDA=0
 fi
 
 if ! which conda; then
@@ -143,6 +151,12 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
 
   # hipify sources
   python tools/amd_build/build_amd.py
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/compiler/latest/env/vars.sh
+  export USE_XPU=1
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
