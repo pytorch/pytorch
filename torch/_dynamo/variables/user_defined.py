@@ -96,7 +96,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         source = AttrSource(self.source, name) if self.source is not None else None
         try:
-            obj = inspect.getattr_static(self.value, name)
+            if self.value is torch.nn.Module:
+                # getattr_static doesn't work on it
+                obj = getattr(self.value, name)
+            else:
+                obj = inspect.getattr_static(self.value, name)
         except AttributeError:
             obj = None
 
