@@ -64,7 +64,7 @@ from .utils import (
     istype,
     orig_code_map,
     tensor_always_has_static_shape,
-    tensor_to_id,
+    tensor_or_module_to_id,
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
@@ -109,7 +109,7 @@ CLOSURE_VARS = {
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
     ),
     "___odict_getitem": collections.OrderedDict.__getitem__,
-    "___tensor_to_id": tensor_to_id,
+    "___tensor_or_module_to_id": tensor_or_module_to_id,
     "___dict_version": dict_version,
     "___dict_contains": lambda a, b: a in b,
     "___dict_keys_getitem": dict_keys_getitem,
@@ -524,12 +524,15 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        any_tensor = any(isinstance(k, torch.Tensor) for k in value.keys())
-        const_keys_repr = dict_keys_repr(
-            tensor_to_id(value), local=is_from_local_source(guard.originating_source)
+        any_tensor_or_module = any(
+            isinstance(k, (torch.Tensor, torch.nn.Module)) for k in value.keys()
         )
-        if any_tensor:
-            code.append(f"___tensor_to_id({ref}) == {const_keys_repr}")
+        const_keys_repr = dict_keys_repr(
+            tensor_or_module_to_id(value),
+            local=is_from_local_source(guard.originating_source),
+        )
+        if any_tensor_or_module:
+            code.append(f"___tensor_or_module_to_id({ref}) == {const_keys_repr}")
         else:
             code.append(f"list({ref}.keys()) == {const_keys_repr}")
 
