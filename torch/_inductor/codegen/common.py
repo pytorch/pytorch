@@ -495,6 +495,7 @@ class DeferredLine(DeferredLineBase):
     def __init__(self, name, line):
         super().__init__(line)
         self.name = name
+        assert not isinstance(line, DeferredLineBase)
 
     def __call__(self):
         if all(
