@@ -138,6 +138,8 @@ class MultiKernel:
     ```
     multi_kernel_kernel1 = MultiKernelCall([kernel1, kernel2], multi_kernel_definition_code)
     ```
+
+    Here is an concrete example: https://gist.github.com/shunting314/d9f3fb6bc6cee3dbae005825ca196d39
     """
 
     def __init__(self, kernels):
@@ -214,8 +216,7 @@ class MultiKernel:
             assert k.inplace_update_buffers == self.kernels[0].inplace_update_buffers
         return self.kernels[0].inplace_update_buffers
 
-    @property
-    def warn_mix_layout(self):
+    def warn_mix_layout(self, kernel_name: str):
         pass
 
 

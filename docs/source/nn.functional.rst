@@ -40,6 +40,7 @@ Pooling functions
     max_unpool3d
     lp_pool1d
     lp_pool2d
+    lp_pool3d
     adaptive_max_pool1d
     adaptive_max_pool2d
     adaptive_max_pool3d

@@ -9,10 +9,6 @@ from torch.nn import functional as F
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
-config.triton.multi_kernel = 1
-config.benchmark_kernel = True
-config.compile_threads = 1
-
 
 class TransformerSnippet(nn.Module):
     def __init__(self):
@@ -30,12 +26,17 @@ class TransformerSnippet(nn.Module):
         return (torch.randn(2, 64).cuda(), torch.randn(2, 64).cuda())
 
 
+@config.patch({"triton.multi_kernel": 1, "benchmark_kernel": True})
 class MultiKernelTest(TestCase):
     def test_softmax(self):
         x = torch.rand(2, 1024).cuda()
         ref = torch.softmax(x, -1)
         act = torch.compile(torch.softmax)(x, -1)
         self.assertTrue(torch.allclose(ref, act))
+
+    @config.patch("warn_mix_layout", True)
+    def test_softmax_warn_mixed_layout(self):
+        self.test_softmax()
 
     def test_layernorm(self):
         ln = nn.LayerNorm(1024).cuda()
