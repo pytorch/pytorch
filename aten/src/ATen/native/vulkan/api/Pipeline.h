@@ -7,7 +7,7 @@
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
-#include <c10/util/flat_hash_map.h>
+#include <unordered_map>
 
 #include <mutex>
 
@@ -124,7 +124,7 @@ class PipelineLayoutCache final {
 
   struct Hasher {
     inline size_t operator()(VkDescriptorSetLayout descriptor_layout) const {
-      return c10::get_hash(descriptor_layout);
+      return std::hash<VkDescriptorSetLayout>()(descriptor_layout);
     }
   };
 
@@ -134,7 +134,7 @@ class PipelineLayoutCache final {
   std::mutex cache_mutex_;
 
   VkDevice device_;
-  ska::flat_hash_map<Key, Value, Hasher> cache_;
+  std::unordered_map<Key, Value, Hasher> cache_;
 
  public:
   VkPipelineLayout retrieve(const Key&);
@@ -159,12 +159,19 @@ class ComputePipelineCache final {
   struct Hasher {
     inline size_t operator()(
         const ComputePipeline::Descriptor& descriptor) const {
-      return c10::get_hash(
-          descriptor.pipeline_layout,
-          descriptor.shader_module,
-          descriptor.local_work_group.data[0u],
-          descriptor.local_work_group.data[1u],
-          descriptor.local_work_group.data[2u]);
+      size_t seed = 0;
+      seed = utils::hash_combine(
+          seed, std::hash<VkPipelineLayout>()(descriptor.pipeline_layout));
+      seed = utils::hash_combine(
+          seed, std::hash<VkShaderModule>()(descriptor.shader_module));
+      seed = utils::hash_combine(
+          seed, std::hash<uint32_t>()(descriptor.local_work_group.data[0u]));
+      seed = utils::hash_combine(
+          seed, std::hash<uint32_t>()(descriptor.local_work_group.data[1u]));
+      seed = utils::hash_combine(
+          seed, std::hash<uint32_t>()(descriptor.local_work_group.data[2u]));
+
+      return seed;
     }
   };
 
@@ -175,7 +182,7 @@ class ComputePipelineCache final {
 
   VkDevice device_;
   VkPipelineCache pipeline_cache_;
-  ska::flat_hash_map<Key, Value, Hasher> cache_;
+  std::unordered_map<Key, Value, Hasher> cache_;
 
  public:
   VkPipeline retrieve(const Key&);
