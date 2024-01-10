@@ -198,6 +198,10 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
 class TorchInGraphFunctionVariable(BaseTorchVariable):
     """Points to a torch function/method that should be put in FX graph"""
 
+    def get_function(self):
+        # PYTORCH_TEST_WITH_DYNAMO=1 pytest --tb=short -rs -sv test/functorch/test_eager_transforms.py -k test_log_softmax_cpu
+        return self.value
+
     def __repr__(self):
         return f"TorchInGraphFunctionVariable({self.value})"
 
