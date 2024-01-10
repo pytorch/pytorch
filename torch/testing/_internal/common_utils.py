@@ -1393,7 +1393,6 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
 
 def unMarkDynamoStrictTest(cls=None):
     def decorator(cls):
-        assert inspect.isclass(cls)
         cls.dynamo_strict = False
         return cls
 
@@ -2709,7 +2708,15 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 if os.environ["STRICT_DEFAULT"] == "1":
                     strict_default = True
 
-        strict_mode = getattr(test_cls, "dynamo_strict", strict_default) and compiled
+        strict_mode = False
+        if compiled:
+            test_method = getattr(self, self._testMethodName)
+            if hasattr(test_method, "dynamo_strict"):
+                strict_mode = test_method.dynamo_strict
+            elif hasattr(test_cls, "dynamo_strict"):
+                strict_mode = test_cls.dynamo_strict
+            else:
+                strict_mode = strict_default
         nopython = getattr(test_cls, "dynamo_strict_nopython", False) and compiled
 
         if strict_mode:
