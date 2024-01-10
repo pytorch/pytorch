@@ -30,15 +30,15 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
 )
+
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
+    PT2EQuantizationTestCase,
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
     TestHelperModules,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-
-from .test_quantize_pt2e import PT2EQuantizationTestCase
 
 
 @skipIfNoQNNPACK
