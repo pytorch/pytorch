@@ -383,11 +383,11 @@ void record_op(
       0u,
       api::utils::make_ivec3(v_input.extents()),
       0u,
-      api::utils::make_ivec4(overlay_region, /*reverse=*/true),
-      api::utils::make_ivec2({kernel_size[3], kernel_size[2]}),
-      api::utils::make_ivec2(stride, /*reverse=*/true),
-      api::utils::make_ivec2(padding, /*reverse=*/true),
-      api::utils::make_ivec2(dilation, /*reverse=*/true),
+      utils::make_ivec4(overlay_region, /*reverse=*/true),
+      utils::make_ivec2({kernel_size[3], kernel_size[2]}),
+      utils::make_ivec2(stride, /*reverse=*/true),
+      utils::make_ivec2(padding, /*reverse=*/true),
+      utils::make_ivec2(dilation, /*reverse=*/true),
       {output_min, output_max},
   };
   api::UniformParamsBuffer params(context, block);
@@ -468,11 +468,11 @@ void record_quantized_op(
       0u,
       api::utils::make_ivec3(v_input.extents()),
       0u,
-      api::utils::make_ivec4(overlay_region, /*reverse=*/true),
-      api::utils::make_ivec2({kernel_size[3], kernel_size[2]}),
-      api::utils::make_ivec2(stride, /*reverse=*/true),
-      api::utils::make_ivec2(padding, /*reverse=*/true),
-      api::utils::make_ivec2(dilation, /*reverse=*/true),
+      utils::make_ivec4(overlay_region, /*reverse=*/true),
+      utils::make_ivec2({kernel_size[3], kernel_size[2]}),
+      utils::make_ivec2(stride, /*reverse=*/true),
+      utils::make_ivec2(padding, /*reverse=*/true),
+      utils::make_ivec2(dilation, /*reverse=*/true),
       {output_min, output_max},
   };
   api::UniformParamsBuffer params(context, block);
@@ -530,7 +530,7 @@ vTensor pack_weights(
 
   vTensor v_weight{
       api::context(),
-      weight_rearranged.sizes(),
+      weight_rearranged.sizes().vec(),
       weight_arg.scalar_type(),
       api::StorageType::TEXTURE_2D,
   };
@@ -555,7 +555,7 @@ vTensor pack_biases(
 
   vTensor v_bias{
       api::context(),
-      bias_rearranged.sizes(),
+      bias_rearranged.sizes().vec(),
       bias_rearranged.scalar_type(),
       api::StorageType::TEXTURE_2D,
   };

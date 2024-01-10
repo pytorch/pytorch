@@ -35,7 +35,7 @@ Tensor cumsum(
 
   vTensor v_output{
       context,
-      input_arg.sizes(),
+      v_input.sizes(),
       input_arg.scalar_type(),
   };
 

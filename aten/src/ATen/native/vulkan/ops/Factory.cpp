@@ -17,7 +17,7 @@ Tensor _empty_affine_quantized(
     const optional<MemoryFormat> memory_format) {
   return convert_quantized(vTensor{
       api::context(),
-      sizes,
+      sizes.vec(),
       scale,
       zero_point,
       dtype ? *dtype : c10::kFloat,
@@ -35,7 +35,7 @@ Tensor empty_memory_format(
     const optional<MemoryFormat> memory_format) {
   return convert(vTensor{
       api::context(),
-      sizes,
+      sizes.vec(),
       dtype ? *dtype : c10::kFloat,
       api::StorageType::TEXTURE_3D,
       memory_format ? *memory_format : c10::MemoryFormat::Contiguous,

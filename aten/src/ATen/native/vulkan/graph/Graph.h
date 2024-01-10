@@ -92,7 +92,7 @@ class ComputeGraph final {
     return values_[idx];
   }
 
-  inline IntArrayRef get_val_sizes(ValueRef idx) {
+  inline const std::vector<int64_t>& get_val_sizes(ValueRef idx) {
     Value& val = get_val(idx);
     if (val.isTensor()) {
       return val.toTensor().sizes();
@@ -124,9 +124,11 @@ class ComputeGraph final {
   // Graph Building
   //
 
-  ValueRef add_tensor(const IntArrayRef sizes, const c10::ScalarType dtype);
+  ValueRef add_tensor(
+      const std::vector<int64_t>& sizes,
+      const c10::ScalarType dtype);
   ValueRef add_tensorref(
-      const IntArrayRef sizes,
+      const std::vector<int64_t>& sizes,
       const c10::ScalarType dtype,
       const void* const data);
   ValueRef add_staging(const c10::ScalarType dtype, const size_t numel);
