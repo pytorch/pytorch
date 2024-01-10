@@ -819,6 +819,10 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     return _getAllocImpl().format_size(size);
   }
 
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    default_copy_data(dest, src, count);
+  }
+
  private:
   bool m_has_unified_memory;
   uint32_t m_usage;
