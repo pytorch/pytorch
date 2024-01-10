@@ -17,13 +17,17 @@ __all__ = ['Transformer', 'TransformerEncoder', 'TransformerDecoder', 'Transform
 
 def _generate_square_subsequent_mask(
         sz: int,
-        device: torch.device = torch.device(torch._C._get_default_device()),  # torch.device('cpu'),
-        dtype: torch.dtype = torch.get_default_dtype(),
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
     r"""Generate a square causal mask for the sequence.
 
     The masked positions are filled with float('-inf'). Unmasked positions are filled with float(0.0).
     """
+    if device is None:
+        device = torch.device('cpu')
+    if dtype is None:
+        dtype = torch.float32
     return torch.triu(
         torch.full((sz, sz), float('-inf'), dtype=dtype, device=device),
         diagonal=1,
@@ -214,8 +218,8 @@ class Transformer(Module):
     @staticmethod
     def generate_square_subsequent_mask(
             sz: int,
-            device: torch.device = torch.device(torch._C._get_default_device()),  # torch.device('cpu'),
-            dtype: torch.dtype = torch.get_default_dtype(),
+            device: Optional[torch.device] = None,
+            dtype: Optional[torch.dtype] = None,
     ) -> Tensor:
         r"""Generate a square causal mask for the sequence.
 
@@ -275,6 +279,8 @@ class TransformerEncoder(Module):
                                           "(use batch_first for better inference performance)")
         elif not encoder_layer.self_attn._qkv_same_embed_dim:
             why_not_sparsity_fast_path = f"{enc_layer}.self_attn._qkv_same_embed_dim was not True"
+        elif encoder_layer.self_attn.in_proj_bias is None:
+            why_not_sparsity_fast_path = f"{enc_layer}.self_attn was passed bias=False"
         elif not encoder_layer.activation_relu_or_gelu:
             why_not_sparsity_fast_path = f"{enc_layer}.activation_relu_or_gelu was not True"
         elif not (encoder_layer.norm1.eps == encoder_layer.norm2.eps) :
@@ -334,7 +340,11 @@ class TransformerEncoder(Module):
         why_not_sparsity_fast_path = ''
         str_first_layer = "self.layers[0]"
         batch_first = first_layer.self_attn.batch_first
-        if not hasattr(self, "use_nested_tensor"):
+        is_fastpath_enabled = torch.backends.mha.get_fastpath_enabled()
+
+        if not is_fastpath_enabled:
+            why_not_sparsity_fast_path = "torch.backends.mha.get_fastpath_enabled() was not True"
+        elif not hasattr(self, "use_nested_tensor"):
             why_not_sparsity_fast_path = "use_nested_tensor attribute not present"
         elif not self.use_nested_tensor:
             why_not_sparsity_fast_path = "self.use_nested_tensor (set in init) was not True"
@@ -631,15 +641,21 @@ class TransformerEncoderLayer(Module):
             check_other=False,
         )
 
+        is_fastpath_enabled = torch.backends.mha.get_fastpath_enabled()
+
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
         why_not_sparsity_fast_path = ''
-        if not src.dim() == 3:
+        if not is_fastpath_enabled:
+            why_not_sparsity_fast_path = "torch.backends.mha.get_fastpath_enabled() was not True"
+        elif not src.dim() == 3:
             why_not_sparsity_fast_path = f"input not batched; expected src.dim() of 3 but got {src.dim()}"
         elif self.training:
             why_not_sparsity_fast_path = "training is enabled"
-        elif not self.self_attn.batch_first :
+        elif not self.self_attn.batch_first:
             why_not_sparsity_fast_path = "self_attn.batch_first was not True"
-        elif not self.self_attn._qkv_same_embed_dim :
+        elif self.self_attn.in_proj_bias is None:
+            why_not_sparsity_fast_path = "self_attn was passed bias=False"
+        elif not self.self_attn._qkv_same_embed_dim:
             why_not_sparsity_fast_path = "self_attn._qkv_same_embed_dim was not True"
         elif not self.activation_relu_or_gelu:
             why_not_sparsity_fast_path = "activation_relu_or_gelu was not True"

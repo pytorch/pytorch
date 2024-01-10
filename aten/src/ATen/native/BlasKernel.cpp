@@ -71,7 +71,7 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
 #endif // AT_BLAS_USE_CBLAS_DOT
 #endif // AT_BUILD_WITH_BLAS
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace blas_impl {
 
@@ -403,4 +403,4 @@ INSTANTIATE_VDOT_IMPL(c10::complex<double>);
 
 #undef INSTANTIATE_DOT_IMPL
 
-}} // namespace at::native
+} // namespace at::native

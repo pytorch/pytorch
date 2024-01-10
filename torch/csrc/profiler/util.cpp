@@ -344,6 +344,8 @@ static constexpr auto kInMsgNelems = "In msg nelems";
 static constexpr auto kOutMsgNelems = "Out msg nelems";
 static constexpr auto kInSplit = "In split size";
 static constexpr auto kOutSplit = "Out split size";
+static constexpr auto kGlobalRankStart = "Global rank start";
+static constexpr auto kGlobalRankStride = "Global rank stride";
 static constexpr auto kGroupSize = "Group size";
 static constexpr int32_t kTruncatLength = 30;
 #endif // USE_C10D
@@ -395,6 +397,10 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
                 outSplitSizes.begin() + kTruncatLength,
                 ", ")));
   }
+  map.emplace(
+      kGlobalRankStart, std::to_string(debugInfo->getGlobalRankStart()));
+  map.emplace(
+      kGlobalRankStride, std::to_string(debugInfo->getGlobalRankStride()));
   map.emplace(kGroupSize, std::to_string(debugInfo->getWorldSize()));
 #endif // USE_C10D
 #endif // USE_DISTRIBUTED

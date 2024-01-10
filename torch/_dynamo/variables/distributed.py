@@ -140,7 +140,7 @@ class DeviceMeshVariable(DistributedVariable):
         if not DistributedVariable.is_available():
             return False
 
-        from torch.distributed._tensor.device_mesh import DeviceMesh
+        from torch.distributed.device_mesh import DeviceMesh
 
         return istype(value, DeviceMesh)
 
