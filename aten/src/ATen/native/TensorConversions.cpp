@@ -1513,24 +1513,36 @@ void convert_indices_from_csr_to_coo_cpu(
     const Tensor& crow_indices,
     const Tensor& col_indices,
     const bool transpose = false) {
-  int64_t nrows = crow_indices.numel() - 1;
-  if (nrows == 0) {
-    indices.zero_();
+  int64_t nrows = crow_indices.size(-1) - 1;
+  int64_t nnz = col_indices.size(-1);
+  if (nrows == 0 || nnz == 0) {
+    indices.zero_();  // is this needed as indices has a zero-valued
+                      // dimension when nrows or nnz is 0?
     return;
   }
   auto crow_indices_ = crow_indices.expect_contiguous();
+  int64_t total_nnz = col_indices.numel();
+  int64_t batch_ndim = crow_indices.dim() - 1;
+  if (batch_ndim > 0) {
+    auto batch_indices = indices.narrow(0, 0, batch_ndim);
+    batch_indices.copy_(at::sparse::full_coo_indices(crow_indices.sizes().slice(0, batch_ndim), crow_indices.options())
+                        .repeat_interleave(nnz, 1));
+  }
   const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
   TORCH_INTERNAL_ASSERT(indices.is_contiguous());
-  auto row0 = indices.select(0, transpose ? 1 : 0);
-  auto row1 = indices.select(0, transpose ? 0 : 1);
+  auto row0 = indices.select(0, transpose ? batch_ndim + 1 : batch_ndim + 0);
+  auto row1 = indices.select(0, transpose ? batch_ndim + 0 : batch_ndim + 1);
   output_t* data_out = row0.data_ptr<output_t>();
-  row1.copy_(*col_indices.expect_contiguous());
+  auto col_indices_ = col_indices.expect_contiguous();
+  row1.copy_(col_indices_->view({-1}));
   at::parallel_for(
-      0, nrows, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
-        for (const auto i : c10::irange(start, end)) {
+                   0, nrows * total_nnz / nnz, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
+        for (const auto i_  : c10::irange(start, end)) {
+          auto b = i_ / nrows;
+          auto i = i_ % nrows;
           std::fill(
-              &data_out[crow_indices_data_in[i]],
-              &data_out[crow_indices_data_in[i + 1]],
+              &data_out[b * nnz + crow_indices_data_in[b * (nrows + 1) + i]],
+              &data_out[b * nnz + crow_indices_data_in[b * (nrows + 1) + i + 1]],
               static_cast<output_t>(i));
         }
       });
@@ -1829,27 +1841,22 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, const int64_t sparse_dim)
   Tensor values;
   Tensor indices = at::_convert_indices_from_csr_to_coo(compressed_indices, plain_indices,
                                                         false, (layout == kSparseCsc || layout == kSparseBsc));
+  const auto batch_ndim = compressed_indices.dim() - 1;
   // Only CSR is trivially coalesced
   bool coalesced = layout == kSparseCsr || self.numel() == 0 || self._nnz() == 1;
   AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(layout, "sparse_compressed_to_sparse",
-    [&] { values = self.values(); },
+    [&] { values = self.values().flatten(0, batch_ndim); },
     [&] {
-      auto size = DimVector(self.sizes().slice(0, 2));
-      auto blocksize = DimVector(self.values().sizes().slice(1, 2));
-
-      const auto max_blocksize = std::max(blocksize[0], blocksize[1]);
-      const auto max_blocksize_arange = at::arange(max_blocksize, indices.options());
-      const auto blocksize_arange_0 = max_blocksize_arange.narrow(-1, 0, blocksize[0]);
-      const auto blocksize_arange_1 = max_blocksize_arange.narrow(-1, 0, blocksize[1]);
-      const auto block_coo_indices = at::stack({
-          blocksize_arange_0.unsqueeze(-1).expand({-1, blocksize[1]}),
-          blocksize_arange_1.unsqueeze(0).expand({blocksize[0], -1})
-      }).flatten(-2, -1);
-
+      auto blocksize = DimVector(self.values().sizes().slice(batch_ndim + 1, 2));
+      DimVector batch_blocksize;
+      batch_blocksize.append(batch_ndim, 1);
+      batch_blocksize.append(blocksize);
+      const auto block_coo_indices = at::zeros({batch_ndim + 2, blocksize[0] * blocksize[1]}, indices.options());
+      block_coo_indices.narrow(0, batch_ndim, 2).copy_(at::sparse::full_coo_indices(blocksize, indices.options()));
       indices = indices
         // Scale indices that identify blocks to element-wise coordinates that correspond
         // to the top-left corner of each block.
-        .mul(at::tensor(blocksize, indices.options()).unsqueeze_(-1))
+        .mul(at::tensor(batch_blocksize, indices.options()).unsqueeze_(1))
         // Now that we know top-left block coordinates, we offset them with element-wise
         // coordinates in the block to get the result.
         // NOTE: indices is mapped from (dim, nnz) to (dim, nnz, 1),
@@ -1861,10 +1868,10 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, const int64_t sparse_dim)
         // to produce valid nnz dimension of a COO tensor.
         .flatten(-2, -1);
 
-      values = self.values().flatten(0, 2);
+      values = self.values().flatten(0, batch_ndim + 2);
 
       // BSRs not spanning across several rows produces coalesced results.
-      coalesced |= (layout == kSparseBsr && blocksize[0] == 1);
+      coalesced |= (layout == kSparseBsr && blocksize[0] == 1 && batch_ndim == 0);
     });
   return at::native::_sparse_coo_tensor_unsafe(indices, values, self.sizes())._coalesced_(coalesced);
 }
