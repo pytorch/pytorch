@@ -483,14 +483,6 @@ class StreamContextVariable(ContextWrappingVariable):
             **kwargs,
         )
 
-    @staticmethod
-    def create_from_existing_context(tx, target_value, **kwargs):
-        return StreamContextVariable.create_from_stream(
-            tx,
-            StreamVariable(None, target_value.stream, target_value.stream.device),
-            **kwargs,
-        )
-
     def __init__(self, target_values, device, initial_values=None, **kwargs):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs

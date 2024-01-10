@@ -574,7 +574,9 @@ class VariableBuilder:
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
         elif isinstance(value, torch.cuda.StreamContext):
             self.install_guards(GuardBuilder.ID_MATCH)
-            return StreamContextVariable.create_from_existing_context(self.tx, value)
+            stream_source = AttrSource(self.source, "stream")
+            stream_var = VariableBuilder(self.tx, stream_source)(value.stream)
+            return StreamContextVariable.create_from_stream(self.tx, stream_var)
         elif isinstance(value, _StreamBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             stream_var = StreamVariable(
