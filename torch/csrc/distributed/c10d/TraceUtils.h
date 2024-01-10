@@ -375,7 +375,7 @@ struct NCCLTraceBuffer {
     const char* profiling_name_;
 
     std::shared_ptr<torch::CapturedTraceback> traceback_;
-    // we borrow pointser to start_ and end_ so we can query the state
+    // we borrow pointers to start_ and end_ so we can query the state
     // on reporting. However, once the event is completed, the call
     // to `complete` will clear these.
     EventList *start_, *end_;
@@ -474,9 +474,6 @@ struct NCCLTraceBuffer {
       }
       if (completed) {
         r.state_ = "completed";
-        if (r.start_ != nullptr) {
-          r.duration_ = getDurationFromFirstEvent(*r.start_, *r.end_);
-        }
       }
     }
   }
@@ -495,36 +492,81 @@ struct NCCLTraceBuffer {
     return result;
   }
 
-  void retire_id(c10::optional<size_t> id) {
+  /*
+  Mark an Event as completed and free its events.
+
+  This is called by the watchdog thread, and is asynchronous from the
+  perspective of the main thread.
+
+  compute_duration defaults to true since retire_id is only called in the
+  watchdog thread, which is currently a place we call cuda APIs which may hang,
+  but care should be taken to avoid computing duration in any function that must
+  never hang. (timing must also be enabled for compute_duration - see
+  TORCH_NCCL_ENABLE_TIMING).
+  */
+  void retire_id(c10::optional<size_t> id, bool compute_duration = true) {
     if (!enabled_ || !id) {
       return;
     }
+
+    bool can_compute_duration = false;
+    EventList* startEvents = nullptr;
+    EventList* endEvents = nullptr;
+    c10::optional<float> duration = c10::nullopt;
+
     std::lock_guard<std::mutex> guard(mutex_);
+
     auto& entry = entries_.at(*id % max_entries_);
     if (entry.id_ == *id) {
       update_state(entry);
+
+      if (compute_duration) {
+        can_compute_duration = strcmp(entry.state_, "completed") == 0 &&
+            entry.start_ && entry.end_;
+        startEvents = entry.start_;
+        endEvents = entry.end_;
+      }
+    }
+
+    mutex_.unlock();
+    // Compute duration without without holding the lock, because
+    // cudaEventDuration() can hang, and we need to acquire the lock before we
+    // can dump(), which we never want to block.
+    if (can_compute_duration) {
+      duration = getDurationFromFirstEvent(*startEvents, *endEvents);
+    }
+    mutex_.lock();
+
+    if (entry.id_ == *id) {
+      if (duration.has_value()) {
+        entry.duration_ = duration.value();
+      }
       entry.retired_ = true;
       entry.start_ = entry.end_ = nullptr;
+    } else {
+      LOG(INFO)
+          << "Failed retire_id " << *id
+          << ", maybe overwritten by another event before compute_duration() finished";
     }
   }
 
   std::string dump() {
     auto result = dump_entries();
     auto entries = new_list();
-    c10::IValue pg_id_s = "pg_id";
-    c10::IValue seq_id_s = "seq_id";
-    c10::IValue profiling_name_s = "profiling_name";
-    c10::IValue input_sizes_s = "input_sizes";
-    c10::IValue output_sizes_s = "output_sizes";
-    c10::IValue time_created_s = "time_created_us";
-    c10::IValue duration_s = "duration_ms";
+    c10::IValue pg_id_key = "pg_id";
+    c10::IValue seq_id_key = "seq_id";
+    c10::IValue profiling_name_key = "profiling_name";
+    c10::IValue input_sizes_key = "input_sizes";
+    c10::IValue output_sizes_key = "output_sizes";
+    c10::IValue time_created_key = "time_created_us";
+    c10::IValue duration_key = "duration_ms";
 
-    c10::IValue frames_s = "frames";
-    c10::IValue state_s = "state";
-    c10::IValue line_s = "line";
-    c10::IValue name_s = "name";
-    c10::IValue filename_s = "filename";
-    c10::IValue retired_s = "retired";
+    c10::IValue frames_key = "frames";
+    c10::IValue state_key = "state";
+    c10::IValue line_key = "line";
+    c10::IValue name_key = "name";
+    c10::IValue filename_key = "filename";
+    c10::IValue retired_key = "retired";
 
     std::vector<torch::CapturedTraceback*> tracebacks;
     for (auto& e : result) {
@@ -534,9 +576,9 @@ struct NCCLTraceBuffer {
     std::vector<c10::IValue> all_frames;
     for (const auto& f : stracebacks.all_frames) {
       auto d = new_dict();
-      d.insert(name_s, f.funcname);
-      d.insert(filename_s, f.filename);
-      d.insert(line_s, int64_t(f.lineno));
+      d.insert(name_key, f.funcname);
+      d.insert(filename_key, f.filename);
+      d.insert(line_key, int64_t(f.lineno));
       all_frames.emplace_back(std::move(d));
     }
 
@@ -544,12 +586,12 @@ struct NCCLTraceBuffer {
       auto& e = result.at(i);
       auto& tb = stracebacks.tracebacks.at(i);
       auto dict = new_dict();
-      dict.insert(pg_id_s, int64_t(e.pg_id_));
-      dict.insert(seq_id_s, int64_t(e.seq_id_));
-      dict.insert(profiling_name_s, e.profiling_name_);
-      dict.insert(time_created_s, int64_t(e.time_created_ / 1000));
+      dict.insert(pg_id_key, int64_t(e.pg_id_));
+      dict.insert(seq_id_key, int64_t(e.seq_id_));
+      dict.insert(profiling_name_key, e.profiling_name_);
+      dict.insert(time_created_key, int64_t(e.time_created_ / 1000));
       if (e.duration_) {
-        dict.insert(duration_s, *e.duration_);
+        dict.insert(duration_key, *e.duration_);
       }
 
       auto it = e.sizes_.begin();
@@ -566,16 +608,16 @@ struct NCCLTraceBuffer {
         return sizes;
       };
 
-      dict.insert(input_sizes_s, read_sizes(e.input_dims_));
-      dict.insert(output_sizes_s, read_sizes(e.output_dims_));
-      dict.insert(state_s, e.state_);
-      dict.insert(retired_s, e.retired_);
+      dict.insert(input_sizes_key, read_sizes(e.input_dims_));
+      dict.insert(output_sizes_key, read_sizes(e.output_dims_));
+      dict.insert(state_key, e.state_);
+      dict.insert(retired_key, e.retired_);
 
       auto frames = new_list();
       for (int64_t frame : tb) {
         frames.push_back(all_frames.at(frame));
       }
-      dict.insert(frames_s, frames);
+      dict.insert(frames_key, frames);
       entries.push_back(dict);
     }
     return pickle_str(entries);
