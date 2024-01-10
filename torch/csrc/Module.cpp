@@ -331,6 +331,16 @@ PyObject* THPModule_setDefaultDtype(PyObject* _unused, PyObject* dtype) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule__tensor_use_count(PyObject* _unused, PyObject* cdata) {
+  HANDLE_TH_ERRORS
+  auto tensor_impl_ptr = THPUtils_unpackLong(cdata);
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+  auto tensor_impl = (c10::TensorImpl*)tensor_impl_ptr;
+  return THPUtils_packUInt64(
+      c10::raw::weak_intrusive_ptr::use_count(tensor_impl));
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject* a_ = nullptr;
@@ -1388,6 +1398,7 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      (PyCFunction)(void (*)())THPModule_has_torch_function_variadic,
      METH_FASTCALL,
      nullptr},
+    {"_tensor_use_count", THPModule__tensor_use_count, METH_O, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 void THCPStream_init(PyObject* module);
