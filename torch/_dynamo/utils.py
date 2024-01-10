@@ -423,6 +423,9 @@ def hashable(x):
         return True
     except TypeError:
         return False
+    # cannot hash writable memoryview object
+    except ValueError:
+        return False
 
 
 def nothing(*args, **kwargs):
@@ -1059,8 +1062,11 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     return found
 
 
-def tensor_to_id(value):
-    return [id(k) if isinstance(k, torch.Tensor) else k for k in value.keys()]
+def tensor_or_module_to_id(value):
+    return [
+        id(k) if isinstance(k, (torch.Tensor, torch.nn.Module)) else k
+        for k in value.keys()
+    ]
 
 
 def const_repr(x, *, local) -> str:

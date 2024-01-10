@@ -346,30 +346,6 @@ c10::optional<std::function<std::string()>>& get_cpp_trace_dumper() {
   return dumper;
 }
 
-c10::optional<std::function<bool()>>& get_gil_checker() {
-  static c10::optional<std::function<bool()>> gil_checker(c10::nullopt);
-  return gil_checker;
-}
-
-std::future<bool> launchAsyncGilCheck() {
-  std::promise<bool> resultPromise;
-  std::future<bool> resultFuture = resultPromise.get_future();
-
-  std::thread workerThread([promise = std::move(resultPromise)]() mutable {
-    try {
-      auto& gil_checker = get_gil_checker();
-      promise.set_value(gil_checker.value()());
-    } catch (...) {
-      promise.set_exception(std::current_exception());
-    }
-  });
-
-  // Detach the thread to allow it to run independently
-  workerThread.detach();
-
-  return resultFuture;
-}
-
 // Return CUDA device with ordinal given by input rank.  If we aren't
 // bound to a specific device, there is no strict guarantee that this
 // heuristic is the correct assignment of ranks to GPUs that Python
@@ -1279,24 +1255,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   auto& cpp_dumper = get_cpp_trace_dumper();
   if (cpp_dumper.has_value()) {
     LOG(INFO) << "Dumping c++ stacktraces: " << cpp_dumper.value()();
-  }
-
-  auto& gil_checker = get_gil_checker();
-  if (gil_checker.has_value()) {
-    auto fut = launchAsyncGilCheck();
-    auto kGilCheckTimeout = std::chrono::seconds(1);
-    auto futStatus = fut.wait_for(kGilCheckTimeout);
-    if (futStatus != std::future_status::ready) {
-      TORCH_CHECK(
-          futStatus != std::future_status::deferred,
-          "Expected the future to have been launched eagerly.");
-      LOG(ERROR)
-          << "Could not acquire GIL within 1 sec on exit, possible GIL induced hang";
-    }
-    LOG(INFO) << "Could acquire GIL on exit";
-  } else {
-    LOG(INFO)
-        << "GIL checker was not registered, perhaps this is a no-python build?";
   }
 
   // Store debug info to storage if no other thread does it. (By default to
