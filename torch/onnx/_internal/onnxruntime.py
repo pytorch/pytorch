@@ -770,6 +770,8 @@ class OrtBackend:
             # To send operator.mul to ORT, add the corresponding string
             # recognized by PyTorch's OperatorSupport class.
             "_operator.mul": None,
+            "_operator.add": None,
+            "_operator.sub": None,
         }
 
         self._supported_ops = OrtOperatorSupport(support_dict, extra_support_dict)
