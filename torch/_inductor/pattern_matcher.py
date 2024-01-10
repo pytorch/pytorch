@@ -861,6 +861,14 @@ def _return_true(match):
     return True
 
 
+def log_trace_fialure(search_fn, e):
+    log.info(
+        "Replacement pattern %s failed to apply due to shape mismatch: %s",
+        search_fn.__name__,
+        e,
+    )
+
+
 def register_replacement(
     search_fn,
     replace_fn,
@@ -885,7 +893,7 @@ def register_replacement(
         pass_dict: dict of passes to register to
         extra_check: additional check to run on match(using real shapes)
     """
-    argnames = [*inspect.signature(search_fn).parameters.keys()]
+    argnames_static = [*inspect.signature(search_fn).parameters.keys()]
 
     def check_fn(match: Match):
         """
@@ -894,6 +902,7 @@ def register_replacement(
 
         Recheck the match with the correct shapes.
         """
+        argnames = list(argnames_static)
         for name in argnames:
             if name not in match.kwargs:
                 raise RuntimeError(
@@ -906,6 +915,7 @@ def register_replacement(
                 [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
             )
         )
+        sym_args = []
         with torch._dynamo.utils.detect_fake_mode(args):
             for i, grad in enumerate(requires_grad):
                 if isinstance(args[i], torch.Tensor):
@@ -919,15 +929,53 @@ def register_replacement(
                         device=args[i].device,
                         requires_grad=grad,
                     )
-            try:
-                specific_graph = trace_fn(search_fn, args)
-            except RuntimeError as e:
-                log.info(
-                    "Replacement pattern %s failed to apply due to shape mismatch: %s",
-                    search_fn.__name__,
-                    e,
-                )
-                return False
+                    for v in itertools.chain(args[i].shape, args[i].stride()):
+                        if isinstance(v, torch.SymInt) and v not in sym_args:
+                            sym_args.append(v)
+
+            if sym_args:
+                # AOT Autograd and make fx will dedupe symbolic shape size
+                # accesses of sym ints that appear as inputs
+                # We don't want the sym_size uses to interfere with pattern matching
+                # so we provide them as inputs.
+                # Later, when we actually do the replacement, the symbolic shape
+                # sizes will get re-traced and added to the graph.
+
+                def search_fn_new(*args_new):
+                    return search_fn(*args_new[len(args_new) - len(args) :])
+
+                try:
+                    specific_graph = trace_fn(search_fn_new, sym_args + args)
+                except RuntimeError as e:
+                    log_trace_fialure(search_fn, e)
+                    return False
+
+                # correct argnames in the graph
+                sym_arg_names = []
+                for i, placeholder in zip(
+                    range(len(sym_args) + len(args)),
+                    specific_graph.graph.nodes,
+                ):
+                    if i < len(sym_args):
+                        sym_arg_names.append(placeholder.target)
+                        continue
+
+                    with specific_graph.graph.inserting_after(placeholder):
+                        new_node = specific_graph.graph.placeholder(
+                            argnames[i - len(sym_args)]
+                        )
+                        new_node.target = new_node.name
+                        placeholder.replace_all_uses_with(new_node)
+                        specific_graph.graph.erase_node(placeholder)
+
+                argnames = sym_arg_names + argnames
+            else:
+                try:
+                    specific_graph = trace_fn(search_fn, args)
+                except RuntimeError as e:
+                    log_trace_fialure(search_fn, e)
+                    return False
+
             specific_pattern = fx_to_pattern(
                 specific_graph,
                 argnames=argnames,
@@ -943,7 +991,7 @@ def register_replacement(
 
     def normalize_args(**kwargs):
         args = []
-        for name in argnames:
+        for name in argnames_static:
             args.append(kwargs.pop(name))
         for i in range(1, len(kwargs) + 1):
             if f"tangents_{i}" not in kwargs:
@@ -1236,7 +1284,10 @@ def fwd_only(fn, args) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
-        gm = make_fx(fn, select_decomp_table())(*args)
+        mode = (
+            "real" if not torch._inductor.utils.any_is_symbolic(*args) else "symbolic"
+        )
+        gm = make_fx(fn, select_decomp_table(), tracing_mode=mode)(*args)
     gm.graph.eliminate_dead_code()
     gm.recompile()
     return gm
