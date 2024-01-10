@@ -4,17 +4,27 @@ import functools
 import inspect
 import numbers
 import re
+import weakref
 from copy import copy
 from functools import wraps
-from typing import Any, Callable, Iterator, OrderedDict, Sequence
+from typing import Any, Callable, Iterator, OrderedDict, Sequence, Type
 
 from functorch import dim as ftdim
 
 import torch
 from torch import multiprocessing as mp, nn, Tensor
 from torch.utils._pytree import tree_map
+from ._lazy import LazyStackedTensorDict
 from ._torch_func import TD_HANDLED_FUNCTIONS
-from .base import _is_tensor_collection, CompatibleType, NO_DEFAULT, TensorDictBase
+from .base import (
+    _default_is_leaf,
+    _is_tensor_collection,
+    _register_tensor_class,
+    CompatibleType,
+    NO_DEFAULT,
+    T,
+    TensorDictBase,
+)
 from .tensordict import _SubTensorDict, TensorDict
 from .utils import (
     _LOCK_ERROR,
@@ -28,17 +38,27 @@ from .utils import (
 
 
 def _apply_leaves(data, fn):
-    if isinstance(data, _SubTensorDict):
-        raise RuntimeError(
-            "Using a _SubTensorDict within a TensorDictParams isn't permitted."
-        )
-    elif isinstance(data, TensorDictBase):
+    if isinstance(data, TensorDict):
         with data.unlock_():
             for key, val in list(data.items()):
                 data._set_str(
                     key, _apply_leaves(val, fn), validated=True, inplace=False
                 )
         return data
+    elif isinstance(data, LazyStackedTensorDict):
+        # this is currently not implemented as the registration of params will only work
+        # with plain TensorDict. The solution will be using pytree to get each independent
+        # leaf
+        raise RuntimeError(
+            "Using a LazyStackedTensorDict within a TensorDictParams isn't permitted."
+        )
+        # for _data in data.tensordicts:
+        #     _apply_leaves(_data, fn)
+        # return data
+    elif isinstance(data, _SubTensorDict):
+        raise RuntimeError(
+            "Using a _SubTensorDict within a TensorDictParams isn't permitted."
+        )
     else:
         return fn(data)
 
@@ -177,9 +197,21 @@ def _carry_over(func):
     @wraps(func)
     def new_func(self, *args, **kwargs):
         out = getattr(self._param_td, name)(*args, **kwargs)
-        out = TensorDictParams(out, no_convert=True)
-        out.no_convert = self.no_convert
+        if out is self._param_td:
+            return self
+        if not isinstance(out, TensorDictParams):
+            out = TensorDictParams(out, no_convert=True)
+            out.no_convert = self.no_convert
         return out
+
+    return new_func
+
+
+def _apply_on_data(func):
+    @wraps(func)
+    def new_func(self, *args, **kwargs):
+        getattr(self.data, func.__name__)(*args, **kwargs)
+        return self
 
     return new_func
 
@@ -209,10 +241,15 @@ class TensorDictParams(TensorDictBase, nn.Module):
             If ``no_convert`` is ``True`` and if non-parameters are present, they
             will be registered as buffers.
             Defaults to ``False``.
+        lock (bool): if ``True``, the tensordict hosted by TensorDictParams will
+            be locked. This can be useful to avoid unwanted modifications, but
+            also restricts the operations that can be done over the object (and
+            can have significant performance impact when `unlock_()` is required).
+            Defaults to ``False``.
 
     Examples:
         >>> from torch import nn
-        >>> from tensordict import TensorDict
+        >>> from torch.dict import TensorDict
         >>> module = nn.Sequential(nn.Linear(3, 4), nn.Linear(4, 4))
         >>> params = TensorDict.from_module(module)
         >>> params.lock_()
@@ -248,7 +285,9 @@ class TensorDictParams(TensorDictBase, nn.Module):
 
     """
 
-    def __init__(self, parameters: TensorDictBase, *, no_convert=False):
+    def __init__(
+        self, parameters: TensorDictBase, *, no_convert=False, lock: bool = False
+    ):
         super().__init__()
         if isinstance(parameters, TensorDictParams):
             parameters = parameters._param_td
@@ -258,7 +297,10 @@ class TensorDictParams(TensorDictBase, nn.Module):
             func = _maybe_make_param
         else:
             func = _maybe_make_param_or_buffer
-        self._param_td = _apply_leaves(self._param_td, lambda x: func(x)).lock_()
+        self._param_td = _apply_leaves(self._param_td, lambda x: func(x))
+        self._lock_content = lock
+        if lock:
+            self._param_td.lock_()
         self._reset_params()
         self._is_locked = False
         self._locked_tensordicts = []
@@ -282,18 +324,21 @@ class TensorDictParams(TensorDictBase, nn.Module):
     def _reset_params(self):
         parameters = self._param_td
         param_keys = []
+        params = []
         buffer_keys = []
+        buffers = []
         for key, value in parameters.items(True, True):
+            # flatten key
+            if isinstance(key, tuple):
+                key = "_".join(key)
             if isinstance(value, nn.Parameter):
                 param_keys.append(key)
+                params.append(value)
             else:
                 buffer_keys.append(key)
-        self.__dict__["_parameters"] = (
-            parameters.select(*param_keys).flatten_keys("_").to_dict()
-        )
-        self.__dict__["_buffers"] = (
-            parameters.select(*buffer_keys).flatten_keys("_").to_dict()
-        )
+                buffers.append(value)
+        self.__dict__["_parameters"] = dict(zip(param_keys, params))
+        self.__dict__["_buffers"] = dict(zip(buffer_keys, buffers))
 
     @classmethod
     def __torch_function__(
@@ -344,11 +389,14 @@ class TensorDictParams(TensorDictBase, nn.Module):
     ) -> TensorDictBase:
         ...
 
+    @lock_blocked
     def update(
         self,
         input_dict_or_td: dict[str, CompatibleType] | TensorDictBase,
         clone: bool = False,
         inplace: bool = False,
+        *,
+        keys_to_update: Sequence[NestedKey] | None = None,
     ) -> TensorDictBase:
         if not self.no_convert:
             func = _maybe_make_param
@@ -359,7 +407,13 @@ class TensorDictParams(TensorDictBase, nn.Module):
         else:
             input_dict_or_td = tree_map(func, input_dict_or_td)
         with self._param_td.unlock_():
-            TensorDictBase.update(self, input_dict_or_td, clone=clone, inplace=inplace)
+            TensorDictBase.update(
+                self,
+                input_dict_or_td,
+                clone=clone,
+                inplace=inplace,
+                keys_to_update=keys_to_update,
+            )
             self._reset_params()
         return self
 
@@ -377,10 +431,6 @@ class TensorDictParams(TensorDictBase, nn.Module):
     ) -> TensorDictBase:
         ...
 
-    @_unlock_and_set
-    def apply_(self, fn: Callable, *others) -> TensorDictBase:
-        ...
-
     def map(
         self,
         fn: Callable,
@@ -392,7 +442,7 @@ class TensorDictParams(TensorDictBase, nn.Module):
     ):
         raise RuntimeError(
             "Cannot call map on a TensorDictParams object. Convert it "
-            "to a detached tensordict first (``tensordict.data``) and call "
+            "to a detached tensordict first (through ``tensordict.data`` or ``tensordict.to_tensordict()``) and call "
             "map in a second time."
         )
 
@@ -405,6 +455,21 @@ class TensorDictParams(TensorDictBase, nn.Module):
         device: torch.device | None = None,
         names: Sequence[str] | None = None,
         inplace: bool = False,
+        default: Any = NO_DEFAULT,
+        **constructor_kwargs,
+    ) -> TensorDictBase:
+        ...
+
+    @_unlock_and_set(inplace=True)
+    def named_apply(
+        self,
+        fn: Callable,
+        *others: TensorDictBase,
+        batch_size: Sequence[int] | None = None,
+        device: torch.device | None = None,
+        names: Sequence[str] | None = None,
+        inplace: bool = False,
+        default: Any = NO_DEFAULT,
         **constructor_kwargs,
     ) -> TensorDictBase:
         ...
@@ -448,9 +513,18 @@ class TensorDictParams(TensorDictBase, nn.Module):
     def clone(self, recurse: bool = True) -> TensorDictBase:
         """Clones the TensorDictParams.
 
-        The effect of this call is different from a regular torch.Tensor.clone call
-        in that it will create a TensorDictParams instance with a new copy of the
-        parameters and buffers __detached__ from the current graph.
+        .. warning::
+            The effect of this call is different from a regular torch.Tensor.clone call
+            in that it will create a TensorDictParams instance with a new copy of the
+            parameters and buffers __detached__ from the current graph. For a
+            regular clone (ie, cloning leaf parameters onto a new tensor that
+            is part of the graph), simply call
+
+                >>> params.apply(torch.clone)
+
+        .. note::
+            If a parameter is duplicated in the tree, ``clone`` will preserve this
+            identity (ie, parameter tying is preserved).
 
         See :meth:`tensordict.TensorDictBase.clone` for more info on the clone
         method.
@@ -459,14 +533,21 @@ class TensorDictParams(TensorDictBase, nn.Module):
         if not recurse:
             return TensorDictParams(self._param_td.clone(False), no_convert=True)
 
-        def _clone(tensor):
+        memo = {}
+
+        def _clone(tensor, memo=memo):
+            result = memo.get(tensor, None)
+            if result is not None:
+                return result
+
             if isinstance(tensor, nn.Parameter):
-                tensor = nn.Parameter(
+                result = nn.Parameter(
                     tensor.data.clone(), requires_grad=tensor.requires_grad
                 )
             else:
-                tensor = Buffer(tensor.data.clone(), requires_grad=tensor.requires_grad)
-            return tensor
+                result = Buffer(tensor.data.clone(), requires_grad=tensor.requires_grad)
+            memo[tensor] = result
+            return result
 
         return TensorDictParams(self._param_td.apply(_clone), no_convert=True)
 
@@ -491,7 +572,7 @@ class TensorDictParams(TensorDictBase, nn.Module):
         ...
 
     def __hash__(self):
-        return hash((id(self), id(self._param_td)))
+        return hash((id(self), id(self.__dict__.get("_param_td", None))))
 
     @_fallback
     def __eq__(self, other: object) -> TensorDictBase:
@@ -502,9 +583,12 @@ class TensorDictParams(TensorDictBase, nn.Module):
         ...
 
     def __getattr__(self, item: str) -> Any:
-        try:
-            return getattr(self._param_td, item)
-        except AttributeError:
+        if not item.startswith("_"):
+            try:
+                return getattr(self.__dict__["_param_td"], item)
+            except AttributeError:
+                return super().__getattr__(item)
+        else:
             return super().__getattr__(item)
 
     @_fallback
@@ -583,10 +667,6 @@ class TensorDictParams(TensorDictBase, nn.Module):
     def _create_nested_str(self, *args, **kwargs):
         ...
 
-    @_fallback
-    def _stack_onto_(self, *args, **kwargs):
-        ...
-
     @_fallback_property
     def batch_size(self) -> torch.Size:
         ...
@@ -629,9 +709,18 @@ class TensorDictParams(TensorDictBase, nn.Module):
         ...
 
     def memmap_(
-        self, prefix: str | None = None, copy_existing: bool = False
+        self,
+        prefix: str | None = None,
+        copy_existing: bool = False,
+        num_threads: int = 0,
     ) -> TensorDictBase:
-        raise RuntimeError("Cannot build a memmap TensorDict in-place.")
+        raise RuntimeError(
+            "Cannot build a memmap TensorDict in-place. Use memmap or memmap_like instead."
+        )
+
+    _memmap_ = TensorDict._memmap_
+
+    _load_memmap = TensorDict._load_memmap
 
     @_fallback_property
     def names(self):
@@ -670,48 +759,34 @@ class TensorDictParams(TensorDictBase, nn.Module):
     def shape(self) -> torch.Size:
         ...
 
-    def _lock_propagate(self, lock_ids=None):
+    def _propagate_lock(self, _lock_parents_weakrefs=None):
         """Registers the parent tensordict that handles the lock."""
         self._is_locked = True
-        is_root = lock_ids is None
-        if is_root:
-            lock_ids = set()
-        self._lock_id = self._lock_id.union(lock_ids)
-        lock_ids = lock_ids.union({id(self)})
-        _locked_tensordicts = []
+        if _lock_parents_weakrefs is None:
+            _lock_parents_weakrefs = []
+        self._lock_parents_weakrefs += _lock_parents_weakrefs
+        _lock_parents_weakrefs.append(weakref.ref(self))
         # we don't want to double-lock the _param_td attrbute which is locked by default
         if not self._param_td.is_locked:
-            for key, value in self._param_td.items():
-                if _is_tensor_collection(type(value)):
-                    value._lock_propagate(lock_ids)
-                    _locked_tensordicts.append(value)
-        if is_root:
-            self._locked_tensordicts = _locked_tensordicts
-        else:
-            self._locked_tensordicts += _locked_tensordicts
+            self._param_td._propagate_lock(_lock_parents_weakrefs)
 
     @erase_cache
-    def _propagate_unlock(self, lock_ids=None):
-        if lock_ids is not None:
-            self._lock_id.difference_update(lock_ids)
-        else:
-            lock_ids = set()
+    def _propagate_unlock(self):
+        # if we end up here, we can clear the graph associated with this td
         self._is_locked = False
-
-        unlocked_tds = [self]
-        lock_ids.add(id(self))
-        self._locked_tensordicts = []
 
         self._is_shared = False
         self._is_memmap = False
-        return unlocked_tds
+
+        if not self._lock_content:
+            return self._param_td._propagate_unlock()
 
     unlock_ = TensorDict.unlock_
     lock_ = TensorDict.lock_
 
     @property
     def data(self):
-        return self.apply(lambda x: x.data)
+        return self._param_td.detach()
 
     @_unlock_and_set(inplace=True)
     def flatten_keys(
@@ -729,7 +804,7 @@ class TensorDictParams(TensorDictBase, nn.Module):
     def exclude(self, *keys: str, inplace: bool = False) -> TensorDictBase:
         ...
 
-    @_fallback
+    @_carry_over
     def transpose(self, dim0, dim1):
         ...
 
@@ -738,6 +813,14 @@ class TensorDictParams(TensorDictBase, nn.Module):
         ...
 
     @_fallback
+    def _permute(
+        self,
+        *dims_list: int,
+        dims: list[int] | None = None,
+    ) -> TensorDictBase:
+        ...
+
+    @_carry_over
     def permute(
         self,
         *dims_list: int,
@@ -746,15 +829,27 @@ class TensorDictParams(TensorDictBase, nn.Module):
         ...
 
     @_fallback
+    def _squeeze(self, dim: int | None = None) -> TensorDictBase:
+        ...
+
+    @_carry_over
     def squeeze(self, dim: int | None = None) -> TensorDictBase:
         ...
 
     @_fallback
+    def _unsqueeze(self, dim: int) -> TensorDictBase:
+        ...
+
+    @_carry_over
     def unsqueeze(self, dim: int) -> TensorDictBase:
         ...
 
     @_fallback
     def __xor__(self, other):
+        ...
+
+    @_fallback
+    def __or__(self, other):
         ...
 
     _check_device = TensorDict._check_device
@@ -777,7 +872,12 @@ class TensorDictParams(TensorDictBase, nn.Module):
         ...
 
     @_fallback
-    def memmap_like(self, prefix: str | None = None) -> T:
+    def memmap_like(
+        self,
+        prefix: str | None = None,
+        copy_existing: bool = False,
+        num_threads: int = 0,
+    ) -> T:
         ...
 
     @_fallback
@@ -790,10 +890,19 @@ class TensorDictParams(TensorDictBase, nn.Module):
 
     @_fallback
     @as_decorator()
-    def to_module(self, module: nn.Module, return_swap: bool = False):
+    def to_module(
+        self,
+        module,
+        *,
+        inplace: bool = False,
+        return_swap: bool = True,
+        swap_dest=None,
+        memo=None,
+        use_state_dict: bool = False,
+    ):
         ...
 
-    @_fallback
+    @_carry_over
     def view(self, *args, **kwargs):
         ...
 
@@ -805,17 +914,24 @@ class TensorDictParams(TensorDictBase, nn.Module):
         return f"TensorDictParams(params={self._param_td})"
 
     def values(
-        self, include_nested: bool = False, leaves_only: bool = False
+        self,
+        include_nested: bool = False,
+        leaves_only: bool = False,
+        is_leaf: Callable[[Type], bool] | None = None,
     ) -> Iterator[CompatibleType]:
+        if is_leaf is None:
+            is_leaf = _default_is_leaf
         for v in self._param_td.values(include_nested, leaves_only):
-            if _is_tensor_collection(type(v)):
+            if not is_leaf(type(v)):
                 yield v
                 continue
             yield self._apply_get_post_hook(v)
 
     def state_dict(
-        self, *args, destination=None, prefix="", keep_vars=False, flatten=False
+        self, *args, destination=None, prefix="", keep_vars=False, flatten=True
     ):
+        # flatten must be True by default to comply with module's state-dict API
+        # since we want all params to be visible at root
         return self._param_td.state_dict(
             destination=destination,
             prefix=prefix,
@@ -826,6 +942,9 @@ class TensorDictParams(TensorDictBase, nn.Module):
     def load_state_dict(
         self, state_dict: OrderedDict[str, Any], strict=True, assign=False
     ):
+        # The state-dict is presumably the result of a call to TensorDictParams.state_dict
+        # but can't be sure.
+
         state_dict_tensors = {}
         state_dict = dict(state_dict)
         for k, v in list(state_dict.items()):
@@ -864,13 +983,85 @@ class TensorDictParams(TensorDictBase, nn.Module):
         self.data.load_state_dict(data)
 
     def items(
-        self, include_nested: bool = False, leaves_only: bool = False
+        self,
+        include_nested: bool = False,
+        leaves_only: bool = False,
+        is_leaf: Callable[[Type], bool] | None = None,
     ) -> Iterator[CompatibleType]:
+        if is_leaf is None:
+            is_leaf = _default_is_leaf
         for k, v in self._param_td.items(include_nested, leaves_only):
-            if _is_tensor_collection(type(v)):
+            if not is_leaf(type(v)):
                 yield k, v
                 continue
             yield k, self._apply_get_post_hook(v)
+
+    @_apply_on_data
+    def zero_(self) -> T:
+        ...
+
+    @_apply_on_data
+    def fill_(self, key: NestedKey, value: float | bool) -> T:
+        ...
+
+    @_apply_on_data
+    def copy_(self, tensordict: T, non_blocking: bool = None) -> T:
+        ...
+
+    @_apply_on_data
+    def set_at_(self, key: NestedKey, value: CompatibleType, index: IndexType) -> T:
+        ...
+
+    @_apply_on_data
+    def set_(
+        self,
+        key: NestedKey,
+        item: CompatibleType,
+    ) -> T:
+        ...
+
+    @_apply_on_data
+    def _stack_onto_(
+        self,
+        list_item: list[CompatibleType],
+        dim: int,
+    ) -> T:
+        ...
+
+    @_apply_on_data
+    def _stack_onto_at_(
+        self,
+        key: str,
+        list_item: list[CompatibleType],
+        dim: int,
+        idx: IndexType,
+    ) -> T:
+        ...
+
+    @_apply_on_data
+    def update_(
+        self,
+        input_dict_or_td: dict[str, CompatibleType] | T,
+        clone: bool = False,
+        *,
+        keys_to_update: Sequence[NestedKey] | None = None,
+    ) -> T:
+        ...
+
+    @_apply_on_data
+    def update_at_(
+        self,
+        input_dict_or_td: dict[str, CompatibleType] | T,
+        idx: IndexType,
+        clone: bool = False,
+        *,
+        keys_to_update: Sequence[NestedKey] | None = None,
+    ) -> T:
+        ...
+
+    @_apply_on_data
+    def apply_(self, fn: Callable, *others) -> T:
+        ...
 
     def _apply(self, fn, recurse=True):
         """Modifies torch.nn.Module._apply to work with Buffer class."""
@@ -905,8 +1096,6 @@ class TensorDictParams(TensorDictBase, nn.Module):
                 param.data = param_applied
                 out_param = param
             else:
-                assert isinstance(param, nn.Parameter)
-                assert param.is_leaf
                 out_param = nn.Parameter(param_applied, param.requires_grad)
                 self._parameters[key] = out_param
 
@@ -917,10 +1106,8 @@ class TensorDictParams(TensorDictBase, nn.Module):
                     param.grad, grad_applied
                 )
                 if should_use_set_data:
-                    assert out_param.grad is not None
                     out_param.grad.data = grad_applied
                 else:
-                    assert param.grad.is_leaf
                     out_param.grad = grad_applied.requires_grad_(
                         param.grad.requires_grad
                     )
@@ -938,8 +1125,6 @@ class TensorDictParams(TensorDictBase, nn.Module):
                 buffer.data = buffer_applied
                 out_buffer = buffer
             else:
-                assert isinstance(buffer, Buffer)
-                assert buffer.is_leaf
                 out_buffer = Buffer(buffer_applied, buffer.requires_grad)
                 self._buffers[key] = out_buffer
 
@@ -950,10 +1135,8 @@ class TensorDictParams(TensorDictBase, nn.Module):
                     buffer.grad, grad_applied
                 )
                 if should_use_set_data:
-                    assert out_buffer.grad is not None
                     out_buffer.grad.data = grad_applied
                 else:
-                    assert buffer.grad.is_leaf
                     out_buffer.grad = grad_applied.requires_grad_(
                         buffer.grad.requires_grad
                     )
@@ -985,4 +1168,7 @@ def _empty_like(td: TensorDictBase, *args, **kwargs) -> TensorDictBase:
             "cloned, preventing empty_like to be called. "
             "Consider calling tensordict.to_tensordict() first."
         ) from err
-    return tdclone.data.apply_(lambda x: torch.empty_like(x, *args, **kwargs))
+    return tdclone.apply_(lambda x: torch.empty_like(x, *args, **kwargs))
+
+
+_register_tensor_class(TensorDictParams)

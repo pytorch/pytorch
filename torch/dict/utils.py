@@ -39,12 +39,6 @@ from typing import (
 
 import numpy as np
 from packaging.version import parse
-from tensordict._tensordict import (  # noqa: F401
-    _unravel_key_to_tuple,
-    unravel_key,
-    unravel_key_list,
-    unravel_keys,
-)
 
 import torch
 from torch import Tensor
@@ -55,19 +49,6 @@ from torch.utils.data._utils.worker import _generate_state
 
 if TYPE_CHECKING:
     from .base import TensorDictBase
-
-TORCHREC_ERR = None
-try:
-    from torchrec import KeyedJaggedTensor
-
-    _has_torchrec = True
-except ImportError as err:
-    _has_torchrec = False
-
-    class KeyedJaggedTensor:  # noqa: D103, D101
-        pass
-
-    TORCHREC_ERR = err
 
 T = TypeVar("T", bound="TensorDictBase")
 
@@ -771,7 +752,7 @@ def cache(fun):
 
     Examples:
         >>> import timeit
-        >>> from tensordict import TensorDict
+        >>> from torch.dict import TensorDict
         >>> class SomeOtherTd(TensorDict):
         ...     @cache
         ...     def all_keys(self):
@@ -883,7 +864,7 @@ class as_decorator:
     """Converts a method to a decorator.
 
     Examples:
-        >>> from tensordict import TensorDict
+        >>> from torch.dict import TensorDict
         >>> data = TensorDict({}, [])
         >>> with data.lock_(): # lock_ is decorated
         ...     assert data.is_locked

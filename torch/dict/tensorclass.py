@@ -3,14 +3,18 @@ from __future__ import annotations
 import dataclasses
 import functools
 import inspect
+import json
 import numbers
+import os
+import pickle
 import re
 import sys
 import warnings
 from copy import copy
 from dataclasses import dataclass
+from pathlib import Path
 from textwrap import indent
-from typing import Any, Callable, Sequence, TypeVar
+from typing import Any, Callable, List, Sequence, TypeVar
 
 import torch
 
@@ -19,6 +23,7 @@ from torch import Tensor
 
 from torch.dict._torch_func import TD_HANDLED_FUNCTIONS
 from torch.dict.base import (
+    _register_tensor_class,
     _unravel_key_to_tuple,
     is_tensor_collection,
     NO_DEFAULT,
@@ -28,6 +33,7 @@ from torch.dict.tensordict import TensorDict
 
 from torch.dict.utils import (
     _get_repr,
+    _is_json_serializable,
     _LOCK_ERROR,
     DeviceType,
     IndexType,
@@ -71,7 +77,7 @@ def tensorclass(cls: T) -> T:
     others.
 
     Examples:
-        >>> from tensordict import tensorclass
+        >>> from torch.dict import tensorclass
         >>> import torch
         >>> from typing import Optional
         >>>
@@ -103,7 +109,7 @@ def tensorclass(cls: T) -> T:
 
     It is also possible to nest tensorclasses instances within each other:
         Examples:
-        >>> from tensordict import tensorclass
+        >>> from torch.dict import tensorclass
         >>> import torch
         >>> from typing import Optional
         >>>
@@ -136,19 +142,21 @@ def tensorclass(cls: T) -> T:
 
         # get the output type from the arguments / keyword arguments
         if len(args) > 0:
-            tc = args[0]
+            tensorclass_instance = args[0]
         else:
-            tc = kwargs.get("input", kwargs["tensors"])
-        if isinstance(tc, (tuple, list)):
-            tc = tc[0]
-
+            tensorclass_instance = kwargs.get("input", kwargs["tensors"])
+        if isinstance(tensorclass_instance, (tuple, list)):
+            tensorclass_instance = tensorclass_instance[0]
         args = tuple(_arg_to_tensordict(arg) for arg in args)
         kwargs = {key: _arg_to_tensordict(value) for key, value in kwargs.items()}
 
-        res = TD_HANDLED_FUNCTIONS[func](*args, **kwargs)
-        if isinstance(res, (list, tuple)):
-            return res.__class__(_from_tensordict_with_copy(tc, td) for td in res)
-        return _from_tensordict_with_copy(tc, res)
+        result = TD_HANDLED_FUNCTIONS[func](*args, **kwargs)
+        if isinstance(result, (list, tuple)):
+            return result.__class__(
+                _from_tensordict_with_copy(tensorclass_instance, tensordict_result)
+                for tensordict_result in result
+            )
+        return _from_tensordict_with_copy(tensorclass_instance, result)
 
     cls = dataclass(cls)
     expected_keys = set(cls.__dataclass_fields__)
@@ -162,7 +170,8 @@ def tensorclass(cls: T) -> T:
     cls.__init__ = _init_wrapper(cls.__init__)
     cls._from_tensordict = classmethod(_from_tensordict_wrapper(expected_keys))
     cls.from_tensordict = cls._from_tensordict
-    cls.__torch_function__ = classmethod(__torch_function__)
+    if not hasattr(cls, "__torch_function__"):
+        cls.__torch_function__ = classmethod(__torch_function__)
     cls.__getstate__ = _getstate
     cls.__setstate__ = _setstate
     cls.__getattribute__ = _getattribute_wrapper(cls.__getattribute__)
@@ -173,8 +182,10 @@ def tensorclass(cls: T) -> T:
     cls.__setitem__ = _setitem
     cls.__repr__ = _repr
     cls.__len__ = _len
-    cls.__eq__ = __eq__
-    cls.__ne__ = __ne__
+    cls.__eq__ = _eq
+    cls.__ne__ = _ne
+    cls.__or__ = _or
+    cls.__xor__ = _xor
     cls.set = _set
     cls.set_at_ = _set_at_
     cls.del_ = _del_
@@ -183,10 +194,18 @@ def tensorclass(cls: T) -> T:
     cls.unbind = _unbind
     cls.state_dict = _state_dict
     cls.load_state_dict = _load_state_dict
+    cls._memmap_ = _memmap_
+
+    # Memmap
+    cls.memmap_like = TensorDictBase.memmap_like
+    cls.memmap_ = TensorDictBase.memmap_
+    cls.memmap = TensorDictBase.memmap
+    cls.load_memmap = TensorDictBase.load_memmap
+    cls._load_memmap = classmethod(_load_memmap)
 
     for attr in TensorDict.__dict__.keys():
         func = getattr(TensorDict, attr)
-        if inspect.ismethod(func):
+        if inspect.ismethod(func) and attr not in cls.__dict__:
             tdcls = func.__self__
             if issubclass(tdcls, TensorDictBase):  # detects classmethods
                 setattr(cls, attr, _wrap_classmethod(tdcls, cls, func))
@@ -197,10 +216,7 @@ def tensorclass(cls: T) -> T:
 
     cls.__doc__ = f"{cls.__name__}{inspect.signature(cls)}"
 
-    tensordict_lib.tensordict._ACCEPTED_CLASSES = (
-        *tensordict_lib.tensordict._ACCEPTED_CLASSES,
-        cls,
-    )
+    _register_tensor_class(cls)
     return cls
 
 
@@ -243,6 +259,7 @@ def _init_wrapper(init: Callable) -> Callable:
         *args: Any,
         batch_size: Sequence[int] | torch.Size | int,
         device: DeviceType | None = None,
+        names: List[str] | None = None,
         **kwargs,
     ):
         for value, key in zip(args, self.__dataclass_fields__):
@@ -268,7 +285,11 @@ def _init_wrapper(init: Callable) -> Callable:
             )
 
         self._tensordict = TensorDict(
-            {}, batch_size=torch.Size(batch_size), device=device, _run_checks=False
+            {},
+            batch_size=torch.Size(batch_size),
+            device=device,
+            names=names,
+            _run_checks=False,
         )
         # To save non tensor data (Nested tensor classes also go here)
         self._non_tensordict = {}
@@ -277,6 +298,7 @@ def _init_wrapper(init: Callable) -> Callable:
     new_params = [
         inspect.Parameter("batch_size", inspect.Parameter.KEYWORD_ONLY),
         inspect.Parameter("device", inspect.Parameter.KEYWORD_ONLY, default=None),
+        inspect.Parameter("names", inspect.Parameter.KEYWORD_ONLY, default=None),
     ]
     wrapper.__signature__ = init_sig.replace(parameters=params + new_params)
 
@@ -333,6 +355,70 @@ def _from_tensordict_wrapper(expected_keys):
         return tc
 
     return wrapper
+
+
+def _memmap_(
+    self,
+    prefix: str | None = None,
+    copy_existing: bool = False,
+    executor=None,
+    futures=None,
+    inplace=True,
+    like=False,
+):
+    _non_tensordict = self._non_tensordict
+    cls = self.__class__
+
+    if prefix is not None:
+        prefix = Path(prefix)
+        if not prefix.exists():
+            os.makedirs(prefix, exist_ok=True)
+
+        def save_metadata(cls=cls, _non_tensordict=_non_tensordict, prefix=prefix):
+            with open(prefix / "meta.json", "w") as f:
+                metadata = {"_type": str(cls)}
+                to_pickle = {}
+                for key, value in _non_tensordict.items():
+                    if _is_json_serializable(value):
+                        metadata[key] = value
+                    else:
+                        to_pickle[key] = value
+                json.dump(metadata, f)
+                if to_pickle:
+                    with open(prefix / "other.pickle", "wb") as pickle_file:
+                        pickle.dump(to_pickle, pickle_file)
+
+        if executor is None:
+            save_metadata()
+        else:
+            futures.append(executor.submit(save_metadata))
+
+        prefix = prefix / "_tensordict"
+
+    td = self._tensordict._memmap_(
+        prefix=prefix,
+        executor=executor,
+        futures=futures,
+        inplace=inplace,
+        like=like,
+        copy_existing=copy_existing,
+    )
+
+    if not inplace:
+        result = cls._from_tensordict(td, _non_tensordict)
+    else:
+        result = self
+    return result
+
+
+def _load_memmap(cls, prefix: Path, metadata: dict):
+    non_tensordict = copy(metadata)
+    del non_tensordict["_type"]
+    if os.path.exists(prefix / "other.pickle"):
+        with open(prefix / "other.pickle", "rb") as pickle_file:
+            non_tensordict.update(pickle.load(pickle_file))
+    td = TensorDict.load_memmap(prefix / "_tensordict")
+    return cls._from_tensordict(td, non_tensordict)
 
 
 def _getstate(self) -> dict[str, Any]:
@@ -631,7 +717,7 @@ def _set(self, key: NestedKey, value: Any, inplace: bool = False):
                 f"Cannot set the attribute '{key}', expected attributes are {expected_keys}."
             )
 
-        if isinstance(value, tuple(tensordict_lib.tensordict._ACCEPTED_CLASSES)):
+        if isinstance(value, tuple(tensordict_lib.base._ACCEPTED_CLASSES)):
             # Avoiding key clash, honoring the user input to assign tensor type data to the key
             if key in self._non_tensordict.keys():
                 if inplace:
@@ -796,7 +882,7 @@ def _load_state_dict(
     return self
 
 
-def __eq__(self, other: object) -> bool:
+def _eq(self, other: object) -> bool:
     """Compares the Tensor class object to another object for equality. However, the equality check for non-tensor data is not performed.
 
     Args:
@@ -847,7 +933,7 @@ def __eq__(self, other: object) -> bool:
 
     """
     if not is_tensor_collection(other) and not isinstance(
-        other, (dict, numbers.Number, Tensor)
+        other, (dict, numbers.Number, Tensor, _MemmapTensor)
     ):
         return False
     if is_tensorclass(other):
@@ -857,7 +943,7 @@ def __eq__(self, other: object) -> bool:
     return _from_tensordict_with_none(self, tensor)
 
 
-def __ne__(self, other: object) -> bool:
+def _ne(self, other: object) -> bool:
     """Compare the Tensor class object to another object for inequality. However, the equality check for non-tensor data is not performed.
 
     Args:
@@ -904,13 +990,61 @@ def __ne__(self, other: object) -> bool:
 
     """
     if not is_tensor_collection(other) and not isinstance(
-        other, (dict, numbers.Number, Tensor)
+        other, (dict, numbers.Number, Tensor, _MemmapTensor)
     ):
         return True
     if is_tensorclass(other):
         tensor = self._tensordict != other._tensordict
     else:
         tensor = self._tensordict != other
+    return _from_tensordict_with_none(self, tensor)
+
+
+def _or(self, other: object) -> bool:
+    """Compares the Tensor class object to another object for logical OR. However, the logical OR check for non-tensor data is not performed.
+
+    Args:
+        other: object to compare to this object. Can be a tensorclass, a
+            tensordict or any compatible type (int, float or tensor), in
+            which case the equality check will be propagated to the leaves.
+
+    Returns:
+        False if the objects are of different class types, Tensorclass of boolean
+        values for tensor attributes and None for non-tensor attributes
+
+    """
+    if not is_tensor_collection(other) and not isinstance(
+        other, (dict, numbers.Number, Tensor, _MemmapTensor)
+    ):
+        return False
+    if is_tensorclass(other):
+        tensor = self._tensordict | other._tensordict
+    else:
+        tensor = self._tensordict | other
+    return _from_tensordict_with_none(self, tensor)
+
+
+def _xor(self, other: object) -> bool:
+    """Compares the Tensor class object to another object for exclusive OR. However, the exclusive OR check for non-tensor data is not performed.
+
+    Args:
+        other: object to compare to this object. Can be a tensorclass, a
+            tensordict or any compatible type (int, float or tensor), in
+            which case the equality check will be propagated to the leaves.
+
+    Returns:
+        False if the objects are of different class types, Tensorclass of boolean
+        values for tensor attributes and None for non-tensor attributes
+
+    """
+    if not is_tensor_collection(other) and not isinstance(
+        other, (dict, numbers.Number, Tensor, _MemmapTensor)
+    ):
+        return False
+    if is_tensorclass(other):
+        tensor = self._tensordict ^ other._tensordict
+    else:
+        tensor = self._tensordict ^ other
     return _from_tensordict_with_none(self, tensor)
 
 
@@ -977,3 +1111,251 @@ def _unbind(self, dim: int):
         self._from_tensordict(td, non_tensordict=copy(self._non_tensordict))
         for td in self._tensordict.unbind(dim)
     )
+
+
+################
+# Custom classes
+# --------------
+
+NONTENSOR_HANDLED_FUNCTIONS = []
+
+
+@tensorclass
+class NonTensorData:
+    """A carrier for non-tensordict data.
+
+    This class can be used whenever non-tensor data needs to be carrier at
+    any level of a tensordict instance.
+
+    :class:`~tensordict.tensorclass.NonTensorData` instances can be created
+    explicitely or using :meth:`~tensordict.TensorDictBase.set_non_tensor`.
+
+    This class is serializable using :meth:`tensordict.TensorDictBase.memmap`
+    and related methods, and can be loaded through :meth:`~tensordict.TensorDictBase.load_memmap`.
+    If the content of the object is JSON-serializable, it will be serializsed in
+    the `meta.json` file in the directory pointed by the parent key of the `NoneTensorData`
+    object. If it isn't, serialization will fall back on pickle. This implies
+    that we assume that the content of this class is either json-serializable or
+    pickable, and it is the user responsibility to make sure that one of these
+    holds. We try to avoid pickling/unpickling objects for performance and security
+    reasons (as pickle can execute arbitrary code during loading).
+
+    .. note:: if the data passed to :class:`NonTensorData` is a :class:`NonTensorData`
+        itself, the data from the nested object will be gathered.
+
+        >>> non_tensor = NonTensorData("a string!")
+        >>> non_tensor = NonTensorData(non_tensor)
+        >>> assert non_tensor.data == "a string!"
+
+    .. note:: Unlike other tensorclass classes, :class:`NonTensorData` supports
+        comparisons of two non-tensor data through :meth:`~.__eq__`, :meth:`~.__ne__`,
+        :meth:`~.__xor__` or :meth:`~.__or__`. These operations return a tensor
+        of shape `batch_size`. For compatibility with `<a tensordict> == <float_number>`,
+        comparison with non-:class:`NonTensorData` will always return an empty
+        :class:`NonTensorData`.
+
+        >>> a = NonTensorData(True, batch_size=[])
+        >>> b = NonTensorData(True, batch_size=[])
+        >>> assert a == b
+        >>> assert not (a != b)
+        >>> assert not (a ^ b)
+        >>> assert a | b
+        >>> # The output is a tensor of shape batch-size
+        >>> a = NonTensorData(True, batch_size=[3])
+        >>> b = NonTensorData(True, batch_size=[3])
+        >>> print(a == b)
+        tensor([True, True, True])
+
+    .. note:: Stacking :class:`NonTensorData` instances results in either
+        a single :class:`NonTensorData` instance if all shapes match, or a
+        :class:`~tensordict.LazyStackedTensorDict` object if the content
+        mismatch. To get to this result, the content of the :class:`NonTensorData`
+        instances must be compared, which can be computationally intensive
+        depending on what this content is.
+
+        >>> data = torch.stack([NonTensorData(1, batch_size=[]) for _ in range(10)])
+        >>> data
+        NonTensorData(
+            data=1,
+            batch_size=torch.Size([10]),
+            device=None,
+            is_shared=False)
+        >>> data = torch.stack([NonTensorData(i, batch_size=[3,]) for i in range(10)], 1)
+        >>> data[:, 0]
+        NonTensorData(
+            data=0,
+            batch_size=torch.Size([3]),
+            device=None,
+            is_shared=False)
+
+    .. note:: Non-tensor data can be filtered out from a tensordict using
+        :meth:`~tensordict.TensorDictBase.filter_non_tensor`.
+
+    Examples:
+        >>> # create an instance explicitly
+        >>> non_tensor = NonTensorData("a string!", batch_size=[]) # batch-size can be anything
+        >>> data = TensorDict({}, batch_size=[3])
+        >>> data.set_non_tensor(("nested", "key"), "a string!")
+        >>> assert isinstance(data.get(("nested", "key")), NonTensorData)
+        >>> assert data.get_non_tensor(("nested", "key")) == "a string!"
+        >>> # serialization
+        >>> class MyPickableClass:
+        ...     value = 10
+        >>> data.set_non_tensor("pickable", MyPickableClass())
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmpdir:
+        ...     data.memmap(tmpdir)
+        ...     loaded = TensorDict.load_memmap(tmpdir)
+        ...     # print directory path
+        ...     print_directory_tree(tmpdir)
+        Directory size: 511.00 B
+        tmp2cso9og_/
+            pickable/
+                _tensordict/
+                    meta.json
+                other.pickle
+                meta.json
+            nested/
+                key/
+                    _tensordict/
+                        meta.json
+                    meta.json
+                meta.json
+            meta.json
+        >>> assert loaded.get_non_tensor("pickable").value == 10
+
+    """
+
+    # Used to carry non-tensor data in a tensordict.
+    # The advantage of storing this in a tensorclass is that we don't need
+    # to patch tensordict with additional checks that will encur unwanted overhead
+    # and all the overhead falls back on this class.
+    data: Any
+
+    def __post_init__(self):
+        if isinstance(self.data, NonTensorData):
+            self.data = self.data.data
+
+        old_eq = self.__class__.__eq__
+        if old_eq is _eq:
+            global NONTENSOR_HANDLED_FUNCTIONS
+            NONTENSOR_HANDLED_FUNCTIONS.extend(TD_HANDLED_FUNCTIONS)
+
+            # Patch only the first time a class is created
+
+            @functools.wraps(_eq)
+            def __eq__(self, other):
+                if isinstance(other, NonTensorData):
+                    return torch.full(
+                        self.batch_size, self.data == other.data, device=self.device
+                    )
+                return old_eq(self, other)
+
+            self.__class__.__eq__ = __eq__
+
+            _ne = self.__class__.__ne__
+
+            @functools.wraps(_ne)
+            def __ne__(self, other):
+                if isinstance(other, NonTensorData):
+                    return torch.full(
+                        self.batch_size, self.data != other.data, device=self.device
+                    )
+                return _ne(self, other)
+
+            self.__class__.__ne__ = __ne__
+
+            _xor = self.__class__.__xor__
+
+            @functools.wraps(_xor)
+            def __xor__(self, other):
+                if isinstance(other, NonTensorData):
+                    return torch.full(
+                        self.batch_size, self.data ^ other.data, device=self.device
+                    )
+                return _xor(self, other)
+
+            self.__class__.__xor__ = __xor__
+
+            _or = self.__class__.__or__
+
+            @functools.wraps(_or)
+            def __or__(self, other):
+                if isinstance(other, NonTensorData):
+                    return torch.full(
+                        self.batch_size, self.data | other.data, device=self.device
+                    )
+                return _or(self, other)
+
+            self.__class__.__or__ = __or__
+
+    def empty(self, recurse=False):
+        return NonTensorData(
+            data=self.data,
+            batch_size=self.batch_size,
+            names=self.names if self._has_names() else None,
+            device=self.device,
+        )
+
+    def to_dict(self):
+        # override to_dict to return just the data
+        return self.data
+
+    @classmethod
+    def _stack_non_tensor(cls, list_of_non_tensor, dim=0):
+        # checks have been performed previously, so we're sure the list is non-empty
+        first = list_of_non_tensor[0]
+        if all(data.data == first.data for data in list_of_non_tensor[1:]):
+            batch_size = list(first.batch_size)
+            batch_size.insert(dim, len(list_of_non_tensor))
+            return NonTensorData(
+                data=first.data,
+                batch_size=batch_size,
+                names=first.names if first._has_names() else None,
+                device=first.device,
+            )
+
+        from tensordict._lazy import LazyStackedTensorDict
+
+        return LazyStackedTensorDict(*list_of_non_tensor, stack_dim=dim)
+
+    @classmethod
+    def __torch_function__(
+        cls,
+        func: Callable,
+        types: tuple[type, ...],
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> Callable:
+        # A modified version of __torch_function__ to account for the different behaviour
+        # of stack, which should return lazy stacks of data of data does not match.
+        if func not in _TD_PASS_THROUGH or not all(
+            issubclass(t, (Tensor, cls)) for t in types
+        ):
+            return NotImplemented
+
+        escape_conversion = func in (torch.stack,)
+
+        if kwargs is None:
+            kwargs = {}
+
+        # get the output type from the arguments / keyword arguments
+        if len(args) > 0:
+            tensorclass_instance = args[0]
+        else:
+            tensorclass_instance = kwargs.get("input", kwargs["tensors"])
+        if isinstance(tensorclass_instance, (tuple, list)):
+            tensorclass_instance = tensorclass_instance[0]
+        if not escape_conversion:
+            args = tuple(_arg_to_tensordict(arg) for arg in args)
+            kwargs = {key: _arg_to_tensordict(value) for key, value in kwargs.items()}
+
+        result = TD_HANDLED_FUNCTIONS[func](*args, **kwargs)
+        if isinstance(result, (list, tuple)):
+            return result.__class__(
+                _from_tensordict_with_copy(tensorclass_instance, tensordict_result)
+                for tensordict_result in result
+            )
+        if not escape_conversion:
+            return _from_tensordict_with_copy(tensorclass_instance, result)
+        return result

@@ -524,17 +524,23 @@ class TensorDict(TensorDictBase):
         if isinstance(value, (TensorDictBase, dict)):
             indexed_bs = _getitem_batch_size(self.batch_size, index)
             if isinstance(value, dict):
-                value = self.empty(recurse=True)[index].update(value)
+                value = self.from_dict(value, batch_size=indexed_bs)
+                # value = self.empty(recurse=True)[index].update(value)
             if value.batch_size != indexed_bs:
-                # try to expand on the left (broadcasting)
-                try:
+                if value.shape == indexed_bs[-len(value.shape)]:
+                    # try to expand on the left (broadcasting)
                     value = value.expand(indexed_bs)
-                except RuntimeError as err:
-                    raise RuntimeError(
-                        f"indexed destination TensorDict batch size is {indexed_bs} "
-                        f"(batch_size = {self.batch_size}, index={index}), "
-                        f"which differs from the source batch size {value.batch_size}"
-                    ) from err
+                else:
+                    try:
+                        # copy and change batch_size if can't be expanded
+                        value = value.copy()
+                        value.batch_size = indexed_bs
+                    except RuntimeError as err:
+                        raise RuntimeError(
+                            f"indexed destination TensorDict batch size is {indexed_bs} "
+                            f"(batch_size = {self.batch_size}, index={index}), "
+                            f"which differs from the source batch size {value.batch_size}"
+                        ) from err
 
             keys = set(self.keys())
             if any(key not in keys for key in value.keys()):
@@ -914,7 +920,7 @@ class TensorDict(TensorDictBase):
             device=self.device, source=d, batch_size=torch.Size([dim, *other_dim])
         )
 
-    def _view(
+    def view(
         self,
         *args,
         **kwargs,
@@ -949,7 +955,7 @@ class TensorDict(TensorDictBase):
 
         return self._fast_apply(_reshape, batch_size=shape, call_on_nested=True)
 
-    def _transpose(self, dim0, dim1):
+    def transpose(self, dim0, dim1):
         if dim0 < 0:
             dim0 = self.ndim + dim0
         if dim1 < 0:
@@ -973,7 +979,7 @@ class TensorDict(TensorDictBase):
             _transpose, batch_size=torch.Size(batch_size), call_on_nested=True
         )
 
-    def _permute(self, *args, **kwargs):
+    def permute(self, *args, **kwargs):
         dims_list = _get_shape_from_args(*args, kwarg_name="dims", **kwargs)
         dims_list = [dim if dim >= 0 else self.ndim + dim for dim in dims_list]
         if any(dim < 0 or dim >= self.ndim for dim in dims_list):
@@ -1161,7 +1167,7 @@ class TensorDict(TensorDictBase):
             else:
                 if not isinstance(idx, tuple):
                     idx = (idx,)
-                if len(idx) < self.ndim:
+                if len([_idx for _idx in idx if _idx is not None]) < self.ndim:
                     idx = (*idx, Ellipsis)
                 idx_names = convert_ellipsis_to_idx(idx, self.batch_size)
                 # this will convert a [None, :, :, 0, None, 0] in [None, 0, 1, None, 3]
@@ -2170,7 +2176,7 @@ class _SubTensorDict(TensorDictBase):
 
     def _get_non_tensor(self, key: NestedKey, default=NO_DEFAULT):
         out = super()._get_non_tensor(key, default=default)
-        from tensordict.tensorclass import NonTensorData
+        from .tensorclass import NonTensorData
 
         if isinstance(out, _SubTensorDict) and isinstance(out._source, NonTensorData):
             return out._source.data
@@ -2559,9 +2565,9 @@ class _SubTensorDict(TensorDictBase):
     split = TensorDict.split
     to_module = TensorDict.to_module
     unbind = TensorDict.unbind
-    _permute = TensorDict._permute
-    _transpose = TensorDict._transpose
-    _view = TensorDict._view
+    permute = TensorDict.permute
+    transpose = TensorDict.transpose
+    view = TensorDict.view
 
     _add_batch_dim = TensorDict._add_batch_dim
 
@@ -2594,7 +2600,7 @@ class _TensorDictKeysView:
 
     Examples:
         >>> import torch
-        >>> from tensordict import TensorDict
+        >>> from torch.dict import TensorDict
 
         >>> td = TensorDict(
         >>>     {"a": TensorDict({"b": torch.rand(1, 2)}, [1, 2]), "c": torch.rand(1)},

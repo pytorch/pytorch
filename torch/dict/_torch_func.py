@@ -10,9 +10,15 @@ from typing import Any, Callable, Sequence, TypeVar
 
 import torch
 from torch import Tensor
+from ._lazy import LazyStackedTensorDict
 from .base import NO_DEFAULT, TensorDictBase
 from .tensordict import TensorDict
 from .utils import _check_keys, _ErrorInteceptor, DeviceType
+
+
+TD_HANDLED_FUNCTIONS: dict[Callable, Callable] = {}
+LAZY_TD_HANDLED_FUNCTIONS: dict[Callable, Callable] = {}
+T = TypeVar("T", bound="TensorDictBase")
 
 
 def implements_for_td(torch_function: Callable) -> Callable[[Callable], Callable]:
@@ -26,8 +32,15 @@ def implements_for_td(torch_function: Callable) -> Callable[[Callable], Callable
     return decorator
 
 
-TD_HANDLED_FUNCTIONS: dict[Callable, Callable] = {}
-T = TypeVar("T", bound="TensorDictBase")
+def implements_for_lazy_td(torch_function: Callable) -> Callable[[Callable], Callable]:
+    """Register a torch function override for TensorDict."""
+
+    @functools.wraps(torch_function)
+    def decorator(func: Callable) -> Callable:
+        LAZY_TD_HANDLED_FUNCTIONS[torch_function] = func
+        return func
+
+    return decorator
 
 
 @implements_for_td(torch.unbind)
@@ -237,6 +250,75 @@ def _cat(
                     out.set_(
                         key, torch.cat([td.get(key) for td in list_of_tensordicts], dim)
                     )
+        return out
+
+
+@implements_for_lazy_td(torch.cat)
+def _lazy_cat(
+    list_of_tensordicts: Sequence[LazyStackedTensorDict],
+    dim: int = 0,
+    out: LazyStackedTensorDict | None = None,
+) -> LazyStackedTensorDict:
+    # why aren't they feeding you?
+    if not list_of_tensordicts:
+        raise RuntimeError("list_of_tensordicts cannot be empty")
+
+    batch_size = list(list_of_tensordicts[0].batch_size)
+    if dim < 0:
+        dim = len(batch_size) + dim
+    if dim >= len(batch_size):
+        raise RuntimeError(
+            f"dim must be in the range 0 <= dim < len(batch_size), got dim"
+            f"={dim} and batch_size={batch_size}"
+        )
+    stack_dim = list_of_tensordicts[0].stack_dim
+    if any((td.stack_dim != stack_dim) for td in list_of_tensordicts):
+        raise RuntimeError("cat lazy stacked tds must have same stack dim")
+
+    batch_size[dim] = sum(td.batch_size[dim] for td in list_of_tensordicts)
+    batch_size = torch.Size(batch_size)
+
+    new_dim = dim
+    if dim > stack_dim:
+        new_dim = dim - 1
+
+    if out is None:
+        out = []
+        if dim == stack_dim:  # if dim is stack, just add all to the same list
+            for lazy_td in list_of_tensordicts:
+                out += lazy_td.tensordicts
+        else:
+            for i in range(len(list_of_tensordicts[0].tensordicts)):
+                out.append(
+                    torch.cat(
+                        [lazy_td.tensordicts[i] for lazy_td in list_of_tensordicts],
+                        new_dim,
+                    )
+                )
+        return LazyStackedTensorDict(*out, stack_dim=stack_dim)
+    else:
+        if not isinstance(out, LazyStackedTensorDict):
+            return _cat(list_of_tensordicts, dim=dim, out=out)
+
+        if out.batch_size != batch_size:
+            raise RuntimeError(
+                "out.batch_size and cat batch size must match, "
+                f"got out.batch_size={out.batch_size} and batch_size"
+                f"={batch_size}"
+            )
+        if out.stack_dim != dim:
+            index_base = (slice(None),) * out.stack_dim
+            for i, sub_dest in enumerate(out.tensordicts):
+                index = index_base + (i,)
+                tds_to_cat = [_td[index] for _td in list_of_tensordicts]
+                torch.cat(tds_to_cat, dim, out=sub_dest)
+        else:
+            init_idx = 0
+            for td_in in list_of_tensordicts:
+                sub_dest = out.tensordicts[init_idx : init_idx + td_in.shape[dim]]
+                init_idx += init_idx + td_in.shape[dim]
+                torch.stack(sub_dest, out.stack_dim).update(td_in, inplace=True)
+
         return out
 
 

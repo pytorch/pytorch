@@ -1,5 +1,5 @@
 from .base import TensorDictBase
-from .functional import merge_tensordicts, pad, pad_sequence
+from .functional import dense_stack_tds, merge_tensordicts, pad, pad_sequence
 from .params import TensorDictParams
 from .tensorclass import tensorclass
 from .tensordict import TensorDict

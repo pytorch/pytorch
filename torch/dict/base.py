@@ -1709,7 +1709,7 @@ class TensorDictBase(MutableMapping):
                 sub_td = self._create_nested_str(key[0])
             sub_td._set_non_tensor(key[1:], value)
             return self
-        from tensordict.tensorclass import NonTensorData
+        from .tensorclass import NonTensorData
 
         self._set_str(
             key,
@@ -1770,7 +1770,7 @@ class TensorDictBase(MutableMapping):
                 return subtd
             return subtd._get_non_tensor(key[1:], default=default)
         value = self._get_str(key, default=default)
-        from tensordict.tensorclass import NonTensorData
+        from .tensorclass import NonTensorData
 
         if isinstance(value, NonTensorData):
             return value.data
@@ -1778,7 +1778,7 @@ class TensorDictBase(MutableMapping):
 
     def filter_non_tensor_data(self) -> T:
         """Filters out all non-tensor-data."""
-        from tensordict.tensorclass import NonTensorData
+        from .tensorclass import NonTensorData
 
         def _filter(x):
             if not isinstance(x, NonTensorData):
@@ -2440,7 +2440,7 @@ class TensorDictBase(MutableMapping):
                 leaf or not.
 
         Examples:
-            >>> from tensordict import TensorDict
+            >>> from torch.dict import TensorDict
             >>> data = TensorDict({"0": 0, "1": {"2": 2}}, batch_size=[])
             >>> data.keys()
             ['0', '1']
@@ -3524,7 +3524,7 @@ class TensorDictBase(MutableMapping):
         except Exception:
             if hasattr(array, "shape"):
                 return torch.full(array.shape, float("NaN"))
-            from tensordict.tensorclass import NonTensorData
+            from .tensorclass import NonTensorData
 
             return NonTensorData(
                 array,
@@ -3764,7 +3764,7 @@ class TensorDictBase(MutableMapping):
             >>> import tempfile
             >>> import timeit
             >>>
-            >>> from tensordict import TensorDict, MemoryMappedTensor
+            >>> from torch.dict import TensorDict, MemoryMappedTensor
             >>> td = TensorDict({
             ...     "a": MemoryMappedTensor.from_tensor(torch.zeros(()).expand(1_000_000)),
             ...     "b": {"c": MemoryMappedTensor.from_tensor(torch.zeros(()).expand(1_000_000, 3))},
@@ -3788,7 +3788,7 @@ class TensorDictBase(MutableMapping):
 
 
         """
-        from tensordict.persistent import PersistentTensorDict
+        from .persistent import PersistentTensorDict
 
         out = PersistentTensorDict.from_dict(
             self,
@@ -4448,10 +4448,8 @@ def _default_is_leaf(cls: Type) -> bool:
 
 
 def _is_leaf_nontensor(cls: Type) -> bool:
-    from tensordict.tensorclass import NonTensorData
+    from .tensorclass import NonTensorData
 
-    if issubclass(cls, KeyedJaggedTensor):
-        return False
     if _is_tensor_collection(cls):
         return issubclass(cls, NonTensorData)
     return issubclass(cls, torch.Tensor)
