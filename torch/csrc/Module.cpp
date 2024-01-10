@@ -726,13 +726,15 @@ PyObject* THPModule_userEnabledMathSDP(PyObject* _unused, PyObject* noargs) {
     Py_RETURN_FALSE;
 }
 PyObject* THPModule_setSDPUseCuDNN(PyObject* _unused, PyObject* arg) {
-  THPUtils_assert(
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
       PyBool_Check(arg),
       "set_sdp_use_cudnn expects a bool, "
       "but got %s",
       THPUtils_typename(arg));
   at::globalContext().setSDPUseCuDNN(arg == Py_True);
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 PyObject* THPModule_userEnabledCuDNNSDP(PyObject* _unused, PyObject* noargs) {
   if (at::globalContext().userEnabledCuDNNSDP())
