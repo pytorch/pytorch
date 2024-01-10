@@ -4826,7 +4826,7 @@
   device_guard: False
   dispatch:
     CompositeImplicitAutograd: reshape_symint
-    CompositeImplicitAutogradNestedTensor: reshape_nested
+    CompositeImplicitAutogradNestedTensor: reshape_nested_symint
 
 - func: _reshape_copy(Tensor self, SymInt[] size) -> Tensor
   variants: function

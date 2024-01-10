@@ -280,20 +280,6 @@ def jagged_torch_function(func, *args, **kwargs):
     if func is torch._C._nn.scaled_dot_product_attention:
         return jagged_scaled_dot_product_attention(*args, **kwargs)
 
-    # Handle reshape() / reshape_as() here because they're CompositeImplicit.
-    # TODO: Do the full view determination logic based on computeStride()
-    if func.__name__ == "reshape":
-        inp = args[0]
-        shape = args[1:]
-
-        return inp.view(shape) if inp.is_contiguous() else inp.contiguous().view(shape)
-
-    if func.__name__ == "reshape_as":
-        inp = args[0]
-        other = args[1]
-
-        return inp.reshape(*other.shape)
-
     # Handle flatten() here because it's CompositeImplicit.
     if func.__name__ == "flatten":
 
