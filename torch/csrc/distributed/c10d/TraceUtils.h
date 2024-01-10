@@ -375,7 +375,7 @@ struct NCCLTraceBuffer {
     const char* profiling_name_;
 
     std::shared_ptr<torch::CapturedTraceback> traceback_;
-    // we borrow pointser to start_ and end_ so we can query the state
+    // we borrow pointers to start_ and end_ so we can query the state
     // on reporting. However, once the event is completed, the call
     // to `complete` will clear these.
     EventList *start_, *end_;
@@ -497,23 +497,53 @@ struct NCCLTraceBuffer {
   // OK to call from inside watchdog thread, which is probably going to hang
   // anyway in cases where eventQuery will hang. (Then we fall back to rely on
   // monitor thread to kill and dump, and rely on dump not hanging)
+  // But, don't hang holding the lock that dump() also holds!
   void retire_id(c10::optional<size_t> id, bool compute_duration = false) {
     if (!enabled_ || !id) {
       return;
     }
-    std::lock_guard<std::mutex> guard(mutex_);
-    auto& entry = entries_.at(*id % max_entries_);
-    if (entry.id_ == *id) {
-      update_state(entry);
 
-      if (compute_duration) {
-        if (strcmp(entry.state_, "completed") == 0 && entry.start_ && entry.end_) {
-          entry.duration_ = getDurationFromFirstEvent(*entry.start_, *entry.end_);
+    bool can_compute_duration = false;
+    EventList* startEvents = nullptr;
+    EventList* endEvents = nullptr;
+
+    {
+      std::lock_guard<std::mutex> guard(mutex_);
+      auto& entry = entries_.at(*id % max_entries_);
+      if (entry.id_ == *id) {
+        update_state(entry);
+
+        if (compute_duration) {
+          can_compute_duration = strcmp(entry.state_, "completed") == 0 &&
+              entry.start_ && entry.end_;
+          startEvents = entry.start_;
+          endEvents = entry.end_;
         }
       }
+    }
 
-      entry.retired_ = true;
-      entry.start_ = entry.end_ = nullptr;
+    // Compute duration without without holding the lock, because
+    // cudaEventDuration() can hang, and we need to acquire the lock before we
+    // can dump(), which we never want to block.
+    c10::optional<float> duration = c10::nullopt;
+    if (can_compute_duration) {
+      duration = getDurationFromFirstEvent(*startEvents, *endEvents);
+    }
+
+    {
+      std::lock_guard<std::mutex> guard(mutex_);
+      auto& entry = entries_.at(*id % max_entries_);
+      if (entry.id_ == *id) {
+        if (duration.has_value()) {
+          entry.duration_ = duration.value();
+        }
+        entry.retired_ = true;
+        entry.start_ = entry.end_ = nullptr;
+      } else {
+        LOG(INFO)
+            << "Failed retire_id " << *id
+            << ", maybe overwritten by another event before compute_duration() finished";
+      }
     }
   }
 
