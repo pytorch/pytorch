@@ -43,6 +43,7 @@ class BaseTorchFunction(torch.Tensor):
             kwargs = {}
         return super().__torch_function__(func, types, args, kwargs)
 
+
 class MockSubclass(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
