@@ -107,14 +107,21 @@ class _SymHashingDict:
         # optimistically hash sympy expressions, if those fail, fallback to symnodes
         self.sym_node_dict = {}
         self.sym_hash_dict = {}
+        self.sym_not_to_dedupe = set()
         self.graph_input_symbols = set()
 
     def add_input_symint_symbol(self, symbol: py_sym_types):
         self.graph_input_symbols.update(symbol.node.expr.free_symbols)
 
+    def dont_hash_sym_expr(self, symbol: py_sym_types):
+        "Dont dedupe this expression with other SymInts which are"
+
+        self.sym_not_to_dedupe.add(symbol.node)
+
     def __setitem__(self, key, value):
         existing_node = key.node in self.sym_node_dict
-        if not existing_node and key.node.expr.free_symbols.issubset(self.graph_input_symbols):
+        dont_dedup = key.node in self.sym_not_to_dedupe
+        if not existing_node and not dont_dedup and key.node.expr.free_symbols.issubset(self.graph_input_symbols):
             self.graph_input_symbols.update(key.node.expr.free_symbols)
             self.sym_hash_dict.__setitem__(self._wrap_to_sym_expr_hash(key), value)
         self.sym_node_dict[key.node] = value
@@ -123,7 +130,9 @@ class _SymHashingDict:
         if node_val := self.sym_node_dict.get(key.node, None):
             return node_val
 
-        return self.sym_hash_dict[self._wrap_to_sym_expr_hash(key)]
+        out = self.sym_hash_dict[self._wrap_to_sym_expr_hash(key)]
+        out()
+        return out
 
     def __contains__(self, key):
         return key.node in self.sym_node_dict or self._wrap_to_sym_expr_hash(key) in self.sym_hash_dict
@@ -132,7 +141,10 @@ class _SymHashingDict:
         if val := self.sym_node_dict.get(key.node, None):
             return val
 
-        return self.sym_hash_dict.get(self._wrap_to_sym_expr_hash(key), default)
+        out = self.sym_hash_dict.get(self._wrap_to_sym_expr_hash(key), default)
+        if out is not None:
+            out()
+        return out
 
     def _wrap_to_sym_expr_hash(self, key):
         return _SymExprHash(key) if isinstance(key, py_sym_types) else key
@@ -250,18 +262,27 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     def proxy_func(p, *args, **kwargs):
         return p()
 
+    def dont_hash_sym_expr(s):
+        # Recompute the expressions that are computed from uses on tensors, otherwise we might induce
+        # a dependency on forward from backward.
+        if isinstance(s, py_sym_types):
+            tracer.symnode_tracker.dont_hash_sym_expr(s)
+
     for i, s in enumerate(tensor.shape):
         if p := get_existing_proxy(s):
             try_set_proxy_slot(s, functools.partial(proxy_func, p))
         else:
+            dont_hash_sym_expr(s)
             try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size.int(proxy, i), x), i)
 
     for i, s in enumerate(tensor.stride()):
         if p := get_existing_proxy(s):
             try_set_proxy_slot(s, functools.partial(proxy_func, p))
         else:
+            dont_hash_sym_expr(s)
             try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_stride.int(proxy, i), x), i)
 
+    dont_hash_sym_expr(tensor.storage_offset())
     try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(torch.ops.aten.sym_storage_offset.default(proxy), x))
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
