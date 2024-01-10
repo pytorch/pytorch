@@ -19,8 +19,7 @@ api::ShaderInfo get_nchw_to_image_shader(const vTensor& v_dst) {
           case c10::ScalarType::QInt32:
             return VK_KERNEL(nchw_to_image_int32);
           default:
-            TORCH_CHECK(
-                false,
+            VK_THROW(
                 "Vulkan quantization currently not supported for dtype ",
                 v_dst.dtype());
         }
@@ -33,16 +32,15 @@ api::ShaderInfo get_nchw_to_image_shader(const vTensor& v_dst) {
           case c10::ScalarType::QInt32:
             return VK_KERNEL(nchw_to_image2d_int32);
           default:
-            TORCH_CHECK(
-                false,
+            VK_THROW(
                 "Vulkan quantization currently not supported for dtype ",
                 v_dst.dtype());
         }
       default:
-        TORCH_CHECK(false, "No kernel available!");
+        VK_THROW("No kernel available!");
       case api::StorageType::BUFFER:
       case api::StorageType::UNKNOWN:
-        TORCH_CHECK(false, "Requested storage type must be a texture type.");
+        VK_THROW("Requested storage type must be a texture type.");
     }
   }
 
@@ -53,17 +51,17 @@ api::ShaderInfo get_nchw_to_image_shader(const vTensor& v_dst) {
       case api::StorageType::TEXTURE_2D:
         return VK_KERNEL(nchw_to_image2d);
       default:
-        TORCH_CHECK(false, "No kernel available!");
+        VK_THROW("No kernel available!");
     }
   } else if (v_dst.dtype() == at::kBool) {
     switch (v_dst.storage_type()) {
       case api::StorageType::TEXTURE_3D:
         return VK_KERNEL(nchw_to_image_bool);
       default:
-        TORCH_CHECK(false, "No kernel available!");
+        VK_THROW("No kernel available!");
     }
   } else {
-    TORCH_CHECK(false, "Unsupported dtype!");
+    VK_THROW("Unsupported dtype!");
   }
 }
 
@@ -82,16 +80,15 @@ api::ShaderInfo get_image_to_nchw_shader(const vTensor& v_src) {
           case c10::ScalarType::QInt32:
             return VK_KERNEL(image_to_nchw_int32);
           default:
-            TORCH_CHECK(
-                false,
+            VK_THROW(
                 "Vulkan quantization currently not supported for dtype ",
                 v_src.dtype());
         }
       default:
-        TORCH_CHECK(false, "No kernel available!");
+        VK_THROW("No kernel available!");
       case api::StorageType::BUFFER:
       case api::StorageType::UNKNOWN:
-        TORCH_CHECK(false, "Requested storage type must be a texture type.");
+        VK_THROW("Requested storage type must be a texture type.");
     }
   }
 
@@ -102,10 +99,10 @@ api::ShaderInfo get_image_to_nchw_shader(const vTensor& v_src) {
       case api::StorageType::TEXTURE_2D:
         return VK_KERNEL(image2d_to_nchw);
       default:
-        TORCH_CHECK(false, "No kernel available!");
+        VK_THROW("No kernel available!");
     }
   } else {
-    TORCH_CHECK(false, "Unsupported dtype!");
+    VK_THROW("Unsupported dtype!");
   }
 }
 

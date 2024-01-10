@@ -21,7 +21,7 @@ api::GPUMemoryLayout get_gpu_memory_layout(
       case c10::MemoryFormat::ChannelsLast:
         return api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED;
       default:
-        TORCH_CHECK(false, "Invalid memory format used to create vTensor!");
+        VK_THROW("Invalid memory format used to create vTensor!");
     }
   }
   // For texture storage, always return a memory layout that packs the channels
@@ -73,8 +73,7 @@ std::vector<int64_t> calc_channels_last_strides(const IntArrayRef sizes) {
       strides[1] = strides[2] * sizes[2];
       return strides;
     default:
-      TORCH_CHECK(
-          false, "ChannelsLast format only available for 3 <= ndim <= 4!");
+      VK_THROW("ChannelsLast format only available for 3 <= ndim <= 4!");
   }
 
   return strides;
@@ -99,14 +98,14 @@ std::vector<int64_t> calc_strides(
           return calc_channels_last_strides(sizes);
           break;
         default:
-          TORCH_CHECK(false, "Invalid memory format used to create vTensor!");
+          VK_THROW("Invalid memory format used to create vTensor!");
       }
       break;
     case api::StorageType::TEXTURE_3D:
     case api::StorageType::TEXTURE_2D:
       return std::vector<int64_t>(sizes.size());
     default:
-      TORCH_CHECK(false, "Invalid storage type used to create vTensor!");
+      VK_THROW("Invalid storage type used to create vTensor!");
   }
 }
 
@@ -124,7 +123,7 @@ std::vector<int64_t> calc_gpu_sizes(
     const api::StorageType storage_type) {
   size_t ndim = sizes.size();
 
-  TORCH_CHECK(storage_type != api::StorageType::UNKNOWN);
+  VK_CHECK_COND(storage_type != api::StorageType::UNKNOWN);
 
   // For buffer formats, the innermost dim (i.e. where the stride is 1) will be
   // aligned up. Which dim is the innermost is described by the GPUMemoryLayout.
@@ -149,7 +148,7 @@ std::vector<int64_t> calc_gpu_sizes(
         break;
 
       default:
-        TORCH_CHECK(false, "Invalid memory format used to create vTensor!");
+        VK_THROW("Invalid memory format used to create vTensor!");
         break;
     }
 
@@ -165,7 +164,7 @@ std::vector<int64_t> calc_gpu_sizes(
   // multiple of 4, as each texel shall store 4 consecutive elements from the
   // packed dimension.
   else {
-    TORCH_CHECK(
+    VK_CHECK_COND(
         ndim >= 0 && ndim <= 4,
         "Texture storage only valid for 0 <= ndim <= 4, received: ",
         ndim);
@@ -185,8 +184,7 @@ std::vector<int64_t> calc_gpu_sizes(
             gpu_sizes[2] = 1;
             break;
           default:
-            TORCH_CHECK(
-                false,
+            VK_THROW(
                 "Invalid memory format used to create vTensor with zero-dim!");
         }
         break;
@@ -209,7 +207,7 @@ std::vector<int64_t> calc_gpu_sizes(
             gpu_sizes[2] = sizes[0];
             break;
           default:
-            TORCH_CHECK(false, "Invalid memory format used to create vTensor!");
+            VK_THROW("Invalid memory format used to create vTensor!");
         }
         break;
 
@@ -237,7 +235,7 @@ std::vector<int64_t> calc_gpu_sizes(
             gpu_sizes[2] = sizes[1];
             break;
           default:
-            TORCH_CHECK(false, "Invalid memory format used to create vTensor!");
+            VK_THROW("Invalid memory format used to create vTensor!");
         }
         break;
 
@@ -259,7 +257,7 @@ std::vector<int64_t> calc_gpu_sizes(
             gpu_sizes[2] = sizes[2];
             break;
           default:
-            TORCH_CHECK(false, "Invalid memory format used to create vTensor!");
+            VK_THROW("Invalid memory format used to create vTensor!");
         }
         break;
 
@@ -284,7 +282,7 @@ std::vector<int64_t> calc_gpu_sizes(
             gpu_sizes[3] = sizes[3];
             break;
           default:
-            TORCH_CHECK(false, "Invalid memory format used to create vTensor!");
+            VK_THROW("Invalid memory format used to create vTensor!");
         }
         break;
     }
@@ -306,7 +304,7 @@ api::utils::uvec3 create_image_extents(
     // image extents do not apply to buffer storage
     return {0u, 0u, 0u};
   } else {
-    TORCH_CHECK(
+    VK_CHECK_COND(
         ndim >= 1 && ndim <= 4,
         "Texture storage only valid for 1 <= ndim <= 4!");
 
@@ -317,19 +315,19 @@ api::utils::uvec3 create_image_extents(
 
     switch (memory_layout) {
       case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
-        TORCH_CHECK(width % 4 == 0, "Channels must be divisible by 4!")
+        VK_CHECK_COND(width % 4 == 0, "Channels must be divisible by 4!");
         width /= 4;
         break;
       case api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED:
-        TORCH_CHECK(height % 4 == 0, "Channels must be divisible by 4!")
+        VK_CHECK_COND(height % 4 == 0, "Channels must be divisible by 4!");
         height /= 4;
         break;
       case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
-        TORCH_CHECK(channels % 4 == 0, "Channels must be divisible by 4!")
+        VK_CHECK_COND(channels % 4 == 0, "Channels must be divisible by 4!");
         channels /= 4;
         break;
       default:
-        TORCH_CHECK(false, "Invalid memory format used!");
+        VK_THROW("Invalid memory format used!");
     }
 
     return {width, height, batch * channels};
