@@ -61,6 +61,7 @@ install_ubuntu() {
     ${maybe_libiomp_dev} \
     libyaml-dev \
     libz-dev \
+    libjemalloc2 \
     libjpeg-dev \
     libasound2-dev \
     libsndfile-dev \
@@ -74,6 +75,7 @@ install_ubuntu() {
     libtool \
     vim \
     unzip \
+    gpg-agent \
     gdb
 
   # Should resolve issues related to various apt package repository cert issues
