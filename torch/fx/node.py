@@ -41,6 +41,7 @@ _side_effectful_functions: Set[Callable] = {
     torch._assert,
     torch._assert_async,
     _ops.aten._assert_async.msg,
+    _ops.aten._assert_scalar.default,
     _ops.aten.copy_.default,
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
@@ -82,7 +83,7 @@ def _type_repr(obj):
             return obj.__qualname__
         return f'{obj.__module__}.{obj.__qualname__}'
     if obj is ...:
-        return('...')
+        return '...'
     if isinstance(obj, types.FunctionType):
         return obj.__name__
     return repr(obj)

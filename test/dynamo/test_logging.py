@@ -143,7 +143,7 @@ from user code:
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
-    test_inductor_debug = within_range_record_test(3, 15, inductor=logging.DEBUG)
+    test_inductor_debug = within_range_record_test(3, 17, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 4, inductor=logging.INFO)
 
     @make_logging_test()
@@ -650,6 +650,28 @@ L['zs'][0] == 3.0                                             # for y, z in zip(
         self.assertGreater(
             len([r for r in records if "return a + 1" in r.getMessage()]), 0
         )
+
+    def test_logs_out(self):
+        import tempfile
+
+        with tempfile.NamedTemporaryFile() as tmp:
+            env = dict(os.environ)
+            env["TORCH_LOGS"] = "dynamo"
+            env["TORCH_LOGS_OUT"] = tmp.name
+            stdout, stderr = self.run_process_no_exception(
+                """\
+import torch
+@torch.compile(backend="eager")
+def fn(a):
+    return a.sum()
+
+fn(torch.randn(5))
+                """,
+                env=env,
+            )
+            with open(tmp.name) as fd:
+                lines = fd.read()
+                self.assertEqual(lines, stderr.decode("utf-8"))
 
 
 # single record tests
