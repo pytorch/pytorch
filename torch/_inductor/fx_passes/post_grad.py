@@ -636,92 +636,10 @@ def remove_noop_ops(graph: torch.fx.Graph):
 
 
 InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
-InplaceOpHandler = namedtuple("InplaceOpHandler", ["handler", "mutated_arg"])
-
-
-def replace_target_with(graph, node, new_target):
-    node.target = new_target
-
-
-def graph_call_function(graph, fn, *args, **kwargs):
-    fake_args, fake_kwargs = pytree.tree_map(
-        lambda node: node.meta["val"] if isinstance(node, torch.fx.Node) else node,
-        (args, kwargs),
-    )
-    with V.fake_mode:
-        fake_result = fn(*fake_args, **fake_kwargs)
-
-    node = graph.call_function(fn, args, kwargs)
-    node.meta["val"] = fake_result
-    return node
-
-
-def reinplace_slice_scatter(graph, node):
-    def arg_extractor(self, src, dim=0, start=None, end=None, step=1):
-        return self, src, dim, start, end, step
-
-    self_, src, dim, start, end, step = arg_extractor(*node.args, **node.kwargs)
-    with graph.inserting_before(node):
-        view = graph_call_function(
-            graph,
-            aten.slice.Tensor,
-            self_,
-            dim,
-            start,
-            end,
-            step,
-        )
-        graph_call_function(graph, aten.copy_.default, view, src)
-    node.replace_all_uses_with(self_)
-    graph.erase_node(node)
-
-
-def reinplace_select_scatter(graph, node):
-    def arg_extractor(self, src, dim, index):
-        return self, src, dim, index
-
-    self_, src, dim, index = arg_extractor(*node.args, **node.kwargs)
-    with graph.inserting_before(node):
-        view = graph_call_function(graph, aten.select.int, self_, dim, index)
-        graph_call_function(graph, aten.copy_.default, view, src)
-    node.replace_all_uses_with(self_)
-    graph.erase_node(node)
-
-
-def reinplace_as_strided_scatter(graph, node):
-    def arg_extractor(self, src, size, stride, storage_offset=None):
-        return self, src, size, stride, storage_offset
-
-    self_, src, size, stride, storage_offset = arg_extractor(*node.args, **node.kwargs)
-    with graph.inserting_before(node):
-        view = graph_call_function(
-            graph,
-            aten.as_strided.default,
-            self_,
-            size,
-            stride,
-            storage_offset,
-        )
-        graph_call_function(graph, aten.copy_.default, view, src)
-
-    node.replace_all_uses_with(self_)
-    graph.erase_node(node)
-
 
 inplaceable_ops = {
-    aten.index_put.default: InplaceOpHandler(
-        functools.partial(replace_target_with, new_target=aten.index_put_.default),
-        0,
-    ),
-    aten._unsafe_index_put.default: InplaceOpHandler(
-        functools.partial(
-            replace_target_with, new_target=inductor_prims._unsafe_index_put_
-        ),
-        0,
-    ),
-    aten.slice_scatter.default: InplaceOpHandler(reinplace_slice_scatter, 0),
-    aten.select_scatter.default: InplaceOpHandler(reinplace_select_scatter, 0),
-    aten.as_strided_scatter.default: InplaceOpHandler(reinplace_as_strided_scatter, 0),
+    aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
+    aten._unsafe_index_put.default: InplaceableOp(inductor_prims._unsafe_index_put_, 0),
 }
 
 try:
@@ -789,20 +707,14 @@ def reinplace_inplaceable_ops(graph):
             mutated_inputs.add(node.args[0])
 
     def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
-        node_loc = node_order.get(node)
-        if node_loc is None:
-            # If node has been newly added to the graph, we don't know its location
-            # and thus can't check if it's the last use. Cautiosly assume there may
-            # be later users.
-            return True
+        node_loc = node_order[node]
         for view in shared_view_nodes:
             for user in view.users:
+                # Skip all users before node
+                if node_order[user] <= node_loc:
+                    continue
                 # Skip over the copy_ epilogue node that could get reinplaced
                 if copy_node == user:
-                    continue
-                # Skip all users before node
-                user_loc = node_order.get(user)
-                if user_loc is not None and user_loc <= node_loc:
                     continue
                 return True
         return False
@@ -847,7 +759,7 @@ def reinplace_inplaceable_ops(graph):
                 copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                 if copy_node is not None:
                     graph.erase_node(copy_node)
-                inplaceable_op.handler(graph, node)
+                node.target = inplaceable_op.inplace_op
         elif node.target in inplaceable_triton_ops:
             # inplaceable_triton_ops take an additional argument called
             # tensors_to_clone which contain a list of tensors to clone
