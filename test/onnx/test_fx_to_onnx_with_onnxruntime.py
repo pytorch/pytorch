@@ -546,6 +546,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((x2,),)],
         )
 
+    @pytorch_test_common.skipIfNoCuda
     def test__scaled_dot_product_flash_attention(self):
         def func(x):
             (
@@ -561,7 +562,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             ) = torch.ops.aten._scaled_dot_product_flash_attention(x, x, x)
             return output
 
-        x = torch.randn(1, 1, 1, 32)
+        x = torch.randn(1, 1, 1, 32, device=torch.device("cuda"))
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (x,))
 
     # NOTE:The test was meant to test the empty bounding box case, but it is not
@@ -1125,7 +1126,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "AssertionError: Dynamic shape check failed for graph inputs",
         skip_model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
-    def test_large_scale_exporter_with_tiny_gpt2(self):
+    def test_fake_tensor_mode_huggingface_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
         device = "cpu"
 
@@ -1337,6 +1338,49 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_fake_tensor_mode_exporter(
             "huggingface_bigscience_bloom_560m",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+            model_type=self.model_type,
+        )
+
+    @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
+        "AssertionError: Expected 5 inputs, got 3"
+        "Github issue: https://github.com/pytorch/pytorch/issues/115745"
+    )
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "AssertionError: Dynamic shape check failed for graph inputs",
+        skip_model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+    )
+    def test_fake_tensor_mode_huggingface_gpt2(self):
+        config = transformers.GPT2Config(
+            vocab_size=8096, n_positions=256, n_embd=256, n_layer=2, n_head=2
+        )
+
+        def create_model():
+            return transformers.GPT2Model(config).eval()
+
+        def create_args():
+            return tuple()
+
+        def create_kwargs():
+            batch, seq = 4, 256
+
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+            position_ids = torch.arange(0, seq, dtype=torch.long)
+            position_ids = position_ids.unsqueeze(0).view(-1, seq)
+
+            return {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "position_ids": position_ids,
+            }
+
+        self._test_fake_tensor_mode_exporter(
+            "huggingface_gpt2",
             create_model,
             create_args,
             create_kwargs,
