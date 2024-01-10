@@ -54,6 +54,7 @@ def wrap_numpy(f):
 
     return wrap
 
+
 class FakeContext:
     def __init__(self, saved_tensors):
         # this will cache the results of saved_tensors
