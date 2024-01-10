@@ -87,7 +87,7 @@ def _decompose_scatter_functional_helper(
 
     if view_ops_tail:
         view = graph_call_function(
-            graph, view_op.target, inp, *view_op.args, view_op.kwargs
+            graph, view_op.target, inp, *view_op.args, **view_op.kwargs
         )
         src = _decompose_scatter_functional_helper(graph, view, src, view_ops[1:])
 

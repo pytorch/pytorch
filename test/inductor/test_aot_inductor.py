@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     IS_WINDOWS,
+    skipIfRocm,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -763,6 +764,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (a, b)
         self.check_model(Model(), example_inputs, constraints=constraints)
 
+    @skipIfRocm
     @requires_multigpu()
     def test_replicate_on_devices(self):
         if self.device != "cuda":
@@ -817,6 +819,7 @@ class AOTInductorTestsTemplate:
 
         self.check_model(M(), ({"x": torch.ones(5), "y": torch.ones(5)},))
 
+    @skipIfRocm
     @requires_multigpu()
     def test_non_default_cuda_device(self):
         if self.device != "cuda":
