@@ -103,7 +103,11 @@ Tensor permute(const Tensor& self, IntArrayRef dims) {
   }
 
   IntArrayRef output_sizes(newSizes);
-  vTensor v_output{api::context(), output_sizes.vec(), self.scalar_type()};
+  vTensor v_output{
+      api::context(),
+      output_sizes.vec(),
+      convert_dtype(self.scalar_type()),
+  };
 
   return permute_4d(self, in_size, out_size, out_dims, v_output);
 }

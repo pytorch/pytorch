@@ -44,7 +44,7 @@ Tensor unsqueeze(const at::Tensor& self, int64_t dim) {
   vTensor v_output{
       context,
       output_size,
-      self.scalar_type(),
+      convert_dtype(self.scalar_type()),
   };
 
   // Required to determine how to insert memory barriers in the command buffer
