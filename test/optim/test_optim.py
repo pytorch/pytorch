@@ -242,7 +242,7 @@ class TestOptim(TestCase):
         optimizer = constructor(weight, bias)
         fn = functools.partial(fn_base, optimizer, weight, bias)
 
-        # Prime the optimizers
+        # Prime the optimizer
         for _i in range(20):
             optimizer.step(fn)
 

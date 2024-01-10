@@ -634,9 +634,9 @@ class Optimizer:
                 fused = pg["fused"] if "fused" in pg else False
                 capturable = pg["capturable"] if "capturable" in pg else False
                 break
-        if key in ["step"]:
+        if key == "step":
             if capturable or fused:
-                return value.to(dtype=_get_scalar_dtype(is_fused=fused), device=param.device)
+                return value.to(dtype=torch.float32, device=param.device)
             else:
                 return value
         else:
@@ -785,6 +785,7 @@ class Optimizer:
         param_groups = [
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({'state': state, 'param_groups': param_groups})
+
         for post_hook in self._optimizer_load_state_dict_post_hooks.values():
             post_hook(self)
 
