@@ -189,7 +189,7 @@ void raw_cudnn_layernorm_forward_out(const Tensor& X, const Tensor& scale, const
     TORCH_INTERNAL_ASSERT(layernorm_graph->validate().is_good());
     TORCH_INTERNAL_ASSERT(layernorm_graph->build_operation_graph(handle).is_good());
     TORCH_INTERNAL_ASSERT(layernorm_graph->create_execution_plans({fe::HeurMode_t::FALLBACK}).is_good());
-    TORCH_INTERNAL_ASSERT(layernorm_graph->check_support(handle).is_good());
+    TORCH_INTERNAL_ASSERT(layernorm_graph->check_support(handle).is_good(), layernorm_graph->check_support(handle).get_message());
     TORCH_INTERNAL_ASSERT(layernorm_graph->build_plans(handle).is_good());
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack_ = {
       {X_fe, X.data_ptr()},
@@ -242,23 +242,23 @@ void raw_cudnn_layernorm_backward_out(const Tensor& dY, const Tensor& X, const T
     auto X_fe = layernorm_graph->tensor(fe::graph::Tensor_attributes()
                              .set_name("X")
                              .set_dim(std::vector<int64_t>(X_reshaped.sizes().begin(), X_reshaped.sizes().end()))
-                             .set_stride({M, 1, M, M}));
+                             .set_stride({N, 1, N, N}));
     auto DY_fe = layernorm_graph->tensor(fe::graph::Tensor_attributes()
                              .set_name("DY")
                              .set_dim(std::vector<int64_t>(DY_reshaped.sizes().begin(), DY_reshaped.sizes().end()))
-                             .set_stride({M, 1, M, M}));
+                             .set_stride({N, 1, N, N}));
     auto scale_fe = layernorm_graph->tensor(fe::graph::Tensor_attributes()
                                   .set_name("scale")
                                   .set_dim({1, N, 1, 1})
                                   .set_stride({N, 1, N, N})
                                   .set_data_type(get_fe_dtype(gamma)));
     auto mean_fe = layernorm_graph->tensor(fe::graph::Tensor_attributes()
-                                  .set_name("scale")
+                                  .set_name("mean")
                                   .set_dim({M, 1, 1, 1})
                                   .set_stride({1, 1, 1, 1})
                                   .set_data_type(get_fe_dtype(mean)));
     auto inv_variance_fe  = layernorm_graph->tensor(fe::graph::Tensor_attributes()
-                                 .set_name("bias")
+                                 .set_name("inv_variance")
                                  .set_dim({M, 1, 1, 1})
                                  .set_stride({1, 1, 1, 1})
                                  .set_data_type(get_fe_dtype(rstd)));
@@ -268,12 +268,11 @@ void raw_cudnn_layernorm_backward_out(const Tensor& dY, const Tensor& X, const T
     DX_fe->set_output(true);
     dscale_fe->set_output(true).set_data_type(get_fe_dtype(*dgamma));
     dbias_fe->set_output(true).set_data_type(get_fe_dtype(*dbeta));
-
     cudnnHandle_t handle = getCudnnHandle();
     TORCH_INTERNAL_ASSERT(layernorm_graph->validate().is_good());
     TORCH_INTERNAL_ASSERT(layernorm_graph->build_operation_graph(handle).is_good());
     TORCH_INTERNAL_ASSERT(layernorm_graph->create_execution_plans({fe::HeurMode_t::FALLBACK}).is_good());
-    TORCH_INTERNAL_ASSERT(layernorm_graph->check_support(handle).is_good());
+    TORCH_INTERNAL_ASSERT(layernorm_graph->check_support(handle).is_good(), layernorm_graph->check_support(handle).get_message());
     TORCH_INTERNAL_ASSERT(layernorm_graph->build_plans(handle).is_good());
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack_ = {
       {X_fe, X.data_ptr()},
