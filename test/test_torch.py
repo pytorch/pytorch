@@ -5809,11 +5809,11 @@ else:
         optimizer.zero_grad()
         x = torch.randn(1, 5).to(device)
         y = 1e-30 * torch.randn(1, 1).to(device)
-        l = ((model(x) - y)**2).mean()
+        l = ((model(x) - y) ** 2).mean()
         scaler.scale(l).backward()
         scaler.step(optimizer)
         scaler.update()
-        assert(scaler._scale != float('inf') and scaler._scale != float('nan'))
+        assert scaler._scale != float("inf") and scaler._scale != float("nan")
 
     @onlyNativeDeviceTypes
     def test_grad_scaling_clipping(self, device):
