@@ -634,7 +634,7 @@ def run_test(
                 timeout,
                 stepcurrent_key,
                 output,
-                options.continue_through_error
+                options.continue_through_error,
             )
         else:
             command.append(f"--sc={stepcurrent_key}")
@@ -665,7 +665,13 @@ def run_test(
 
 
 def run_test_retries(
-    command, test_directory, env, timeout, stepcurrent_key, output, continue_through_error
+    command,
+    test_directory,
+    env,
+    timeout,
+    stepcurrent_key,
+    output,
+    continue_through_error,
 ):
     # Run the test with -x to stop at first failure. Try again, skipping the
     # previously run tests, repeating this until there is a test that fails 3
@@ -1051,9 +1057,7 @@ def handle_log_file(
     os.remove(file_path)
 
 
-def get_pytest_args(
-    options, is_cpp_test=False, is_distributed_test=False
-):
+def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
     if RERUN_DISABLED_TESTS:
         # Distributed tests are too slow, so running them x50 will cause the jobs to timeout after
         # 3+ hours. So, let's opt for less number of reruns. We need at least 150 instances of the
