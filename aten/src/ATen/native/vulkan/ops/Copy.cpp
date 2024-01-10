@@ -282,7 +282,7 @@ vTensor to_vulkan(at::Tensor& src, const api::StorageType storage_type) {
       src.sizes().vec(),
       convert_dtype(src.scalar_type()),
       storage_type,
-      src.suggest_memory_format(),
+      get_gpu_memory_layout(storage_type, src.suggest_memory_format()),
   };
 
   ops::pack_cpu_to_vulkan(src, v_ret);
