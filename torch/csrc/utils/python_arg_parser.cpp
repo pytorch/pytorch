@@ -743,7 +743,7 @@ bool is_tensor_list_and_append_overloaded(
     if (!is_tensor_and_append_overloaded(iobj, overloaded_args)) {
       if (throw_error) {
         TORCH_CHECK_TYPE(
-            true,
+            false,
             "expected Tensor as element ",
             idx,
             " in argument ",
