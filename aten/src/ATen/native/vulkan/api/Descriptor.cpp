@@ -1,6 +1,7 @@
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Utils.h>
 
+#include <algorithm>
 #include <utility>
 
 namespace at {
