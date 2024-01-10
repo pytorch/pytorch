@@ -464,7 +464,8 @@ lazy_tensor_core_python_sources = [
 ]
 
 inductor_core_resources = [
-    "torch/csrc/inductor/aoti_model_container_runner.cpp",
+    "torch/csrc/inductor/aoti_runner/model_container_runner.cpp",
+    "torch/csrc/inductor/aoti_runner/model_container_runner_cpu.cpp",
     "torch/csrc/inductor/aoti_torch/shim_common.cpp",
     "torch/csrc/inductor/aoti_torch/tensor_converter.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
@@ -652,7 +653,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/memory_snapshot.cpp",
-    "torch/csrc/inductor/aoti_model_container_runner_cuda.cpp",
+    "torch/csrc/inductor/aoti_runner/model_container_runner_cuda.cpp",
     "torch/csrc/inductor/aoti_torch/shim_cuda.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/profiler/stubs/cuda.cpp",
@@ -674,6 +675,8 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/ProcessGroupUCC.cpp",
     "torch/csrc/distributed/c10d/UCCTracing.cpp",
     "torch/csrc/distributed/c10d/UCCUtils.cpp",
+    "torch/csrc/distributed/c10d/intra_node_comm.cpp",
+    "torch/csrc/distributed/c10d/intra_node_comm.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
@@ -806,6 +809,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/init.cpp",
     "torch/csrc/functorch/init.cpp",
     "torch/csrc/mps/Module.cpp",
+    "torch/csrc/inductor/aoti_runner/pybind.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
@@ -1021,6 +1025,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/operator_name.cpp",
     "aten/src/ATen/core/TorchDispatchUtils.cpp",
     "aten/src/ATen/core/register_symbols.cpp",
+    "aten/src/ATen/core/SingletonSymNodeImpl.cpp",
     "aten/src/ATen/core/class_type.cpp",
     "aten/src/ATen/core/type.cpp",
     "aten/src/ATen/core/type_factory.cpp",

@@ -28,6 +28,7 @@ from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
     IteratorVariable,
+    ItertoolsVariable,
     RepeatIteratorVariable,
 )
 from .lazy import LazyVariableTracker
@@ -39,6 +40,7 @@ from .lists import (
     RangeVariable,
     RestrictedListSubclassVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .misc import (
@@ -66,11 +68,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import (
-    TorchCtxManagerClassVariable,
-    TorchInGraphFunctionVariable,
-    TorchVariable,
-)
+from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
@@ -95,6 +93,7 @@ __all__ = [
     "GradModeVariable",
     "InspectSignatureVariable",
     "IteratorVariable",
+    "ItertoolsVariable",
     "LambdaVariable",
     "LazyVariableTracker",
     "ListIteratorVariable",
@@ -117,7 +116,6 @@ __all__ = [
     "TensorVariable",
     "TorchCtxManagerClassVariable",
     "TorchInGraphFunctionVariable",
-    "TorchVariable",
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",

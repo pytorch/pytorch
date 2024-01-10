@@ -18,6 +18,10 @@ BUILD_DIR="build"
 BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
+#Set Default values for these variables in case they are not set
+SHARD_NUMBER="${SHARD_NUMBER:=1}"
+NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
+
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
@@ -259,6 +263,7 @@ test_dynamo_shard() {
     --exclude-jit-executor \
     --exclude-distributed-tests \
     --exclude \
+      test_ao_sparsity \
       test_autograd \
       test_jit \
       test_proxy_tensor \
@@ -308,8 +313,10 @@ test_inductor() {
 
   # docker build uses bdist_wheel which does not work with test_aot_inductor
   # TODO: need a faster way to build
-  BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-  CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+      BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
+      CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
+  fi
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -389,8 +396,8 @@ test_perf_for_dashboard() {
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]] && [[ "$mode" == "inference" ]]; then
-        python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --cpp-wrapper "$@" \
+        TORCHINDUCTOR_CPP_WRAPPER=1 python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *freezing_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
@@ -491,6 +498,13 @@ test_inductor_torchbench_smoketest_perf() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
+  # smoke test the cpp_wrapper mode
+  TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/torchbench.py --device cuda --accuracy --bfloat16 \
+    --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_smoketest.csv"
+  python benchmarks/dynamo/check_accuracy.py \
+      --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_smoketest.csv" \
+      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_torchbench_inference.csv"
+
   python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
     --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
     --output "$TEST_REPORTS_DIR/inductor_training_smoketest.csv"
@@ -500,7 +514,11 @@ test_inductor_torchbench_smoketest_perf() {
   python benchmarks/dynamo/torchbench.py --device cuda --performance --bfloat16 --inference \
     --export-aot-inductor --only nanogpt --output "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv"
   # The threshold value needs to be actively maintained to make this check useful
-  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t 5.2
+  # The perf number of nanogpt seems not very stable, e.g.
+  # https://github.com/pytorch/pytorch/actions/runs/7158691360/job/19491437314,
+  # and thus we lower its threshold to reduce flakiness. If this continues to be a problem,
+  # we switch to use some other model.
+  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t 4.9
 
   # Check memory compression ratio for a few models
   for test in hf_Albert timm_vision_transformer; do
@@ -1069,7 +1087,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
-    checkout_install_torchbench hf_Bert hf_Albert timm_vision_transformer
+    checkout_install_torchbench hf_Bert hf_Albert nanogpt timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   else
     checkout_install_torchbench
@@ -1085,13 +1103,12 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   test_inductor
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  test_without_numpy
   install_torchvision
   test_dynamo_shard 1
   test_aten
-elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *dynamo* && $SHARD_NUMBER -gt 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  test_dynamo_shard 2
+  test_dynamo_shard "${SHARD_NUMBER}"
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
@@ -1119,6 +1136,10 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
+  install_torchvision
+  test_python
+  test_aten
+elif [[ "${BUILD_ENVIRONMENT}" == *xpu* && -n "$TESTS_TO_INCLUDE" ]]; then
   install_torchvision
   test_python
   test_aten

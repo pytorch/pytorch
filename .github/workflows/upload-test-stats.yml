@@ -98,12 +98,9 @@ jobs:
     if: ${{ always() && github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-latest
     continue-on-error: true
-    environment: pytorchbot-env
     steps:
       - name: Get our GITHUB_TOKEN API limit usage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN}}
         run: |
           curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/rate_limit
-          curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $PYTORCHBOT_TOKEN" https://api.github.com/rate_limit
