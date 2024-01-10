@@ -17,7 +17,7 @@ api::ShaderInfo get_shader(const OpType type) {
     case OpType::DIV:
       return VK_KERNEL(div);
   }
-  TORCH_INTERNAL_ASSERT(false, "Invalid OpType");
+  VK_THROW("Invalid OpType");
 }
 
 struct Params final {
