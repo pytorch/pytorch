@@ -484,10 +484,7 @@ class WrapperCodeGen(CodeGen):
             self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
 
     def codegen_input_nan_asserts(self):
-<<<<<<< HEAD
         self.prefix.writeline("# make sure graph inputs are not nan/inf")
-=======
->>>>>>> ae467129df9 ([inductor] multi-kernel support)
         for name, buf in V.graph.graph_inputs.items():
             if isinstance(buf, sympy.Expr):
                 continue
