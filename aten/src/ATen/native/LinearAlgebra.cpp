@@ -1997,7 +1997,7 @@ static Tensor _matmul_impl(
   const bool has_out = out.defined();
 
   if (has_out) {
-    // Usually we would rely out= kernels we decompose into to check this, but
+    // Usually we would rely on the out= kernels we decompose into to check this, but
     // for matmul there is logic at the composite level that relies on this invariant.
     TORCH_CHECK(!(tensor1.requires_grad() || tensor2.requires_grad() || out.requires_grad()) || !at::GradMode::is_enabled(),
       "matmul(): functions with out=... arguments don't support automatic differentiation, "

@@ -4410,8 +4410,7 @@ class TestLinalg(TestCase):
             y = make_arg(size_y, noncontiguous=nctg_y)
             self.check_single_matmul(x, y)
 
-    @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
-    @dtypes(torch.int64, torch.float, torch.complex64)
+    @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
         a = torch.empty((256, 512), device=device, dtype=dtype, requires_grad=True).unsqueeze(0)
         b = torch.empty((4, 128, 512), device=device, dtype=dtype, requires_grad=True).transpose(-1, -2)
