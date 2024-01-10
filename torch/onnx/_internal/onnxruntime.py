@@ -383,11 +383,17 @@ def _adjust_scalar_from_fx_to_onnx(
     ],
     value_info: "onnx.ValueInfoProto",  # type: ignore[name-defined]
 ) -> torch.Tensor:
+    """Helper function to wrap PyTorch variables as torch.Tensor"""
     if (
         isinstance(dynamo_value, torch.Tensor)
         and len(value_info.type.tensor_type.shape.dim) == 0
         and dynamo_value.shape == (1,)
     ):
+        # ONNX expect a scalar with empty shape.
+        # In contrast, PyTorch usually allows implicit
+        # conversion between shape=() and shape=(1,).
+        #
+        # Below, PyTorch's shape (1,) is reshaped to ().
         return torch.squeeze(dynamo_value)
     elif isinstance(dynamo_value, int):
         return torch.tensor(dynamo_value, dtype=torch.int64)
@@ -412,6 +418,7 @@ def _adjust_scalar_from_onnx_to_fx(
         bool,
     ],
 ) -> Union[torch.Tensor, int, float, bool,]:
+    """Helper function to wrap ORT-produced torch.Tensor as PyTorch variables"""
     assert isinstance(tensor, torch.Tensor), "ORT's output must be tensor."
     if isinstance(
         prim_value,
