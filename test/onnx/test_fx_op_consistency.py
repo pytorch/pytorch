@@ -1247,7 +1247,23 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         dtypes=onnx_test_common.COMPLEX_TYPES,
         reason="fixme: kwargs dtpye=complex64 is not supported in ONNX."
     ),
-    # SLOW TESTS
+    # SLOW TESTS (All are xfails if we run them)
+    skip_slow(
+        "cdist",
+        reason="fixme: Test sets are too many.",
+    ),
+    skip_slow(
+        "histogram",
+        reason="fixme: Test sets are too many.",
+    ),
+    skip_slow(
+        "linalg.svd",
+        reason="fixme: Test sets are too many.",
+    ),
+    skip_slow(
+        "logspace",
+        reason="fixme: Test sets are too many.",
+    ),
     skip_slow(
         "logspace",
         variant_name="tensor_overload",
@@ -1255,6 +1271,23 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     skip_slow(
         "max_pool2d_with_indices_backward",
+        reason="fixme: Test sets are too many.",
+    ),
+    skip_slow(
+        "nn.functional.interpolate",
+        variant_name="bicubic",
+        reason="fixme: Test sets are too many.",
+    ),
+    skip_slow(
+        "nn.functional.max_unpool1d",
+        reason="fixme: Test sets are too many.",
+    ),
+    skip_slow(
+        "nn.functional.max_unpool2d",
+        reason="fixme: Test sets are too many.",
+    ),
+    skip_slow(
+        "nn.functional.max_unpool3d",
         reason="fixme: Test sets are too many.",
     ),
     skip_slow(
@@ -1267,6 +1300,14 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     skip_slow(
         "nn.functional.max_pool3d",
+        reason="fixme: Test sets are too many.",
+    ),
+    skip_slow(
+        "nn.functional.unfold",
+        reason="fixme: Test sets are too many.",
+    ),
+    skip_slow(
+        "searchsorted",
         reason="fixme: Test sets are too many.",
     )
 )
