@@ -2121,6 +2121,16 @@ class TestSDPACudaOnly(NNTestCase):
         max_diff = (out - out_contig).abs().mean()
         self.assertTrue(max_diff.item() < 1e-7)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Fused SDPA was not built for this system")
+    def test_singelton_head_dim_stride_ne_1(self, device):
+        query = torch.tensor([[[[1, 2]]]], dtype=torch.float16, device=device)
+        query = query.transpose(-1, -2)
+        key = torch.tensor([[[[1]]]], dtype=torch.float16, device=device)
+        value = torch.tensor([[[[1]]]], dtype=torch.float16, device=device)
+
+        with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
+            scaled_dot_product_attention(query, key, value)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
