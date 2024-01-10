@@ -145,7 +145,7 @@ def _decompose_scatter_mutating(
     for view in view_ops:
         tmp = graph_call_function(graph, view.target, tmp, *view.args, **view.kwargs)
 
-    graph_call_function(graph, aten.copy_, tmp, src)
+    graph_call_function(graph, aten.copy_.default, tmp, src)
     return inp
 
 
