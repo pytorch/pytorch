@@ -576,12 +576,13 @@ class VariableBuilder:
             return StreamContextVariable.create_from_existing_context(self.tx, value)
         elif isinstance(value, _StreamBase):
             self.install_guards(GuardBuilder.ID_MATCH)
-            return StreamVariable(
+            stream_var = StreamVariable(
                 None,
                 value,
                 value.device,
                 source=self.source,
             )
+            return self.tx.output.side_effects.track_object_existing(value, stream_var)
         elif isinstance(value, _EventBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EventVariable(

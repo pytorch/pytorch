@@ -532,7 +532,7 @@ class StreamContextVariable(ContextWrappingVariable):
     def reconstruct(self, codegen):
         codegen.load_import_from("torch", "cuda.stream")
         assert len(self.target_values) == 1
-        self.target_values[0].reconstruct(codegen)
+        codegen(self.target_values[0])
         codegen.extend_output(create_call_function(1, False))
         return []
 
@@ -597,12 +597,6 @@ class StreamVariable(VariableTracker):
 
     def as_proxy(self):
         return self.proxy
-
-    def reconstruct(self, codegen):
-        codegen.load_import_from("torch", "cuda.Stream")
-        codegen.extend_output([codegen.create_load_const(str(self.device))])
-        codegen.extend_output(create_call_function(1, False))
-        return []
 
 
 class EventVariable(VariableTracker):
