@@ -13,8 +13,7 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/autograd/variable.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 struct InputBuffer {
   explicit InputBuffer(size_t size) : buffer(size) {}
@@ -44,5 +43,4 @@ struct InputBuffer {
   std::vector<Variable> buffer;
 };
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

@@ -2,8 +2,7 @@
 
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 extern PyObject* THPVariableFunctionsModule;
 
@@ -25,5 +24,4 @@ inline PyObject* TypeError_to_NotImplemented_(
 
 void initTorchFunctions();
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
