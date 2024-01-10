@@ -9,7 +9,6 @@
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
-#include <c10/util/ArrayRef.h>
 
 namespace at {
 namespace native {
