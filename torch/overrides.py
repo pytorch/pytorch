@@ -341,6 +341,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._fix_weakref,
         Tensor._view_func,
         Tensor._view_func_unsafe,
+        Tensor._rev_view_func_unsafe,
         Tensor._make_wrapper_subclass,
         Tensor._python_dispatch.__get__,
         Tensor._has_symbolic_sizes_strides.__get__,

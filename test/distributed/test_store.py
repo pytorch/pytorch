@@ -778,7 +778,7 @@ class TimeoutTest(TestCase):
                 else:
                     my_store.wait(["foo"], datetime.timedelta(seconds=10))
                 rank_res[rank] = True
-            except Error as e:
+            except Error as e:  # noqa: F821
                 rank_res[rank] = e
             time.sleep(1)
 
