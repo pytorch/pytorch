@@ -17,6 +17,7 @@ from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphi
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_LINUX,
@@ -41,11 +42,10 @@ importlib.import_module("filelock")
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
-HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
-    unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
+    unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
 
 
@@ -1335,6 +1335,28 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             torch.compiler.cudagraph_mark_step_begin()
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
+        @torch._dynamo.config.patch("capture_scalar_outputs", True)
+        def test_incompatible_cudagraph_ops_item(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x.item()
+
+            self.assertEqual(foo(torch.tensor(3.0, device="cuda")), 3.0)
+            self.assertEqual(foo(torch.tensor(6.0, device="cuda")), 6.0)
+
+        @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+        def test_incompatible_cudagraph_ops_nonzero(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x.nonzero()
+
+            self.assertEqual(
+                foo(torch.tensor([1, 0, 2], device="cuda")), torch.tensor([[0], [2]])
+            )
+            self.assertEqual(
+                foo(torch.tensor([1, 0, 0], device="cuda")), torch.tensor([[0]])
+            )
 
         def test_storage_access_error(self):
             x = torch.rand([4], device="cuda")

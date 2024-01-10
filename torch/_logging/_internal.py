@@ -12,6 +12,7 @@ log = logging.getLogger(__name__)
 
 DEFAULT_LOG_LEVEL = logging.WARNING
 LOG_ENV_VAR = "TORCH_LOGS"
+LOG_OUT_ENV_VAR = "TORCH_LOGS_OUT"
 LOG_FORMAT_ENV_VAR = "TORCH_LOGS_FORMAT"
 
 
@@ -566,6 +567,9 @@ Examples:
   string will set the output format
   Valid keys are "levelname", "message", "pathname", "levelno", "lineno",
   "filename" and "name".
+
+  TORCH_LOGS_OUT=/tmp/output.txt will output the logs to /tmp/output.txt as
+  well. This is useful when the output is long.
 """  # flake8: noqa: B950
     msg = f"""
 TORCH_LOGS Info
@@ -786,6 +790,10 @@ def _set_log_state(state):
 def _init_logs(log_file_name=None):
     _reset_logs()
     _update_log_state_from_env()
+
+    out = os.environ.get(LOG_OUT_ENV_VAR, None)
+    if out is not None:
+        log_file_name = out
 
     # First, reset all known (registered) loggers to NOTSET, so that they
     # respect their parent log level
