@@ -1,6 +1,5 @@
 #include <ATen/native/vulkan/impl/Packing.h>
 
-#include <ATen/native/vulkan/graph/Exception.h>
 #include <ATen/native/vulkan/graph/Staging.h>
 
 namespace at {
@@ -23,7 +22,7 @@ void memcpy_to_mapping(
   } else if (dtype == c10::kQInt32) {
     memcpy_to_mapping_impl<c10::qint32>(src, dst_mapping, nbytes);
   } else {
-    VKGRAPH_THROW("Unrecognized dtype!");
+    VK_THROW("Unrecognized dtype!");
   }
 }
 
@@ -43,7 +42,7 @@ void memcpy_from_mapping(
   } else if (dtype == c10::kQInt32) {
     memcpy_from_mapping_impl<c10::qint32>(src_mapping, dst, nbytes);
   } else {
-    VKGRAPH_THROW("Unrecognized dtype!");
+    VK_THROW("Unrecognized dtype!");
   }
 }
 
@@ -113,7 +112,7 @@ void StagingNode::encode_execute(ComputeGraph* graph) const {
     api::StorageBuffer& to_staging = graph->get_val(outputs_[0]).toStaging();
     encode_copy_from_vtensor(graph->context(), from_tensor, to_staging);
   } else {
-    VKGRAPH_THROW(
+    VK_THROW(
         "Unexpected input value type ",
         in_val.type(),
         " and output value type ",
