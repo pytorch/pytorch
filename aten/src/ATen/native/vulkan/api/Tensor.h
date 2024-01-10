@@ -6,7 +6,6 @@
 
 #include <ATen/native/vulkan/api/Context.h>
 #include <ATen/native/vulkan/api/Types.h>
-#include <c10/core/MemoryFormat.h>
 
 namespace at {
 namespace native {
@@ -91,8 +90,9 @@ class vTensor final {
       api::Context* context,
       const std::vector<int64_t>& sizes,
       const api::ScalarType dtype,
-      const api::StorageType storage_type,
-      const api::GPUMemoryLayout memory_layout);
+      const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
+      const api::GPUMemoryLayout memory_layout =
+          api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED);
 
   // Default constructor for quantized vTensor
   vTensor(
@@ -101,26 +101,9 @@ class vTensor final {
       double q_scale,
       int64_t q_zero_point,
       const api::ScalarType dtype,
-      const api::StorageType storage_type,
-      const api::GPUMemoryLayout memory_layout);
-
-  // Allows construction of vTensor from aten Tensor params
-  vTensor(
-      api::Context* context,
-      const std::vector<int64_t>& sizes,
-      const api::ScalarType dtype = api::kFloat,
       const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
-      const c10::MemoryFormat memory_format = c10::MemoryFormat::Contiguous);
-
-  // Allows construction of quantized vTensor from aten Tensor params
-  vTensor(
-      api::Context* const context,
-      const std::vector<int64_t>& sizes,
-      double q_scale,
-      int64_t q_zero_point,
-      const api::ScalarType dtype = api::kQUInt8,
-      const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
-      const c10::MemoryFormat memory_format = c10::MemoryFormat::Contiguous);
+      const api::GPUMemoryLayout memory_layout =
+          api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED);
 
   // Copy Constructor and Assignment; Ideally copying  would be disabled
   // (see the reasoning for move assignment below) but it is required for
