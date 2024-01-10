@@ -366,9 +366,10 @@ class CachingAutotuner(KernelInterface):
 
         scope["runner"] = get_first_attr(binary, "run", "c_wrapper")
         scope["function"] = get_first_attr(binary, "function", "cu_function")
-        cluster_dims = get_first_attr(binary, "cluster_dims", "clusterDims")
         scope["cta_args"] = (
-            (binary.num_ctas, *cluster_dims) if hasattr(binary, "num_ctas") else ()
+            (binary.num_ctas, *get_first_attr(binary, "cluster_dims", "clusterDims"))
+            if hasattr(binary, "num_ctas")
+            else ()
         )
 
         exec(
