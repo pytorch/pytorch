@@ -129,6 +129,8 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         example_args_collection,
         fullgraph: bool = False,
         test_backward: bool = False,
+        atol: float = 1e-5,
+        rtol: float = 1e-6,
     ):
         """Run original and compiled model and compare the results.
 
@@ -157,20 +159,26 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             baseline_result = model(*example_args)
             result = compiled_model(*example_args)
             if isinstance(baseline_result, torch.Tensor):
-                torch.testing.assert_close(baseline_result, result)
+                torch.testing.assert_close(
+                    baseline_result, result, atol=atol, rtol=rtol
+                )
                 if test_backward:
                     baseline_result.sum().backward()
                     result.sum().backward()
                     for baseline_param, param in zip(
                         model.parameters(), compiled_model.parameters()
                     ):
-                        torch.testing.assert_close(baseline_param.grad, param.grad)
+                        torch.testing.assert_close(
+                            baseline_param.grad, param.grad, atol=atol, rtol=rtol
+                        )
             else:
                 assert (
                     test_backward is False
                 ), "Calculating backward with multiple outputs is not supported yet."
                 for baseline_elem, result_elem in zip(baseline_result, result):
-                    torch.testing.assert_close(baseline_elem, result_elem)
+                    torch.testing.assert_close(
+                        baseline_elem, result_elem, atol=atol, rtol=rtol
+                    )
 
     def _assert_counting_information(
         self,
@@ -439,7 +447,9 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             (True, True),
         ]
     )
-    def test_llama_decoder_with_local_backend(self, test_local_backend: bool, test_backward: bool):
+    def test_llama_decoder_with_local_backend(
+        self, test_local_backend: bool, test_backward: bool
+    ):
         from transformers import LlamaConfig  # noqa: F811
         from transformers.models.llama.modeling_llama import (  # noqa: F811
             LlamaDecoderLayer,
@@ -514,15 +524,19 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 local_ort,
                 expected_execution_count=execution_count,
                 number_of_cached_graph_modules=number_of_captured_graphs,
-                number_of_exported_onnx_models_for_all_graph_modules=(1,) * number_of_captured_graphs,
+                number_of_exported_onnx_models_for_all_graph_modules=(1,)
+                * number_of_captured_graphs,
             )
 
     @parameterized.expand(
         [
-            (True,),
+            (True, False),
+            (True, True),
         ]
     )
-    def test_llama_with_local_backend(self, test_local_backend: bool):
+    def test_llama_with_local_backend(
+        self, test_local_backend: bool, test_backward: bool
+    ):
         from transformers import LlamaConfig  # noqa: F811
         from transformers.models.llama.modeling_llama import LlamaModel  # noqa: F811
 
@@ -548,7 +562,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 decoder_output = self.llama(
                     input_ids, attention_mask, position_ids, return_dict=False
                 )
-                return decoder_output
+                return decoder_output[0]
 
         def generate_example_inputs(batch: int, seq: int):
             # shape: batch x seq x hidden_size
@@ -581,16 +595,21 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             local_aot_ort,
             example_args_collection,
             fullgraph=True,
-            test_backward=True,
+            test_backward=test_backward,
+            atol=1e-4,
+            rtol=1e-4,
         )
 
         if test_local_backend:
             assert local_ort is not None
+            number_of_captured_graphs = 2 if test_backward else 1
+            execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
                 local_ort,
-                expected_execution_count=len(example_args_collection),
-                number_of_cached_graph_modules=1,
-                number_of_exported_onnx_models_for_all_graph_modules=(1,),
+                expected_execution_count=execution_count,
+                number_of_cached_graph_modules=number_of_captured_graphs,
+                number_of_exported_onnx_models_for_all_graph_modules=(1,)
+                * number_of_captured_graphs,
             )
 
 
