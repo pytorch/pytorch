@@ -378,16 +378,13 @@ auto wrap_pybind_function_impl_(
   namespace py = pybind11;
 
   // f=f is needed to handle function references on older compilers
-  return [f = std::forward<Func>(f),
-          release_gil](Arg<Func, Is>... args) {
+  return [f = std::forward<Func>(f), release_gil](Arg<Func, Is>... args) {
     HANDLE_TH_ERRORS
     if (release_gil) {
       py::gil_scoped_release no_gil;
-      return c10::guts::invoke(
-          f, std::forward<Arg<Func, Is>>(args)...);
+      return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
     } else {
-      return c10::guts::invoke(
-          f, std::forward<Arg<Func, Is>>(args)...);
+      return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
     }
     END_HANDLE_TH_ERRORS_PYBIND
   };
