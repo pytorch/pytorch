@@ -1212,6 +1212,8 @@ torch_c_binding_in_graph_functions = {
         "torch._foreach_atan",
         "torch._foreach_ceil_",
         "torch._foreach_ceil",
+        "torch._foreach_clamp_",
+        "torch._foreach_clamp",
         "torch._foreach_clamp_max_",
         "torch._foreach_clamp_max",
         "torch._foreach_clamp_min_",
