@@ -1,57 +1,6 @@
 # tests in this list will run without Dynamo strict mode by default.
 FIXME_default_non_strict = {
-    "backends/xeon/test_launch",
-    "benchmark_utils/test_benchmark_utils",
-    "distributions/test_constraints",
-    "distributions/test_distributions",
-    "dynamo/test_activation_checkpointing",
-    "dynamo/test_after_aot",
-    "dynamo/test_aot_autograd",
-    "dynamo/test_autograd_function",
-    "dynamo/test_backends",
-    "dynamo/test_backward_higher_order_ops",
-    "dynamo/test_base_output",
-    "dynamo/test_bytecode_hook",
-    "dynamo/test_compile",
-    "dynamo/test_comptime",
-    "dynamo/test_config",
-    "dynamo/test_ctx_manager",
-    "dynamo/test_cudagraphs",
-    "dynamo/test_debug_utils",
-    "dynamo/test_decorators",
-    "dynamo/test_dynamic_shapes",
-    "dynamo/test_exc",
-    "dynamo/test_export",
-    "dynamo/test_export_mutations",
-    "dynamo/test_frame_init",
-    "dynamo/test_functions",
-    "dynamo/test_global",
-    "dynamo/test_higher_order_ops",
-    "dynamo/test_hooks",
-    "dynamo/test_input_attr_tracking",
-    "dynamo/test_interop",
     "dynamo/test_logging",
-    "dynamo/test_minifier",
-    "dynamo/test_misc",
-    "dynamo/test_model_output",
-    "dynamo/test_modules",
-    "dynamo/test_nops",
-    "dynamo/test_optimizers",
-    "dynamo/test_pre_dispatch",
-    "dynamo/test_profiler",
-    "dynamo/test_python_autograd",
-    "dynamo/test_recompile_ux",
-    "dynamo/test_recompiles",
-    "dynamo/test_replay_record",
-    "dynamo/test_repros",
-    "dynamo/test_skip_non_tensor",
-    "dynamo/test_sources",
-    "dynamo/test_subclasses",
-    "dynamo/test_subgraphs",
-    "dynamo/test_torchrec",
-    "dynamo/test_trace_rules",
-    "dynamo/test_unspec",
-    "dynamo/test_verify_correctness",
     "export/test_db",
     "export/test_experimental",
     "export/test_export",
@@ -66,15 +15,7 @@ FIXME_default_non_strict = {
     "export/test_upgrade",
     "export/test_verifier",
     "functorch/test_aotdispatch",
-    "functorch/test_control_flow",
-    "functorch/test_dims",
-    "functorch/test_eager_transforms",
-    "functorch/test_logging",
-    "functorch/test_memory_efficient_fusion",
-    "functorch/test_minifier",
     "functorch/test_ops",
-    "functorch/test_parsing",
-    "functorch/test_rearrange",
     "functorch/test_vmap",
     "functorch/test_vmap_registrations",
     "inductor/test_aot_inductor",
@@ -132,135 +73,44 @@ FIXME_default_non_strict = {
     "inductor/test_triton_heuristics",
     "inductor/test_triton_wrapper",
     "inductor/test_unbacked_symints",
-    "lazy/test_bindings",
-    "lazy/test_debug_util",
-    "lazy/test_extract_compiled_graph",
-    "lazy/test_functionalization",
-    "lazy/test_generator",
-    "lazy/test_meta_kernel",
-    "lazy/test_reuse_ir",
-    "lazy/test_step_closures",
     "lazy/test_ts_opinfo",
-    "nn/test_convolution",
-    "nn/test_dropout",
-    "nn/test_embedding",
-    "nn/test_init",
-    "nn/test_lazy_modules",
-    "nn/test_module_hooks",
-    "nn/test_multihead_attention",
-    "nn/test_packed_sequence",
-    "nn/test_parametrization",
-    "nn/test_pooling",
-    "nn/test_pruning",
-    "optim/test_lrscheduler",
-    "optim/test_optim",
-    "optim/test_swa_utils",
     "profiler/test_memory_profiler",
     "profiler/test_profiler",
     "profiler/test_profiler_tree",
+    "test_schema_check",  # nb: times out
     "test_ao_sparsity",
     "test_autograd",
     "test_binary_ufuncs",
-    "test_bundled_inputs",
-    "test_comparison_utils",
-    "test_compile_benchmark_util",
-    "test_complex",
     "test_content_store",
-    "test_cpp_api_parity",
-    "test_cpp_extensions_aot_ninja",
-    "test_cpp_extensions_aot_no_ninja",
-    "test_cpp_extensions_jit",
-    "test_cpp_extensions_open_device_registration",
-    "test_cuda",
-    "test_cuda_expandable_segments",
-    "test_cuda_multigpu",
-    "test_cuda_nvml_based_avail",
-    "test_cuda_primary_ctx",
-    "test_cuda_sanitizer",
-    "test_cuda_trace",
     "test_custom_ops",
     "test_dataloader",
-    "test_datapipe",
     "test_decomp",
-    "test_deploy",
-    "test_dispatch",
-    "test_dlpack",
-    "test_dynamic_shapes",
-    "test_expanded_weights",
-    "test_fake_tensor",
-    "test_flop_counter",
     "test_foreach",
-    "test_function_schema",
-    "test_functional_autograd_benchmark",
-    "test_functionalization",
-    "test_functionalization_of_rng_ops",
-    "test_futures",
     "test_fx",
     "test_fx_experimental",
-    "test_fx_passes",
-    "test_fx_reinplace_pass",
-    "test_hub",
-    "test_import_stats",
-    "test_itt",
     "test_jit",
-    "test_jit_autocast",
-    "test_jit_disabled",
     "test_jit_fuser_te",
     "test_jit_llga_fuser",
-    "test_jiterator",
     "test_legacy_vmap",
-    "test_license",
-    "test_logging",
     "test_masked",
     "test_maskedtensor",
-    "test_matmul_cuda",
-    "test_meta",
-    "test_mkl_verbose",
-    "test_mkldnn",
-    "test_mkldnn_fusion",
-    "test_mkldnn_verbose",
-    "test_mobile_optimizer",
-    "test_model_dump",
-    "test_model_exports_to_core_aten",
     "test_modules",
-    "test_monitor",
-    "test_multiprocessing",
-    "test_multiprocessing_spawn",
     "test_namedtensor",
-    "test_namedtuple_return_api",
-    "test_native_functions",
-    "test_native_mha",
-    "test_nestedtensor",
-    "test_nn",
-    "test_numba_integration",
-    "test_numpy_interop",
-    "test_openmp",
     "test_ops",
     "test_ops_fwd_gradients",
     "test_ops_gradients",
     "test_ops_jit",
-    "test_optim",
-    "test_out_dtype_op",
-    "test_overrides",
     "test_package",
-    "test_per_overload_api",
     "test_prims",
     "test_proxy_tensor",
-    "test_pruning_op",
     "test_public_bindings",
     "test_python_dispatch",
-    "test_pytree",
     "test_quantization",
     "test_reductions",
-    "test_scatter_gather_ops",
-    "test_schema_check",
-    "test_segment_reductions",
-    "test_serialization",
     "test_sparse",
     "test_sparse_csr",
     "test_sparse_semi_structured",
     "test_spectral_ops",
-    "test_sympy_utils",
     "test_tensorexpr",
     "test_tensorexpr_pybind",
     "test_torch",
@@ -522,7 +372,6 @@ dynamo_expected_failures = {
     "TestModuleInitCPU.test_nn_LSTM_cpu_float32",
     "TestModuleInitCPU.test_qat_Conv1d_cpu_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc10_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc14_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc9_out_dtype_float64",
     "TestUnaryUfuncs.test_x_and_out_casting_casting_same_kind_ufunc0_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc8_out_dtype_complex128",
@@ -538,11 +387,9 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc14_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc8_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc1_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc12_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc5",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc14_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc2_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc5_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc15_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc0_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc12_out_dtype_float64",
@@ -561,7 +408,6 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc4_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc9_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc12_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc12_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc0_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc11_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc15_out_dtype_float32",
@@ -592,11 +438,9 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc9_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc8_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc7_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc7_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc14_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc10_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc9_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc14_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc4_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc8_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc8_out_dtype_complex128",
@@ -607,23 +451,17 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc12_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc11_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc1_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc15_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc0_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc2_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc15",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc16_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc12_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc16_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc15_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc16_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc7_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc1_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc2_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc3_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc6_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc6_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc3",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc13_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc5_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc3_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc7_out_dtype_float64",
@@ -633,18 +471,14 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc2_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc10_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc10",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc11_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc16_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc11_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc5_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc9_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc2_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc5_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc3_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc7_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc15_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc5_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc10_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc15_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc11_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc14_out_dtype_float64",
@@ -652,7 +486,6 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc2_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc11_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc12_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc14_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc8_out_dtype_float64",
     "TestUnaryUfuncs.test_x_and_out_casting_casting_same_kind_ufunc0_out_dtype_float64",
     "TestUfuncDtypeKwd.test_binary_ufunc_dtype_and_out",
@@ -663,7 +496,6 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc13_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc5_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc14_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc9_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc9_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc14_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc13_out_dtype_float32",
@@ -672,18 +504,14 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc11",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc7_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc13_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc5_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc6_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc1",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc8_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc13_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc0_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc9_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc16_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc16_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc5_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc12",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc6_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc3_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc6_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc14_out_dtype_float32",
@@ -691,8 +519,6 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc13_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc7_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc14_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc10_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc11_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc4_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc6_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc4_out_dtype_float64",
@@ -703,7 +529,6 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc3_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc11_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc15_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc13_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc14",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc15_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc6",
@@ -716,14 +541,10 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc6_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc11_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc13_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc15_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc7_out_dtype_float32",
     "TestUnaryUfuncs.test_x_and_out_casting_casting_unsafe_ufunc0_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc14_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc15_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc15_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc10_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc12_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc4_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc14_out_dtype_complex128",
     "TestUnaryUfuncs.test_x_and_out_casting_casting_no_ufunc0_out_dtype_float64",
@@ -735,11 +556,9 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc16_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc13_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc5_out_dtype_float32",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc9_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc8_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc3_out_dtype_complex128",
     "TestUnaryUfuncs.test_x_and_out_casting_casting_safe_ufunc0_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc16_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc15_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc12_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc6_out_dtype_complex128",
@@ -750,22 +569,18 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc10_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc7_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc11_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc8_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc9_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc10_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc8_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc16_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc9_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc1_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc3_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc10_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc7_out_dtype_complex128",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc6_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc7_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc0_out_dtype_float64",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc8",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc11_out_dtype_float64",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc16_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_no_ufunc13_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc13_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc2_out_dtype_float64",
@@ -775,7 +590,6 @@ dynamo_expected_failures = {
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_unsafe_ufunc4_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_equiv_ufunc6_out_dtype_complex128",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc13",
-    "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc5_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_same_kind_ufunc2_out_dtype_float32",
     "TestBinaryUfuncs.test_xy_and_out_broadcast_ufunc2",
     "TestBinaryUfuncs.test_xy_and_out_casting_casting_safe_ufunc10_out_dtype_complex128",
@@ -1276,49 +1090,29 @@ dynamo_expected_failures = {
     "TestOneArr.test_asarray_list_func1",
     "TestOneArr.test_asarray_list_func46",
     "TestSequenceOfArrays.test_single_list_func0",
-    "TestCholesky.test_basic_property_shape3_dtype1",
     "TestCond.test_sq_cases",
     "TestNormInt64.test_bad_args",
     "TestQR.test_qr_empty_m_0_n_3",
     "TestMultiDot.test_dynamic_programming_optimization_and_out",
     "TestNormDouble.test_bad_args",
-    "TestCholesky.test_basic_property_shape4_dtype1",
-    "TestCholesky.test_basic_property_shape3_dtype2",
-    "TestCholesky.test_basic_property_shape4_dtype0",
-    "TestCholesky.test_basic_property_shape3_dtype0",
     "TestCond.test_empty_sq_cases",
-    "TestCholesky.test_basic_property_shape1_dtype3",
     "TestQR.test_qr_empty_m_0_n_0",
     "TestQR.test_mode_raw",
     "TestMultiDot.test_two_arguments_and_out",
-    "TestCholesky.test_basic_property_shape1_dtype2",
     "TestMultiDot.test_three_arguments_and_out",
     "TestNormDouble.test_axis",
-    "TestCholesky.test_basic_property_shape1_dtype1",
-    "TestCholesky.test_basic_property_shape2_dtype1",
     "TestMisc.test_generalized_raise_multiloop",
     "TestEigvalsh.test_invalid",
     "TestNormDouble.test_matrix_2x2",
-    "TestCholesky.test_basic_property_shape0_dtype0",
     "TestMisc.test_byteorder_check",
-    "TestCholesky.test_basic_property_shape4_dtype3",
-    "TestCholesky.test_basic_property_shape2_dtype2",
-    "TestCholesky.test_basic_property_shape3_dtype3",
     "TestNormInt64.test_axis",
-    "TestCholesky.test_basic_property_shape2_dtype0",
-    "TestCholesky.test_basic_property_shape0_dtype3",
     "TestQR.test_qr_empty_m_3_n_0",
     "TestEigh.test_invalid",
     "TestNormSingle.test_bad_args",
     "TestNormSingle.test_matrix_2x2",
     "TestNormSingle.test_axis",
-    "TestCholesky.test_basic_property_shape1_dtype0",
-    "TestCholesky.test_basic_property_shape4_dtype2",
     "TestMultiDot.test_too_few_input_arrays",
-    "TestCholesky.test_basic_property_shape0_dtype2",
-    "TestCholesky.test_basic_property_shape0_dtype1",
     "TestNormInt64.test_matrix_2x2",
-    "TestCholesky.test_basic_property_shape2_dtype3",
     "TestFliplr.test_basic",
     "TestHistogram2d.test_binparameter_combination",
     "TestHistogram2d.test_all_outliers",
@@ -1404,16 +1198,9 @@ dynamo_expected_failures = {
     "TestPercentile.test_keepdims_out_q_7_axis_1",
     "TestPercentile.test_api",
     "TestQuantile.test_quantile_monotonic_method_normal_unbiased",
-    "TestSetOps.test_in1d_mixed_dtype_dtype11_dtype21_kind_table",
-    "TestSetOps.test_in1d_mixed_dtype_dtype10_dtype20_kind0",
-    "TestSetOps.test_in1d_mixed_dtype_dtype10_dtype20_kind_table",
-    "TestSetOps.test_ediff1d_forbidden_type_casts_ary1_prepend1_append1_expected_to_begin",
-    "TestSetOps.test_in1d_mixed_dtype_dtype11_dtype21_kind0",
-    "TestSetOps.test_in1d_mixed_dtype_dtype11_dtype21_kind_sort",
     "TestSetOps.test_in1d_table_timedelta_fails",
     "TestUnique.test_unique_axis_errors",
     "TestSetOps.test_setdiff1d",
-    "TestSetOps.test_in1d_mixed_dtype_dtype10_dtype20_kind_sort",
     "TestSetOps.test_in1d_timedelta_kind_sort",
     "TestSetOps.test_in1d_timedelta_kind0",
     "TestUnique.test_unique_axis",
@@ -1475,12 +1262,10 @@ dynamo_expected_failures = {
     "TestScalarTypeNames.test_names_reflect_attributes_t7",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t5",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t9",  # torch_np/numpy_tests/core/test_numerictypes
-    "TestIsSubDType.test_both_abstract",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t6",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t2",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t8",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t0",  # torch_np/numpy_tests/core/test_numerictypes
-    "TestIsSubDType.test_nondtype_nonscalartype",  # torch_np/numpy_tests/core/test_numerictypes
     "TestScalarTypeNames.test_names_reflect_attributes_t3",  # torch_np/numpy_tests/core/test_numerictypes
     "TestClip.test_clip_inplace_array",  # torch_np/numpy_tests/core/test_numeric
     "TestRequire.test_require_each",  # torch_np/numpy_tests/core/test_numeric
@@ -1544,6 +1329,7 @@ dynamo_expected_failures = {
     "TestEinsum.test_different_paths_dtype_l",  # torch_np/numpy_tests/core/test_einsum
     "TestEinsum.test_different_paths_dtype_h",  # torch_np/numpy_tests/core/test_einsum
     "TestEinsum.test_einsum_misc",  # torch_np/numpy_tests/core/test_einsum
+    "TestMisc.test_f16_on_cuda",
     "TestMisc.test_overlap",  # torch_np/numpy_tests/core/test_einsum
     "TestEinsum.test_einsum_sums_int64",  # torch_np/numpy_tests/core/test_einsum
     "TestEinsum.test_einsum_failed_on_p9_and_s390x",  # torch_np/numpy_tests/core/test_einsum
@@ -1598,7 +1384,6 @@ dynamo_expected_failures = {
     "TestDLPack.test_higher_dims_ndim_26",  # torch_np/numpy_tests/core/test_dlpack
     "TestDLPack.test_higher_dims_ndim_8",  # torch_np/numpy_tests/core/test_dlpack
     "WeakTest.test_make_weak_keyed_dict_from_weak_keyed_dict",  # test_weak
-    "WeakKeyDictionaryTestCase.test_update",  # test_weak
     "TestViewOpsLAZY.test_advanced_indexing_assignment_lazy",  # test_view_ops
     "TestOldViewOpsCPU.test_crow_col_indices_cpu",  # test_view_ops
     "TestViewOpsLAZY.test_advanced_indexing_nonview_lazy",  # test_view_ops
@@ -1818,6 +1603,774 @@ dynamo_expected_failures = {
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_seq_len_1030_n_head_3_head_dim_16_causal_False_train_True_cpu_bfloat16",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float64_batch_size_2_seq_len_267_n_head_3_head_dim_16_causal_True_train_True_cpu_float64",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float32_batch_size_12_seq_len_267_n_head_3_head_dim_16_causal_True_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_bfloat16",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float32_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float32",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_12_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_1030_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_1179_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_1_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_16_mask_dim_4_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_2_bool_mask_1_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_0_train_True_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_False_cpu_float64",
+    "TestSDPACPU.test_scaled_dot_product_fused_attention_mask_vs_math_cpu_fused_kernel0_float64_batch_size_2_q_seq_len_267_kv_seq_len_514_n_head_3_head_dim_8_mask_dim_4_bool_mask_1_train_True_cpu_float64",
     "TestAssertCloseSparseCOO.test_matching_coalesced",  # test_testing
     "TestImports.test_circular_dependencies",  # test_testing
     "TestAssertCloseSparseCSR.test_mismatching_crow_indices_msg",  # test_testing
@@ -2020,12 +2573,1572 @@ dynamo_expected_failures = {
     "TestShapeOpsCPU.test_clamp_propagates_nans_cpu",  # test_shape_ops
     "TestShapeOpsCPU.test_flip_cpu_bfloat16",  # test_shape_ops
     "TestShapeOpsCPU.test_clamp_cpu_float32",  # test_shape_ops
+    "TestSubclassSerialization.test_tensor_subclass_deepcopy",  # test_serialization
+    "TestOldSerialization.test_save_different_dtype_unallocated",  # test_serialization
+    "TestSubclassSerialization.test_tensor_subclass_getstate_overwrite",  # test_serialization
+    "TestSerialization.test_save_different_dtype_unallocated",  # test_serialization
+    "TestSubclassSerialization.test_tensor_subclass_wrapper_serialization",  # test_serialization
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_float32",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_bfloat16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_complex64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_float64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_bfloat16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_complex128",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_float16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter__reductions_cpu_float16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int32",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_int32",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_float32",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_float16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter__reductions_cpu_float32",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_uint8",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_uint8",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_int16",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_complex128",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_int8",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_float64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_complex64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_sum_cpu_int64",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int8",  # test_scatter_gather_ops
+    "TestScatterGatherCPU.test_scatter__reductions_cpu_complex64",  # test_scatter_gather_ops
+    "TestCxxPytree.test_pytree_serialize_spec8",  # test_pytree
+    "TestGenericPytree.test_flatten_unflatten_namedtuple_py",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec9",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec3",  # test_pytree
+    "TestGenericPytree.test_flatten_unflatten_deque_py",  # test_pytree
+    "TestGenericPytree.test_flatten_unflatten_deque_cxx",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec2",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec5",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_namedtuple",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec0",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec6",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec4",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec7",  # test_pytree
+    "TestCxxPytree.test_pytree_serialize_spec1",  # test_pytree
+    "TestPythonPytree.test_treespec_equality",  # test_pytree
+    "TestOutDtypeOp.test_out_dtype_non_op_overload",  # test_out_dtype_op
+    "TestOutDtypeOp.test_out_dtype_wrong_output",  # test_out_dtype_op
+    "TestNumPyInteropCPU.test_numpy_non_writeable_cpu",  # test_numpy_interop
+    "TestNN.test_Sequential_append",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_False_mode_bicubic_memory_format0_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_all_ignored_cpu",  # test_nn
+    "TestNN.test_ParameterList_replication",  # test_nn
+    "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_none_use_module_form_False_cpu",  # test_nn
+    "TestNN.test_interpolate_buffer_overflow",  # test_nn
+    "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_mean_use_module_form_False_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_hardsigmoid_grad_cpu",  # test_nn
+    "TestNN.test_batchnorm_raises_error_if_running_var_or_running_mean_have_forward_grad",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_byte_target_matches_long_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_module_to_empty_cpu_float32",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_none_cpu",  # test_nn
+    "TestNN.test_Sequential_extend",  # test_nn
+    "TestNN.test_overwrite_module_params_on_conversion",  # test_nn
+    "TestNN.test_ModuleList",  # test_nn
+    "TestNNDeviceTypeCPU.test_hardswish_grad_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_threshold_inplace_overlap_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_module_to_empty_cpu_float64",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_True_mode_bicubic_memory_format1_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_True_mode_bicubic_memory_format0_cpu",  # test_nn
+    "TestNN.test_Sequential_imul",  # test_nn
+    "TestNN.test_upsampling_bfloat16",  # test_nn
+    "TestNNDeviceTypeCPU.test_triplet_margin_with_distance_loss_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_sum_use_module_form_False_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_sum_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_False_mode_bicubic_memory_format1_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_batchnorm_grad_cpu",  # test_nn
+    "TestNN.test_interpolate",  # test_nn
+    "TestNN.test_register_state_dict_pre_hook",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_True_cpu",  # test_nn
+    "TestNN.test_fb_fc_packed",  # test_nn
+    "TestFusionEval.test_fuse_module_eval_numerics",  # test_nn
+    "TestNNDeviceTypeCPU.test_invalid_reduction_strings_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_total_weight_is_zero_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_mean_cpu",  # test_nn
+    "TestNN.test_register_state_dict_pre_hook_lazy_module",  # test_nn
+    "TestNN.test_ParameterDict_replication",  # test_nn
+    "TestNN.test_Sequential_iadd",  # test_nn
+    "TestNN.test_upsamplingLinear1d",  # test_nn
+    "TestNativeFunctions.test_symintlist_error_with_overload",  # test_native_functions
+    "TestNativeFunctions.test_vararg_symintlist_error",  # test_native_functions
+    "TestNativeFunctions.test_optional_intlist_invalid",  # test_native_functions
+    "TestNativeFunctions.test_symintlist_error",  # test_native_functions
+    "TestNativeFunctions.test_optional_floatlist_invalid",  # test_native_functions
+    "TestMultiprocessing.test_empty_shared",  # test_multiprocessing
+    "TestMultiprocessing.test_inherit_tensor",  # test_multiprocessing
+    "TestMultiprocessing.test_is_shared",  # test_multiprocessing
+    "TestMultiprocessing.test_fs_is_shared",  # test_multiprocessing
+    "TestMkldnnCPU.test_resnext50_32x4d_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_resnet18_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_add_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_linear_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_prelu_bf16_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_prelu_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_batch_norm_2d_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_mul_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_conv1d_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_linear_lowp_cpu_float16",  # test_mkldnn
+    "TestMkldnnCPU.test_sigmoid_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_conv3d_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_reshape_blocked_format_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_copy_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_tanh_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_conv2d_cpu",  # test_mkldnn
+    "TestMkldnnCPU.test_batch_norm_3d_cpu",  # test_mkldnn
+    "TestFunctionalAutogradBenchmark.test_fast_tasks",  # test_functional_autograd_benchmark
+    "TestFunctionSchema.test_serialize_and_deserialize",  # test_function_schema
+    "FakeTensorOperatorInvariants.test_like_ops",  # test_fake_tensor
+    "FakeTensorConverterTest.test_memoized_conversion_from_meta",  # test_fake_tensor
+    "FakeTensorOperatorInvariants.test_non_kwarg_only_device",  # test_fake_tensor
+    "FakeTensorOperatorInvariants.test_tensor_constructors_all_have_kwarg_device",  # test_fake_tensor
+    "TestExpandedWeightModuleCPU.test_Conv1d_reflect_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv2d_zeros_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Embedding_discontiguous_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_conv1d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_instance_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Conv2d_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv2d_reflect_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv2d_replicate_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_conv3d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_instance_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightHelperFunctionCPU.test_unpack_expanded_weight_or_tensor_with_custom_function_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv1d_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightHelperFunctionCPU.test_unpack_expanded_weight_or_tensor_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_conv1d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Conv1d_pad1_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_per_sample_api_compute_batch_size_not_pytreeable_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_linear_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_group_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_group_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_conv3d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Conv2d_dilated_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_conv2d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Conv1d_replicate_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv3d_replicate_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv1d_pad2size1_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv1d_stride_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_conv2d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_embedding_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_per_sample_api_compute_batch_size_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_layer_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_linear_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_embedding_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_linear_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Conv2d_padding_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv3d_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv3d_zeros_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv3d_1x1x1_no_bias_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv3d_no_bias_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightHelperFunctionCPU.test_set_grad_sample_if_exists_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Linear_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_group_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Linear_no_bias_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Embedding_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_layer_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_conv3d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_embedding_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_instance_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_conv1d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Conv1d_circular_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv1d_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv1d_pad1size1_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv2d_strided_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv3d_circular_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv3d_stride_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv2d_no_bias_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightModuleCPU.test_Conv3d_stride_padding_multiple_inputs_cpu",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_layer_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Conv1d_zeros_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_conv2d_cpu_float64",  # test_expanded_weights  # noqa: B950
+    "TestExpandedWeightModuleCPU.test_Conv2d_circular_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
+    "TestTorchDlPackCPU.test_dlpack_export_non_strided_cpu",  # test_dlpack
+    "TestIterDataPipeGraphFastForward.test_simple_snapshot_custom_self_next",  # test_datapipe
+    "TestIterDataPipeGraphFastForward.test_simple_snapshot_custom_non_generator",  # test_datapipe
+    "TestGraph.test_traverse_circular_datapipe",  # test_datapipe
+    "TestGraph.test_traverse_unhashable_datapipe",  # test_datapipe
+    "TestCppExtensionJIT.test_cpp_frontend_module_has_same_output_as_python",  # test_cpp_extensions_jit
+    "TestPoolingNN.test_quantized_max_pool1d_empty_kernel",  # nn/test_pooling
+    "TestPoolingNN.test_MaxUnpool2d_output_size",  # nn/test_pooling
+    "TestNNParametrization.test_deepcopy_after_parametrization",  # nn/test_parametrization
+    "TestNNParametrization.test_new_spectral_norm_dim",  # nn/test_parametrization
+    "TestNNParametrization.test_new_spectral_norm_forward",  # nn/test_parametrization
+    "TestNNParametrization.test_weight_norm_state_dict_compat",  # nn/test_parametrization
+    "TestNNParametrization.test_new_spectral_norm",  # nn/test_parametrization
+    "TestNNParametrization.test_weight_norm_deepcopy",  # nn/test_parametrization
+    "PackedSequenceTest.test_to",  # nn/test_packed_sequence
+    "PackedSequenceTest.test_type_casts",  # nn/test_packed_sequence
+    "PackedSequenceTest.test_pack_sequence",  # nn/test_packed_sequence
+    "PackedSequenceTest.test_total_length",  # nn/test_packed_sequence
+    "TestModuleHooks.test_forward_pre_hooks_named_tuple_True",  # nn/test_module_hooks
+    "TestModuleHooks.test_full_backward_pre_hooks_named_tuple_True",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_submodule_registration",  # nn/test_module_hooks
+    "TestModuleHooks.test_forward_hooks_named_tuple_False",  # nn/test_module_hooks
+    "TestModuleHooks.test_full_backward_hooks_named_tuple_False",  # nn/test_module_hooks
+    "TestModuleHooks.test_forward_hooks_named_tuple_True",  # nn/test_module_hooks
+    "TestStateDictHooks.test_pickled_hook",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_inplace",  # nn/test_module_hooks
+    "TestModuleGlobalHooks.test_module_backward_global_hook_writeable",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_buffer_registration",  # nn/test_module_hooks
+    "TestModuleHooks.test_full_backward_hooks_named_tuple_True",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_no_requires_grad",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_backward_writeable",  # nn/test_module_hooks
+    "TestModuleHooks.test_forward_pre_hooks_named_tuple_False",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_parameter_registration",  # nn/test_module_hooks
+    "TestModuleHooks.test_full_backward_pre_hooks_named_tuple_False",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_cpp",  # nn/test_module_hooks
+    "TestStateDictHooks.test_load_state_dict_pre_hook",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_invalid_outputs",  # nn/test_module_hooks
+    "TestModuleHookNN.test_backward_hooks_interaction",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hooks",  # nn/test_module_hooks
+    "TestModuleHookNN.test_hook_last_arg_requires_grad",  # nn/test_module_hooks
+    "TestModuleGlobalHooks.test_module_global_hook_invalid_outputs",  # nn/test_module_hooks
+    "TestLazyModules.test_lazy_module_parameter",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_batchnorm2d_state",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv3d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv_transposed1d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv2d",  # nn/test_lazy_modules
+    "TestLazyModules.test_optimizer_pass",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_instancenorm3d_state",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_batchnorm3d_state",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv_transpose1d_pickle",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_instancenorm2d",  # nn/test_lazy_modules
+    "TestLazyModules.test_invalid_functions",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_instancenorm2d_state",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv3d_pickle",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_batchnorm2d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_instancenorm1d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_batchnorm1d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_instancenorm1d_state",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv_transpose3d_pickle",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_instancenorm3d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_batchnorm3d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv2d_pickle",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv1d_pickle",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_module_jit_buffer",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv1d",  # nn/test_lazy_modules
+    "TestLazyModules.test_linear",  # nn/test_lazy_modules
+    "TestLazyModules.test_materialize_dtype",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_module_buffer",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_batchnorm1d_state",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_module_jit_param",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_batchnorm_with_dict_input",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv_transpose2d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv_transpose2d_pickle",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_conv_transpose3d",  # nn/test_lazy_modules
+    "TestLazyModules.test_lazy_linear_pickle",  # nn/test_lazy_modules
+    "TestNNInit.test_kaiming_normal_errors_on_inputs_smaller_than_2d",  # nn/test_init
+    "TestNNInit.test_xavier_normal_errors_on_inputs_smaller_than_2d",  # nn/test_init
+    "TestNNInit.test_ones_and_zeros",  # nn/test_init
+    "TestNNInit.test_eye",  # nn/test_init
+    "TestNNInit.test_kaiming_uniform_errors_on_inputs_smaller_than_2d",  # nn/test_init
+    "TestNNInit.test_dirac_only_works_on_3_4_5d_inputs",  # nn/test_init
+    "TestNNInit.test_sparse_only_works_on_2d_inputs",  # nn/test_init
+    "TestNNInit.test_constant",  # nn/test_init
+    "TestNNInit.test_xavier_uniform_errors_on_inputs_smaller_than_2d",  # nn/test_init
+    "TestNNInit.test_xavier_uniform",  # nn/test_init
+    "TestNNInit.test_eye_only_works_on_2d_inputs",  # nn/test_init
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_bfloat16_cpu_int32_int64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int64_bfloat16",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_EmbeddingBag_per_sample_weights_and_no_offsets_cpu_int32_float32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int64_float32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_dimension_errors_cpu",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_EmbeddingBag_per_sample_weights_and_no_offsets_cpu_int64_float64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_bfloat16_cpu_int64_int64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int32_bfloat16",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int64_float32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_half_cpu_int64_int64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int32_float16",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int64_bfloat16",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int32_float32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_EmbeddingBag_per_sample_weights_and_no_offsets_cpu_int64_float32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_EmbeddingBag_per_sample_weights_and_no_offsets_cpu_int32_float64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int64_float64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_half_cpu_int32_int32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int32_float16",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int32_float64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_half_cpu_int64_int32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int64_float16",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int32_float64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int64_float64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int32_float32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_half_cpu_int32_int64",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_bfloat16_cpu_int64_int32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_bfloat16_cpu_int32_int32",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int64_float16",  # nn/test_embedding
+    "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int32_bfloat16",  # nn/test_embedding
+    "TestDropoutNN.test_invalid_dropout_p",  # nn/test_dropout
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNN.test_Conv2d_missing_argument",  # nn/test_convolution
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel2d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel1d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_False_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel2d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel2d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_True_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel3d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel3d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_True_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch3d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_batch_channel3d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_True_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel2d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel3d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_channel1d_has_bias_False_strided_True_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_mkldnn_empty_channel1d_has_bias_True_strided_False_contiguous_False_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch1d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch_channel1d_has_bias_False_strided_False_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestConvolutionNNDeviceTypeCPU.test_conv_backend_empty_batch2d_has_bias_False_strided_True_contiguous_True_cpu",  # nn/test_convolution  # noqa: B950
+    "TestDistributionShapes.test_mixture_same_family_shape",  # distributions/test_distributions
+    "TestFunctors.test_cat_transform",  # distributions/test_distributions
+    "TestFunctors.test_cat_transform_non_uniform",  # distributions/test_distributions
+    "TestRearrange.test_ellipsis_ops",  # functorch/test_rearrange
+    "TestRearrange.test_concatenations_and_stacking",  # functorch/test_rearrange
+    "TestRearrange.test_rearrange_permutations",  # functorch/test_rearrange
+    "TestRearrange.test_collapsed_ellipsis_errors_out",  # functorch/test_rearrange
+    "TestRearrange.test_rearrange_consistency",  # functorch/test_rearrange
+    "TestRearrange.test_unsqueeze",  # functorch/test_rearrange
+    "TestRearrange.test_squeeze",  # functorch/test_rearrange
+    "TestMin.test_manual_stuff",  # functorch/test_dims
+    "TestMin.test_dim_args",  # functorch/test_dims
+    "TestMin.test_dims_with_size",  # functorch/test_dims
+    "TestMin.test_functorch",  # functorch/test_dims
+    "TestMin.test_eq",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_adapt",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_monkey",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_network",  # functorch/test_dims
+    "TestMin.test_doc",  # functorch/test_dims
+    "TestMin.test_c",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_index_placement",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_dims_with_size",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_with_dims_split",  # functorch/test_dims
+    "TestMin.test_index",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_softmax_split",  # functorch/test_dims
+    "TestMin.test_mm_fuse",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_simple",  # functorch/test_dims
+    "TestMin.test_seg",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_doc",  # functorch/test_dims
+    "TestMin.test_attn",  # functorch/test_dims
+    "TestMin.test_mask",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_mm",  # functorch/test_dims
+    "TestMin.test_index_placement",  # functorch/test_dims
+    "TestMin.test_dir",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_hello",  # functorch/test_dims
+    "TestMin.test_network",  # functorch/test_dims
+    "TestMin.test_permute_orig",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_parse",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_order_keyword",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_seg",  # functorch/test_dims
+    "TestMin.test_diag",  # functorch/test_dims
+    "TestMin.test_monkey",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_embed",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_stack",  # functorch/test_dims
+    "TestMin.test_hello",  # functorch/test_dims
+    "TestMin.test_expand",  # functorch/test_dims
+    "TestMin.test_time_mm_fuse",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_compare_dims",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_manual_stuff",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_max",  # functorch/test_dims
+    "TestMin.test_adapt",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_dir",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_order",  # functorch/test_dims
+    "TestMin.test_mm",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_index",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_permute_orig",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_functorch",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_dim_args",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_eq",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_mask",  # functorch/test_dims
+    "TestMin.test_big_split",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_attn",  # functorch/test_dims
+    "TestMin.test_max",  # functorch/test_dims
+    "TestMin.test_compare_dims",  # functorch/test_dims
+    "TestMin.test_parse",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_big_split",  # functorch/test_dims
+    "TestMin.test_simple",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_mm_fuse",  # functorch/test_dims
+    "TestMin.test_order_keyword",  # functorch/test_dims
+    "TestMin.test_inplace",  # functorch/test_dims
+    "TestMin.test_with_dims_split",  # functorch/test_dims
+    "TestMin.test_softmax_split",  # functorch/test_dims
+    "TestMin.test_order",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_c",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_inplace",  # functorch/test_dims
+    "TestMin.test_embed",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_diag",  # functorch/test_dims
+    "TestMinFunctorchOnly.test_expand",  # functorch/test_dims
+    "TestMin.test_stack",  # functorch/test_dims
+    "TestControlFlowTraced.test_tracing_map_symbolic_simple",  # functorch/test_control_flow
+    "TestControlFlow.test_map_list_in_out",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_nested_cond_map_cond_symbolic",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_autograd_aot_functionalized",  # functorch/test_control_flow
+    "TestControlFlow.test_map_autograd_nested_list",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_autograd_symbolic_simple",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_real",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_map_functionalized_aot_func",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_symbolic_list",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_symbolic_dict",  # functorch/test_control_flow
+    "TestControlFlow.test_map_dict_in_out",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_autograd_symbolic_list",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_tracing_map_autograd_symbolic_dict",  # functorch/test_control_flow
+    "TestControlFlow.test_map_autograd_no_grad_output",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_map_functionalized",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_nested_map_cond_symbolic",  # functorch/test_control_flow
+    "TestControlFlowTraced.test_nested_map_cond_real",  # functorch/test_control_flow
+    "TestMetaKernel.test_addmm_invalid_dtype",  # lazy/test_meta_kernel
+    "TestVerifyCorrectness.test_incorrect_verify_true",  # dynamo/test_verify_correctness
+    "TestVerifyCorrectness.test_torchscript",  # dynamo/test_verify_correctness
+    "UnspecTests.test_conv1d_symint_padding",  # dynamo/test_unspec
+    "UnspecTests.test_no_recompiles",  # dynamo/test_unspec
+    "UnspecTests.test_no_recompilations",  # dynamo/test_unspec
+    "UnspecTests.test_builtin_max_min",  # dynamo/test_unspec
+    "UnspecTests.test_propagate_dynamic_dim",  # dynamo/test_unspec
+    "UnspecTests.test_isinstance_symint",  # dynamo/test_unspec
+    "UnspecTests.test_mark_01_dynamic",  # dynamo/test_unspec
+    "UnspecTests.test_use_and_specialize",  # dynamo/test_unspec
+    "TraceRuleTests.test_skipfiles_inlinelist",  # dynamo/test_trace_rules
+    "SubGraphTests.test_dynamic_order_dependence",  # dynamo/test_subgraphs
+    "SubGraphTests.test_no_graph_break_on_item",  # dynamo/test_subgraphs
+    "SubGraphTests.test_dynamic_zero_inference",  # dynamo/test_subgraphs
+    "SubGraphTests.test_enumerate_not_break_graph",  # dynamo/test_subgraphs
+    "SubGraphTests.test_dynamic_duck_size",  # dynamo/test_subgraphs
+    "SubGraphTests.test_dynamic_getitem",  # dynamo/test_subgraphs
+    "SubGraphTests.test_dynamic_kwarg",  # dynamo/test_subgraphs
+    "SubclassTests.test_compile_with_functionalization",  # dynamo/test_subclasses
+    "TestNestedTensor.test_binary_recompiles",  # dynamo/test_subclasses
+    "SubclassTests.test_wrapper_subclass_with_differently_sized_inner_tensor",  # dynamo/test_subclasses
+    "SubclassTests.test_compile_higher_order_with_functionalization",  # dynamo/test_subclasses
+    "SubclassTests.test_wrapper_subclass_guards_on_inner_tensor",  # dynamo/test_subclasses
+    "TestNestedTensor.test_unbind",  # dynamo/test_subclasses
+    "SubclassTests.test_torch_function_state_guards",  # dynamo/test_subclasses
+    "SubclassTests.test_wrapper_subclass_with_same_sized_inner_tensor",  # dynamo/test_subclasses
+    "SkipNonTensorTests.test_do_not_skip_side_effects",  # dynamo/test_skip_non_tensor
+    "SkipNonTensorTests.test_add_tensor_dict",  # dynamo/test_skip_non_tensor
+    "SkipNonTensorTests.test_add_tensor2",  # dynamo/test_skip_non_tensor
+    "SkipNonTensorTests.test_add_tensor1",  # dynamo/test_skip_non_tensor
+    "SkipNonTensorTests.test_add_tensor_list",  # dynamo/test_skip_non_tensor
+    "SkipNonTensorTests.test_recursive_list",  # dynamo/test_skip_non_tensor
+    "ReproTests.test_function_in_skipfiles",  # dynamo/test_repros
+    "ReproTests.test_negative_shape_guard",  # dynamo/test_repros
+    "ReproTests.test_dynamic_shapes_implicit_guard",  # dynamo/test_repros
+    "ReproTests.test_reformer_min_chunk_len",  # dynamo/test_repros
+    "ReproTests.test_jit_trace_errors",  # dynamo/test_repros
+    "ReproTests.test_chunk_reformer_ff",  # dynamo/test_repros
+    "ReproTests.test_module_in_skipfiles",  # dynamo/test_repros
+    "ReproTests.test_do_paste_mask",  # dynamo/test_repros
+    "ReproTests.test_boxes_len",  # dynamo/test_repros
+    "ReproTests.test_convert_boxes_to_pooler_format",  # dynamo/test_repros
+    "ReproTests.test_list_self_reference",  # dynamo/test_repros
+    "ReproTests.test_validate_model_kwargs",  # dynamo/test_repros
+    "ReproTests.test_create_rand_mask_from_inputs",  # dynamo/test_repros
+    "ReproTests.test_rewrite_assert_with_non_string_msg",  # dynamo/test_repros
+    "ReproTests.test_empty_list_contains_with_jump",  # dynamo/test_repros
+    "ReproTests.test_issue175",  # dynamo/test_repros
+    "ReproTests.test_restricted_list_subclass1",  # dynamo/test_repros
+    "ReproTests.test_add_sub_alpha_out",  # dynamo/test_repros
+    "ReproTests.test_dynamic_shapes_float_guard",  # dynamo/test_repros
+    "ReproTests.test_list_aliasing",  # dynamo/test_repros
+    "ReproTests.test_addr_alpha_beta_out",  # dynamo/test_repros
+    "ReproTests.test_merge_criteria_processor_list2",  # dynamo/test_repros
+    "ReproTests.test_reformer_eval",  # dynamo/test_repros
+    "ReproTests.test_longformer_chunk",  # dynamo/test_repros
+    "ReproTests.test_functools_wraps",  # dynamo/test_repros
+    "ReproTests.test_tensor_data_kwarg",  # dynamo/test_repros
+    "ReproTests.test_recursive_map",  # dynamo/test_repros
+    "ReproTests.test_reformer_sorting",  # dynamo/test_repros
+    "ReproTests.test_size_typematch",  # dynamo/test_repros
+    "ReproTests.test_threading_local",  # dynamo/test_repros
+    "ReproTests.test_merge_criteria_processor_list1",  # dynamo/test_repros
+    "ReproTests.test_relative_import",  # dynamo/test_repros
+    "ReproTests.test_rewrite_assert_noop",  # dynamo/test_repros
+    "ReproTests.test_seq_append_list",  # dynamo/test_repros
+    "ReproTests.test_relative_import_no_modulename",  # dynamo/test_repros
+    "ReproTests.test_multi_import",  # dynamo/test_repros
+    "ReproTests.test_rewrite_assert_with_msg",  # dynamo/test_repros
+    "ReproTests.test_hf_t5_forward",  # dynamo/test_repros
+    "ReproTests.test_hf_xsoftmax_training",  # dynamo/test_repros
+    "ReproTests.test_numpy_not_ndarray_recompiles",  # dynamo/test_repros
+    "RecompileTests.test_automatic_dynamic_reduce_recompiles",  # dynamo/test_recompiles
+    "RecompileTests.test_automatic_dynamic_tensor_scalar_change",  # dynamo/test_recompiles
+    "RecompileTests.test_recompiles_true_false_flop",  # dynamo/test_recompiles
+    "RecompileTests.test_dynamic_shape_parameter_recompile",  # dynamo/test_recompiles
+    "RecompileTests.test_aliasing_guard_failures_with_globals",  # dynamo/test_recompiles
+    "RecompileUxTests.test_verbose_tensor_check",  # dynamo/test_recompile_ux
+    "RecompileUxTests.test_mismatched_type",  # dynamo/test_recompile_ux
+    "TestPythonAutograd.test_backwards2",  # dynamo/test_python_autograd
+    "TestPythonAutograd.test_forwards1",  # dynamo/test_python_autograd
+    "TestPythonAutograd.test_split",  # dynamo/test_python_autograd
+    "TestPythonAutograd.test_forwards2",  # dynamo/test_python_autograd
+    "DynamoProfilerTests.test_dynamo_timed_profiling_isolated",  # dynamo/test_profiler
+    "DynamoProfilerTests.test_profiler_cache_lookup",  # dynamo/test_profiler
+    "DynamoProfilerTests.test_profiler_dynamo_compiled_region",  # dynamo/test_profiler
+    "OptimizerTests.test_rmsprop",  # dynamo/test_optimizers
+    "OptimizerTests.test_rprop",  # dynamo/test_optimizers
+    "OptimizerTests.test_nadam",  # dynamo/test_optimizers
+    "OptimizerTests.test_adagrad",  # dynamo/test_optimizers
+    "OptimizerTests.test_adamax",  # dynamo/test_optimizers
+    "OptimizerTests.test_adam",  # dynamo/test_optimizers
+    "OptimizerTests.test_asgd",  # dynamo/test_optimizers
+    "End2EndTests.test_init_group",  # dynamo/test_optimizers
+    "OptimizerTests.test_adamw",  # dynamo/test_optimizers
+    "OptimizerTests.test_sgd",  # dynamo/test_optimizers
+    "OptimizedModuleTest.test_module_dict_iter_name",  # dynamo/test_modules
+    "NNModuleTests.test_lazy_module1",  # dynamo/test_modules
+    "OptimizedModuleTest.test_composition_with_opt_mod",  # dynamo/test_modules
+    "OptimizedModuleTest.test_backward_hooks",  # dynamo/test_modules
+    "OptimizedModuleTest.test_nn_module",  # dynamo/test_modules
+    "OptimizedModuleTest.test_to",  # dynamo/test_modules
+    "OptimizedModuleTest.test_hooks_outer",  # dynamo/test_modules
+    "NNModuleTests.test_lazy_module5",  # dynamo/test_modules
+    "OptimizedModuleTest.test_hooks_inner",  # dynamo/test_modules
+    "NNModuleTests.test_lazy_module_no_cls_to_become",  # dynamo/test_modules
+    "OptimizedModuleTest.test_cache_size_limit_on_guarded_nn_modules",  # dynamo/test_modules
+    "NNModuleTests.test_self_mutating1",  # dynamo/test_modules
+    "NNModuleTests.test_unsupportedmodule",  # dynamo/test_modules
+    "NNModuleTests.test_unsupportedmethod",  # dynamo/test_modules
+    "OptimizedModuleTest.test_hooks_skip_guards",  # dynamo/test_modules
+    "NNModuleTests.test_lazy_module2",  # dynamo/test_modules
+    "OptimizedModuleTest.test_no_recompile_on_nn_guarded_modules",  # dynamo/test_modules
+    "NNModuleTests.test_lazy_module4",  # dynamo/test_modules
+    "NNModuleTests.test_lazy_module6",  # dynamo/test_modules
+    "MiscTests.test_tensor_dict3",  # dynamo/test_misc
+    "MiscTests.test_with_builtin_type",  # dynamo/test_misc
+    "MiscTests.test_tolist_scalar",  # dynamo/test_misc
+    "MiscTests.test_raise_guard_full_constraint",  # dynamo/test_misc
+    "MiscTests.test_setattr_mutation1",  # dynamo/test_misc
+    "MiscTests.test_closure_out_of_scope_cell",  # dynamo/test_misc
+    "MiscTests.test_size_input",  # dynamo/test_misc
+    "MiscTests.test_inplace_view_on_graph_input",  # dynamo/test_misc
+    "MiscTests.test_itertools_groupby_pure_python_key_func",  # dynamo/test_misc
+    "MiscTests.test_frozenset_torch_func_contains",  # dynamo/test_misc
+    "MiscTests.test_nested_closure",  # dynamo/test_misc
+    "MiscTests.test_tolist_1d",  # dynamo/test_misc
+    "MiscTests.test_any_all_symnode",  # dynamo/test_misc
+    "MiscTests.test_iter_set",  # dynamo/test_misc
+    "MiscTests.test_dict_order_keys_tensors",  # dynamo/test_misc
+    "MiscTests.test_mark_static",  # dynamo/test_misc
+    "MiscTests.test_backend_match_guard",  # dynamo/test_misc
+    "MiscTests.test_tolist_0d",  # dynamo/test_misc
+    "MiscTests.test_str_format_assert2",  # dynamo/test_misc
+    "MiscTests.test_typing_typevar",  # dynamo/test_misc
+    "MiscTests.test_raise_guard_partial_constraint_no_graph_break",  # dynamo/test_misc
+    "MiscTests.test_get_cache_entry",  # dynamo/test_misc
+    "MiscTests.test_nested_optimize_decorator",  # dynamo/test_misc
+    "MiscTests.test_nested_optimize_run",  # dynamo/test_misc
+    "MiscTests.test_release_input_memory",  # dynamo/test_misc
+    "MiscTests.test_inplace_param_update",  # dynamo/test_misc
+    "MiscTests.test_numpy_recompilation_scalar",  # dynamo/test_misc
+    "MiscTests.test_inline_closure_not_loaded_by_parent",  # dynamo/test_misc
+    "MiscTests.test_tracing_nested_py_tree_dicts",  # dynamo/test_misc
+    "MiscTests.test_tracing_py_tree_tensor_subclass",  # dynamo/test_misc
+    "MiscTests.test_user_getattribute",  # dynamo/test_misc
+    "MiscTests.test_listcomp",  # dynamo/test_misc
+    "MiscTests.test_yield_gen_and_from",  # dynamo/test_misc
+    "MiscTests.test_guard_failure_fn",  # dynamo/test_misc
+    "MiscTests.test_numpy_non_torch_dtype",  # dynamo/test_misc
+    "MiscTests.test_numpy_with_builtin_type",  # dynamo/test_misc
+    "MiscTests.test_py_guards_mark_dynamic",  # dynamo/test_misc
+    "MiscTests.test_namedtuple2",  # dynamo/test_misc
+    "MiscTests.test_itertools_accumulate_tensors_default_sum",  # dynamo/test_misc
+    "MiscTests.test_guard_failure_fn2",  # dynamo/test_misc
+    "MiscTests.test_cond_nested",  # dynamo/test_misc
+    "MiscTests.test_nn_module_getattr",  # dynamo/test_misc
+    "MiscTests.test_itertools_repeat",  # dynamo/test_misc
+    "MiscTests.test_numpy_int_constant",  # dynamo/test_misc
+    "MiscTests.test_torch_seed",  # dynamo/test_misc
+    "MiscTests.test_callpacked",  # dynamo/test_misc
+    "MiscTests.test_mandelbrot_numpy",  # dynamo/test_misc
+    "MiscTests.test_pure_python_accumulate",  # dynamo/test_misc
+    "MiscTests.test_release_module_memory",  # dynamo/test_misc
+    "MiscTests.test_dunder_new_function_inlining",  # dynamo/test_misc
+    "MiscTests.test_numpy_readonly",  # dynamo/test_misc
+    "MiscTests.test_tolist_kd",  # dynamo/test_misc
+    "MiscTests.test_deque_append_left",  # dynamo/test_misc
+    "MiscTests.test_nested_optimize",  # dynamo/test_misc
+    "MiscTests.test_tracing_nested_py_tree",  # dynamo/test_misc
+    "MiscTests.test_repeat_interleave_graphbreaks",  # dynamo/test_misc
+    "MiscTests.test_itertools_infinite_repeat",  # dynamo/test_misc
+    "MiscTests.test_is_compiling",  # dynamo/test_misc
+    "MiscTests.test_boolarg",  # dynamo/test_misc
+    "MiscTests.test_compare_shapes_with_constant",  # dynamo/test_misc
+    "MiscTests.test_itertools_groupby_pure_python_default_identify_func",  # dynamo/test_misc
+    "MiscTests.test_no_raise_guard_partial_constraint",  # dynamo/test_misc
+    "MiscTests.test_tracing_nested_py_tree_tuples",  # dynamo/test_misc
+    "MiscTests.test_set_aliasing_recompiles",  # dynamo/test_misc
+    "MiscTests.test_guard_failure_fn_tensor_iter",  # dynamo/test_misc
+    "MiscTests.test_itertools_infinite_repeat_mutation",  # dynamo/test_misc
+    "MiscTests.test_numpy_force",  # dynamo/test_misc
+    "MiscTests.test_tracing_nested_py_tree_mixed_all",  # dynamo/test_misc
+    "MiscTests.test_inference_mode",  # dynamo/test_misc
+    "MiscTests.test_numpy_array_of_arrays",  # dynamo/test_misc
+    "MiscTests.test_itertools_infinite_cycle",  # dynamo/test_misc
+    "MiscTests.test_tracing_py_tree",  # dynamo/test_misc
+    "MiscTests.test_tensor_build_list_unpack",  # dynamo/test_misc
+    "MiscTests.test_simple_set_usage",  # dynamo/test_misc
+    "MiscTests.test_no_raise_guard_partial_constraint_across_break",  # dynamo/test_misc
+    "MiscTests.test_numpy_tolist",  # dynamo/test_misc
+    "MiscTests.test_dictcomp",  # dynamo/test_misc
+    "MiscTests.test_dict_order_keys",  # dynamo/test_misc
+    "MiscTests.test_numpy_size_attr",  # dynamo/test_misc
+    "MiscTests.test_add_to_set",  # dynamo/test_misc
+    "MiscTests.test_tolist_kd_dynamic",  # dynamo/test_misc
+    "MiscTests.test_raise_on_backend_error",  # dynamo/test_misc
+    "MiscTests.test_nan",  # dynamo/test_misc
+    "MiscTests.test_numpy_iter",  # dynamo/test_misc
+    "MiscTests.test_return_nested_function",  # dynamo/test_misc
+    "MiscTests.test_tensor_item_capture",  # dynamo/test_misc
+    "MiscTests.test_guard_failure_fn_shape_control",  # dynamo/test_misc
+    "MiscTests.test_tensor_dict1",  # dynamo/test_misc
+    "MiscTests.test_deterministic_algorithms_mutated",  # dynamo/test_misc
+    "MiscTests.test_dataclass_fields",  # dynamo/test_misc
+    "MiscTests.test_dict_order_keys_modules",  # dynamo/test_misc
+    "MiscTests.test_deque_input",  # dynamo/test_misc
+    "MiscTests.test_itertools_accumulate_symint_default_sum",  # dynamo/test_misc
+    "MiscTests.test_numpy_subdtype",  # dynamo/test_misc
+    "MiscTests.test_numpy_torch_operators",  # dynamo/test_misc
+    "MiscTests.test_dtypes_no_graphbreaks",  # dynamo/test_misc
+    "MiscTests.test_tracing_tree_map_only",  # dynamo/test_misc
+    "MiscTests.test_out_variants_with_resizing_on_graph_inputs",  # dynamo/test_misc
+    "MiscTests.test_nested_closure_mutation",  # dynamo/test_misc
+    "MiscTests.test_tensor_dict2",  # dynamo/test_misc
+    "MiscTests.test_cond_side_effects",  # dynamo/test_misc
+    "MiscTests.test_namedtuple1",  # dynamo/test_misc
+    "MiscTests.test_yield_send_to_subgenerator_graph_break",  # dynamo/test_misc
+    "MiscTests.test_recompile_on_global_state_change",  # dynamo/test_misc
+    "MiscTests.test_type_copy",  # dynamo/test_misc
+    "MiscTests.test_yield_from",  # dynamo/test_misc
+    "MiscTests.test_intermediary_tensor_grad_access",  # dynamo/test_misc
+    "MiscTests.test_release_scope_memory",  # dynamo/test_misc
+    "InteropTests.test_vmap_in_graph",  # dynamo/test_interop
+    "TestInputAttrTracking.test_complex_attr_access_without_graph_breaks",  # dynamo/test_input_attr_tracking
+    "TestInputAttrTracking.test_tensor_property_on_tensor",  # dynamo/test_input_attr_tracking
+    "TestInputAttrTracking.test_set_data_on_input_tensor",  # dynamo/test_input_attr_tracking
+    "TestInputAttrTracking.test_tensor_property_assigned_on_tensor",  # dynamo/test_input_attr_tracking
+    "TestInputAttrTracking.test_const_property_on_tensor",  # dynamo/test_input_attr_tracking
+    "HooksTests.test_tensor_register_multiple_hooks_handles_in_list",  # dynamo/test_hooks
+    "HooksTests.test_functools_arg_vary",  # dynamo/test_hooks
+    "HooksTests.test_tensor_register_hook_in_graph_local",  # dynamo/test_hooks
+    "HooksTests.test_post_acc_grad_hook",  # dynamo/test_hooks
+    "HooksTests.test_tensor_register_multiple_hooks",  # dynamo/test_hooks
+    "HooksTests.test_tensor_register_global_hook",  # dynamo/test_hooks
+    "HigherOrderOpTests.test_wrap_kwarg_recompile",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_non_tensor_input",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_with_side_effect",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_fallback_on_python_primitives_output",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_cond_branches_no_arguments",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_free_const",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_multiple_invocation_in_dims",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_illegal_op_graph_break",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_cond_pytree_operands",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_cond_branches_no_arguments_no_closure",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_side_effects",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_nested_tuple_output",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_output_with_dict",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_two_tensor_has_aux",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_wrap_subgraph_name_is_valid",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_freevar_python_scalar",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_free_tensor",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_two_inputs_tuple_in_dims",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_with_graph_break",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_multiple_invocation_out_dims",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_map_pytree_return",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_capture_untracked_global_nested",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_multiple_outputs_diff_dims",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_vmap_source_fn_stack",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_kwargs",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_over_vmap_two_inputs",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_disable_capture",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_fn_with_kwargs",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_multiple_outputs",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_map_lowers_to_graph",  # dynamo/test_higher_order_ops
+    "ActivationCheckpointingTests.test_cond_with_kwargs",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_map_source_fn_stack",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_capture_value_created_in_subgraph",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_pytree",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_cond_pytree_operands_with_non_tensor_leaves",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_side_effect_in_body",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_cond_subgraph_name_is_valid",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_modules",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_over_vmap_captured",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_cond_source_fn_stack",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_map_subgraph_name_is_valid",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_pytree_inputs",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_disable_capture",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_multiple_outputs_out_dims_tuple",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_map_multi_return",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_two_tensor_all_grad_has_aux",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_grad_has_aux",  # dynamo/test_higher_order_ops
+    "HigherOrderOpTests.test_map_symint_input",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_two_inputs",  # dynamo/test_higher_order_ops
+    "DefaultsTests.test_in_set_inplace",  # dynamo/test_functions
+    "FunctionTests.test_default_dict_lambda",  # dynamo/test_functions
+    "FunctionTests.test_default_dict_closure",  # dynamo/test_functions
+    "FunctionTests.test_is_contiguous_frame_counts",  # dynamo/test_functions
+    "FunctionTests.test_partials_as_input_partials_lambda",  # dynamo/test_functions
+    "FunctionTests.test_default_dict",  # dynamo/test_functions
+    "DefaultsTests.test_cast_tensor_single_elem",  # dynamo/test_functions
+    "DefaultsTests.test_func_default_torch_args",  # dynamo/test_functions
+    "FunctionTests.test_math_radians",  # dynamo/test_functions
+    "DefaultsTests.test_compare_constant_and_tensor",  # dynamo/test_functions
+    "DefaultsTests.test_in_set_would_fail_broadcast",  # dynamo/test_functions
+    "FunctionTests.test_partials_as_input_partials_mod",  # dynamo/test_functions
+    "ExportTests.test_cond_raise_user_error_on_non_list_operands",  # dynamo/test_export
+    "ExportTests.test_export_dynamic_dim_range_constraint",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_free_function_and_class_method_multiarg",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_free_function_and_class_method",  # dynamo/test_export
+    "ExportTests.test_cond_raise_user_error_on_unsupported_pred",  # dynamo/test_export
+    "ExportTests.test_export_no_raise",  # dynamo/test_export
+    "ExportTests.test_torch_inference_mode_ctx",  # dynamo/test_export
+    "ExportTests.test_export_decomp",  # dynamo/test_export
+    "ExportTests.test_export_mark_dynamic_conflict_dynamic_dim",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_not_return_const",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_none_control_flow",  # dynamo/test_export
+    "ExportTests.test_exported_graph_serialization",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_free_function",  # dynamo/test_export
+    "ExportTests.test_export_preserve_constraints_as_metadata_scalar",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_none_control_flow_free_func",  # dynamo/test_export
+    "ExportTests.test_cond_raise_user_error_on_non_tensor_operands",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_not_none_control_flow_free_func",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_not_none_control_flow_pos",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_tuple_nonzero",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_not_none_control_flow",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_dict_values",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_list_nonzero",  # dynamo/test_export
+    "ExportTests.test_export_dynamic_dim_cleanup",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_method_on_module_invoke_twice",  # dynamo/test_export
+    "ExportTests.test_map_cond_param_buffer_lifted",  # dynamo/test_export
+    "ExportTests.test_export_multi_dynamic_dim_unsafe_relationship",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_free_function_and_class_method_multiarg_diff",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_method_on_module",  # dynamo/test_export
+    "ExportTests.test_export_multi_dynamic_dim_constraint",  # dynamo/test_export
+    "ExportTests.test_untracked_inputs_in_constraints",  # dynamo/test_export
+    "ExportTests.test_export_raise_on_relationship",  # dynamo/test_export
+    "ExportTests.test_export_with_map_cond",  # dynamo/test_export
+    "ExportTests.test_export_with_constant_list_nonzero_free_function",  # dynamo/test_export
+    "ExcTests.test_graph_break_log",  # dynamo/test_exc
+    "ExcTests.test_trigger_bisect_on_error",  # dynamo/test_exc
+    "ExcTests.test_backend_suppress_line",  # dynamo/test_exc
+    "ExcTests.test_not_implemented_error",  # dynamo/test_exc
+    "ExcTests.test_trigger_on_error",  # dynamo/test_exc
+    "ExcTests.test_internal_error_no_suppress",  # dynamo/test_exc
+    "ExcTests.test_internal_error_suppress_errors",  # dynamo/test_exc
+    "DecoratorTests.test_mark_static_address_guarded",  # dynamo/test_decorators
+    "DecoratorTests.test_mark_static_address_unguarded",  # dynamo/test_decorators
+    "CtxManagerTests.test_disable_saved_tensors_hooks",  # dynamo/test_ctx_manager
+    "CtxManagerTests.test_disable_saved_tensors_hooks_prev_disabled",  # dynamo/test_ctx_manager
+    "CtxManagerTests.test_autograd_profiler_enabled",  # dynamo/test_ctx_manager
+    "CtxManagerTests.test_disable_saved_tensors_hooks_prev_disabled_nested",  # dynamo/test_ctx_manager
+    "ComptimeTests.test_graph_break",  # dynamo/test_comptime
+    "PublicTorchCompilerTests.test_dynamo_signatures",  # dynamo/test_compile
+    "TestCustomBackendAPI.test_aot_autograd_api",  # dynamo/test_backends
+    "TestOptimizations.test_example_inputs",  # dynamo/test_backends
+    "TestCustomBackendAPI.test_lookup_backend",  # dynamo/test_backends
+    "TestOptimizations.test_example_inputs_runtime_use",  # dynamo/test_backends
+    "TestCustomBackendAPI.test_register_backend_api",  # dynamo/test_backends
+    "AutogradFunctionTests.test_stride_in_bwd",  # dynamo/test_autograd_function
+    "AutogradFunctionTests.test_print_in_bwd",  # dynamo/test_autograd_function
+    "AutogradFunctionTests.test_graph_break_if_lifted_free_variable",  # dynamo/test_autograd_function
+    "AotAutogradFallbackTests.test_aot_sequence_nr",  # dynamo/test_aot_autograd
+    "TestTorchFunctionOverride.test_Tensor_log",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_prod",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___iand__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_orgqr",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___isub__",  # test_overrides
+    "TestTorchFunctionOverride.test_tensor_subclass_propagation",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_detach_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_gcd_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addmv_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_matmul",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_copysign",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_add",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_chalf",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rfloordiv__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sign",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tolist",  # test_overrides
+    "TestRNN.test_rnn",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_retains_grad___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_squeeze_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_aminmax",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___lt__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_isclose",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase__backward_hooks___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_inverse",  # test_overrides
+    "TestNamedTuple.test_max",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___ror__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_hypot",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_max",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arccos",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase__cdata___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__update_names",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sinc_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___div__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_q_per_channel_scales",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tan_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_as_strided_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lgamma",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_shared",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logdet",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_scatter_reduce",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_erf",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_equal",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sinh",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_split",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addmv",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_kthvalue",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_relu",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_select",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___contains__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_mm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_det",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_igammac_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_atanh_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_int_repr",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_nested___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_digamma",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ormqr",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sparse_dim",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___irshift__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___imul__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nanmean",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_to",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_add_",  # test_overrides
+    "TestBroadcastAllOverride.test_broadcast_all",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_div",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_slice_scatter",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_remainder_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_baddbmm_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_renorm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_igamma_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_same_size",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_add_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sort",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clone",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_crow_indices",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log10",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_atan2_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_resize_as_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_subtract",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ne_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___index__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sparse_resize_and_clear_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_dot",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___reversed__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_msort",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_to_mkldnn",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addcmul_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ndimension",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_rsqrt_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__dimV",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logical_and_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_share_memory_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_rad2deg",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_greater_equal",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_coalesced",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clamp_min_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_swapaxes",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cosh_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___array__",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_mkldnn___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_short",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_le_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_var",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_hsplit",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___deepcopy__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fmin",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_expm1_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_slogdet",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_conj_physical_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logical_or_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clamp_max",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_erf_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sub_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nonzero",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_inner",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase__base___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fliplr",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unsafe_split",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nelement",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase__post_accumulate_grad_hooks___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___setstate__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logical_xor_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_allclose",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log1p",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_pow_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lerp_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_vdot",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_requires_grad___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_indices",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lgamma_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_mT___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__values",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_distributed",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_mtia___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_histc",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logical_or",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_svd",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cfloat",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_flipud",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___and__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_fill_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_swapdims_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_names___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_resolve_neg",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_output_nr___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cross",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_add",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_isposinf",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tile",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nan_to_num",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_trace",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___long__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_set_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arcsin_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_random_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_put",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_uniform_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_frac_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sigmoid_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_signbit",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_repeat_interleave",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bernoulli_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fill_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___lshift__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_map_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_isnan",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_long",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_subtract_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_ndim___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_data_ptr",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_i0",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_qscheme",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logcumsumexp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ldexp_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_neg",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sign_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unsqueeze_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arctan2_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clip_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cumprod_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_data___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_mode",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_layout___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_atan_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_xpu",  # test_overrides
+    "TestTorchFunctionMode.test_mode_notimplemented_loop",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_baddbmm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_reduce_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_requires_grad_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_minimum",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_erfinv",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_detach",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_dequantize",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_or_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_acos_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_trunc",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_quantile",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___mod__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__nested_tensor_storage_offsets",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_xlogy_",  # test_overrides
+    "TestTorchFunctionOverride.test_mm_semantics",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_multiply",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_expand",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___xor__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cholesky_inverse",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_storage_type",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___idiv__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_dim_order",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rrshift__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_contiguous",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_contiguous",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_isreal",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_min",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_col_indices",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_register_post_accumulate_grad_hook",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_floor",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___invert__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_left_shift_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_flip",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logit_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_div_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_resize_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_view_as",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_gather",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___mul__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_flatten",  # test_overrides
+    "TestTorchFunctionMode.test_disable_enable_subclass",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_numpy",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cumsum_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fmod",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_has_names",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_xpu___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tanh",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_eq_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ipu",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logsumexp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_expand_as",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_split_with_sizes",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cumprod",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fix_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_igamma",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_median",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nextafter_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_polygamma_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase__version___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_less_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lt_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_put_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nanmedian",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_half",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logaddexp2",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logit",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___dlpack__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nan_to_num_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cumsum",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_hardshrink",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_squeeze",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___add__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bernoulli",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sparse_resize_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_deg2rad_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_corrcoef",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_isfinite",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fmax",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lu_solve",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_rename_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_real___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_transpose",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__autocast_to_reduced_precision",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_any",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sinh_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_dsplit",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___setitem__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_amax",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_smm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_stft",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_asin_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ne",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_rad2deg_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_scatter_reduce_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bincount",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_chunk",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_floor_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_renorm_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_asinh_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sspaddmm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_reshape",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logical_xor",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_put",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_ort___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sgn_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___bool__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_q_scale",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_right_shift",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_refine_names",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_map2_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_negative_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_element_size",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_reduce",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bmm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_mean",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_leaf___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_size",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_q_zero_point",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_meta___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tan",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log2_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_scatter_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__to_dense",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_divide",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_asin",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_quantized___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_exp_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_imag___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_swapaxes_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_std",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___len__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_not_equal",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___ifloordiv__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fill_diagonal_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rmatmul__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_acosh",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arctanh_",  # test_overrides
+    "TestTorchFunctionOverride.test_mean_semantics",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_rot90",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_diag",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tril_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_softmax",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sparse_mask",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_double",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_erfc",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tensor_split",  # test_overrides
+    "TestGradCheckOverride.test_gradcheck",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_device___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_or",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___repr__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_less",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___cuda_array_interface_____get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clamp_max_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nansum",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cummin",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cauchy_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_igammac",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_mvlgamma_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addmm_",  # test_overrides
+    "TestTorchFunctionMode.test_modes_return_notimplemented",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_atan",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_acosh_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___dlpack_device__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_q_per_channel_zero_points",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ceil",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_histogram",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lcm_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_i0_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_atan2",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_narrow",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sinc",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sigmoid",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ldexp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logical_and",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_mvlgamma",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_diff",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_resize",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sum",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__nested_tensor_strides",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_movedim",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unsafe_chunk",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_resize_as_sparse_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_expm1",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_gcd",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_swapdims",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rmul__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logical_not",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lerp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_zero_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addcdiv",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_sparse___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_round_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_exp2_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_register_hook",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_diag_embed",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___array_wrap__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___radd__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_absolute_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ge_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___ge__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_type",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_T___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_dtype___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_less_equal",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_grad___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_volatile___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clamp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clip",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_put_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase__grad_fn___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_shape___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_permute",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_resolve_conj",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sqrt",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_true_divide_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_get_device",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_diagonal_scatter",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sub",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___ior__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_greater",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase__grad___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_apply_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_argsort",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_matrix_power",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cos_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log_softmax",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_erfinv_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__autocast_to_full_precision",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_untyped_storage",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_where",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_angle",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_coalesce",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rdiv__",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_nbytes___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_masked_fill_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bfloat16",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_hypot_",  # test_overrides
+    "TestEinsumOverride.test_wrapper",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sgn",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_char",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_triangular_solve",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_float",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___gt__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_scatter_add_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_exp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_scatter_add",  # test_overrides
+    "TestIterator.test_iterator",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___eq__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_masked_scatter_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tril",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nanquantile",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_masked_select",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_mv",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_negative",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_argwhere",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_matrix_exp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unique_consecutive",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unfold",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___format__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_round",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_deg2rad",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_grad_fn___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_align_as",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_complex",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cosh",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_align_to",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_square",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arcsinh_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unsqueeze",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_not",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_rename",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___reduce_ex__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_t_",  # test_overrides
+    "TestTorchFunctionMode.test_modes_handle_first",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___ne__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_item",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___le__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ccol_indices",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_nonzero",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_copy_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_broadcast_to",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_right_shift_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_cpu___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arccosh",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arcsin",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_as_strided",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nextafter",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_q_per_channel_axis",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_trunc_",  # test_overrides
+    "TestTorchFunctionMode.test_nested_modes_with_python_has_torch_function",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arctan",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_t",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_diagonal",  # test_overrides
+    "TestTorchFunctionMode.test_subclass_hash",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_isinf",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ger",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__coalesced_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_not_equal_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_multiply_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ge",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_abs",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___int__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_argmin",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_inference",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__is_view",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rmod__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_amin",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_select_scatter",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_fill",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_square_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addr",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_asinh",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_heaviside_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_adjoint",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_float_power",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_gt_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_xlogy",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__dimI",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_gt",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_copy_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___ixor__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_to_dense",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___complex__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_and_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_neg",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_norm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___float__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__sparse_mask_projection",  # test_overrides
+    "TestPickle.test_pickle",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___iadd__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_divide_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_geqrf",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_select",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___ilshift__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_frexp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_int",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_maximum",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_storage_offset",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_byte",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unbind",  # test_overrides
+    "TestIndexing.test_getitem_subclass",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_floating_point",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log10_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_xla___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cos",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_positive",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_resize_as",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_storage",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_pow",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_type_as",  # test_overrides
+    "TestGradNewOnesOverride.test_newones",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__indices",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tanh_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_masked_scatter",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_not_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cholesky",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_all",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_heaviside",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lcm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_reshape_as",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_greater_equal_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_backward",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_greater_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logaddexp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_xor",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_transpose_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_polygamma",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_row_indices",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addbmm_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_triu_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_atanh",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rxor__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_normal_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_copy",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logical_not_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log1p_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_absolute",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_abs_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_count_nonzero",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_qr",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_relu_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_conj",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fmod_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unique",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___nonzero__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_geometric_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_topk",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rlshift__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_diagflat",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cummax",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cov",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_istft",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arctanh",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_name___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nonzero_static",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_pin_memory",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arctan2",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_retain_grad",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_repeat",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_reciprocal_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lt",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_record_stream",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___truediv__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rand__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fix",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_multinomial",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___imod__",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_itemsize___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_copysign_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_vulkan___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_dense_dim",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_prelu",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sin_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_reciprocal",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_sparse_csr___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arccosh_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_dist",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_narrow_copy",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_conj_physical",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arctan_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sin",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cdouble",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_masked_fill",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log2",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sqrt_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clamp_min",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addr_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rshift__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_mul",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_roll",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_signed",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addcdiv_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_true_divide",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_pinned",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_cuda___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_xor_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_floor_divide_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_eq",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_neg_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_view",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_as_strided_scatter",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_pinverse",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_vsplit",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___matmul__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unsafe_split_with_sizes",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_ipu___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_and",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arcsinh",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_float_power_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_values",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__nnz",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_outer",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log_normal_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___sub__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addbmm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_mul_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__nested_tensor_size",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_left_shift",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_digamma_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_isneginf",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_le",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_erfc_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_scatter",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_exp2",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sum_to_size",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_take",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_take_along_dim",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rsub__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cholesky_solve",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_remainder",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_dim",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_triu",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_numel",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_acos",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_mps___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ravel",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_frac",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_moveaxis",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lu",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_exponential_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___floordiv__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___getitem__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_rsqrt",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cpu",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_kron",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cuda",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_less_equal_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bool",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_mH___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arccos_",  # test_overrides
+    "TestTorchFunctionOverride.test_precedence_semantics",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___or__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rpow__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addcmul",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addmm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_conj",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_set_to",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_to_sparse",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_argmax",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clamp_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_floor_divide",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ceil_",  # test_overrides
+    "TestNamedTupleAPI.test_namedtuple_return",  # test_namedtuple_return_api
 }
 
 dynamo_skips = {
     "TestMatmulOperator.test_matmul_raises",
     "TestMatmulOperator.test_exceptions",
     "TestMatmulOperator.test_matmul_inplace",
+    "TestMonitorTensorboard.test_event_handler",  # weird
     "TestMethods.test_diagonal",
     "TestMethods.test_searchsorted_complex",
     "TestMethods.test_round",
@@ -2086,6 +4199,10 @@ dynamo_skips = {
     "WeakTest.test_make_weak_keyed_dict_from_dict",  # known py311 fail
     "TestViewOpsCPU.test_as_strided_gradients_cpu",  # known py311 fail
     "TestViewOpsLAZY.test_as_strided_gradients_lazy",  # known py311 fail
+    "LoggingTest.testApiUsage",  # flaky?
+    "TestPruningNN.test_global_pruning_importance_scores",  # flaky
+    "TestOpenMP_ParallelFor.test_one_thread",  # test_openmp
+    "TestTorchrun.test_multi_threads",  # backends/xeon/test_launch
     "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape3_cpu",  # known py38 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_UPPER_LEFT_shape0_cpu",  # known py38 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_CausalVariant_LOWER_RIGHT_shape1_cpu",  # known py38 fail
@@ -2103,6 +4220,7 @@ dynamo_skips = {
     "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape2_cpu",  # known py311 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_1_shape1_cpu",  # known py311 fail
     "TestAttnMasksCPU.test_causal_variants_causal_variant_2_shape1_cpu",  # known py311 fail
+    "TestFunctionalAutogradBenchmark.test_fast_tasks",  # flaky?
     "TestFrameworkUtils.test_filtering_env_var",  # known py38 fail
     "TestAsArrayCPU.test_default_device_cpu",  # known py38 fail
     "TestAsArrayCPU.test_astensor_consistency_cpu",  # known py311 fail
@@ -2110,4 +4228,323 @@ dynamo_skips = {
     "TestTensorCreationCPU.test_vander_types_cpu_complex64",  # known py311 fail
     "TestTensorCreationCPU.test_torch_polar_cpu_float32",  # known py311 fail
     "TestTensorCreationCPU.test_torch_polar_cpu_float64",  # known py311 fail
+    "TestSWAUtils.test_averaged_model_all_devices_ema_True",  # flaky
+    "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_False",  # flaky
+    "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_True",  # flaky
+    "TestOpenMP_ParallelFor.test_n_threads",  # known py311 fail
+    "TestNativeFunctions.test_intlist_error_with_overload",  # known py311 fail
+    "TestMkldnnFusion.test_single_conv",  # known py311 fail
+    "TestTorchDlPackCPU.test_dlpack_export_is_conj_cpu",  # known py311 fail
+    "TestPythonDispatcher.test_quantized_structured_not_implemented",  # known py38 fail
+    "TestLazyReuseIr.testAdd",  # known py311 fail
+    "TestLazyReuseIr.testAddSubFallback",  # known py311 fail
+    "TestLazyReuseIr.testBatchNorm",  # known py311 fail
+    "TestLazyReuseIr.testAddSub",  # known py311 fail
+    "TestVerifyCorrectness.test_example_inputs",  # known py311 fail
+    "RecompileTests.test_aliasing_guard_failures",  # known py311 fail
+    "TestPythonAutograd.test_backwards1",  # known py311 fail
+    "DynamicShapesExportTests.test_retracibility_dict_container_inp_out_dynamic_shapes",  # Takes way too long
+    "DynamicShapesExportTests.test_retracibility_dynamic_shapes",  # takes way too long
+    "DynamicShapesExportTests.test_retracibility_nested_list_out_dynamic_shapes",  # takes way too long
+    "DynamoProfilerTests.test_dynamo_timed_profiling_backend_compile",  # known py311 fail
+    "OptimizerTests.test_adadelta",  # known py311 fail
+    "NopTests.test_extended_args",  # known py311 fail
+    "MiscTests.test_exception_table_parsing",  # known py311 fail
+    "MiscTests.test_py311_jump_offset",  # known py311 fail
+    "MiscTests.test_linetable_311_writer1",  # known py311 fail
+    "MiscTests.test_itertools_infinite_count",  # known py311 fail
+    "MiscTests.test_exception_table_e2e",  # known py311 fail
+    "MiscTests.test_linetable_311_writer2",  # known py311 fail
+    "MiscTests.test_exception_table_e2e_2",  # known py311 fail
+    "MiscTests.test_itertools_accumulate_tensors_user_defined",  # known py311 fail
+    "MiscTests.test_itertools_accumulate_tensors_kwargs",  # known py311 fail
+    "MiscTests.test_itertools_accumulate_tensors_builtins",  # known py311 fail
+    "InteropTests.test_fx_fn",  # known py311 fail
+    "HigherOrderOpTests.test_access_module_attr",  # known py311 fail
+    "FrameInitTests.test_frame_init",  # known py311 fail
+    "DynamicShapesMiscTests.test_tolist_0d_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_cond_pytree_operands_with_non_tensor_leaves_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesHigherOrderOpTests.test_output_with_dict_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_multiple_outputs_diff_dims_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_wrap_subgraph_name_is_valid_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_over_vmap_two_inputs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFunctionTests.test_math_radians_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_map_lowers_to_graph_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_type_copy_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_inference_mode_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_two_inputs_tuple_in_dims_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_get_cache_entry_dynamic_shapes",  # known py311 fail
+    "DynamicShapesSubGraphTests.test_no_graph_break_on_item_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_tuple_nonzero_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_subdtype_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_modules_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_capture_value_created_in_subgraph_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_yield_send_to_subgenerator_graph_break_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_list_self_reference_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_vmap_source_fn_stack_dynamic_shapes",  # known py311 fail
+    "DynamicShapesSubGraphTests.test_dynamic_duck_size_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_inline_closure_not_loaded_by_parent_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_non_torch_dtype_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_multiple_outputs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_reformer_sorting_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_linetable_311_writer1_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_cond_raise_user_error_on_non_tensor_operands_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_free_tensor_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_list_nonzero_free_function_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_side_effect_in_body_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tracing_tree_map_only_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tensor_dict2_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tracing_nested_py_tree_mixed_all_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_dynamic_shapes_implicit_guard_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_int_constant_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_nn_module_getattr_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_yield_gen_and_from_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_map_cond_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_multiple_invocation_out_dims_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesMiscTests.test_set_aliasing_recompiles_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_reformer_min_chunk_len_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_map_multi_return_dynamic_shapes",  # known py311 fail
+    "DynamicShapesNNModuleTests.test_unsupportedmodule_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_iter_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_reformer_train_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_mandelbrot_numpy_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_infinite_repeat_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_force_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_list_nonzero_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tracing_nested_py_tree_tuples_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_seq_append_list_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_dynamic_dim_cleanup_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_infinite_cycle_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_map_source_fn_stack_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_cond_branches_no_arguments_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_nested_closure_mutation_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_tensor_data_kwarg_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFunctionTests.test_partials_as_input_partials_mod_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tolist_scalar_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_with_builtin_type_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_compare_shapes_with_constant_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_frozenset_torch_func_contains_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFunctionTests.test_is_contiguous_frame_counts_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_rewrite_assert_noop_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_map_symint_input_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_relative_import_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_raise_on_relationship_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_threading_local_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_reformer_eval_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_groupby_pure_python_default_identify_func_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesMiscTests.test_release_input_memory_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_decomp_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_none_control_flow_free_func_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_longformer_chunk_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_disable_capture_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_free_function_and_class_method_multiarg_diff_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesReproTests.test_boxes_len_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_list_slice_mul_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tensor_build_list_unpack_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_create_rand_mask_from_inputs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_repeat_interleave_graphbreaks_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_grad_state_mutated_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_release_module_memory_dynamic_shapes",  # known py311 fail
+    "DynamicShapesCtxManagerTests.test_disable_saved_tensors_hooks_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_wrap_kwarg_recompile_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_slice_input_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFunctionTests.test_fstrings2_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tracing_py_tree_tensor_subclass_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_multi_import_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_not_none_control_flow_pos_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_map_cond_param_buffer_lifted_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_over_vmap_captured_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_out_variants_with_resizing_on_graph_inputs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_repeat_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_add_to_set_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tensor_dict1_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_convert_boxes_to_pooler_format_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_kwargs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_exception_table_e2e_2_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_free_const_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFunctionTests.test_default_dict_lambda_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_guard_failure_fn_shape_control_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_merge_criteria_processor_list1_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_accumulate_tensors_builtins_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_numpy_not_ndarray_recompiles_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_function_in_skipfiles_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_pytree_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_recompile_on_global_state_change_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_return_nested_function_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_cond_raise_user_error_on_non_list_operands_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_restricted_list_subclass1_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_raise_guard_full_constraint_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_optim_state_references_cleared_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_boolarg_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_nested_closure_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_map_pytree_return_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_access_module_attr_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_rewrite_assert_with_non_string_msg_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_no_raise_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tensor_item_capture_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tracing_py_tree_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_non_tensor_input_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_two_tensor_all_grad_has_aux_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_simple_set_usage_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_fn_with_kwargs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_size_attr_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_torch_operators_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_dunder_new_function_inlining_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_yield_from_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_empty_list_contains_with_jump_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_raise_on_backend_error_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_not_return_const_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_with_side_effect_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_deque_input_dynamic_shapes",  # known py311 fail
+    "DynamicShapesCtxManagerTests.test_autograd_profiler_enabled_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_linetable_311_writer2_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_recursive_map_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_dataclass_fields_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_list_aliasing_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_cond_source_fn_stack_dynamic_shapes",  # known py311 fail
+    "DynamicShapesSubGraphTests.test_dynamic_zero_inference_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_functools_wraps_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_illegal_op_graph_break_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_is_compiling_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_relative_import_no_modulename_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_iter_set_dynamic_shapes",  # known py311 fail
+    "DynamicShapesSubGraphTests.test_dynamic_getitem_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_negative_shape_guard_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFunctionTests.test_default_dict_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_deterministic_algorithms_mutated_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_str_format_assert2_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_not_none_control_flow_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_pytree_inputs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_map_subgraph_name_is_valid_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tolist_kd_dynamic_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_dynamic_dim_range_constraint_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_raise_guard_partial_constraint_no_graph_break_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_any_all_symnode_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_recompilation_scalar_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_inplace_view_on_graph_input_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_dict_order_keys_modules_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_py311_jump_offset_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_addr_alpha_beta_out_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_cond_pytree_operands_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_untracked_inputs_in_constraints_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_py_guards_mark_dynamic_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_rewrite_assert_with_msg_dynamic_shapes",  # known py311 fail
+    "DynamicShapesSubGraphTests.test_dynamic_kwarg_dynamic_shapes",  # known py311 fail
+    "DynamicShapesNNModuleTests.test_lazy_module_no_cls_to_become_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_release_scope_memory_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_callpacked_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_listcomp_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_infinite_count_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_namedtuple1_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_mark_dynamic_conflict_dynamic_dim_dynamic_shapes",  # known py311 fail
+    "DynamicShapesNNModuleTests.test_self_mutating1_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_user_getattribute_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_accumulate_tensors_default_sum_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_size_typematch_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_inplace_param_update_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_nested_tuple_output_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_closure_out_of_scope_cell_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_not_none_control_flow_free_func_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_multiple_invocation_in_dims_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_accumulate_tensors_user_defined_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_nan_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_readonly_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_multi_dynamic_dim_constraint_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_hf_t5_forward_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tolist_kd_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_capture_untracked_global_nested_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_two_inputs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_has_aux_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_free_function_and_class_method_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesExportTests.test_export_with_constant_none_control_flow_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_add_sub_alpha_out_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_jit_trace_errors_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_setattr_mutation1_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_multiple_outputs_out_dims_tuple_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesMiscTests.test_numpy_array_of_arrays_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_method_on_module_invoke_twice_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesSubGraphTests.test_dynamic_order_dependence_dynamic_shapes",  # known py311 fail
+    "DynamicShapesNNModuleTests.test_unsupportedmethod_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_exception_table_parsing_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_batchnorm_e2e_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_merge_criteria_processor_list2_dynamic_shapes",  # known py311 fail
+    "DynamicShapesSubGraphTests.test_enumerate_not_break_graph_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_chunk_reformer_ff_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_with_builtin_type_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tracing_nested_py_tree_dicts_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_no_raise_guard_partial_constraint_across_break_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_method_on_module_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_cond_nested_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_requires_grad_guards_with_grad_mode2_dynamic_shapes",  # known py311 fail
+    "DynamicShapesCtxManagerTests.test_disable_saved_tensors_hooks_prev_disabled_nested_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesMiscTests.test_cond_side_effects_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_nested_optimize_run_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_nested_optimize_decorator_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_nested_optimize_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_typing_typevar_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_vmap_side_effects_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_intermediary_tensor_grad_access_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_no_raise_guard_partial_constraint_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_dtypes_no_graphbreaks_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFunctionTests.test_partials_as_input_partials_lambda_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_mark_static_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tuple_mul_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_deque_append_left_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_many_views_with_mutation_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_hf_xsoftmax_training_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_accumulate_symint_default_sum_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_do_paste_mask_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_torch_seed_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_infinite_repeat_mutation_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_two_tensor_has_aux_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_numpy_tolist_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_dict_order_keys_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_free_function_and_class_method_multiarg_dynamic_shapes",  # known py311 fail  # noqa: B950
+    "DynamicShapesHigherOrderOpTests.test_cond_branches_no_arguments_no_closure_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_pure_python_accumulate_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tolist_1d_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_exported_graph_serialization_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_exception_table_e2e_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_namedtuple2_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_fallback_on_python_primitives_output_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_size_input_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_guard_failure_fn_tensor_iter_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_accumulate_tensors_kwargs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_dict_order_keys_tensors_dynamic_shapes",  # known py311 fail
+    "DynamicShapesCtxManagerTests.test_disable_saved_tensors_hooks_prev_disabled_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_with_graph_break_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_module_in_skipfiles_dynamic_shapes",  # known py311 fail
+    "DynamicShapesHigherOrderOpTests.test_cond_subgraph_name_is_valid_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tensor_dict3_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_torch_inference_mode_ctx_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_dictcomp_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFunctionTests.test_default_dict_closure_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_issue175_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_dict_values_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_disable_capture_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_itertools_groupby_pure_python_key_func_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_backend_match_guard_dynamic_shapes",  # known py311 fail
+    "DynamicShapesFuncTorchHigherOrderOpTests.test_grad_freevar_python_scalar_dynamic_shapes",  # known py311 fail
+    "DynamicShapesMiscTests.test_tracing_nested_py_tree_dynamic_shapes",  # known py311 fail
+    "DynamicShapesReproTests.test_validate_model_kwargs_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_preserve_constraints_as_metadata_scalar_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_cond_raise_user_error_on_unsupported_pred_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_multi_dynamic_dim_unsafe_relationship_dynamic_shapes",  # known py311 fail
+    "DynamicShapesExportTests.test_export_with_constant_free_function_dynamic_shapes",  # known py311 fail
+    "DecoratorTests.test_allow_in_graph",  # known py311 fail
+    "InPlaceCompilationTests.test_compilation",  # known py311 fail
+    "DynamicShapesAotAutogradFallbackTests.test_aot_sequence_nr_dynamic_shapes",  # weird
+    "ExportTests.test_predispatch_with_for_out_dtype",  # weird
+    "ExportTests.test_predispatch_with_for_out_dtype_nested",  # weird
+    "MiscTests.test_auto_functionalize_on_view",  # weird
+    "MiscTests::test_auto_functionalize_optional",  # weird
+    "MiscTests::test_auto_functionalize_with_returns",  # weird
+    "MiscTests::test_generate_trivial_abstract_impl",  # weird
+    "RecompileUxTests.test_drop_cache_on_skip",  # weird
+    "ReproTests.test_optim_state_references_cleared",  # weird
+    "ReproTests.test_reformer_train",  # weird
+    "TraceRuleTests.test_torch_name_rule_map_updated",  # weird
+    "TestTorchFunctionOverride.test_TensorBase_H___get__",  # known py311 fail
 }
