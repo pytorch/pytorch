@@ -44,7 +44,7 @@ ValueRef add_arithmetic_node(
     const float alpha,
     const arithmetic::OpType optype) {
   std::vector<int64_t> t1_sizes = graph.get_val_sizes(t1);
-  c10::ScalarType t1_dtype = graph.get_val_dtype(t1);
+  api::ScalarType t1_dtype = graph.get_val_dtype(t1);
 
   ValueRef out = graph.add_tensor(t1_sizes, t1_dtype);
   add_arithmetic_node(graph, t1, t2, out, alpha, optype);
@@ -66,7 +66,7 @@ void ArithmeticPrepack::encode_prepack(ComputeGraph* graph) const {
       graph->context(), packed.dtype(), packed.gpu_nbytes());
 
   size_t numel = api::utils::multiply_integers(tref.sizes);
-  size_t nbytes = numel * c10::elementSize(tref.dtype);
+  size_t nbytes = numel * api::element_size(tref.dtype);
   copy_ptr_to_staging(tref.data, staging, nbytes);
 
   encode_copy_to_vtensor(graph->context(), staging, packed);
