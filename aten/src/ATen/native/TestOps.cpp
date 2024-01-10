@@ -115,10 +115,10 @@ Tensor _test_check_tensor(const Tensor& self) {
 
 namespace at::functionalization {
 
-// view_copy ops must have a functional inverse registered
-Tensor FunctionalInverses::_test_autograd_multiple_dispatch_view_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views) {
+// view ops must have a functional inverse registered
+Tensor FunctionalInverses::_test_autograd_multiple_dispatch_view_inverse(const at::Tensor& base, const at::Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     TORCH_INTERNAL_ASSERT(false,
-    "Attempted to call _test_autograd_multiple_dispatch_view_copy_inverse() during the functionalization pass. ",
+    "Attempted to call _test_autograd_multiple_dispatch_view_inverse() during the functionalization pass. ",
     "This function is for testing only and should never be called.");
     return Tensor();
 }

@@ -40,7 +40,7 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import EventVariable, StreamVariable
-from .dicts import ConstDictVariable, DefaultDictVariable, SetVariable
+from .dicts import ConstDictVariable, DefaultDictVariable, is_hashable, SetVariable
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -86,6 +86,8 @@ def _polyfill_call_impl(name):
 
 
 class BuiltinVariable(VariableTracker):
+    _SENTINEL = object()
+
     @staticmethod
     @functools.lru_cache(None)
     def _constant_fold_functions():
@@ -674,6 +676,15 @@ class BuiltinVariable(VariableTracker):
     ) -> "VariableTracker":
         if self.fn == dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
+        if self.fn == itertools.chain and name == "from_iterable":
+            assert len(args) == 1
+            assert len(kwargs) == 0
+            obj = args[0]
+            items = []
+            for item in obj.unpack_var_sequence(tx):
+                items.extend(item.unpack_var_sequence(tx))
+            return variables.TupleVariable(items)
+
         return super().call_method(tx, name, args, kwargs)
 
     def _call_min_max(self, tx, *args):
@@ -701,7 +712,9 @@ class BuiltinVariable(VariableTracker):
 
             # result of an item call is a scalar convert to a tensor
             if isinstance(a, FakeItemVariable):
-                a = variables.TorchVariable(torch.tensor).call_function(tx, [a], {})
+                a = variables.TorchInGraphFunctionVariable(torch.tensor).call_function(
+                    tx, [a], {}
+                )
 
             # Dynamic input does not get resolved, rather, gets stored as call_function
             if isinstance(a, SymNodeVariable) or isinstance(b, SymNodeVariable):
@@ -724,7 +737,7 @@ class BuiltinVariable(VariableTracker):
 
                     fn = variables.NumpyVariable(np.clip)
                 else:
-                    fn = variables.TorchVariable(torch.clamp)
+                    fn = variables.TorchInGraphFunctionVariable(torch.clamp)
                 kwargs = {"min": b} if (self.fn is max) else {"max": b}
                 result = fn.call_function(tx, [a], kwargs)
             else:
@@ -735,7 +748,7 @@ class BuiltinVariable(VariableTracker):
                     fn = variables.NumpyVariable(fn)
                 else:
                     fn = {max: torch.maximum, min: torch.minimum}[self.fn]
-                    fn = variables.TorchVariable(fn)
+                    fn = variables.TorchInGraphFunctionVariable(fn)
                 result = fn.call_function(tx, [a, b], {})
 
             # return unspec if both a, b are unspec or const
@@ -909,15 +922,14 @@ class BuiltinVariable(VariableTracker):
                     ListIteratorVariable,
                 ),
             ):
-                items = user_cls()
-                for x in arg.unpack_var_sequence(tx):
-                    k, v = x.unpack_var_sequence(tx)
-                    k = ConstDictVariable.get_key(k)
-                    items.update({k: v})
+                items = dict(
+                    x.unpack_var_sequence(tx) for x in arg.unpack_var_sequence(tx)
+                )
                 return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
         elif not args and kwargs:
+            items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
             return variables.ConstDictVariable(
-                dict(kwargs), user_cls=user_cls, mutable_local=MutableLocal()
+                items, user_cls=user_cls, mutable_local=MutableLocal()
             )
         unimplemented(f"{user_cls.__name__}(): {args} {kwargs}")
 
@@ -940,19 +952,14 @@ class BuiltinVariable(VariableTracker):
         )
 
         if isinstance(arg, dict):
+            arg = [ConstantVariable.create(k) for k in arg.keys()]
             return DictVariableType(
                 dict.fromkeys(arg, value), user_cls, mutable_local=MutableLocal()
             )
-        elif isinstance(
-            arg,
-            (
-                ConstDictVariable,
-                ListVariable,
-                TupleVariable,
-                ListIteratorVariable,
-            ),
+        elif arg.has_unpack_var_sequence(tx) and all(
+            is_hashable(v) for v in arg.unpack_var_sequence(tx)
         ):
-            keys = [DictVariableType.get_key(x) for x in arg.unpack_var_sequence(tx)]
+            keys = arg.unpack_var_sequence(tx)
             return DictVariableType(
                 dict.fromkeys(keys, value), user_cls, mutable_local=MutableLocal()
             )
@@ -1069,42 +1076,44 @@ class BuiltinVariable(VariableTracker):
             items = [fn.call_function(tx, [x], {}) for x in seq.unpack_var_sequence(tx)]
             return variables.TupleVariable(items)
 
-    def call_sum(self, tx, seq, **kwargs):
+    def call_sum(self, tx, seq, start=_SENTINEL):
         # Special case for sum on tuple of floats and ints
-        if (
-            isinstance(seq, (variables.ListVariable, variables.TupleVariable))
-            and all(
-                isinstance(x, variables.ConstantVariable)
-                and isinstance(x.value, (int, float))
-                for x in seq.items
-            )
-            and not kwargs
+        if isinstance(seq, (variables.ListVariable, variables.TupleVariable)) and all(
+            isinstance(x, variables.ConstantVariable)
+            and isinstance(x.value, (int, float))
+            for x in seq.items
         ):
-            new_list = [x.value for x in seq.items]
-            return variables.ConstantVariable.create(sum(new_list))
+            if start is self._SENTINEL:
+                return variables.ConstantVariable.create(
+                    sum(x.value for x in seq.items),
+                )
+            if isinstance(start, variables.ConstantVariable) and isinstance(
+                start.value, (int, float)
+            ):
+                return variables.ConstantVariable.create(
+                    sum((x.value for x in seq.items), start=start.value),
+                )
         if seq.has_unpack_var_sequence(tx):
-            start = kwargs.pop(
-                "start", variables.ConstantVariable.create(0)
-            ).as_python_constant()
-            assert not kwargs
-            items = seq.unpack_var_sequence(tx)[start:]
+            if start is self._SENTINEL:
+                start = variables.ConstantVariable.create(0)
+            items = seq.unpack_var_sequence(tx)
             return BuiltinVariable(functools.reduce).call_function(
                 tx,
                 [
                     BuiltinVariable(operator.add),
                     variables.TupleVariable(items),
-                    variables.ConstantVariable.create(0),
+                    start,
                 ],
                 {},
             )
 
-    def call_reduce(self, tx, function, iterable, initializer=None):
+    def call_reduce(self, tx, function, iterable, initial=_SENTINEL):
         if iterable.has_unpack_var_sequence(tx):
             items = iterable.unpack_var_sequence(tx)
-            if initializer is None:
+            if initial is self._SENTINEL:
                 value, items = items[0], items[1:]
             else:
-                value = initializer
+                value = initial
             for element in items:
                 value = function.call_function(tx, [value, element], {})
             return value
@@ -1118,7 +1127,6 @@ class BuiltinVariable(VariableTracker):
             GetAttrVariable,
             PythonModuleVariable,
             TorchInGraphFunctionVariable,
-            TorchVariable,
             UserFunctionVariable,
         )
         from .builder import SourcelessBuilder, VariableBuilder
@@ -1231,11 +1239,19 @@ class BuiltinVariable(VariableTracker):
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchInGraphFunctionVariable):
+            # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
             member = getattr(obj.value, name)
-            if trace_rules.lookup(member) is not None:
-                return trace_rules.lookup(member)(member, **options)
-        elif isinstance(obj, TorchVariable):
-            member = getattr(obj.value, name)
+            if trace_rules.is_aten_op_or_tensor_method(member):
+                return TorchInGraphFunctionVariable(member, **options)
+        elif isinstance(obj, (PythonModuleVariable, DummyModule)):
+            if obj.is_torch:
+                member = getattr(obj.value, name)
+            else:
+                member = obj.value.__dict__[name]
+
+            if config.replay_record_enabled:
+                tx.exec_recorder.record_module_access(obj.value, name, member)
+
             if is_utils_checkpoint(member):
                 options["source"] = source
                 return build_checkpoint_variable(**options)
@@ -1245,13 +1261,6 @@ class BuiltinVariable(VariableTracker):
                 return VariableBuilder(tx, source)(member)
             else:
                 return SourcelessBuilder()(tx, member)
-        elif isinstance(obj, (PythonModuleVariable, DummyModule)):
-            member = obj.value.__dict__[name]
-
-            if config.replay_record_enabled:
-                tx.exec_recorder.record_module_access(obj.value, name, member)
-
-            return VariableBuilder(tx, source)(member)
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
@@ -1551,9 +1560,11 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):
             from .builder import wrap_fx_proxy_cls
 
-            if op is operator.is_ and isinstance(right, TensorVariable):
+            if op is operator.is_:
                 return ConstantVariable.create(
-                    id(extract_fake_example_value(left.as_proxy().node))
+                    isinstance(left, TensorVariable)
+                    and isinstance(right, TensorVariable)
+                    and id(extract_fake_example_value(left.as_proxy().node))
                     == id(extract_fake_example_value(right.as_proxy().node))
                 )
 
@@ -1571,6 +1582,9 @@ class BuiltinVariable(VariableTracker):
                     # not broadcastable, can't be compared
                     _unimplemented()
             tensor_cls = left if isinstance(left, TensorVariable) else right
+            proxy = tx.output.create_proxy(
+                "call_function", op, (left.as_proxy(), right.as_proxy()), {}
+            )
             return wrap_fx_proxy_cls(
                 type(tensor_cls),  # handle Ndarrays and Tensors
                 tx,
