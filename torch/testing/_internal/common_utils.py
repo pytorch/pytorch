@@ -1342,6 +1342,14 @@ def xfailIfTorchDynamo(func):
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
+    """
+    Usage:
+    @skipIfTorchDynamo(msg)
+    def test_blah(self):
+        ...
+    """
+    assert isinstance(msg, str), "Are you using skipIfTorchDynamo correctly?"
+
     def decorator(fn):
         if not isinstance(fn, type):
             @wraps(fn)
@@ -1358,7 +1366,6 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
             fn.__unittest_skip_why__ = msg
 
         return fn
-
 
     return decorator
 
