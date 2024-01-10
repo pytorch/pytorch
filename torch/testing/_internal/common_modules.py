@@ -221,6 +221,7 @@ class ModuleInfo:
         self.module_memformat_affects_out = module_memformat_affects_out
         self.train_and_eval_differ = train_and_eval_differ
         self.module_error_inputs_func = module_error_inputs_func
+        self.is_lazy = issubclass(module_cls, torch.nn.modules.lazy.LazyModuleMixin)
 
     def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
         result = [set_single_threaded_if_parallel_tbb]
@@ -3906,6 +3907,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_pickle", dtypes=[torch.float16], device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", dtypes=[torch.float16],
                                 device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_to", dtypes=[torch.float16], device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_multiple_device_transfer", dtypes=[torch.float16],
                                 device_type='cuda'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
