@@ -264,8 +264,7 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
 
 def memory_stats_as_nested_dict(device: Union[Device, int] = None) -> Dict[str, Any]:
     r"""Return the result of :func:`~torch.cuda.memory_stats` as a nested dictionary."""
-    if not is_initialized():
-        return {}
+    _lazy_init()
     device = _get_device_index(device, optional=True)
     return torch._C._cuda_memoryStats(device)
 
@@ -286,6 +285,7 @@ def reset_accumulated_memory_stats(device: Union[Device, int] = None) -> None:
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
     """
+    _lazy_init()
     device = _get_device_index(device, optional=True)
     return torch._C._cuda_resetAccumulatedMemoryStats(device)
 
@@ -305,6 +305,7 @@ def reset_peak_memory_stats(device: Union[Device, int] = None) -> None:
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
     """
+    _lazy_init()
     device = _get_device_index(device, optional=True)
     return torch._C._cuda_resetPeakMemoryStats(device)
 
@@ -483,6 +484,7 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
     """
+    _lazy_init()
     device = _get_device_index(device, optional=True)
     stats = memory_stats(device=device)
 
