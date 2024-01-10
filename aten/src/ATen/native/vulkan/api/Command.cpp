@@ -125,13 +125,15 @@ void CommandBuffer::insert_barrier(const PipelineBarrier& pipeline_barrier) {
       "is not DESCRIPTORS_BOUND or RECORDING.");
 
   if (pipeline_barrier) {
-    c10::SmallVector<VkBufferMemoryBarrier, 4u> buffer_memory_barriers;
+    std::vector<VkBufferMemoryBarrier> buffer_memory_barriers;
+    buffer_memory_barriers.reserve(pipeline_barrier.buffers.size());
     for (const api::BufferMemoryBarrier& memory_barrier :
          pipeline_barrier.buffers) {
       buffer_memory_barriers.push_back(memory_barrier.handle);
     }
 
-    c10::SmallVector<VkImageMemoryBarrier, 4u> image_memory_barriers;
+    std::vector<VkImageMemoryBarrier> image_memory_barriers;
+    image_memory_barriers.reserve(pipeline_barrier.images.size());
     for (const api::ImageMemoryBarrier& memory_barrier :
          pipeline_barrier.images) {
       image_memory_barriers.push_back(memory_barrier.handle);
