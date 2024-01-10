@@ -43,8 +43,8 @@ void initDeviceGlobalIdx(int device) {
   sycl::device& raw_device = c10::xpu::get_raw_device(device);
   // Get all SYCL devices associated with the SYCL platform.
   auto devices = sycl::device::get_devices();
-  auto match_device = [raw_device](const auto& device) -> bool {
-    return raw_device == device;
+  auto match_device = [raw_device](const auto& dev) -> bool {
+    return raw_device == dev;
   };
   auto it = std::find_if(devices.begin(), devices.end(), match_device);
   TORCH_CHECK(
