@@ -6,6 +6,8 @@
 #include <memory>
 #ifdef USE_VULKAN_API
 
+#include <ATen/native/vulkan/api/vk_api.h>
+
 #include <ATen/native/vulkan/api/Adapter.h>
 
 namespace at {
