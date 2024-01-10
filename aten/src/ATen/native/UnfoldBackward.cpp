@@ -10,7 +10,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(unfold_backward_stub);
 
@@ -38,4 +38,4 @@ Tensor unfold_backward(
   return grad_input;
 }
 
-}} // namespace at::native
+} // namespace at::native

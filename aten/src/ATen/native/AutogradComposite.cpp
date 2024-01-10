@@ -16,8 +16,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // We expect this code to only be reached in inference mode and when all inputs are inference tensors
 Tensor _make_dual(const Tensor& primal, const Tensor& tangent, int64_t level) {
@@ -107,6 +106,4 @@ Tensor _lazy_clone(Tensor const& self) {
   return Tensor(std::move(tensor));
 }
 
-} // namespace native
-
-} // namespace at
+} // namespace at::native

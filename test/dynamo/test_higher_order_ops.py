@@ -1102,7 +1102,6 @@ class GraphModule(torch.nn.Module):
         xs = torch.randn(2, 3, 3)
         y = torch.randn(3)
 
-        @torch.compile(backend=cnt, fullgraph=True)
         def map_f(xs, y):
             def inner(x, y):
                 def inner2(x, y):
@@ -1112,26 +1111,99 @@ class GraphModule(torch.nn.Module):
 
             return control_flow.map(inner, xs, y)
 
-        result = map_f(xs, y)
-        self.assertEqual(result, xs + y)
-
-        map_gm = backend.graphs[0]
-        name_set = set()
-        for name, _ in map_gm.named_modules():
-            name_set.add(name)
-        self.assertEqual(name_set, {"", "map_body_1.map_body_0", "map_body_1"})
+        graphs = self._check_map_graph_and_extract(map_f, (xs, y))
+        if graphs:
+            graph, body_graph = graphs
+            self.assertExpectedInline(
+                graph,
+                """\
+def forward(self, L_xs_ : torch.Tensor, L_y_ : torch.Tensor):
+    l_xs_ = L_xs_
+    l_y_ = L_y_
+    map_body_1 = self.map_body_1
+    map_impl = torch.ops.higher_order.map_impl(map_body_1, 1, l_xs_, l_y_);  map_body_1 = l_xs_ = l_y_ = None
+    getitem_1 = map_impl[0];  map_impl = None
+    return (getitem_1,)""",
+            )
+            self.assertExpectedInline(
+                body_graph,
+                """\
+def forward(self, getitem, l_y_):
+    getitem_1 = getitem[0]
+    map_body_0 = self.map_body_0
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, getitem, l_y_);  map_body_0 = getitem = l_y_ = None
+    getitem_2 = map_impl[0];  map_impl = None
+    return (getitem_2,)""",
+            )
 
     def test_map_multi_return(self):
         cnt = CompileCounter()
 
-        @torch.compile(backend=cnt)
         def f(x):
             return control_flow.map(lambda x: (x.sin(), x.sin()), x)
 
         x = torch.randn(3)
-        result = f(x)
-        self.assertEqual(result, (x.sin(), x.sin()))
-        self.assertEqual(cnt.frame_count, 0)
+        graphs = self._check_map_graph_and_extract(f, (x,))
+        if graphs:
+            graph, body_graph = graphs
+            self.assertExpectedInline(
+                graph,
+                """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    map_body_0 = self.map_body_0
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_);  map_body_0 = l_x_ = None
+    getitem_1 = map_impl[0]
+    getitem_2 = map_impl[1];  map_impl = None
+    return (getitem_1, getitem_2)""",
+            )
+            self.assertExpectedInline(
+                body_graph,
+                """\
+def forward(self, getitem):
+    sin = getitem.sin()
+    sin_1 = getitem.sin();  getitem = None
+    return (sin, sin_1)""",
+            )
+
+    def test_map_pytree_return(self):
+        cnt = CompileCounter()
+
+        def _construct_pytree(a):
+            return (a, [[[a]]], a, (a, (a,), a), {"a": a})
+
+        def f(x):
+            def inner_f(xs):
+                return _construct_pytree(xs)
+
+            return control_flow.map(inner_f, x)
+
+        x = torch.randn(3)
+        graphs = self._check_map_graph_and_extract(f, (x,))
+        if graphs:
+            graph, body_graph = graphs
+            self.assertExpectedInline(
+                graph,
+                """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    map_body_0 = self.map_body_0
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_);  map_body_0 = l_x_ = None
+    getitem_1 = map_impl[0]
+    getitem_2 = map_impl[1]
+    getitem_3 = map_impl[2]
+    getitem_4 = map_impl[3]
+    getitem_5 = map_impl[4]
+    getitem_6 = map_impl[5]
+    getitem_7 = map_impl[6];  map_impl = None
+    return (getitem_1, getitem_2, getitem_3, getitem_4, getitem_5, getitem_6, getitem_7)""",
+            )
+            self.assertExpectedInline(
+                body_graph,
+                """\
+def forward(self, getitem):
+    return (getitem, getitem, getitem, getitem, getitem, getitem, getitem)""",
+            )
 
     def test_map_kwargs(self):
         cnt = CompileCounter()
@@ -1156,14 +1228,61 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 1)
         y = torch.randn(3, 1)
-        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        graphs = self._check_map_graph_and_extract(fn, (x, y))
+        if graphs:
+            graph, body_graph = graphs
+            self.assertExpectedInline(
+                graph,
+                """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    map_body_0 = self.map_body_0
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_, 3);  map_body_0 = l_x_ = None
+    getitem_1 = map_impl[0];  map_impl = None
+    return (getitem_1,)""",
+            )
+            self.assertExpectedInline(
+                body_graph,
+                """\
+def forward(self, getitem, const):
+    add = getitem + 3;  getitem = None
+    sin = torch.sin(add);  add = None
+    return (sin,)""",
+            )
 
-        ref = fn(x, y)
-        res = compiled_fn(x, y)
+    def test_map_lowers_to_graph(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
 
-        self.assertEqual(ref, res)
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, ifdynstaticdefault(2, 3))
+        def fn(x, y):
+            def inner(x, y):
+                return torch.sin(x + y)
+
+            return control_flow.map(inner, x, y.size(0))
+
+        x = torch.randn(3, 1)
+        y = torch.randn(3, 1)
+        graphs = self._check_map_graph_and_extract(fn, (x, y))
+        if graphs:
+            graph, body_graph = graphs
+            self.assertExpectedInline(
+                graph,
+                """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    map_body_0 = self.map_body_0
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_, 3);  map_body_0 = l_x_ = None
+    getitem_1 = map_impl[0];  map_impl = None
+    return (getitem_1,)""",
+            )
+            self.assertExpectedInline(
+                body_graph,
+                """\
+def forward(self, getitem, const):
+    add = getitem + 3;  getitem = None
+    sin = torch.sin(add);  add = None
+    return (sin,)""",
+            )
 
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
@@ -1314,6 +1433,25 @@ class GraphModule(torch.nn.Module):
         true_graph = gm.cond_true_0.code.strip()
         false_graph = gm.cond_false_0.code.strip()
         return (graph, true_graph, false_graph)
+
+    def _check_map_graph_and_extract(self, fn, args):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+        out = torch.compile(fn, backend=cnt, fullgraph=True)(*args)
+        self.assertEqual(out, fn(*args))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(backend.graphs), 1)
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        gm = backend.graphs[0]
+        graph = gm.code.strip()
+        subgraphs = []
+        for module_name in gm._modules.keys():
+            subgraphs.append(getattr(gm, module_name).code.strip())
+        return (graph, *subgraphs)
 
     def test_cond_branches_no_arguments(self):
         def fn(x):
@@ -2097,6 +2235,7 @@ class GraphModule(torch.nn.Module):
             """{'add': ['map', 'map', 'add'], 'cos': ['map', 'cos'], 'sin': ['sin']}""",
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_source_fn_stack(self):
         backend = EagerAndRecordGraphs()
 
@@ -2119,6 +2258,7 @@ class GraphModule(torch.nn.Module):
  'sum_1': ['grad_impl', 'grad_impl', 'sum_1']}""",
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_source_fn_stack(self):
         backend = EagerAndRecordGraphs()
 
@@ -2231,13 +2371,6 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
 
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
-    def run(self, result=None):
-        # capture_func_transform will be set to False (for 2.1) till we
-        # support all transforms, so manually patch it to `True`` for
-        # testing on release branch.
-        with config.patch(capture_func_transforms=True):
-            super().run(result)
-
     def _compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
         backend = EagerAndRecordGraphs()
         actual = fn(*inputs)
@@ -2248,6 +2381,7 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         wrapped_gm = backend.graphs[graph_idx]
         return wrapped_gm
 
+    @config.patch(capture_func_transforms=True)
     def test_grad(self):
         counters.clear()
 
@@ -2286,6 +2420,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_freevar_tensor(self):
         counters.clear()
         y = torch.randn(3, 3)
@@ -2301,6 +2436,7 @@ class GraphModule(torch.nn.Module):
         actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_freevar_python_scalar(self):
         counters.clear()
         y = 3
@@ -2341,6 +2477,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_capture_tensor(self):
         counters.clear()
 
@@ -2385,6 +2522,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_closure_scalar(self):
         counters.clear()
 
@@ -2429,6 +2567,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_has_aux(self):
         counters.clear()
 
@@ -2473,6 +2612,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_two_tensor_has_aux(self):
         counters.clear()
 
@@ -2517,6 +2657,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_two_tensor_all_grad_has_aux(self):
         counters.clear()
 
@@ -2603,6 +2744,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_over_grad(self):
         counters.clear()
 
@@ -2648,6 +2790,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_with_graph_break(self):
         counters.clear()
 
@@ -2664,6 +2807,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 1)
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_with_side_effect(self):
         counters.clear()
 
@@ -2684,11 +2828,12 @@ class GraphModule(torch.nn.Module):
             self,
             dict(counters["graph_break"]),
             {
-                r".*HigherOrderOperator: Mutating a variable not in the current scope \(replace_all\)": 2
+                r".*HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)": 2
             },
         )
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_pytree(self):
         counters.clear()
 
@@ -2713,6 +2858,7 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_non_tensor_input(self):
         counters.clear()
 
@@ -2753,6 +2899,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_disable_capture(self):
         counters.clear()
 
@@ -2780,6 +2927,7 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_fn_with_kwargs(self):
         def fn(x, y):
             return (x + y).sum()
@@ -2798,6 +2946,7 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap(self):
         def fn(x):
             return torch.func.vmap(lambda x: x.sum(0) + x.sum(1))(x)
@@ -2834,6 +2983,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_free_const(self):
         y = 3
 
@@ -2873,6 +3023,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_free_tensor(self):
         y = torch.randn(3, 3)
 
@@ -2913,6 +3064,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_two_inputs(self):
         def fn(x, y):
             return torch.func.vmap(
@@ -2955,6 +3107,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_two_inputs_tuple_in_dims(self):
         in_dims = (0, 1)
 
@@ -2999,6 +3152,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_over_vmap_two_inputs(self):
         def fn(x, y):
             return torch.func.vmap(torch.func.vmap(lambda x, y: x + y, in_dims=1))(x, y)
@@ -3046,6 +3200,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_over_vmap_captured(self):
         x = torch.ones(2, 3)
         y = torch.ones(5, 3)
@@ -3092,6 +3247,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_multiple_outputs(self):
         x = torch.ones(2, 4, 3)
 
@@ -3130,6 +3286,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_multiple_outputs_diff_dims(self):
         x = torch.ones(2, 4, 3)
 
@@ -3168,6 +3325,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_multiple_outputs_out_dims_tuple(self):
         x = torch.ones(2, 4, 3)
         out_dims = (1, 0)
@@ -3207,6 +3365,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_kwargs(self):
         counters.clear()
         x = torch.ones(2, 3)
@@ -3224,6 +3383,7 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_pytree_inputs(self):
         counters.clear()
         x = torch.ones(2, 3)
@@ -3239,17 +3399,17 @@ class GraphModule(torch.nn.Module):
 
         actual = fn(x, y)
         expected = torch.compile(fn, backend="aot_eager", fullgraph=False)(x, y)
-        self.assertEqual(len(counters["graph_break"]), 2)
+        self.assertEqual(len(counters["graph_break"]), 1)
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
             {
                 ".*torch.vmap with body that accepts non-Tensors as input": 2,
-                "Unsupported: meta converter nyi with fake tensor propagation.": 1,
             },
         )
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_side_effects(self):
         counters.clear()
         x = torch.ones(2, 3)
@@ -3271,11 +3431,12 @@ class GraphModule(torch.nn.Module):
             self,
             dict(counters["graph_break"]),
             {
-                r".*HigherOrderOperator: Mutating a variable not in the current scope \(replace_all\)": 2
+                r".*HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)": 2
             },
         )
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_disable_capture(self):
         counters.clear()
 
@@ -3300,6 +3461,7 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_illegal_op_graph_break(self):
         counters.clear()
 
@@ -3321,6 +3483,7 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_multiple_invocation_in_dims(self):
         counters.clear()
 
@@ -3337,6 +3500,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 9)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_multiple_invocation_out_dims(self):
         counters.clear()
 
@@ -3353,6 +3517,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 9)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_new_tensor_in_body(self):
         def fn(x):
             return x + torch.ones(3)
@@ -3368,6 +3533,7 @@ class GraphModule(torch.nn.Module):
         actual = opt(x)
         self.assertEqual(expected, actual)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_new_tensor_unused_in_body(self):
         def fn(x):
             return torch.tensor(0.5)
@@ -3381,6 +3547,7 @@ class GraphModule(torch.nn.Module):
         actual = opt(x)
         self.assertEqual(expected, actual)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_new_tensor_implicit_via_op(self):
         def wrapper_fn(x):
             return torch.func.vmap(lambda t: torch.add(t, 0.5))(x)
@@ -3419,7 +3586,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             return torch.sigmoid(torch.matmul(x, y))
 
         def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y)
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=True
+            )
 
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)
@@ -3439,7 +3608,11 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, y):
             return torch.utils.checkpoint.checkpoint(
-                gn, torch.sin(x), y, use_reentrant=True, preserve_rng_state=False
+                gn,
+                torch.sin(x),
+                y,
+                use_reentrant=True,
+                preserve_rng_state=False,
             )
 
         x = torch.randn(4, 4, requires_grad=True)
@@ -3459,7 +3632,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             return torch.nn.functional.dropout(torch.matmul(x, y), p=0.2)
 
         def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y)
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=True
+            )
 
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
         y = torch.randn(4, 4, device="cuda", requires_grad=True)
@@ -3482,7 +3657,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             return torch.nn.functional.dropout(torch.matmul(x, y), p=0.2)
 
         def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y)
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=True
+            )
 
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
         y = torch.randn(4, 4, device="cuda", requires_grad=True)
@@ -3500,7 +3677,11 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             return torch.sigmoid(torch.matmul(x, y))
 
         def fn(x, y):
-            return torch.cos(torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y))
+            return torch.cos(
+                torch.utils.checkpoint.checkpoint(
+                    gn, torch.sin(x), y, use_reentrant=True
+                ),
+            )
 
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)
@@ -3533,7 +3714,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         mod = MockModule()
 
         def fn(x):
-            return torch.utils.checkpoint.checkpoint(mod, torch.sin(x))
+            return torch.utils.checkpoint.checkpoint(
+                mod, torch.sin(x), use_reentrant=True
+            )
 
         x = torch.randn(10, 10, requires_grad=True)
 

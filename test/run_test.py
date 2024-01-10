@@ -200,6 +200,7 @@ TESTS = discover_tests(
         "distributed/test_c10d_spawn",
         "distributions/test_transforms",
         "distributions/test_utils",
+        "test/inductor/test_aot_inductor_utils",
         "onnx/test_pytorch_onnx_onnxruntime_cuda",
         "onnx/test_models",
         # These are not C++ tests
@@ -299,7 +300,6 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "dynamo/test_activation_checkpointing",
 ]
 
 # The tests inside these files should never be run in parallel with each other
@@ -1202,30 +1202,6 @@ def parse_args():
         help="select a set of tests to exclude",
     )
     parser.add_argument(
-        "-f",
-        "--first",
-        choices=TESTS,
-        metavar="TESTS",
-        help="select the test to start from (excludes previous tests)",
-    )
-    parser.add_argument(
-        "-l",
-        "--last",
-        choices=TESTS,
-        metavar="TESTS",
-        help="select the last test to run (excludes following tests)",
-    )
-    parser.add_argument(
-        "--bring-to-front",
-        nargs="+",
-        choices=TestChoices(TESTS),
-        default=[],
-        metavar="TESTS",
-        help="select a set of tests to run first. This can be used in situations"
-        " where you want to run all tests, but care more about some set, "
-        "e.g. after making a change to a specific component",
-    )
-    parser.add_argument(
         "--ignore-win-blocklist",
         action="store_true",
         help="always run blocklisted windows tests",
@@ -1300,43 +1276,6 @@ def parse_args():
     )
 
     return parser.parse_args()
-
-
-def find_test_index(test, selected_tests, find_last_index=False):
-    """Find the index of the first or last occurrence of a given test/test module in the list of selected tests.
-
-    This function is used to determine the indices when slicing the list of selected tests when
-    ``options.first``(:attr:`find_last_index`=False) and/or ``options.last``(:attr:`find_last_index`=True) are used.
-
-    :attr:`selected_tests` can be a list that contains multiple consequent occurrences of tests
-    as part of the same test module, e.g.:
-
-    ```
-    selected_tests = ['autograd', 'cuda', **'torch.TestTorch.test_acos',
-                     'torch.TestTorch.test_tan', 'torch.TestTorch.test_add'**, 'utils']
-    ```
-
-    If :attr:`test`='torch' and :attr:`find_last_index`=False, result should be **2**.
-    If :attr:`test`='torch' and :attr:`find_last_index`=True, result should be **4**.
-
-    Args:
-        test (str): Name of test to lookup
-        selected_tests (list): List of tests
-        find_last_index (bool, optional): should we lookup the index of first or last
-            occurrence (first is default)
-
-    Returns:
-        index of the first or last occurrence of the given test
-    """
-    idx = 0
-    found_idx = -1
-    for t in selected_tests:
-        if t.startswith(test):
-            found_idx = idx
-            if not find_last_index:
-                break
-        idx += 1
-    return found_idx
 
 
 def exclude_tests(
@@ -1417,21 +1356,6 @@ def get_selected_tests(options) -> List[str]:
     else:
         # Exclude all onnx tests otherwise
         options.exclude.extend(onnx_tests)
-
-    # process reordering
-    if options.bring_to_front:
-        to_front = set(options.bring_to_front)
-        selected_tests = options.bring_to_front + list(
-            filter(lambda name: name not in to_front, selected_tests)
-        )
-
-    if options.first:
-        first_index = find_test_index(options.first, selected_tests)
-        selected_tests = selected_tests[first_index:]
-
-    if options.last:
-        last_index = find_test_index(options.last, selected_tests, find_last_index=True)
-        selected_tests = selected_tests[: last_index + 1]
 
     # process exclusion
     if options.exclude_jit_executor:
@@ -1730,6 +1654,8 @@ def main():
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
 
+    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
+
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
@@ -1737,13 +1663,17 @@ def main():
         unranked_tests=selected_tests
     )
 
-    if IS_CI:
-        # downloading test cases configuration to local environment
-        get_test_case_configs(dirpath=test_directory)
-        aggregated_heuristics = get_test_prioritizations(selected_tests)
+    with open(
+        REPO_ROOT / "test" / "test-reports" / "td_heuristic_rankings.log", "w"
+    ) as f:
+        if IS_CI:
+            # downloading test cases configuration to local environment
+            get_test_case_configs(dirpath=test_directory)
+            aggregated_heuristics = get_test_prioritizations(selected_tests, file=f)
 
-    test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
-    test_prioritizations.print_info()
+        test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
+
+        f.write(test_prioritizations.get_info_str())
 
     test_file_times_dict = load_test_file_times()
     test_class_times_dict = load_test_class_times()
@@ -1822,8 +1752,6 @@ def main():
 
     if not options.no_translation_validation:
         os.environ["PYTORCH_TEST_WITH_TV"] = "1"
-
-    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
     try:
         # Actually run the tests

@@ -1,12 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 
 import dataclasses
+
 import torch
 from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
 from torch.distributed.checkpoint.planner import SavePlan, WriteItemType
-from torch.distributed.checkpoint.planner_helpers import (
-    _create_write_item_for_tensor,
-)
+from torch.distributed.checkpoint.planner_helpers import _create_write_item_for_tensor
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -33,9 +32,7 @@ class TestDedupTensor(TestCase):
         self.assertEqual(2, len(dedup_plans[0].items))
         self.assertEqual(1, len(dedup_plans[1].items))
 
-        self.assertIn(
-            "tensor_0", (item.index.fqn for item in dedup_plans[0].items)
-        )
+        self.assertIn("tensor_0", (item.index.fqn for item in dedup_plans[0].items))
         self.assertIn("r0", (item.index.fqn for item in dedup_plans[0].items))
 
         self.assertIn("r1", (item.index.fqn for item in dedup_plans[1].items))

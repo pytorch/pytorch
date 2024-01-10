@@ -7,7 +7,6 @@ from os.path import abspath, dirname
 from typing import Any, Dict, Set, Type, TYPE_CHECKING
 
 import torch
-from . import external_utils
 
 # to configure logging for dynamo, aot, and inductor
 # use the following API in the torch._logging module
@@ -15,8 +14,7 @@ from . import external_utils
 # or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
 # see this design doc for more detailed info
 # Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
-# the name of a file to write the logs to (currently unused)
-# TODO(jon-chuang): use setup_log_file in setup_compile_debug
+# the name of a file to write the logs to
 # [@compile_ignored: debug]
 log_file_name = None
 
@@ -49,17 +47,6 @@ accumulated_cache_size_limit = 64
 # specialized, so this is mostly useful for export, where we want inputs
 # to be dynamic, but accesses to ints should NOT get promoted into inputs.
 specialize_int = False
-
-# Assume these functions return constants
-constant_functions = {
-    torch.jit.is_scripting: False,
-    torch.jit.is_tracing: False,
-    torch._C._get_tracing_state: None,
-    torch.fx._symbolic_trace.is_fx_tracing: False,
-    torch.onnx.is_in_onnx_export: False,
-    external_utils.is_compiling: True,
-    torch._utils.is_compiling: True,
-}
 
 # legacy config, does nothing now!
 dynamic_shapes = True
@@ -235,6 +222,12 @@ enforce_cond_guards_match = True
 # about optimize_ddp behavior.
 optimize_ddp = True
 
+# If True, delays DDPOptimizer submodule compilation to 1st run of the model,
+# so that real tensor strides are used in all submodules
+# (instead of using FakeTensor strides which can differ from real tensor strides and causes error in some cases).
+# This feature is not hardened yet and it's known to cause issues to some models, so False by default.
+optimize_ddp_lazy_compile = False
+
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
 
@@ -325,7 +318,10 @@ only_allow_pt2_compliant_ops = False
 capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
-capture_func_transforms = True
+capture_func_transforms = False
+
+# If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
+log_compilation_metrics = True
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing

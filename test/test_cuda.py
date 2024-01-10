@@ -64,6 +64,7 @@ if TEST_CUDA:
 _cycles_per_ms = None
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCuda(TestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -1387,7 +1388,7 @@ torch.cuda.synchronize()
         scaler.scale(l).backward()
         scaler.step(optimizer)
         scaler.update()
-        assert(scaler._scale != float('inf') and scaler._scale != float('nan'))
+        assert scaler._scale != float('inf') and scaler._scale != float('nan')
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -1836,8 +1837,7 @@ torch.cuda.synchronize()
                     ('TORCH_CUDNN_V8_API_DISABLED' in os.environ and
                      int(os.environ['TORCH_CUDNN_V8_API_DISABLED']) or
                      torch.cuda.get_device_capability() < (8, 0))
-                should_error_from_not_implemented = should_error_from_cudnn or 'thnn' in op \
-                    or 'fused' in op or 'gru' in op or op == '_thnn_fused_lstm_cell' or op == 'lstm_cell'
+                should_error_from_not_implemented = should_error_from_cudnn
                 if not skip_test:
                     if should_error_from_not_implemented:
                         with self.assertRaises(RuntimeError, msg=str(op) + ' should not be supported for bfloat16!'):
@@ -2564,7 +2564,7 @@ exit(2)
             if not TEST_CUDAMALLOCASYNC:
                 # These stat checks are specific to the native allocator.
                 if share_mem != "Don't share":
-                    self.assertEqual(reserved_no_sharing - torch.cuda.memory_stats()["reserved_bytes.all.current"],
+                    self.assertEqual(reserved_no_sharing - torch.cuda.memory_stats()["reserved_bytes.all.current"],  # noqa: F821
                                      kSmallBuffer)
                 else:
                     reserved_no_sharing = torch.cuda.memory_stats()["reserved_bytes.all.current"]
@@ -3304,6 +3304,30 @@ exit(2)
         # Exception would Corrupt Process and make other tests fail
         # self.assertTrue(throws_on_cuda_event("global"))
 
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    def test_cuda_graph_allocator_propagates_stream(self):
+        segments = torch.cuda.memory_snapshot()
+        existing_pools = {s["segment_pool_id"] for s in segments}
+        x = torch.randn(10240000, device="cuda")
+        y = torch.rand_like(x)
+        g = torch.cuda.CUDAGraph()
+        s0 = torch.cuda.Stream()
+        s1 = torch.cuda.Stream()
+        s0.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s0):
+            g.capture_begin()
+            z = x + y
+        with torch.cuda.stream(s1):
+            s1.wait_stream(s0)
+            w = z + y
+        s0.wait_stream(s1)
+        with torch.cuda.stream(s0):
+            g.capture_end()
+        segments = torch.cuda.memory_snapshot()
+        x = [s["segment_pool_id"] for s in segments if s["segment_pool_id"] not in existing_pools]
+        self.assertEqual(len(x), 2)
+        self.assertEqual(x[0], x[1])
+
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
         mean, invstd = torch.batch_norm_gather_stats(
@@ -3394,13 +3418,26 @@ exit(2)
     @unittest.skipIf(TEST_MULTIGPU, "Testing on one GPU is sufficient")
     def test_lazy_init(self):
         """ Validate that no CUDA calls are made during `import torch` call"""
-        from subprocess import check_output
+        def check_output(script: str) -> str:
+            return subprocess.check_output([sys.executable, "-c", script]).decode("ascii").strip()
+
         VISIBLE_DEVICES = "HIP_VISIBLE_DEVICES" if TEST_WITH_ROCM else "CUDA_VISIBLE_DEVICES"
         test_script = f"import os; import torch;os.environ['{VISIBLE_DEVICES}']='32';print(torch.cuda.device_count())"
-        rc = check_output([sys.executable, '-c', test_script]).decode("ascii").strip()
+        rc = check_output(test_script)
         self.assertEqual(rc, "0")
+        if not TEST_WITH_ROCM:
+            # Check that `cuInit` was not called during the import
+            # By using ctypes and calling cuDeviceCountGet() and expect CUDA_ERROR_NOT_INITIALIZED == 3
+            # See https://github.com/pytorch/pytorch/issues/116276 for more details
+            libcuda_name = "libcuda.so.1" if not IS_WINDOWS else "nvcuda.dll"
+            cuda_driver_api_call = f"ctypes.CDLL('{libcuda_name}').cuDeviceGetCount(ctypes.byref(x))"
+            rc = check_output(f"import torch; import ctypes;x=ctypes.c_int(-1);print({cuda_driver_api_call})")
+            self.assertEqual(rc, "3")
 
 
+
+
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_memory_snapshot(self):
@@ -3897,6 +3934,7 @@ def reconstruct_from_tensor_metadata(metadata):
 
 
 @unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "NYI")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBlockStateAbsorption(TestCase):
 
     def checkCheckpointedBlock(self, before_block, after_block):
@@ -4166,7 +4204,7 @@ class TestBlockStateAbsorption(TestCase):
             try:
                 yield
             finally:
-                torch._C._cuda_endAllocateCurrentStreamToPool(device)
+                torch._C._cuda_endAllocateCurrentStreamToPool(device, mem_pool)
                 torch._C._cuda_releasePool(device, mem_pool)
                 stream_context.__exit__(None, None, None)
 

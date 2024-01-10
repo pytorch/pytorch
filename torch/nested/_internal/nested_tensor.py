@@ -13,12 +13,12 @@ _tensor_symint_registry = WeakTensorKeyDictionary()
 
 def get_tensor_symint(tensor, *, coeff=1):
     global _tensor_id_counter
-    if tensor not in _tensor_symint_registry:
-        _tensor_symint_registry[tensor] = torch._C._get_singleton_int(
-            _tensor_id_counter, coeff
-        )
+    tensor_symint = _tensor_symint_registry.get(tensor)
+    if tensor_symint is None:
+        tensor_symint = torch._C._get_singleton_int(_tensor_id_counter, coeff)
         _tensor_id_counter += 1
-    return _tensor_symint_registry[tensor]
+        _tensor_symint_registry[tensor] = tensor_symint
+    return tensor_symint
 
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash

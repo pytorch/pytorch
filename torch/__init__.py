@@ -16,6 +16,7 @@ import platform
 import textwrap
 import ctypes
 import inspect
+import threading
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -39,7 +40,7 @@ import builtins
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage',
-    'set_default_tensor_type', 'set_default_device',
+    'set_default_tensor_type', 'set_default_device', 'get_default_device',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
@@ -190,7 +191,7 @@ def _load_global_deps() -> None:
             'nccl': 'libnccl.so.*[0-9]',
             'nvtx': 'libnvToolsExt.so.*[0-9]',
         }
-        is_cuda_lib_err = [lib for lib in cuda_libs.values() if(lib.split('.')[0] in err.args[0])]
+        is_cuda_lib_err = [lib for lib in cuda_libs.values() if lib.split('.')[0] in err.args[0]]
         if not is_cuda_lib_err:
             raise err
         for lib_folder, lib_name in cuda_libs.items():
@@ -341,6 +342,10 @@ class SymFloat:
         raise AssertionError("type stub not overridden")
 
     def __sym_int__(self):
+        raise AssertionError("type stub not overridden")
+
+    def is_integer(self):
+        """Return True if the float is an integer."""
         raise AssertionError("type stub not overridden")
 
     def __repr__(self):
@@ -610,7 +615,23 @@ def is_storage(obj):
     return type(obj) in _storage_classes
 
 
-_GLOBAL_DEVICE_CONTEXT = None
+_GLOBAL_DEVICE_CONTEXT = threading.local()
+
+
+def get_default_device() -> "torch.device":
+    r"""Gets the default ``torch.Tensor`` to be allocated on ``device``"""
+    global _GLOBAL_DEVICE_CONTEXT
+    if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
+        device = _GLOBAL_DEVICE_CONTEXT.device_context.device
+        if device.index is not None:
+            return device
+        else:
+            # TODO: Call like get_device_index() method corresponding to
+            # each device type
+            return torch.tensor([]).device
+    else:
+        return torch.device("cpu")
+
 
 def set_default_device(device):
     """Sets the default ``torch.Tensor`` to be allocated on ``device``.  This
@@ -644,29 +665,43 @@ def set_default_device(device):
     Example::
 
         >>> # xdoctest: +SKIP("requires cuda, changes global state")
-        >>> torch.tensor([1.2, 3]).device
+        >>> torch.get_default_device()
         device(type='cpu')
         >>> torch.set_default_device('cuda')  # current device is 0
-        >>> torch.tensor([1.2, 3]).device
+        >>> torch.get_default_device()
         device(type='cuda', index=0)
+        >>> torch.set_default_device('cuda')
+        >>> torch.cuda.set_device('cuda:1')  # current device is 1
+        >>> torch.get_default_device()
+        device(type='cuda', index=1)
         >>> torch.set_default_device('cuda:1')
-        >>> torch.tensor([1.2, 3]).device
+        >>> torch.get_default_device()
         device(type='cuda', index=1)
 
     """
     global _GLOBAL_DEVICE_CONTEXT
-    if _GLOBAL_DEVICE_CONTEXT is not None:
-        _GLOBAL_DEVICE_CONTEXT.__exit__(None, None, None)
+    if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
+        device_context = _GLOBAL_DEVICE_CONTEXT.device_context
+        if device_context is not None:
+            device_context.__exit__(None, None, None)
+
     if device is None:
-        _GLOBAL_DEVICE_CONTEXT = None
-        return
-    from torch.utils._device import DeviceContext
-    _GLOBAL_DEVICE_CONTEXT = DeviceContext(device)
-    _GLOBAL_DEVICE_CONTEXT.__enter__()
+        device_context = None
+    else:
+        from torch.utils._device import DeviceContext
+        device_context = DeviceContext(device)
+        device_context.__enter__()
+    _GLOBAL_DEVICE_CONTEXT.device_context = device_context
 
 
 def set_default_tensor_type(t):
-    r"""Sets the default ``torch.Tensor`` type to floating point tensor type
+    r"""
+    .. warning::
+
+        This function is deprecated as of PyTorch 2.1, please use :func:`torch.set_default_dtype()` and
+        :func:`torch.set_default_device()` as alternatives.
+
+    Sets the default ``torch.Tensor`` type to floating point tensor type
     ``t``. This type will also be used as default floating point type for
     type inference in :func:`torch.tensor`.
 
@@ -1432,7 +1467,7 @@ if TYPE_CHECKING:
     from torch._C._VariableFunctions import *  # type: ignore[assignment, misc] # noqa: F403
     # Fixup segment_reduce visibility
     _segment_reduce = segment_reduce
-    del segment_reduce
+    del segment_reduce  # noqa: F821
 
 # Ops not to be exposed in `torch` namespace,
 # mostly helper ops.

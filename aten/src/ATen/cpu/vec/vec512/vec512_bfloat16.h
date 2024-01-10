@@ -172,17 +172,15 @@ public:
     if (count == size())
       return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
 
-    __at_align__ int16_t tmp_values[size()];
-    std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
-    return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(tmp_values));
+    __mmask32 mask = (1ULL << count) - 1;
+    return _mm512_maskz_loadu_epi16(mask, ptr);
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
       _mm512_storeu_si512(reinterpret_cast<__m512i*>(ptr), values);
     } else if (count > 0) {
-      __at_align__ int16_t tmp_values[size()];
-      _mm512_storeu_si512(reinterpret_cast<__m512i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
+      __mmask32 mask = (1ULL << count) - 1;
+      _mm512_mask_storeu_epi16(ptr, mask, values);
     }
   }
   template <int64_t mask>
@@ -457,6 +455,9 @@ public:
   }
   Vectorized<T> expm1() const {
     return map(Sleef_expm1f16_u10);
+  }
+  Vectorized<T> exp_u20() const {
+    return exp();
   }
   Vectorized<T> fmod(const Vectorized<T> & q) const {
     __m512 x_lo, x_hi;
