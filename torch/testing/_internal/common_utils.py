@@ -803,7 +803,7 @@ TEST_IN_SUBPROCESS = args.subprocess
 TEST_SAVE_XML = args.save_xml
 REPEAT_COUNT = args.repeat
 SEED = args.seed
-if not expecttest.ACCEPT:
+if not getattr(expecttest, "ACCEPT", False):
     expecttest.ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
@@ -1352,7 +1352,7 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
                     fn(*args, **kwargs)
             return wrapper
 
-        assert(isinstance(fn, type))
+        assert isinstance(fn, type)
         if TEST_WITH_TORCHDYNAMO:  # noqa: F821
             fn.__unittest_skip__ = True
             fn.__unittest_skip_why__ = msg
@@ -1374,7 +1374,7 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
                     fn(*args, **kwargs)
             return wrapper
 
-        assert(isinstance(fn, type))
+        assert isinstance(fn, type)
         if condition:
             fn.__unittest_skip__ = True
             fn.__unittest_skip_why__ = msg
@@ -1440,7 +1440,7 @@ def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT exe
                     fn(*args, **kwargs)
             return wrapper
 
-        assert(isinstance(fn, type))
+        assert isinstance(fn, type)
         if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
             fn.__unittest_skip__ = True
             fn.__unittest_skip_why__ = msg
@@ -2080,7 +2080,7 @@ class CudaMemoryLeakCheck:
                 if driver_mem_allocated > self.driver_befores[i]:
                     driver_discrepancy = True
 
-                if not(caching_allocator_discrepancy or driver_discrepancy):
+                if not (caching_allocator_discrepancy or driver_discrepancy):
                     # Leak was false positive, exit loop
                     discrepancy_detected = False
                     break
@@ -4506,6 +4506,9 @@ def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.devi
     dtype_to_ctype: Dict[torch.dtype, Any] = {
         torch.int8: ctypes.c_int8,
         torch.uint8: ctypes.c_uint8,
+        torch.uint16: ctypes.c_uint16,
+        torch.uint32: ctypes.c_uint32,
+        torch.uint64: ctypes.c_uint64,
         torch.int16: ctypes.c_int16,
         torch.int32: ctypes.c_int32,
         torch.int64: ctypes.c_int64,

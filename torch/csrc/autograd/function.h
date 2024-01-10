@@ -63,7 +63,7 @@ TORCH_API std::shared_ptr<Node> get_current_node();
 // or more input `Variable`s and producing zero or more output `Variable`s. All
 // functions in PyTorch's autograd machinery derive from this class and
 // override its `apply` method. Instances of such subclasses will then be
-// invokeable via the call operator.
+// invokable via the call operator.
 //
 //                    Nodes in the Autograd Graph
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
