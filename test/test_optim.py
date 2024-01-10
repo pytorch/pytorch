@@ -505,20 +505,19 @@ class TestOptimRenewed(TestCase):
         params = [Parameter(torch.randn(2, 3, device=device, dtype=dtype)) for _ in range(2)]
         for p in params:
             p.grad = torch.rand_like(p)
-
-        for optim_input in all_optim_inputs:
-            optimizer = optim_cls(params, **optim_input.kwargs)
-
-            # Needed for LBFGS
-            def closure():
-                return torch.rand(1, device=device, dtype=dtype) if optim_cls.__name__ == "LBFGS" else None
-
             # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
             # which we know does NOT represent the expected use case!
             if optim_cls.__name__ == "SparseAdam":
-                for p in params:
-                    p.grad = p.grad.to_sparse()
+                p.grad = p.grad.to_sparse()
 
+        # Needed for LBFGS
+        lbfgs_loss = torch.rand(1, device=device, dtype=dtype)
+
+        def closure():
+            return lbfgs_loss if optim_cls.__name__ == "LBFGS" else None
+
+        for optim_input in all_optim_inputs:
+            optimizer = optim_cls(params, **optim_input.kwargs)
             for _ in range(3):
                 optimizer.step(closure)
             state_dict = deepcopy(optimizer.state_dict())
@@ -537,24 +536,23 @@ class TestOptimRenewed(TestCase):
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
         # We limit our configs to CPU only, because we will be moving them to CUDA later
         cpu_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs("cpu", dtype, optim_info, skip=("differentiable",))
-        lbfgs_loss = torch.rand(1, device="cpu", dtype=dtype)
+
+        # Needed for LBFGS
+        lbfgs_loss = torch.rand(1, device=device, dtype=dtype)
+
+        def closure():
+            return lbfgs_loss if optim_cls.__name__ == "LBFGS" else None
 
         for optim_input in cpu_optim_inputs:
             params = [Parameter(torch.randn(2, 3, device="cpu", dtype=dtype)) for _ in range(2)]
             for p in params:
                 p.grad = torch.randn_like(p)
+                # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
+                # which we know does NOT represent the expected use case!
+                if optim_cls.__name__ == "SparseAdam":
+                    p.grad = p.grad.to_sparse()
 
             optimizer = optim_cls(params, **optim_input.kwargs)
-
-            # Needed for LBFGS
-            def closure():
-                return lbfgs_loss if optim_cls.__name__ == "LBFGS" else None
-
-            # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
-            # which we know does NOT represent the expected use case!
-            if optim_cls.__name__ == "SparseAdam":
-                for p in params:
-                    p.grad = p.grad.to_sparse()
 
             for _ in range(3):
                 optimizer.step(closure)
