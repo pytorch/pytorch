@@ -3622,6 +3622,7 @@ class TestNestedTensorSubclass(TestCase):
             # Math fallback doesn't work with bfloat16 on CUDA because
             # "group_gemm_dispatch" not implemented for 'BFloat16'
             if not (device == "cuda" and dtype == torch.bfloat16):
+                print(f"device is {device}, dtype is {dtype}")
                 check_forward_backward()
 
 
