@@ -16,22 +16,6 @@
 
 namespace c10d {
 
-/* Helper used by work::getDuration() and nccl flight recorder */
-float getDurationFromFirstEvent(
-    const std::vector<at::cuda::CUDAEvent>& ncclStartEvents,
-    const std::vector<at::cuda::CUDAEvent>& ncclEndEvents) {
-  TORCH_CHECK(
-      ncclStartEvents.size() == 1,
-      "getDuration only works for single device per ProcessGroup, but found multiple start events.");
-  TORCH_CHECK(
-      ncclEndEvents.size() == 1,
-      "getDuration only works for single device per ProcessGroup, but found multiple end events.");
-  TORCH_CHECK(
-      ncclEndEvents[0].query(),
-      "getDuration can only be called after work is succeeded.")
-  return ncclStartEvents[0].elapsed_time(ncclEndEvents[0]);
-}
-
 /* Trace Utils Related to TORCH_NCCL_DESYNC_DEBUG */
 
 inline std::string getTraceStartKey(const std::string& pgName, int rank) {
@@ -383,7 +367,6 @@ struct NCCLTraceBuffer {
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
     c10::time_t time_created_;
-    c10::optional<float> duration_;
 
     const char* state_ = "scheduled";
 
@@ -474,9 +457,6 @@ struct NCCLTraceBuffer {
       }
       if (completed) {
         r.state_ = "completed";
-        if (r.start_ != nullptr) {
-          r.duration_ = getDurationFromFirstEvent(*r.start_, *r.end_);
-        }
       }
     }
   }
@@ -517,7 +497,6 @@ struct NCCLTraceBuffer {
     c10::IValue input_sizes_s = "input_sizes";
     c10::IValue output_sizes_s = "output_sizes";
     c10::IValue time_created_s = "time_created_us";
-    c10::IValue duration_s = "duration_ms";
 
     c10::IValue frames_s = "frames";
     c10::IValue state_s = "state";
@@ -548,9 +527,6 @@ struct NCCLTraceBuffer {
       dict.insert(seq_id_s, int64_t(e.seq_id_));
       dict.insert(profiling_name_s, e.profiling_name_);
       dict.insert(time_created_s, int64_t(e.time_created_ / 1000));
-      if (e.duration_) {
-        dict.insert(duration_s, *e.duration_);
-      }
 
       auto it = e.sizes_.begin();
       auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {

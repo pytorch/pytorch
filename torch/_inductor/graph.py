@@ -258,6 +258,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.disable_cudagraphs = False
         self.disable_cudagraphs_reason = ""
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
+        self.dynamo_flat_name_to_original_fqn = self.module.meta.get(
+            "dynamo_flat_name_to_original_fqn", {}
+        )
         self.init_backend_registration()
 
     @staticmethod
@@ -278,10 +281,6 @@ class GraphLowering(torch.fx.Interpreter):
         nconv = len(conv_nodes)
 
         if nconv == 0:
-            return False
-
-        # NHWC perf issue on ROCm5.7 first noted here https://github.com/pytorch/pytorch/pull/110319
-        if torch.version.hip and torch.cuda.is_available():
             return False
 
         # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
@@ -1126,7 +1125,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def compile_to_fn(self):
         if self.aot_mode:
-            from .codecache import AotCodeCache
+            from .codecache import AotCodeCompiler
 
             assert self.cpp_wrapper, "AOT mode only supports C++ wrapper"
             code, linemap = self.codegen_with_cpp_wrapper()
@@ -1147,7 +1146,7 @@ class GraphLowering(torch.fx.Interpreter):
                 )
 
             # Directly return the file path with the compiled code
-            return AotCodeCache.compile(
+            return AotCodeCompiler.compile(
                 self, code, serialized_extern_kernel_nodes, cuda=self.cuda
             )
         else:
