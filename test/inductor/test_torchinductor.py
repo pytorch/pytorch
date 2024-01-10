@@ -5467,6 +5467,30 @@ class CommonTemplate:
         args = [torch.tensor([1], dtype=torch.int64), torch.randn(8, 4), torch.randn(4)]
         self.common(fn, args)
 
+    def test_index_put_reinplace(self):
+        def fn(x):
+            idx = torch.arange(10, device=x.device)
+            src = torch.ones(10, dtype=x.dtype, device=x.device)
+            x.index_put_((idx,), src)
+            return x.expand((2, x.shape[0]))
+
+        a = torch.randn(1024)
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(fn, (a,))
+        assertGeneratedKernelCountEqual(self, 1)
+
+    def test_index_put_failed_reinplace(self):
+        def fn(x):
+            idx = torch.arange(10, device=x.device)
+            src = torch.ones(10, dtype=x.dtype, device=x.device)
+            y = x.index_put((idx,), src)
+            return x.expand((2, x.shape[0])), y
+
+        a = torch.randn(1024)
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(fn, (a,))
+        assertGeneratedKernelCountEqual(self, 2)
+
     def test_adding_tensor_offsets(self):
         @torch.compile(fullgraph=True)
         def fn(x):
@@ -5657,7 +5681,9 @@ class CommonTemplate:
                 with torch.no_grad():
                     self.cache_k[:bsz, start_pos : start_pos + seqlen] = xk
                 keys = self.cache_k[:bsz, : start_pos + seqlen]
-                scores = torch.matmul(xk.transpose(1, 2), keys.transpose(1, 2).transpose(2, 3))
+                scores = torch.matmul(
+                    xk.transpose(1, 2), keys.transpose(1, 2).transpose(2, 3)
+                )
                 return scores
 
         kv_cache_module = M(self.device)
@@ -5670,7 +5696,6 @@ class CommonTemplate:
         with torch.no_grad():
             self.common(kv_cache_module, (inp, 1), check_lowp=False)
         assertGeneratedKernelCountEqual(self, 1)
-
 
     def test_scatter1(self):
         def fn(a, dim, index, b):

@@ -1,24 +1,31 @@
 import operator
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
 import torch
-import torch.utils._pytree as pytree
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_functional
 from torch._inductor import inductor_prims
 from torch._inductor.fx_utils import get_node_storage
 from torch._inductor.lowering import (
+    fallbacks,
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
+    needs_realized_inputs,
 )
 from torch._inductor.virtualized import V
 from torch.fx.immutable_collections import immutable_dict
-
+from torch.fx.passes.reinplace import _is_view_op
+from torch.utils import _pytree as pytree
 
 aten = torch.ops.aten
-inductor_prims
-InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
-InplaceOpHandler = namedtuple("InplaceOpHandler", ["handler", "mutated_arg"])
+
+
+@dataclass(frozen=True)
+class InplaceableOp:
+    inplace_op: Callable[..., Any]
+    mutated_arg: int
+    extra_check: Callable[[torch.fx.Node], bool] = lambda node: True
+
 
 _SCATTER_OP_TO_VIEW = {
     torch.ops.aten.diagonal_scatter.default: torch.ops.aten.diagonal.default,
@@ -26,19 +33,10 @@ _SCATTER_OP_TO_VIEW = {
     torch.ops.aten.slice_scatter.default: torch.ops.aten.slice.Tensor,
     torch.ops.aten.as_strided_scatter.default: torch.ops.aten.as_strided.default,
 }
+_VIEW_OP_TO_SCATTER = {v: k for k, v in _SCATTER_OP_TO_VIEW.items()}
 
 
-def _is_view_op(tgt):
-    if tgt is None or not isinstance(tgt, torch._ops.OpOverload):
-        return None
-    schema = tgt._schema
-    if len(schema.arguments) > 0:
-        first_arg = schema.arguments[0]
-        # check if op is a view
-        return first_arg.alias_info is not None and not first_arg.alias_info.is_write
-
-
-def graph_call_function(graph, fn, *args, **kwargs):
+def graph_call_function(graph: torch.fx.Graph, fn, *args, **kwargs):
     fake_args, fake_kwargs = pytree.tree_map(
         lambda node: node.meta["val"] if isinstance(node, torch.fx.Node) else node,
         (args, kwargs),
@@ -58,7 +56,9 @@ class ViewOp:
     kwargs: Dict[str, Any]
 
 
-def _inplace_generalized_scatter(inp, src, view_ops):
+def _inplace_generalized_scatter(
+    inp: torch.Tensor, src: torch.Tensor, view_ops: List[ViewOp]
+) -> torch.Tensor:
     tmp = inp
     for view in view_ops:
         fake_args, fake_kwargs = pytree.tree_map(
@@ -70,12 +70,71 @@ def _inplace_generalized_scatter(inp, src, view_ops):
     return inp
 
 
-def _generalized_scatter(inp, src, view_ops):
+def _generalized_scatter(
+    inp: torch.Tensor, src: torch.Tensor, view_ops: List[ViewOp]
+) -> torch.Tensor:
     out = inp.clone()
     return _inplace_generalized_scatter(out, src, view_ops)
 
 
-def _decompose_generalized_scatter(graph, node):
+def _decompose_scatter_functional_helper(
+    graph: torch.fx.Graph,
+    inp: torch.Tensor,
+    src: torch.Tensor,
+    view_ops: List[ViewOp],
+) -> torch.fx.Node:
+    view_op, view_ops_tail = view_ops[0], view_ops[1:]
+
+    if view_ops_tail:
+        view = graph_call_function(
+            graph, view_op.target, inp, *view_op.args, view_op.kwargs
+        )
+        src = _decompose_scatter_functional_helper(graph, view, src, view_ops[1:])
+
+    return graph_call_function(
+        graph,
+        _VIEW_OP_TO_SCATTER[view_op.target],
+        inp,
+        src,
+        *view_op.args,
+        **view_op.kwargs,
+    )
+
+
+def _decompose_scatter_functional(
+    graph: torch.fx.Graph, node: torch.fx.Node
+) -> torch.fx.Node:
+    """Decompose _generalized_scatter to a sequence of view_scatter operations
+
+    e.g. _generalized_scatter(inp, src, [(aten.slice, 0, 0, 10), (aten.slice, 1, 10, -10)])
+
+    will become
+
+    view = aten.slice(inp, 0, 0, 10)
+    view_updated = aten.slice_scatter(view, src, 1, 10, -10)
+    inp_updated = aten.slice_scatter(inp, view_updated, 0, 0, 10)
+    """
+    assert node.target is _generalized_scatter
+    inp, src, view_ops = node.args
+    return _decompose_scatter_functional_helper(graph, *node.args)
+
+
+def _decompose_scatter_mutating(
+    graph: torch.fx.Graph, node: torch.fx.Node
+) -> torch.fx.Node:
+    """Decompose _generalized_scatter using mutations
+
+    e.g. _generalized_scatter(inp, src, [(aten.slice, 0, 0, 10), (aten.slice, 1, 10, -10)])
+
+    will become
+
+    inp_updated = aten.clone(inp)
+    slice1 = aten.slice(inp_updated, 0, 0, 10)
+    slice2 = aten.slice(slice1, 1, 10, -10)
+    slice2.copy_(src)
+
+    """
+    assert node.target in (_generalized_scatter, _inplace_generalized_scatter)
     inp, src, view_ops = node.args
     assert not node.kwargs
 
@@ -90,20 +149,74 @@ def _decompose_generalized_scatter(graph, node):
     return inp
 
 
-def decompose_generalized_scatter(graph):
+# View ops whose view_scatter op is lowered into mutations anyway,
+# so is never a pessimisation to decompose.
+_ALWAYS_MUTATING_SCATTER_OPS = {
+    aten.as_strided.default,
+    aten.diagonal.default,
+}
+
+
+def should_reinplace_scatter(node: torch.fx.Node) -> bool:
+    """Choose between mutating and functional scatter decompositions
+
+    Reinplacing view scatter ops can be pessimising as it blocks fusion with the
+    input or output tensor computations. However, it is still profitable if the
+    input and output would have been realized anyway.
+
+    """
+    inp, src, view_ops = node.args
+
+    # Mutating scatter ops unconditionally realize input and output
+    if any(view.target in _ALWAYS_MUTATING_SCATTER_OPS for view in view_ops):
+        return True
+
+    # Check if input is always a buffer, and output is always realized by users.
+
+    def is_buffer(node):
+        return node.op == "placeholder" or node.target in fallbacks
+
+    def realizes_inputs(node):
+        return node.op == "output" or node.target in needs_realized_inputs
+
+    if is_buffer(inp) and any(realizes_inputs(user) for user in node.users):
+        return True
+
+    # If the output is copied back into the input, this forces both to be
+    # realized as the output is a user of the input
+    if any(
+        user.target is aten.copy_.default and user.args[0] is inp for user in node.users
+    ):
+        return True
+
+    # Otherwise, assume fusions will make functional variants profitable
+    return False
+
+
+def decompose_generalized_scatter(graph: torch.fx.Graph) -> None:
+    """Replace _generalized_scatter with normal aten ops"""
     for node in graph.nodes:
         if node.target not in (_generalized_scatter, _inplace_generalized_scatter):
             continue
 
+        use_mutation = (
+            node.target is _inplace_generalized_scatter
+            or should_reinplace_scatter(node)
+        )
+
         with graph.inserting_before(node):
-            new_node = _decompose_generalized_scatter(graph, node)
+            if use_mutation:
+                new_node = _decompose_scatter_mutating(graph, node)
+            else:
+                new_node = _decompose_scatter_functional(graph, node)
+
         node.replace_all_uses_with(new_node)
         graph.erase_node(node)
 
 
-def canonicalize_view_scatter_ops(graph):
+def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
     """
-    This canonicalizes view scatter ops into the generalized form, defined as:
+    This canonicalizes view scatter ops into a generalized form, defined as:
       def scatter(inp, src, views):
         tmp = inp.clone()
         for view in views:
@@ -121,10 +234,10 @@ def canonicalize_view_scatter_ops(graph):
     easier to reinplace since there is only one use of `self`
     """
 
-    node_to_view_base = {}
+    node_to_view_base: Dict[torch.fx.Node, torch.fx.Node] = {}
     node_to_view_op: Dict[torch.fx.Node, List[ViewOp]] = defaultdict(list)
 
-    def handle_views(node):
+    def handle_views(node: torch.fx.Node):
         inp = node.args[0]
         node_to_view_base[node] = node_to_view_base.get(inp, inp)
         node_to_view_op[node] = [
@@ -136,7 +249,7 @@ def canonicalize_view_scatter_ops(graph):
             ),
         ]
 
-    def handle_view_scatter(node):
+    def handle_view_scatter(node: torch.fx.Node):
         assert len(node.args) >= 2
         inp, src = node.args[:2]
 
@@ -204,7 +317,11 @@ def canonicalize_view_scatter_ops(graph):
 inplaceable_ops = {
     aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
     aten._unsafe_index_put.default: InplaceableOp(inductor_prims._unsafe_index_put_, 0),
-    _generalized_scatter: InplaceableOp(_inplace_generalized_scatter, 0),
+    _generalized_scatter: InplaceableOp(
+        _inplace_generalized_scatter,
+        0,
+        extra_check=should_reinplace_scatter,
+    ),
 }
 
 try:
@@ -231,7 +348,16 @@ for outplace_op, inplace_op in inplaceable_foreach_ops_lowerings.items():
 inplaceable_triton_ops = {triton_kernel_wrapper_functional}
 
 
-def reinplace_inplaceable_ops_core(graph):
+# Operators that don't depend on the tensor data
+META_ONLY_OPS = {
+    aten.sym_size.int,
+    aten.sym_stride.int,
+    aten.sym_numel.default,
+    aten.sym_storage_offset.default,
+}
+
+
+def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     """
     Reinplaces in-placeable operations.
     If there are no uses of a view of the mutated arg after the current node,
@@ -272,20 +398,23 @@ def reinplace_inplaceable_ops_core(graph):
             mutated_inputs.add(node.args[0])
 
     def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
-        node_loc = node_order.get(node)
-        if node_loc is None:
-            # If node has been newly added to the graph, we don't know its location
-            # and thus can't check if it's the last use. Cautiosly assume there may
-            # be later users.
-            return True
+        node_loc = node_order[node]
+
+        def is_meta_only_user(node):
+            if _is_view_op(node.target):
+                return all(is_meta_only_user(u) for u in node.users)
+            return node.target in META_ONLY_OPS
+
         for view in shared_view_nodes:
             for user in view.users:
+                # Skip all users before node
+                if node_order[user] <= node_loc:
+                    continue
                 # Skip over the copy_ epilogue node that could get reinplaced
                 if copy_node == user:
                     continue
-                # Skip all users before node
-                user_loc = node_order.get(user)
-                if user_loc is not None and user_loc <= node_loc:
+                # Reinplacing does not change shape metadata
+                if is_meta_only_user(user):
                     continue
                 return True
         return False
@@ -323,7 +452,7 @@ def reinplace_inplaceable_ops_core(graph):
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
             mutated_arg = node.args[inplaceable_op.mutated_arg]
-            if can_inplace(node, mutated_arg):
+            if can_inplace(node, mutated_arg) and inplaceable_op.extra_check(node):
                 # TODO(yifu): this doesn't properly remove copy epilogues for
                 # ops that mutate multiple inputs. Need to revise the copy
                 # node tracking logic to support the case.
@@ -371,7 +500,7 @@ def reinplace_inplaceable_ops_core(graph):
         graph.erase_node(node)
 
 
-def reinplace_inplaceable_ops(graph):
+def reinplace_inplaceable_ops(graph: torch.fx.Graph) -> None:
     canonicalize_view_scatter_ops(graph)
     reinplace_inplaceable_ops_core(graph)
     decompose_generalized_scatter(graph)
