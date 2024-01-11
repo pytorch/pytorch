@@ -3549,6 +3549,20 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+    def test_set_grad_from_input_to_intermed(self):
+        param = torch.rand(2, 3)
+
+        def f(p):
+            p.grad = torch.rand_like(p)
+            p.grad = p.grad.to_sparse()
+            return p.grad
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled_f = torch._dynamo.optimize(cnts)(f)
+        compiled_f(param)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
+
     @skipIfNotPy311
     def test_linetable_311_writer1(self):
         def fn():
