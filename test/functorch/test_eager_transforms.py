@@ -3423,6 +3423,7 @@ class TestComposability(TestCase):
         with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
             transform(g)(x)
 
+    @xfailIfTorchDynamo
     def test_vjp_doesnt_support_saved_tensor_hooks(self, device):
         def f(x):
             return torch.sin(x).sum()
@@ -3439,6 +3440,7 @@ class TestComposability(TestCase):
         with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
             vjp(g, x)
 
+    @xfailIfTorchDynamo
     def test_jvp_doesnt_support_saved_tensor_hooks(self, device):
         def f(x):
             return torch.sin(x).sum()
