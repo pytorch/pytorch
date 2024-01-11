@@ -182,6 +182,11 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
     {
         output_type = CUDA_R_16F;
     }
+    else if(input_type == CUDA_R_8I and out_dtype == at::ScalarType::BFloat16)
+    {
+        output_type = CUDA_R_16BF;
+        // std::cout << "[WARNING] Using BFP16 as the output type for INT8 input." << std::endl;
+    }
     else
     {
         TORCH_CHECK(false, "Setting out_dtype is only supported for int8 input and fp16 output.");

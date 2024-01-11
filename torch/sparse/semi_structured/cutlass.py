@@ -58,15 +58,6 @@ class SparseSemiStructuredTensorCUTLASS(  # type: ignore[misc]
         original_shape: torch.Size,
         transposed: bool = False,
     ) -> None:
-    """
-        This constructor should not be called directly. Instead use `from_dense` or `from_sparse_coo`.
-
-        Args:
-            sparse_tensor_cutlass (torch.Tensor): The sparse tensor in CUTLASS format.
-            meta_tensor_cutlass (torch.Tensor): The metadata tensor in CUTLASS format.
-            original_shape (torch.Size): The shape of the original dense tensor.
-            transposed (bool): If ``True``, the sparse tensor and metadata are
-    """
         self.sparse_tensor_cutlass = sparse_tensor_cutlass
         self.meta_tensor_cutlass = meta_tensor_cutlass
         self.original_shape = original_shape

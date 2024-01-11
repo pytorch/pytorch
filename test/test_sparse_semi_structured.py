@@ -600,6 +600,16 @@ class TestCUSPARSELT(TestCase):
         else:
             SparseSemiStructuredTensor._FORCE_CUTLASS = False
 
+    @parametrize("dense_input_shape", [(128, 128)])
+    def test_cslt_sparse_mm_int8_in_bf16_out(self, dense_input_shape, device):
+        A = rand_sparse_semi_structured_mask(128, 128, dtype=torch.int8)
+        A_compressed = torch._cslt_compress(A)
+
+        B = torch.rand(dense_input_shape, device=device).to(torch.int8)
+
+        dense_result = torch.mm(A.cpu().to(torch.int64), B.t().cpu().to(torch.int64)).to(device, dtype=torch.bfloat16)
+        sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), out_dtype=torch.bfloat16)
+        assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
     @parametrize("dense_input_shape", [(128, 128)])
     def test_cslt_sparse_mm_int8_in_fp16_out(self, dense_input_shape, device):
@@ -638,6 +648,20 @@ class TestCUSPARSELT(TestCase):
         alpha_scaled = torch.stack([alpha] * 128).t()
         dense_result = alpha_scaled.cpu() * torch.mm(A.to(torch.int32).cpu(), B.to(torch.int32).cpu())
         dense_result = dense_result.to(torch.float16)
+
+        assert torch.allclose(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
+
+    def test_cslt_sparse_mm_alpha_int8_in_bf16_out(self, device):
+        A = torch.Tensor([0, 0, 10, 10]).tile((128, 64)).to(torch.int8).cuda()
+        B = torch.ones((128, 256), device=device).to(torch.int8).t()
+        alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
+
+        A_compressed = torch._cslt_compress(A)
+        sparse_result = torch._cslt_sparse_mm(A_compressed, B, alpha=alpha, out_dtype=torch.bfloat16).cpu()
+
+        alpha_scaled = torch.stack([alpha] * 128).t()
+        dense_result = alpha_scaled.cpu() * torch.mm(A.to(torch.int32).cpu(), B.to(torch.int32).cpu())
+        dense_result = dense_result.to(torch.bfloat16)
 
         assert torch.allclose(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 

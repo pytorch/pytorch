@@ -338,7 +338,10 @@ def aot_compile(
             args,
             kwargs,
             constraints,
-            disable_constraint_solver=disable_constraint_solver
+            disable_constraint_solver=disable_constraint_solver,
+            # Disabling this flag, because instead we can rely on the mapping
+            # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
+            restore_fqn=False,
         )
     flat_example_inputs = pytree.arg_tree_leaves(*args, **(kwargs or {}))
 
