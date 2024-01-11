@@ -2,6 +2,7 @@
 
 #ifdef USE_C10D_NCCL
 
+#include <atomic>
 #include <chrono>
 #include <future>
 #include <iostream>
@@ -12,6 +13,7 @@
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 
@@ -550,9 +552,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void enableCollectivesTiming() override;
 
-  // Provide an API for users to define their own ways to store NCCL debug info.
-  void registerDebugInfoWriter(std::unique_ptr<DebugInfoWriter> writer);
-
   // Helper function for iteratively aborting communicators in the provided map
   void abortCommsFromMap(
       std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
@@ -717,6 +716,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Generates a prefix that is unique to this process group and rank, for
   // disambiguating logs
+  std::string createLogPrefix() const;
+
+  // Returns the unique prefix created in createLogPrefix
   const std::string& logPrefix() const;
 
   // Returns the global rank of the device. This function assumes that users
@@ -755,8 +757,15 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   static const int64_t kWatchdogThreadSleepMillis;
 
-  // The store is used to broadcast the NCCL unique ID of rank 0.
+  // The store is used to broadcast the NCCL unique ID of rank 0. This store
+  // comes with prefix and it is different across ProcessGroup NCCL instances
+  // (aka, different ProcessGroups).
   c10::intrusive_ptr<Store> store_;
+
+  // Reference to the store without prefix so that keys are same across all
+  // ProcessGroup NCCL instances and (key, value) pairs written to the store are
+  // global.
+  c10::intrusive_ptr<Store> globalStore_;
 
   bool storeError_{false};
 
@@ -816,7 +825,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::mutex mutex_;
 
   // Heartbeat of watchdog thread.
-  uint64_t heartbeat_;
+  std::atomic_uint64_t heartbeat_;
 
   // The time interval used for deciding whether there is no watchdog heartbeat.
   int heartbeatTimeoutInSec_;
@@ -965,15 +974,20 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   std::exception_ptr watchDogException_ = nullptr;
 
-  // The callback function to store NCCL debug info.
-  std::unique_ptr<DebugInfoWriter> debugInfoWriter_ = nullptr;
-
   size_t uid_;
+
+  std::string logPrefix_;
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
 };
 
 TORCH_API std::string dump_nccl_trace();
+
+// Gets a mutable reference to a global optional function.  Heartbeat Monitor
+// will query this function and if available, call it to dump traces. Inside
+// fbcode, we store a function here that uses an internal tool for process
+// tracing
+TORCH_API c10::optional<std::function<std::string()>>& get_cpp_trace_dumper();
 
 } // namespace c10d
 

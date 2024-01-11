@@ -401,6 +401,7 @@ class TestBoolScalar(TestCase):
 
 class TestBoolArray(TestCase):
     def setUp(self):
+        super().setUp()
         # offset for simd tests
         self.t = np.array([True] * 41, dtype=bool)[1::]
         self.f = np.array([False] * 41, dtype=bool)[1::]
@@ -489,6 +490,7 @@ class TestBoolArray(TestCase):
 @xfailIfTorchDynamo
 class TestBoolCmp(TestCase):
     def setUp(self):
+        super().setUp()
         self.f = np.ones(256, dtype=np.float32)
         self.ef = np.ones(self.f.size, dtype=bool)
         self.d = np.ones(128, dtype=np.float64)
@@ -1292,6 +1294,7 @@ class TestArrayComparisons(TestCase):
 @instantiate_parametrized_tests
 class TestClip(TestCase):
     def setUp(self):
+        super().setUp()
         self.nr = 5
         self.nc = 3
 
@@ -2075,6 +2078,7 @@ class TestIsclose(TestCase):
 
 class TestStdVar(TestCase):
     def setUp(self):
+        super().setUp()
         self.A = np.array([1, -1, 1, -1])
         self.real_var = 1
 
@@ -2132,6 +2136,7 @@ class TestCreationFuncs(TestCase):
     # Test ones, zeros, empty and full.
 
     def setUp(self):
+        super().setUp()
         # dtypes = {np.dtype(tp) for tp in itertools.chain.from_iterable(np.sctypes.values())}
         dtypes = {np.dtype(tp) for tp in "efdFDBbhil?"}
         self.dtypes = dtypes
@@ -2193,6 +2198,7 @@ class TestLikeFuncs(TestCase):
     """Test ones_like, zeros_like, empty_like and full_like"""
 
     def setUp(self):
+        super().setUp()
         self.data = [
             # Array scalars
             (np.array(3.0), None),
