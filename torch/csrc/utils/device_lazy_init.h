@@ -26,16 +26,21 @@ namespace utils {
 void device_lazy_init(at::DeviceType device_type);
 void set_requires_device_init(at::DeviceType device_type, bool value);
 
-static void maybe_initialize_device(at::Device& device) {
+static inline void maybe_initialize_device(at::Device& device) {
   if (device.is_cuda() || device.is_xpu()) {
     device_lazy_init(device.type());
   }
 }
 
-static void maybe_initialize_device(const at::TensorOptions& options) {
-  if (options.device().is_cuda() || options.device().is_xpu()) {
-    torch::utils::device_lazy_init(options.device().type());
+static inline void maybe_initialize_device(c10::optional<at::Device>& device) {
+  if (!device.has_value()) {
+    return;
   }
+  maybe_initialize_device(device.value());
+}
+
+static inline void maybe_initialize_device(const at::TensorOptions& options) {
+  maybe_initialize_device(options.device());
 }
 
 } // namespace utils

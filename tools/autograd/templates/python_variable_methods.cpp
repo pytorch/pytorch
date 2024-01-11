@@ -976,9 +976,7 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   auto copy = std::get<3>(parsed);
   auto opt_memory_format = std::get<4>(parsed);
   auto& self_ = THPVariable_Unpack(self);
-  if (device) {
-    torch::utils::maybe_initialize_device(*device);
-  }
+  torch::utils::maybe_initialize_device(device);
   if (!device && !scalarType && !copy && !opt_memory_format.has_value()) {
     Py_INCREF(self);
     return self;
