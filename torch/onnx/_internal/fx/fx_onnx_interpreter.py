@@ -137,11 +137,11 @@ def _retrieve_or_adapt_input_to_graph_set(
         # They should all be promoted to tensor with shape (1,)
         # in order to call ONNX's Concat.
         for tensor in onnx_tensor:
+            # Prepare `tensor` as input of ONNX's Concat.
             if isinstance(
                 tensor, torch.fx.Node
             ) and fx_type_utils.is_torch_symbolic_type(tensor.meta.get("val")):
                 element_value = fx_name_to_onnxscript_value[tensor.name]
-                sequence_mixed_elements.append(fx_name_to_onnxscript_value[tensor.name])
                 if (
                     isinstance(
                         element_value, onnxscript_graph_building.TorchScriptTensor
@@ -159,6 +159,10 @@ def _retrieve_or_adapt_input_to_graph_set(
                 # NOTE: op.Concat doesn't support scalar, so we need to wrap it with
                 # dim, and onnx-script will promote it to tensor(int64)
                 sequence_mixed_elements.append([tensor])
+            else:
+                raise RuntimeError(
+                    f"Unsupported type in sequence_mixed_elements: {type(tensor)}"
+                )
         # Concat all the elements in the sequence.
         # shapes are mapped to tensors in ONNX graph (TorchScriptGraph),
         # so list of sym_ints is concatenated to a tensor before calling ONNX op.
