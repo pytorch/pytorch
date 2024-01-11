@@ -1,18 +1,16 @@
 # Owner(s): ["module: inductor"]
-import tempfile
 
 import torch
 import torch._export
 import torch._inductor
 import torch.fx._pytree as fx_pytree
-from torch._inductor.utils import aot_inductor_launcher, cache_dir
 
 from torch.testing._internal.common_utils import IS_FBCODE
 
 from torch.utils import _pytree as pytree
 
 
-class AOTInductorModelRunner:
+class AOTIRunnerUtil:
     @classmethod
     def compile(
         cls,
@@ -34,41 +32,31 @@ class AOTInductorModelRunner:
         return so_path
 
     @classmethod
-    def load(cls, device, so_path, example_inputs):
+    def load_runner(cls, device, so_path):
         if IS_FBCODE:
             from .fb import test_aot_inductor_model_runner_pybind
 
-            module = test_aot_inductor_model_runner_pybind.Runner(
+            return test_aot_inductor_model_runner_pybind.Runner(
                 so_path, device == "cpu"
             )
-
-            call_spec = module.get_call_spec()
-            in_spec = pytree.treespec_loads(call_spec[0])
-            out_spec = pytree.treespec_loads(call_spec[1])
-
-            def optimized(*args):
-                flat_inputs = fx_pytree.tree_flatten_spec((*args, {}), in_spec)
-                flat_outputs = module.run(flat_inputs)
-                return pytree.tree_unflatten(flat_outputs, out_spec)
-
         else:
-            module = torch.utils.cpp_extension.load_inline(
-                name="aot_inductor",
-                cpp_sources=[aot_inductor_launcher(so_path, device)],
-                # use a unique build directory to avoid test interference
-                build_directory=tempfile.mkdtemp(dir=cache_dir()),
-                functions=["run", "get_call_spec"],
-                with_cuda=(device == "cuda"),
+            return (
+                torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
+                if device == "cpu"
+                else torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1)
             )
 
-            call_spec = module.get_call_spec()
+    @classmethod
+    def load(cls, device, so_path):
+        runner = AOTIRunnerUtil.load_runner(device, so_path)
+
+        def optimized(*args):
+            call_spec = runner.get_call_spec()
             in_spec = pytree.treespec_loads(call_spec[0])
             out_spec = pytree.treespec_loads(call_spec[1])
-
-            def optimized(*args):
-                flat_inputs = fx_pytree.tree_flatten_spec((*args, {}), in_spec)
-                flat_outputs = module.run(flat_inputs)
-                return pytree.tree_unflatten(flat_outputs, out_spec)
+            flat_inputs = fx_pytree.tree_flatten_spec((*args, {}), in_spec)
+            flat_outputs = runner.run(flat_inputs)
+            return pytree.tree_unflatten(flat_outputs, out_spec)
 
         return optimized
 
@@ -82,14 +70,14 @@ class AOTInductorModelRunner:
         constraints=None,
         disable_constraint_solver=False,
     ):
-        so_path = AOTInductorModelRunner.compile(
+        so_path = AOTIRunnerUtil.compile(
             model,
             example_inputs,
             options=options,
             constraints=constraints,
             disable_constraint_solver=disable_constraint_solver,
         )
-        optimized = AOTInductorModelRunner.load(device, so_path, example_inputs)
+        optimized = AOTIRunnerUtil.load(device, so_path)
         return optimized(example_inputs)
 
     @classmethod
@@ -101,13 +89,13 @@ class AOTInductorModelRunner:
         options=None,
         constraints=None,
     ):
-        so_path = AOTInductorModelRunner.compile(
+        so_path = AOTIRunnerUtil.compile(
             model,
             list_example_inputs[0],
             options=options,
             constraints=constraints,
         )
-        optimized = AOTInductorModelRunner.load(device, so_path, list_example_inputs[0])
+        optimized = AOTIRunnerUtil.load(device, so_path)
         list_output_tensors = []
         for example_inputs in list_example_inputs:
             list_output_tensors.append(optimized(example_inputs))
