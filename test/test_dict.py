@@ -39,11 +39,15 @@ TD_BATCH_SIZE = 4
 
 
 def decompose(td):
-    for v in td.values():
-        if is_tensor_collection(v):
-            yield from decompose(v)
-        else:
-            yield v
+    if isinstance(td, LazyStackedTensorDict):
+        for inner_td in td.tensordicts:
+            yield from decompose(inner_td)
+    else:
+        for v in td.values():
+            if is_tensor_collection(v):
+                yield from decompose(v)
+            else:
+                yield v
 
 
 def get_available_devices():
@@ -1791,6 +1795,8 @@ class TestTensorDicts(TestCase):
     @parametrize("op", ["flatten", "unflatten"])
     def test_cache(self, td_type, op):
         torch.manual_seed(1)
+        if td_type in ("td_stack",):
+            self.skipTest("Exclusive stacks can't be flattened")
         td = getattr(self, td_type)
         try:
             td.lock_()
@@ -2082,7 +2088,8 @@ class TestTensorDicts(TestCase):
         td = getattr(self, td_type)
         if td_type in ("td_stack",):
             with self.assertRaisesRegex(
-                KeyError, expected_regex="keys in tensordicts mismatch"
+                RuntimeError,
+                expected_regex="the method to_dict cannot complete when there are exclusive keys",
             ):
                 assert (td == td.to_dict()).all()
             return
@@ -2255,9 +2262,17 @@ class TestTensorDicts(TestCase):
             with self.assertRaisesRegex(
                 RuntimeError, expected_regex="Cannot modify locked TensorDict"
             ):
-                td_flatten = td.flatten_keys(inplace=inplace, separator=separator)
+                td.flatten_keys(inplace=inplace, separator=separator)
             return
         else:
+            if td_type in ("td_stack",):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    expected_regex="the method flatten_keys cannot complete when there are exclusive keys",
+                ):
+                    td.flatten_keys(inplace=inplace, separator=separator)
+                return
+
             td_flatten = td.flatten_keys(inplace=inplace, separator=separator)
         for value in td_flatten.values():
             assert not isinstance(value, TensorDictBase)
@@ -2881,6 +2896,13 @@ class TestTensorDicts(TestCase):
 
         # Create TensorDict and dict equivalent values, and populate each with according nested value
         td_clone = td.clone(recurse=True)
+        if td_type in ("td_stack",):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                expected_regex="the method to_dict cannot complete when there are exclusive keys",
+            ):
+                td_dict = td.to_dict()
+            return
         td_dict = td.to_dict()
         nested_dict_value = {"e": torch.randn(4, 3, 2, 1, 10)}
         nested_tensordict_value = TensorDict(
@@ -3150,12 +3172,6 @@ class TestTensorDicts(TestCase):
         torch.manual_seed(1)
         td = getattr(self, td_type)
         keys = ["a"]
-        if td_type == "td_h5":
-            with self.assertRaisesRegex(
-                NotImplementedError, expected_regex="Cannot call select"
-            ):
-                td.select(*keys, strict=strict, inplace=inplace)
-            return
 
         if td_type in ("nested_stacked_td", "nested_td"):
             keys += [("my_nested_td", "inner")]
@@ -3192,12 +3208,6 @@ class TestTensorDicts(TestCase):
     def test_select_exception(self, td_type, strict):
         torch.manual_seed(1)
         td = getattr(self, td_type)
-        if td_type == "td_h5":
-            with self.assertRaisesRegex(
-                NotImplementedError, expected_regex="Cannot call select"
-            ):
-                _ = td.select("tada", strict=strict)
-            return
 
         if strict:
             with self.assertRaises(KeyError):
@@ -3231,17 +3241,7 @@ class TestTensorDicts(TestCase):
             td.apply(lambda x: x.requires_grad_(False))
         td.unlock_()
         assert not td.get("a").requires_grad
-        if td_type in ("td_h5",):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                expected_regex="Cannot set a tensor that has requires_grad=True",
-            ):
-                td.set("a", torch.randn_like(td.get("a")).requires_grad_())
-            return
-        if td_type in ("sub_td", "sub_td2"):
-            td.set_("a", torch.randn_like(td.get("a")).requires_grad_())
-        else:
-            td.set("a", torch.randn_like(td.get("a")).requires_grad_())
+        td.set("a", torch.randn_like(td.get("a")).requires_grad_())
 
         assert td.get("a").requires_grad
 
@@ -3287,19 +3287,7 @@ class TestTensorDicts(TestCase):
         sub_tensordict = TensorDict(
             {"b": sub_sub_tensordict}, [4, 3, 2, 1], device=device
         )
-        if td_type == "td_h5":
-            del td["a"]
-        if td_type == "sub_td":
-            td = td._source.set(
-                "a", sub_tensordict.expand(2, *sub_tensordict.shape)
-            ).get_sub_tensordict(1)
-        elif td_type == "sub_td2":
-            td = td._source.set(
-                "a",
-                sub_tensordict.expand(2, *sub_tensordict.shape).permute(1, 0, 2, 3, 4),
-            ).get_sub_tensordict((slice(None), 1))
-        else:
-            td.set("a", sub_tensordict)
+        td.set("a", sub_tensordict)
 
         # if key exists we return the existing value
         torch.testing.assert_close(td.setdefault(("a", "b", "c"), tensor2), tensor)
@@ -3476,7 +3464,7 @@ class TestTensorDicts(TestCase):
             assert td._cache.get("sorted_keys", None) is not None
             td.unlock_()
             assert td._cache is None
-        elif td_type not in ("sub_td", "sub_td2"):  # we cannot lock sub tensordicts
+        else:
             target = td
             assert target._cache is None
             td.lock_()
@@ -3546,10 +3534,7 @@ class TestTensorDicts(TestCase):
         td_squeeze = torch.squeeze(td, dim=-1)
         tensor_squeeze_dim = td.batch_dims + squeeze_dim
         tensor = torch.ones_like(td.get("a").squeeze(tensor_squeeze_dim))
-        if td_type in ("sub_td", "sub_td2"):
-            td_squeeze.set_("a", tensor)
-        else:
-            td_squeeze.set("a", tensor)
+        td_squeeze.set("a", tensor)
         assert td.batch_size[squeeze_dim] == 1
         assert (td_squeeze.get("a") == tensor).all()
         assert (td_squeeze.get("a") == 1).all()
@@ -3560,10 +3545,6 @@ class TestTensorDicts(TestCase):
         td = getattr(self, td_type)
         td_squeeze = torch.squeeze(td, dim=None)
         tensor = torch.ones_like(td.get("a").squeeze())
-        if td_type == "td_params":
-            with self.assertRaisesRegex(ValueError, expected_regex="Failed to update"):
-                td_squeeze.set_("a", tensor)
-            return
         td_squeeze.set_("a", tensor)
         assert (td_squeeze.get("a") == tensor).all()
         if td_type == "unsqueezed_td":
@@ -3639,21 +3620,9 @@ class TestTensorDicts(TestCase):
             )
             for _ in range(tds_count)
         ]
-        if td_type in ("sub_td", "sub_td2"):
-            with self.assertRaisesRegex(
-                IndexError, expected_regex="storages of the indexed tensors"
-            ):
-                torch.stack(tds_list, 0, out=td)
-            return
-        if td_type == "td_params":
-            with self.assertRaisesRegex(
-                RuntimeError, expected_regex="arguments don't support automatic"
-            ):
-                torch.stack(tds_list, 0, out=td)
-            return
         data_ptr_set_before = {val.data_ptr() for val in decompose(td)}
 
-        stacked_td = torch.stack(tds_list, 0, out=td)
+        stacked_td = LazyStackedTensorDict.maybe_dense_stack(tds_list, 0, out=td)
         data_ptr_set_after = {val.data_ptr() for val in decompose(td)}
         assert data_ptr_set_before == data_ptr_set_after
         assert stacked_td.batch_size == td.batch_size
@@ -3665,8 +3634,18 @@ class TestTensorDicts(TestCase):
     def test_state_dict(self, td_type):
         torch.manual_seed(1)
         td = getattr(self, td_type)
+        if td_type in ("td_stack",):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                expected_regex="the method state_dict cannot complete when there are exclusive keys",
+            ):
+                td.state_dict()
+            return
         sd = td.state_dict()
         td_zero = td.clone().detach().zero_()
+        if td_type in ("td_params",):
+            # we must use a TensorDictParams here because the keys are flattened
+            td_zero = TensorDictParams(td_zero)
         td_zero.load_state_dict(sd)
         assert_allclose_td(td, td_zero)
 
@@ -3674,17 +3653,37 @@ class TestTensorDicts(TestCase):
     def test_state_dict_assign(self, td_type):
         torch.manual_seed(1)
         td = getattr(self, td_type)
+        if td_type in ("td_stack",):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                expected_regex="the method state_dict cannot complete when there are exclusive keys",
+            ):
+                td.state_dict()
+            return
         sd = td.state_dict()
         td_zero = td.clone().detach().zero_()
         shallow_copy = td_zero.clone(False)
+        if td_type in ("td_params",):
+            # we must use a TensorDictParams here because the keys are flattened
+            td_zero = TensorDictParams(td_zero)
         td_zero.load_state_dict(sd, assign=True)
         assert (shallow_copy == 0).all()
-        assert_allclose_td(td, td_zero)
+
+        if td_type not in ("td_params",):
+            # we lost the identity in the process
+            assert_allclose_td(td, td_zero)
 
     @parametrize("td_type", TD_TYPES)
     def test_state_dict_strict(self, td_type):
         torch.manual_seed(1)
         td = getattr(self, td_type)
+        if td_type in ("td_stack",):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                expected_regex="the method state_dict cannot complete when there are exclusive keys",
+            ):
+                td.state_dict()
+            return
         sd = td.state_dict()
         td_zero = td.clone().detach().zero_()
         del sd["a"]
@@ -3710,10 +3709,8 @@ class TestTensorDicts(TestCase):
         val2 = np.zeros(shape=(4, 3, 2, 1, 10))
         td.set_("key1", val2)
         assert (td.get("key1") == 0).all()
-        if td_type not in ("stacked_td", "nested_stacked_td"):
+        if td_type not in ("td_stack",):
             err_msg = r"key.*smartypants.*not found in "
-        elif td_type in ("td_h5",):
-            err_msg = "Unable to open object"
         else:
             err_msg = "setting a value in-place on a stack of TensorDict"
 
@@ -3748,10 +3745,8 @@ class TestTensorDicts(TestCase):
             td.set_("key1", val2)
         assert (td.get("key1").get("subkey1") == 0).all()
 
-        if td_type not in ("stacked_td", "nested_stacked_td"):
+        if td_type not in ("td_stack",):
             err_msg = r"key.*smartypants.*not found in "
-        elif td_type in ("td_h5",):
-            err_msg = "Unable to open object"
         else:
             err_msg = "setting a value in-place on a stack of TensorDict"
 
@@ -3779,6 +3774,13 @@ class TestTensorDicts(TestCase):
         td["d"] = nested_tensordict_value
 
         # Convert into dictionary and recursively check if the values are TensorDicts
+        if td_type in ("td_stack",):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                expected_regex="the method to_dict cannot complete when there are exclusive keys",
+            ):
+                td_dict = td.to_dict()
+            return
         td_dict = td.to_dict()
         assert recursive_checker(td_dict)
 
@@ -3815,13 +3817,13 @@ class TestTensorDicts(TestCase):
     @parametrize("td_type", TD_TYPES)
     @parametrize("dim", range(4))
     def test_unbind(self, td_type, dim):
-        if td_type not in ["sub_td", "idx_td", "td_reset_bs"]:
-            torch.manual_seed(1)
-            td = getattr(self, td_type)
-            td_unbind = torch.unbind(td, dim=dim)
-            assert (td == torch.stack(td_unbind, dim)).all()
-            idx = (slice(None),) * dim + (0,)
-            assert (td[idx] == td_unbind[0]).all()
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        td_unbind = torch.unbind(td, dim=dim)
+        td_reconstruct = LazyStackedTensorDict.maybe_dense_stack(td_unbind, dim)
+        assert (td == td_reconstruct).all()
+        idx = (slice(None),) * dim + (0,)
+        assert (td[idx] == td_unbind[0]).all()
 
     @parametrize("td_type", TD_TYPES)
     @parametrize("inplace", [True, False])
@@ -3846,6 +3848,13 @@ class TestTensorDicts(TestCase):
         td["nested_tensordict"] = nested_tensordict
 
         if inplace and locked:
+            if td_type in ("td_stack",):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    expected_regex="the method flatten_keys cannot complete when there are exclusive keys.",
+                ):
+                    td.flatten_keys(inplace=inplace, separator=separator)
+                return
             td_flatten = td.flatten_keys(inplace=inplace, separator=separator)
             td_flatten.lock_()
             with self.assertRaisesRegex(
@@ -3858,6 +3867,13 @@ class TestTensorDicts(TestCase):
         else:
             if locked:
                 td.lock_()
+            if td_type in ("td_stack",):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    expected_regex="the method flatten_keys cannot complete when there are exclusive keys.",
+                ):
+                    td_flatten = td.flatten_keys(inplace=inplace, separator=separator)
+                return
             td_flatten = td.flatten_keys(inplace=inplace, separator=separator)
             td_unflatten = td_flatten.unflatten_keys(
                 inplace=inplace, separator=separator
@@ -3886,10 +3902,7 @@ class TestTensorDicts(TestCase):
         td.unlock_()  # make sure that the td is not locked
         td_unsqueeze = torch.unsqueeze(td, dim=squeeze_dim)
         tensor = torch.ones_like(td.get("a").unsqueeze(squeeze_dim))
-        if td_type in ("sub_td", "sub_td2"):
-            td_unsqueeze.set_("a", tensor)
-        else:
-            td_unsqueeze.set("a", tensor)
+        td_unsqueeze.set("a", tensor)
         assert (td_unsqueeze.get("a") == tensor).all()
 
     @parametrize("clone", [True, False])
@@ -3931,27 +3944,51 @@ class TestTensorDicts(TestCase):
         )
         assert keys == set(td.keys(True))
 
-        if td_type in ("sub_td", "sub_td2"):
-            with self.assertRaisesRegex(
-                ValueError, expected_regex="Tried to replace a tensordict with"
-            ):
-                td.update({"newnested": torch.zeros(td.shape)}, clone=clone)
-        else:
-            td.update({"newnested": torch.zeros(td.shape)}, clone=clone)
-            assert isinstance(td["newnested"], torch.Tensor)
+        td.update({"newnested": torch.zeros(td.shape)}, clone=clone)
+        assert isinstance(td["newnested"], torch.Tensor)
 
     @parametrize("td_type", TD_TYPES)
     def test_update_at_(self, td_type):
         td = getattr(self, td_type)
         td0 = td[1].clone().zero_()
-        if td_type == "td_params":
-            with self.assertRaisesRegex(
-                RuntimeError, expected_regex="a view of a leaf Variable"
-            ):
-                td.update_at_(td0, 0)
-            return
         td.update_at_(td0, 0)
         assert (td[0] == 0).all()
+
+    @parametrize("td_type", TD_TYPES)
+    def test_update_select(self, td_type):
+        if td_type in ("td_memmap",):
+            self.skipTest(reason="update not possible with memory-mapped td")
+        td = getattr(self, td_type)
+        t = lambda: torch.zeros(()).expand((4, 3, 2, 1))
+        other_td = TensorDict(
+            {
+                "My": {"father": {"was": t(), "a": t()}, "relentlessly": t()},
+                "self-improving": t(),
+            },
+            batch_size=(4, 3, 2, 1),
+        )
+        td.update(
+            other_td,
+            keys_to_update=(("My", ("father",), "was"), ("My", "relentlessly")),
+        )
+        assert ("My", "father", "was") in td.keys(True)
+        assert ("My", ("father",), "was") in td.keys(True)
+        assert ("My", "relentlessly") in td.keys(True)
+        assert ("My", "father", "a") in td.keys(True)
+        assert ("self-improving",) not in td.keys(True)
+        t = lambda: torch.ones(()).expand((4, 3, 2, 1))
+        other_td = TensorDict(
+            {
+                "My": {"father": {"was": t(), "a": t()}, "relentlessly": t()},
+                "self-improving": t(),
+            },
+            batch_size=(4, 3, 2, 1),
+        )
+        td.update(other_td, keys_to_update=(("My", "relentlessly"),))
+        assert (td["My", "relentlessly"] == 1).all()
+        assert (td["My", "father", "was"] == 0).all()
+        td.update(other_td, keys_to_update=(("My", ("father",), "was"),))
+        assert (td["My", "father", "was"] == 1).all()
 
     @parametrize(
         "index", ["tensor1", "mask", "int", "range", "tensor2", "slice_tensor"]
@@ -3988,7 +4025,15 @@ class TestTensorDicts(TestCase):
             with self.assertRaisesRegex(RuntimeError, expected_regex="a leaf Variable"):
                 sub_td.update(td0)
             return
+        if td_type in ("td_stack",):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                expected_regex="Cannot use _SubTensorDict.update with a LazyStackedTensorDict that has exclusive keys",
+            ):
+                sub_td.update(td0)
+            return
         sub_td.update(td0)
+
         assert (sub_td == 2).all()
         assert (td[index] == 2).all()
 
@@ -4019,17 +4064,7 @@ class TestTensorDicts(TestCase):
             assert (td_where.get(k)[~mask] == 1).all()
         td_where = td.clone()
         assert not td_where.is_locked, td_where
-        if td_type in ("td_params",):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                expected_regex=re.escape(
-                    "Cannot modify locked TensorDict. For in-place modification, consider using the `set_()` method and make sure the key is present."
-                ),
-            ):
-                torch.where(mask, td, torch.ones_like(td), out=td_where)
-            return
-        else:
-            torch.where(mask, td, torch.ones_like(td), out=td_where)
+        torch.where(mask, td, torch.ones_like(td), out=td_where)
         for k in td.keys(True, True):
             assert (td_where.get(k)[~mask] == 1).all()
 
@@ -4090,12 +4125,6 @@ class TestTensorDicts(TestCase):
     def test_zero_(self, td_type):
         torch.manual_seed(1)
         td = getattr(self, td_type)
-        if td_type == "td_params":
-            with self.assertRaisesRegex(
-                RuntimeError, expected_regex="a leaf Variable that requires grad"
-            ):
-                td.zero_()
-            return
         new_td = td.zero_()
         assert new_td is td
         for k in td.keys():

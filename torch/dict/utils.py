@@ -1327,7 +1327,7 @@ def _unravel_key_to_tuple(key):
 
 
 def unravel_key_list(keys):
-    raise NotImplementedError
+    return tuple(unravel_key(key) for key in keys)
 
 
 def unravel_key(key):

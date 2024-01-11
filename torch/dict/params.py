@@ -955,7 +955,7 @@ class TensorDictParams(TensorDictBase, nn.Module):
             TensorDict(state_dict_tensors, []).unflatten_keys(".")
         )
         state_dict.update(state_dict_tensors)
-        self.data.load_state_dict(state_dict, strict=True, assign=False)
+        self.data.load_state_dict(state_dict, strict=True, assign=assign)
         return self
 
     def _load_from_state_dict(

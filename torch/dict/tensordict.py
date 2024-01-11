@@ -524,10 +524,10 @@ class TensorDict(TensorDictBase):
         if isinstance(value, (TensorDictBase, dict)):
             indexed_bs = _getitem_batch_size(self.batch_size, index)
             if isinstance(value, dict):
-                value = self.from_dict(value, batch_size=indexed_bs)
+                value = TensorDict.from_dict(value, batch_size=indexed_bs)
                 # value = self.empty(recurse=True)[index].update(value)
             if value.batch_size != indexed_bs:
-                if value.shape == indexed_bs[-len(value.shape)]:
+                if value.shape == indexed_bs[-len(value.shape) :]:
                     # try to expand on the left (broadcasting)
                     value = value.expand(indexed_bs)
                 else:
@@ -2202,6 +2202,13 @@ class _SubTensorDict(TensorDictBase):
         if input_dict_or_td is self:
             # no op
             return self
+        from ._lazy import LazyStackedTensorDict
+
+        if isinstance(self._source, LazyStackedTensorDict):
+            if self._source._has_exclusive_keys:
+                raise RuntimeError(
+                    "Cannot use _SubTensorDict.update with a LazyStackedTensorDict that has exclusive keys."
+                )
         if keys_to_update is not None:
             if len(keys_to_update) == 0:
                 return self
