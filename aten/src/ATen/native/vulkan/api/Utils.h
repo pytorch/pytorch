@@ -2,7 +2,6 @@
 
 #include <numeric>
 
-#include <c10/util/ArrayRef.h>
 #include <c10/util/Half.h> // For c10::overflows
 
 #include <ATen/native/vulkan/api/vk_api.h>
@@ -132,24 +131,27 @@ inline std::ostream& operator<<(std::ostream& os, const uvec3& v) {
 }
 
 //
-// IntArrayRef Handling
+// std::vector<T> Handling
 //
 
 /*
- * Utility function to perform indexing on an IntArrayRef. Negative indexing is
- * allowed. For instance, passing an index of -1 will retrieve the last element.
- * If the requested index is out of bounds, then 1u will be returned.
+ * Utility function to perform indexing on an std::vector<T>. Negative indexing
+ * is allowed. For instance, passing an index of -1 will retrieve the last
+ * element. If the requested index is out of bounds, then 1u will be returned.
  */
-inline uint32_t val_at(int32_t index, const IntArrayRef sizes) {
-  const int32_t ndim = static_cast<int32_t>(sizes.size());
+template <typename T>
+inline T val_at(const int64_t index, const std::vector<T>& sizes) {
+  const int64_t ndim = static_cast<int64_t>(sizes.size());
   if (index >= 0) {
-    return index >= ndim ? 1 : safe_downcast<uint32_t>(sizes[index]);
+    return index >= ndim ? 1 : sizes[index];
   } else {
-    return ndim + index < 0 ? 1 : safe_downcast<uint32_t>(sizes[ndim + index]);
+    return ndim + index < 0 ? 1 : sizes[ndim + index];
   }
 }
 
-inline ivec2 make_ivec2(IntArrayRef ints, bool reverse = false) {
+inline ivec2 make_ivec2(
+    const std::vector<int64_t>& ints,
+    bool reverse = false) {
   VK_CHECK_COND(ints.size() == 2);
   if (reverse) {
     return {safe_downcast<int32_t>(ints[1]), safe_downcast<int32_t>(ints[0])};
@@ -158,7 +160,9 @@ inline ivec2 make_ivec2(IntArrayRef ints, bool reverse = false) {
   }
 }
 
-inline ivec4 make_ivec4(IntArrayRef ints, bool reverse = false) {
+inline ivec4 make_ivec4(
+    const std::vector<int64_t>& ints,
+    bool reverse = false) {
   VK_CHECK_COND(ints.size() == 4);
   if (reverse) {
     return {
@@ -177,7 +181,7 @@ inline ivec4 make_ivec4(IntArrayRef ints, bool reverse = false) {
   }
 }
 
-inline ivec4 make_ivec4_prepadded1(IntArrayRef ints) {
+inline ivec4 make_ivec4_prepadded1(const std::vector<int64_t>& ints) {
   VK_CHECK_COND(ints.size() <= 4);
 
   ivec4 result = {1, 1, 1, 1};
@@ -197,14 +201,14 @@ inline ivec3 make_ivec3(uvec3 ints) {
 }
 
 /*
- * Given an IntArrayRef of up to 4 elements, constructs a uvec4 containing those
- * elements in reverse order.
+ * Given an vector of up to 4 int64_t representing the sizes of a tensor,
+ * constructs a uvec4 containing those elements in reverse order.
  */
-inline uvec4 make_nchw_uvec4(const IntArrayRef arr) {
-  uint32_t w = val_at(-1, arr);
-  uint32_t h = val_at(-2, arr);
-  uint32_t c = val_at(-3, arr);
-  uint32_t n = val_at(-4, arr);
+inline uvec4 make_nchw_uvec4(const std::vector<int64_t>& arr) {
+  uint32_t w = safe_downcast<uint32_t>(val_at(-1, arr));
+  uint32_t h = safe_downcast<uint32_t>(val_at(-2, arr));
+  uint32_t c = safe_downcast<uint32_t>(val_at(-3, arr));
+  uint32_t n = safe_downcast<uint32_t>(val_at(-4, arr));
 
   return {w, h, c, n};
 }
@@ -235,7 +239,7 @@ inline bool operator==(const utils::uvec3& _1, const utils::uvec3& _2) {
 
 inline VkOffset3D create_offset3d(const utils::uvec3& offsets) {
   return VkOffset3D{
-      static_cast<int32_t>(offsets.data[0u]),
+      utils::safe_downcast<int32_t>(offsets.data[0u]),
       static_cast<int32_t>(offsets.data[1u]),
       static_cast<int32_t>(offsets.data[2u])};
 }

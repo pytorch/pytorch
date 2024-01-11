@@ -277,7 +277,7 @@ vTensor to_vulkan(at::Tensor& src, const api::StorageType storage_type) {
 
   vTensor v_ret{
       api::context(),
-      src.sizes(),
+      src.sizes().vec(),
       src.scalar_type(),
       storage_type,
       src.suggest_memory_format(),

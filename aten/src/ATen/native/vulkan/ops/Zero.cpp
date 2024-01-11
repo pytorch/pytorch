@@ -55,7 +55,7 @@ Tensor zeros(
   // Create the output texture
   vTensor v_output{
       context,
-      size,
+      size.vec(),
       ScalarType::Float,
   };
 

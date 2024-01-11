@@ -103,11 +103,10 @@ Tensor softmax_internal(
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
-  const IntArrayRef v_input_sizes = v_input.sizes();
 
   vTensor v_output{
       context,
-      v_input_sizes,
+      v_input.sizes(),
       input_arg.scalar_type(),
   };
   const api::utils::uvec3 global_workgroup_extents = v_output.extents();
@@ -143,7 +142,7 @@ Tensor softmax_internal(
   set_softmax_kernel_params(
       input_arg.dim(),
       dim,
-      v_input_sizes,
+      v_input.sizes(),
       shader_descriptor,
       input_shader_extents,
       early_exit,
