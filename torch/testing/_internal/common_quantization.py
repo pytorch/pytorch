@@ -1217,6 +1217,9 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             self.assertEqual(fx_quant_output, pt2_quant_output)
 
     def _quantize(self, m, quantizer, example_inputs):
+        # resetting dynamo cache
+        torch._dynamo.reset()
+
         m = capture_pre_autograd_graph(
             m,
             example_inputs,
@@ -2801,3 +2804,13 @@ class TestHelperModules:
 
         def example_inputs(self):
             return (torch.randn(2, 4, 10, 10),)
+
+    class LinearReluModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
+            self.relu = torch.nn.ReLU()
+
+        def forward(self, x):
+            x = self.relu(self.fc(x))
+            return x

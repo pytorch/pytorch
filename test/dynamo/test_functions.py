@@ -2123,15 +2123,18 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             operator.ge,
             operator.ne,
             operator.eq,
+            operator.is_,
+            operator.is_not,
         ]:
+            with self.subTest(op=op):
 
-            def fn(x):
-                return op(-10, x)
+                def fn(x):
+                    return op(-10, x)
 
-            opt_fn = torch.compile(fullgraph=True)(fn)
+                opt_fn = torch.compile(fullgraph=True)(fn)
 
-            x = torch.randn(10)
-            self.assertEqual(opt_fn(x), fn(x))
+                x = torch.randn(10)
+                self.assertEqual(opt_fn(x), fn(x))
 
 
 instantiate_parametrized_tests(FunctionTests)

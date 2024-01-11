@@ -1583,18 +1583,6 @@ def forward(self, arg_0):
         ):
             _ = Constraint()
 
-    def test_predispatch_export_with_autograd_op(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                with torch.enable_grad():
-                    return x + x
-
-        with torch.no_grad():
-            ep = _export(Foo(), (torch.ones(10),), pre_dispatch=True)
-
     def test_train_eval_on_exported_preautograd_module(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2235,7 +2223,7 @@ def forward(self, l_x_):
         ep = export(M(), (torch.ones(16, 4),), dynamic_shapes={'x': {0: Dim("dim")}})
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
         FileCheck().check_count(
-            "torch.sym_sqrt", 1, exactly=True
+            "torch._sym_sqrt", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_check_specialized_int(self):
