@@ -1,8 +1,7 @@
 #pragma once
 
+#include <cmath>
 #include <numeric>
-
-#include <c10/util/Half.h> // For c10::overflows
 
 #include <ATen/native/vulkan/api/vk_api.h>
 
@@ -57,14 +56,142 @@ inline constexpr Type div_up(const Type& numerator, const Type& denominator) {
 }
 
 //
-// Cast
+// Casting Utilities
 //
 
 namespace detail {
 
+/*
+ * x cannot be less than 0 if x is unsigned
+ */
+template <typename T>
+static inline constexpr bool is_negative(
+    const T& /*x*/,
+    std::true_type /*is_unsigned*/) {
+  return false;
+}
+
+/*
+ * check if x is less than 0 if x is signed
+ */
+template <typename T>
+static inline constexpr bool is_negative(
+    const T& x,
+    std::false_type /*is_unsigned*/) {
+  return x < T(0);
+}
+
+/*
+ * Returns true if x < 0
+ */
+template <typename T>
+inline constexpr bool is_negative(const T& x) {
+  return is_negative(x, std::is_unsigned<T>());
+}
+
+/*
+ * Returns true if x < lowest(Limit); standard comparison
+ */
+template <typename Limit, typename T>
+static inline constexpr bool less_than_lowest(
+    const T& x,
+    std::false_type /*limit_is_unsigned*/,
+    std::false_type /*x_is_unsigned*/) {
+  return x < std::numeric_limits<Limit>::lowest();
+}
+
+/*
+ * Limit can contained negative values, but x cannot; return false
+ */
+template <typename Limit, typename T>
+static inline constexpr bool less_than_lowest(
+    const T& /*x*/,
+    std::false_type /*limit_is_unsigned*/,
+    std::true_type /*x_is_unsigned*/) {
+  return false;
+}
+
+/*
+ * Limit cannot contained negative values, but x can; check if x is negative
+ */
+template <typename Limit, typename T>
+static inline constexpr bool less_than_lowest(
+    const T& x,
+    std::true_type /*limit_is_unsigned*/,
+    std::false_type /*x_is_unsigned*/) {
+  return x < T(0);
+}
+
+/*
+ * Both x and Limit cannot be negative; return false
+ */
+template <typename Limit, typename T>
+static inline constexpr bool less_than_lowest(
+    const T& /*x*/,
+    std::true_type /*limit_is_unsigned*/,
+    std::true_type /*x_is_unsigned*/) {
+  return false;
+}
+
+/*
+ * Returns true if x is less than the lowest value of type T
+ */
+template <typename Limit, typename T>
+inline constexpr bool less_than_lowest(const T& x) {
+  return less_than_lowest<Limit>(
+      x, std::is_unsigned<Limit>(), std::is_unsigned<T>());
+}
+
+// Suppress sign compare warning when compiling with GCC
+// as later does not account for short-circuit rule before
+// raising the warning, see https://godbolt.org/z/Tr3Msnz99
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#endif
+
+/*
+ * Returns true if x is greater than the greatest value of the type Limit
+ */
+template <typename Limit, typename T>
+inline constexpr bool greater_than_max(const T& x) {
+  constexpr bool can_overflow =
+      std::numeric_limits<T>::digits > std::numeric_limits<Limit>::digits;
+  return can_overflow && x > std::numeric_limits<Limit>::max();
+}
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+
+template <typename To, typename From>
+std::enable_if_t<std::is_integral_v<From> && !std::is_same_v<From, bool>, bool>
+overflows(From f) {
+  using limit = std::numeric_limits<To>;
+  // Casting from signed to unsigned; allow for negative numbers to wrap using
+  // two's complement arithmetic.
+  if (!limit::is_signed && std::numeric_limits<From>::is_signed) {
+    return greater_than_max<To>(f) ||
+        (is_negative(f) && -static_cast<uint64_t>(f) > limit::max());
+  }
+  // standard case, check if f is outside the range of type To
+  else {
+    return less_than_lowest<To>(f) || greater_than_max<To>(f);
+  }
+}
+
+template <typename To, typename From>
+std::enable_if_t<std::is_floating_point_v<From>, bool> overflows(From f) {
+  using limit = std::numeric_limits<To>;
+  if (limit::has_infinity && std::isinf(static_cast<double>(f))) {
+    return false;
+  }
+  return f < limit::lowest() || f > limit::max();
+}
+
 template <typename To, typename From>
 inline constexpr To safe_downcast(const From& v) {
-  VK_CHECK_COND(!c10::overflows<To>(v), "Cast failed: out of range!");
+  VK_CHECK_COND(!overflows<To>(v), "Cast failed: out of range!");
   return static_cast<To>(v);
 }
 
