@@ -797,12 +797,12 @@ class CommonTemplate:
         def mm_abstract(x):
             return torch.empty_like(x)
 
-        def fn(a):
+        def fn(a, b):
             z = torch.ops.mynamespace.mm(a)
-            w = torch.ops.mynamespace.mm(a)
+            w = torch.ops.mynamespace.mm(b)
             return z + w
 
-        self.common(fn, (torch.randn(1)))
+        self.common(fn, (torch.randn(2,2,2), torch.randn(2,2,2)))
 
     def test_horizonal_fusion1(self):
         def fn(a, b, c):
