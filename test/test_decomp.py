@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     ops,
     instantiate_device_type_tests,
+    onlyCPU,
     onlyCUDA,
 )
 from torch.testing._internal.common_methods_invocations import op_db, skip, skipOps, xfail
@@ -535,6 +536,20 @@ class TestDecomp(TestCase):
         res = torch._decomp.decompositions.uniform(x, low=low, high=high)
         self.assertEqual(ref, res)
 
+    def test_broadcasting_index_copy(self, device):
+        x = torch.zeros([1, 10], device=device)
+        xs = torch.ones([2, 10], device=device)
+
+        def index_copy(xs, x):
+            torch._decomp.decompositions.index_copy_(xs, 0, torch.tensor(0).to(device), x)
+
+        index_copy(xs, x)
+
+        xs_two = torch.ones([2, 10], device=device)
+        xs_two[0] = x
+
+        self.assertEqual(xs, xs_two)
+
     def test_rrelu_with_noise(self, device):
         # rrelu_with_noise behavior depends on a) whether elements in the input
         # are <= 0, and b) whether we're in training mode. Cover all cases:
@@ -900,7 +915,7 @@ class DecompOneOffTests(TestCase):
         self.assertTrue(torch.allclose(ref[1], res[1]))
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyNativeDeviceTypes
+    @onlyCPU
     @skipIfCrossRef
     def test_sdpa(self, device):
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -927,7 +942,7 @@ class DecompOneOffTests(TestCase):
             attention,
             decomposition_table=get_decompositions(
                 [
-                    torch.ops.aten._scaled_dot_product_flash_attention.default,
+                    torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default,
                 ]
             ),
         )(query_layer, key_layer, value_layer)
