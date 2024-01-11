@@ -30,13 +30,12 @@
 
 #include <iostream>
 #include <tuple>
-#include <type_traits>
 
 #include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/detail/ElementwiseInvoke.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
-#include <c10/core/DynamicCast.h>
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
@@ -192,60 +191,6 @@ static void launch_legacy_kernel(int64_t N, const func_t& f) {
   auto stream = at::cuda::getCurrentCUDAStream();
   elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-}
-
-template <typename traits, typename func_t, typename index_t, size_t... INDEX>
-C10_HOST_DEVICE typename traits::result_type invoke_impl(
-    const func_t& f,
-    char* const C10_RESTRICT data[],
-    const index_t strides[],
-    int i,
-    std::index_sequence<INDEX...>) {
-  (void)strides;
-  (void)i;
-  return f(c10::load<typename traits::template arg<INDEX>::type>(
-      data[INDEX] + i * strides[INDEX])...);
-}
-
-template <
-    typename func_t,
-    typename index_t,
-    typename traits = function_traits<func_t>>
-C10_HOST_DEVICE typename traits::result_type invoke(
-    const func_t& f,
-    char* const C10_RESTRICT data[],
-    const index_t strides[],
-    int i) {
-  using Indices = std::make_index_sequence<traits::arity>;
-  return invoke_impl<traits>(f, data, strides, i, Indices{});
-}
-
-template <typename traits, typename func_t, typename index_t, size_t... I>
-C10_HOST_DEVICE typename traits::result_type invoke_impl(
-    const func_t& f,
-    char* const C10_RESTRICT data[],
-    const index_t strides[],
-    const ScalarType dtypes[],
-    int i,
-    std::index_sequence<I...>) {
-  (void)strides;
-  (void)i;
-  return f(c10::fetch_and_cast<typename traits::template arg<I>::type>(
-      dtypes[I], data[I] + i * strides[I])...);
-}
-
-template <
-    typename func_t,
-    typename index_t,
-    typename traits = function_traits<func_t>>
-C10_HOST_DEVICE typename traits::result_type invoke(
-    const func_t& f,
-    char* const C10_RESTRICT data[],
-    const index_t strides[],
-    const ScalarType dtypes[],
-    int i) {
-  using Indices = std::make_index_sequence<traits::arity>;
-  return invoke_impl<traits>(f, data, strides, dtypes, i, Indices{});
 }
 
 template <typename func_t>
