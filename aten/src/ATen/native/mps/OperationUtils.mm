@@ -361,9 +361,9 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
   // if buffer size is zero in here, it's not a user error. It could be a missing check for
   // tensor.numel() == 0 in our internal implementations of ops.
   TORCH_INTERNAL_ASSERT([srcBuf length] > 0, "Placeholder tensor is empty!");
-  const MPSDataType mpsDataType = dataType != MPSDataTypeInvalid ? dataType
-      : _tensor.dim() == 0                                       ? getMPSScalarType(_tensor.scalar_type())
-                                                                 : getMPSDataType(_tensor.scalar_type());
+  const auto  mpsDataType = dataType != MPSDataTypeInvalid ? dataType
+                                                           : _tensor.dim() == 0 ? getMPSScalarType(_tensor.scalar_type())
+                                                                                : getMPSDataType(_tensor.scalar_type());
 
   if (src.is_contiguous() && src.storage_offset() && sliceViewTensor) {
     _value = getMPSGraphTensorDataForView(src, mpsShape, mpsDataType);
@@ -393,7 +393,7 @@ MPSGraphTensorData* getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStre
     MPSNDArray* emptyArray = [[[MPSNDArray alloc] initWithDevice:mpsStream->device() descriptor:desc] autorelease];
     result = [[[MPSGraphTensorData alloc] initWithMPSNDArray:emptyArray] autorelease];
   }
-  assert(result);
+  TORCH_INTERNAL_ASSERT(result);
   return result;
 }
 
@@ -455,7 +455,7 @@ Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device) {
   } else if (scalar.isComplex()) {
     tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kComplexDouble));
   } else {
-    AT_ASSERT(scalar.isIntegral(false));
+    TORCH_INTERNAL_ASSERT(scalar.isIntegral(false));
     tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kLong));
   }
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
@@ -518,7 +518,7 @@ string get_mem_format_string(c10::MemoryFormat memory_format) {
       mem_format_key = "ChannelsLast";
       break;
     default:
-      assert(0 && "Invalid memory format\n");
+      TORCH_CHECK(false, "Invalid memory format", memory_format);
   }
 
   return mem_format_key;
