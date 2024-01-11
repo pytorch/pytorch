@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <ATen/native/vulkan/api/vk_api.h>
+
 #include <ATen/native/vulkan/api/Exception.h>
 
 #ifdef USE_VULKAN_FP16_INFERENCE
@@ -62,7 +64,7 @@ inline VkFormat to_vkformat(const ScalarType t) {
   switch (t) {
     VK_FORALL_SCALAR_TYPES(CASE_VK_FORMAT)
     default:
-      VK_THROW("Unknown ScalarType");
+      VK_THROW("Unknown ScalarType: ", t);
   }
 #undef CASE_VK_FORMAT
 }
@@ -86,7 +88,7 @@ inline ScalarType element_scalartype(const VkFormat vkformat) {
     case VK_FORMAT_R16G16B16A16_SFLOAT:
       return kHalf;
     default:
-      VK_THROW("No corresponding scalar type for unknown VkFormat");
+      VK_THROW("No corresponding scalar type for unknown VkFormat: ", vkformat);
   }
 }
 
@@ -103,7 +105,7 @@ inline size_t element_size(const ScalarType t) {
   switch (t) {
     VK_FORALL_SCALAR_TYPES(CASE_ELEMENTSIZE_CASE)
     default:
-      VK_THROW("Unknown ScalarType");
+      VK_THROW("Unknown ScalarType: ", t);
   }
 #undef CASE_ELEMENTSIZE_CASE
 }
@@ -116,7 +118,7 @@ inline const char* to_string(const ScalarType t) {
   switch (t) {
     VK_FORALL_SCALAR_TYPES(CASE_TO_STRING)
     default:
-      return "UNKNOWN_SCALAR";
+      return "UNKNOWN_SCALAR_TYPE";
   }
 #undef CASE_TO_STRING
 }
