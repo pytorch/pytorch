@@ -814,10 +814,15 @@ class ReplacementPatternEntry(PatternEntry):
             last_node = min(indices, key=lambda tup: tup[0])[1]
 
         def percolate_tags(node, recompute_tag):
-            for arg in node.all_input_nodes:
-                if hasattr(arg, "meta"):
+            queue = [node]
+            visited = set()
+
+            while queue:
+                arg = queue.pop()
+                if arg not in visited and hasattr(arg, "meta"):
+                    visited.add(arg)
                     arg.meta["recompute"] = recompute_tag
-                    percolate_tags(arg, recompute_tag)
+                    queue.extend(arg.all_input_nodes)
 
         with graph.inserting_before(last_node):
             replacement = Replacer(replacement_graph).run(*args)
