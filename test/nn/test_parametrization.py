@@ -1545,6 +1545,13 @@ class TestNNParametrization(NNTestCase):
         input = torch.randn(3, 4)
         self.assertEqual(m(input), m2(input))
 
+    def test_param_new_attr_deepcopy(self):
+        p = nn.Parameter(torch.randn(3, 4))
+        p.new_attr = "xyz"
+        p_copy = deepcopy(p)
+        self.assertTrue(hasattr(p_copy, "new_attr"))
+        self.assertTrue(p_copy.new_attr == "xyz")
+
 
 class TestNNParametrizationDevice(NNTestCase):
     def test_weight_norm_parametrization(self, device):
