@@ -829,17 +829,75 @@ def forward(self, x_1, output_1):
 class MutationTests(torch._dynamo.test_case.TestCase):
     @requires_cuda()
     def test_find_mutations(self):
-        from torch._higher_order_ops.triton_kernel_wrap import filter_non_mutated
+        from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
+
+        t = torch.randn(4)
 
         tests = [
-            [add_kernel, ["in_ptr0", "in_ptr1", "out_ptr"], ["out_ptr"]],
-            [add_kernel_2d_autotuned, ["in_ptr0", "in_ptr1", "out_ptr"], ["out_ptr"]],
-            # Cannot remove in_ptr0 since it is used in a external call
-            [indirection_kernel, ["in_ptr0", "out_ptr"], ["in_ptr0", "out_ptr"]],
-            [mul2_inplace_kernel, ["ptr"], ["ptr"]],
+            [
+                add_kernel,
+                {
+                    "in_ptr0": t,
+                    "in_ptr1": t,
+                    "out_ptr": t,
+                    "n_elements": 4,
+                    "BLOCK_SIZE": 4,
+                },
+                ["out_ptr"],
+            ],
+            [
+                add_kernel_2d_autotuned,
+                {
+                    "in_ptr0": t,
+                    "in_ptr1": t,
+                    "out_ptr": t,
+                    "x_elements": 4,
+                    "y_elements": 4,
+                },
+                ["out_ptr"],
+            ],
+            [
+                indirection_kernel,
+                {
+                    "in_ptr0": t,
+                    "out_ptr": t,
+                    "n_elements": 4,
+                    "BLOCK_SIZE": 4,
+                    "ACTIVATION": "mul2_inplace_kernel",
+                },
+                ["in_ptr0", "out_ptr"],
+            ],
+            [
+                indirection_kernel,
+                {
+                    "in_ptr0": t,
+                    "out_ptr": t,
+                    "n_elements": 4,
+                    "BLOCK_SIZE": 4,
+                    "ACTIVATION": "add_kernel",
+                },
+                # TODO(oulgen): since the indirection uses @triton.jit
+                # we cannot optimize this right now. Fix it.
+                ["in_ptr0", "out_ptr"],
+            ],
+            [
+                mul2_inplace_kernel,
+                {"ptr": t, "n_elements": 4, "BLOCK_SIZE": 4},
+                ["ptr"],
+            ],
+            # cant optimize since the kernel contains a tl.inline_asm_elementwise
+            [
+                inline_asm_kernel,
+                {"X": t, "Y": t, "Z": t, "n": 4, "BLOCK": 4},
+                ["X", "Y", "Z"],
+            ],
         ]
         for kernel, inputs, outputs in tests:
-            self.assertListEqual(filter_non_mutated(kernel, inputs), outputs)
+            self.assertListEqual(
+                identify_mutated_tensors(kernel, inputs),
+                outputs,
+                msg=f"while testing {kernel.fn.__name__}",
+            )
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)
