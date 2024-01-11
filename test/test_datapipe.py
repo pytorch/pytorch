@@ -63,6 +63,7 @@ from torch.utils.data.datapipes.utils.snapshot import (
 from torch.utils.data.datapipes.dataframe import CaptureDataFrame
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 from torch.utils.data.datapipes.iter.sharding import SHARDING_PRIORITIES
+import operator
 
 try:
     import dill
@@ -228,7 +229,7 @@ class TestStreamWrapper(TestCase):
         for api in ['open', 'read', 'close']:
             self.assertTrue(api in s)
 
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     def test_api(self):
         fd = TestStreamWrapper._FakeFD("")
         wrap_fd = StreamWrapper(fd)
@@ -1361,8 +1362,8 @@ class TestFunctionalIterDataPipe(TestCase):
         # Unmatched input columns with fn arguments
         _helper(None, fn_n1, 1, error=ValueError)
         _helper(None, fn_n1, [0, 1, 2], error=ValueError)
-        _helper(None, lambda d0, d1: d0 + d1, 0, error=ValueError)
-        _helper(None, lambda d0, d1: d0 + d1, [0, 1, 2], error=ValueError)
+        _helper(None, operator.add, 0, error=ValueError)
+        _helper(None, operator.add, [0, 1, 2], error=ValueError)
         _helper(None, fn_cmplx, 0, 1, ValueError)
         _helper(None, fn_n1_pos, 1, error=ValueError)
         _helper(None, fn_n1_def, [0, 1, 2], 1, error=ValueError)
@@ -1407,7 +1408,7 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(lambda data: (data[0] + 1, data[1], data[2]), Add1Callable(), 0)
 
     @suppress_warnings  # Suppress warning for lambda fn
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     def test_map_dict_with_col_iterdatapipe(self):
         def fn_11(d):
             return -d
@@ -2926,9 +2927,7 @@ class TestSharding(TestCase):
 
         dp0 = self._get_pipeline().sharding_filter()
         dl = DataLoader(dp0, batch_size=1, shuffle=False, num_workers=2)
-        items = []
-        for i in dl:
-            items.append(i)
+        items = list(dl)
 
         self.assertEqual(sorted(expected), sorted(items))
 
@@ -2939,9 +2938,7 @@ class TestSharding(TestCase):
         dp0 = self._get_pipeline()
         dp0 = CustomShardingIterDataPipe(dp0)
         dl = DataLoader(dp0, batch_size=1, shuffle=False, num_workers=2)
-        items = []
-        for i in dl:
-            items.append(i)
+        items = list(dl)
 
         self.assertEqual(sorted(expected), sorted(items))
 

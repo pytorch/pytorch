@@ -394,6 +394,74 @@ def meta_unsqueeze_(self, dim):
     return self
 
 
+@register_meta(aten._sparse_semi_structured_linear)
+def meta_sparse_structured_linear(
+    input: Tensor,
+    weight: Tensor,
+    _meta: Tensor,
+    bias: Optional[Tensor] = None,
+    _activation_opt: Optional[str] = None,
+    out_dtype: Optional[torch.dtype] = None,
+):
+    output_sizes = list(input.shape)
+    if bias is not None:
+        assert weight.size(0) == bias.size(0), "output size mismatch"
+    assert weight.size(1) == input.size(-1) / 2
+    output_sizes[-1] = weight.size(0)
+
+    # see: https://github.com/pytorch/pytorch/pull/114477#issuecomment-1830121375
+    # We assume that we have already squashed the inputs into a 2-D tensor
+    # Then, as the output is transposed, we need to propagate the transposed
+    # stride information to the output tensor
+    assert len(input.shape) == 2, "we can only handle the squashed input case"
+    transposed_strides = (1, input.size(0))
+
+    if out_dtype is not None:
+        assert (
+            input.dtype == torch.int8 and out_dtype == torch.int32
+        ), "out_dtype is only supported for i8i8->i32 linear operator"
+    output = input.new_empty(
+        output_sizes,
+        dtype=input.dtype if out_dtype is None else out_dtype,
+    ).as_strided(output_sizes, transposed_strides)
+
+    return output
+
+
+@register_meta(aten._cslt_sparse_mm)
+def meta__cslt_sparse_mm(
+    compressed_A: torch.Tensor,
+    dense_B: torch.Tensor,
+    bias: Optional[Tensor] = None,
+    alpha: Optional[Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
+    transpose_result: bool = False,
+):
+    assert dense_B.dtype in {
+        torch.float16,
+        torch.bfloat16,
+        torch.int8,
+    }, "_cslt_sparse_mm only supports fp16, bf16, and int8"
+    assert compressed_A.dtype == dense_B.dtype, "inputs must have the same dtype"
+    assert len(dense_B.shape) == 2, "_cslt_sparse_mm only supports 2d inputs"
+
+    is_int8_input_type = compressed_A.dtype == torch.int8
+    compression_factor = 10 if is_int8_input_type else 9
+    k = dense_B.size(0)
+    n = dense_B.size(1)
+    m = (compressed_A.numel() * 16) // (compression_factor * k)
+    if bias is not None:
+        assert m == bias.size(0)
+
+    if out_dtype is not None:
+        assert (
+            is_int8_input_type and out_dtype == torch.float16
+        ), "out_dtype is only supported for i8i8->fp16 matmul"
+    output_shape = (n, m) if transpose_result else (m, n)
+    result = dense_B.new_empty(output_shape, dtype=out_dtype)
+    return result
+
+
 @register_meta(aten.index_reduce.default)
 def meta_index_reduce(
     self: Tensor,
@@ -5001,37 +5069,8 @@ def meta__scaled_dot_product_flash(
     num_heads = query.size(1)
     max_seqlen_batch_q = query.size(2)
     head_dim = query.size(3)
-
     max_seqlen_batch_k = key.size(2)
 
-    if device_hint(query) == "cpu":
-        attention = torch.empty(
-            (batch_size, max_seqlen_batch_q, num_heads, head_dim),
-            dtype=query.dtype,
-            device=query.device,
-        ).transpose(1, 2)
-        logsumexp = torch.empty(
-            (
-                batch_size,
-                max_seqlen_batch_q,
-                num_heads,
-            ),
-            dtype=torch.float,
-            device=query.device,
-        ).transpose(1, 2)
-        return (
-            attention,
-            logsumexp,
-            torch.empty((), dtype=torch.int32, device="meta"),
-            torch.empty((), dtype=torch.int32, device="meta"),
-            0,
-            0,
-            torch.empty((), dtype=torch.long, device="meta"),
-            torch.empty((), dtype=torch.long, device="meta"),
-            torch.empty((), dtype=query.dtype, device=query.device),
-        )
-
-    # Cuda Path
     query_t = query.transpose(1, 2)
     attention = torch.empty_like(query_t).transpose(1, 2)
     logsumexp = torch.empty(
@@ -5095,17 +5134,75 @@ def meta__scaled_dot_product_flash_backward(
     philox_offset: Tensor,
     scale: Optional[float] = None,
 ):
-    if device_hint(query) != "cpu":
-        grad_q = torch.empty_like(query.transpose(1, 2)).transpose(1, 2)
-        grad_k = torch.empty_like(key.transpose(1, 2)).transpose(1, 2)
-        grad_v = torch.empty_like(value.transpose(1, 2)).transpose(1, 2)
-        return grad_q, grad_k, grad_v
+    grad_q = torch.empty_like(query.transpose(1, 2)).transpose(1, 2)
+    grad_k = torch.empty_like(key.transpose(1, 2)).transpose(1, 2)
+    grad_v = torch.empty_like(value.transpose(1, 2)).transpose(1, 2)
+    return grad_q, grad_k, grad_v
 
+
+@register_meta(
+    [
+        aten._scaled_dot_product_flash_attention_for_cpu,
+    ]
+)
+def meta__scaled_dot_product_flash_attention_for_cpu(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    attn_mask: Optional[Tensor] = None,
+    scale: Optional[float] = None,
+):
+    batch_size = query.size(0)
+    num_heads = query.size(1)
+    max_seqlen_batch_q = query.size(2)
+    head_dim = query.size(3)
+
+    attention = torch.empty(
+        (batch_size, max_seqlen_batch_q, num_heads, head_dim),
+        dtype=query.dtype,
+        device=query.device,
+    ).transpose(1, 2)
+    logsumexp = torch.empty(
+        (
+            batch_size,
+            max_seqlen_batch_q,
+            num_heads,
+        ),
+        dtype=torch.float,
+        device=query.device,
+    ).transpose(1, 2)
+    return (
+        attention,
+        logsumexp,
+    )
+
+
+@register_meta(
+    [
+        aten._scaled_dot_product_flash_attention_for_cpu_backward,
+    ]
+)
+def meta__scaled_dot_product_flash_attention_for_cpu_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    dropout_p: float,
+    is_causal: bool,
+    attn_mask: Optional[Tensor] = None,
+    scale: Optional[float] = None,
+):
+    # cpus's grad layout is different from cuda's,
+    # i.e. (batch_size, seq_len，num_heads, head_dim）
     batch_size = query.size(0)
     num_heads = query.size(1)
     head_dim = query.size(3)
-    len_q = query.size(2) if device_hint(query) == "cpu" else max_q
-    len_k = key.size(2) if device_hint(query) == "cpu" else max_k
+    len_q = query.size(2)
+    len_k = key.size(2)
 
     grad_q = torch.empty_permuted(
         (batch_size, num_heads, len_q, head_dim),
@@ -5235,6 +5332,93 @@ def meta__scaled_dot_product_efficient_backward(
 
 @register_meta(
     [
+        aten._flash_attention_forward,
+    ]
+)
+def meta__flash_attention_forward(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    cum_seq_q: Optional[Tensor],
+    cum_seq_k: Optional[Tensor],
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    return_debug_mask: bool,
+    scale: Optional[float] = None,
+):
+    batch_size = query.size(0)
+    max_seqlen_batch_q = query.size(1)
+    num_heads = query.size(2)
+    head_dim = query.size(3)
+
+    max_seqlen_batch_k = key.size(1)
+
+    # Cuda Path
+    attention = torch.empty_like(query)
+    logsumexp = torch.empty(
+        (batch_size, num_heads, max_seqlen_batch_q),
+        dtype=torch.float,
+        device=query.device,
+    )
+
+    if return_debug_mask:
+        blocksize_c = 128 if head_dim > 64 else 256
+        max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
+        if max_seqlen_batch_k <= 128:
+            max_seqlen_k = 128
+        elif max_seqlen_batch_k <= 256:
+            max_seqlen_k = 256
+        debug_mask = torch.empty(
+            (batch_size, num_heads, max_seqlen_batch_q, max_seqlen_k),
+            dtype=query.dtype,
+            device=query.device,
+        )
+    else:
+        debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
+
+    # See Note [Seed and Offset]:
+    return (
+        attention,
+        logsumexp,
+        torch.empty((), dtype=torch.long, device="meta"),
+        torch.empty((), dtype=torch.long, device="meta"),
+        debug_mask,
+    )
+
+
+@register_meta(
+    [
+        aten._flash_attention_backward,
+    ]
+)
+def meta__flash_attention_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    cum_seq_q: Tensor,
+    cum_seq_k: Tensor,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    philox_seed: Tensor,
+    philox_offset: Tensor,
+    scale: Optional[float] = None,
+):
+    grad_query = torch.empty_like(query)
+    grad_key = torch.empty_like(key)
+    grad_value = torch.empty_like(value)
+
+    return grad_query, grad_key, grad_value
+
+
+@register_meta(
+    [
         aten._efficient_attention_forward,
     ]
 )
@@ -5246,6 +5430,7 @@ def meta__efficient_attention_forward(
     cu_seqlens_q: Optional[Tensor],
     cu_seqlens_k: Optional[Tensor],
     max_seqlen_q: Optional[int],
+    max_seqlen_k: Optional[int],
     dropout_p: float,
     custom_mask_type: int,
     compute_log_sumexp: bool = False,

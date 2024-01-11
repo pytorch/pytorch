@@ -13,6 +13,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/atest.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/basic.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/broadcast_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cpu_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_generator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_profiling_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_rng_test.cpp
@@ -54,6 +55,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   )
 
 list(APPEND ATen_CUDA_TEST_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_apply_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_atomic_ops_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_caching_host_allocator_test.cpp

@@ -7,7 +7,7 @@ from torch._dynamo.source import GetItemSource
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder, install_guard
-from ..utils import np
+from ..utils import istype, np
 from .base import typestr, VariableTracker
 
 _type_to_assert_reason = {
@@ -138,6 +138,11 @@ class ConstantVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .tensor import SymNodeVariable
+
+        if name == "format" and istype(self.value, str):
+            return variables.BuiltinVariable(str.format).call_function(
+                tx, [self, *args], kwargs
+            )
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
