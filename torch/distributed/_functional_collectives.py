@@ -8,6 +8,7 @@ import torch.distributed.distributed_c10d as c10d
 from torch._custom_ops import impl_abstract
 from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
+from torch._C._distributed_c10d import ProcessGroup
 
 from . import _functional_collectives_impl as fun_col_impl
 from ._functional_collectives_impl import _register_tensor_wrapper
@@ -791,9 +792,9 @@ These schemas intentionally match torch.distributed.distributed_c10d.* ops that 
 
 
 def all_gather_tensor_inplace(
-    output: torch.Tensor,
-    input: torch.Tensor,
-    group,  # TODO add a type,
+    output_tensor: torch.Tensor,
+    input_tensor: torch.Tensor,
+    group: ProcessGroup = None,
     async_op: bool = False,
     tag: str = "",
     gather_dim: int = 0,
@@ -801,7 +802,7 @@ def all_gather_tensor_inplace(
     assert (
         not async_op
     ), "Can't remap async version of inplace op to functional collective"
-    return output.copy_(all_gather_tensor(input, gather_dim, group, tag))
+    return output_tensor.copy_(all_gather_tensor(input_tensor, gather_dim, group, tag))
 
 
 def reduce_scatter_tensor_inplace(

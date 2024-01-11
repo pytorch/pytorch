@@ -2732,7 +2732,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
 
 
 @_exception_logger
-def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=False):
+def all_gather_into_tensor(output_tensor, input_tensor, group: ProcessGroup = None, async_op=False):
     """
     Gather tensors from all ranks and put them in a single output tensor.
 
