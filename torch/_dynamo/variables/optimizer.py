@@ -130,7 +130,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         install_guard(state_source.make_guard(GuardBuilder.DICT_KEYS))
         for p, value in self.value.state.items():
             tx.store_global_weakref(global_key_name(p), p)
-            p_state_source = GetItemSource(state_source, self.tensor_to_source[p])
+            p_state_source = GetItemSource(
+                state_source, GlobalWeakRefSource(global_key_name(p))
+            )
             install_guard(p_state_source.make_guard(GuardBuilder.DICT_KEYS))
             for k, v in value.items():
                 if (
