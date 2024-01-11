@@ -1631,8 +1631,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         v = self.pop()
         assert inst.argval > 0
         obj = self.stack[-inst.arg]
-        if isinstance(obj, LazyVariableTracker):
-            obj = obj.realize()
+       obj = obj.realize()
         assert isinstance(obj, ConstDictVariable)
         assert obj.mutable_local
         obj.call_method(self, "update", [v], {})
