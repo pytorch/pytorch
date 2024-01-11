@@ -203,7 +203,7 @@ MemoryMap::MemoryMap(MemoryMap&& other) noexcept
 }
 
 MemoryMap::~MemoryMap() {
-  if (C10_UNLIKELY(!data_)) {
+  if (!data_) {
     return;
   }
 
@@ -296,7 +296,7 @@ ImageSampler::ImageSampler(ImageSampler&& other) noexcept
 }
 
 ImageSampler::~ImageSampler() {
-  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
+  if (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroySampler(device_, handle_, nullptr);
@@ -533,7 +533,7 @@ VkSampler SamplerCache::retrieve(const SamplerCache::Key& key) {
   std::lock_guard<std::mutex> lock(cache_mutex_);
 
   auto it = cache_.find(key);
-  if C10_UNLIKELY (cache_.cend() == it) {
+  if (cache_.cend() == it) {
     it = cache_.insert({key, SamplerCache::Value(device_, key)}).first;
   }
 
@@ -590,7 +590,7 @@ MemoryAllocator::MemoryAllocator(MemoryAllocator&& other) noexcept
 }
 
 MemoryAllocator::~MemoryAllocator() {
-  if C10_LIKELY (VK_NULL_HANDLE == allocator_) {
+  if (VK_NULL_HANDLE == allocator_) {
     return;
   }
   vmaDestroyAllocator(allocator_);
@@ -739,7 +739,7 @@ VulkanFence& VulkanFence::operator=(VulkanFence&& other) noexcept {
 }
 
 VulkanFence::~VulkanFence() {
-  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
+  if (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroyFence(device_, handle_, nullptr);

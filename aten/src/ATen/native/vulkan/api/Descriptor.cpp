@@ -76,7 +76,7 @@ DescriptorSet& DescriptorSet::bind(
 }
 
 VkDescriptorSet DescriptorSet::get_bind_handle() const {
-  c10::SmallVector<VkWriteDescriptorSet, 6u> write_descriptor_sets;
+  std::vector<VkWriteDescriptorSet> write_descriptor_sets;
 
   for (const ResourceBinding& binding : bindings_) {
     VkWriteDescriptorSet write{
@@ -194,7 +194,7 @@ DescriptorPool::DescriptorPool(
       config_(config),
       mutex_{},
       piles_{} {
-  c10::SmallVector<VkDescriptorPoolSize, 4u> type_sizes{
+  std::vector<VkDescriptorPoolSize> type_sizes{
       {
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           config_.descriptorUniformBufferCount,

@@ -13,6 +13,7 @@
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Shader.h>
+#include <ATen/native/vulkan/api/Utils.h>
 
 namespace at {
 namespace native {
@@ -300,7 +301,7 @@ inline void arg_is_empty(bool& any_is_empty, const VulkanImage& image) {
 template <typename... Arguments>
 inline bool any_arg_is_empty(Arguments&&... arguments) {
   bool any_is_empty = false;
-  C10_UNUSED const int _[]{
+  VK_UNUSED const int _[]{
       0,
       (arg_is_empty(any_is_empty, std::forward<Arguments>(arguments)), 0)...,
   };
@@ -313,7 +314,7 @@ inline void bind(
     DescriptorSet& descriptor_set,
     const std::index_sequence<Indices...>&,
     Arguments&&... arguments) {
-  C10_UNUSED const int _[]{
+  VK_UNUSED const int _[]{
       0,
       (descriptor_set.bind(Indices, std::forward<Arguments>(arguments)), 0)...,
   };

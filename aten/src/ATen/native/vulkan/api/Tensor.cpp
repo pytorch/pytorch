@@ -1,6 +1,5 @@
 #include <ATen/native/vulkan/api/Tensor.h>
 #include <ATen/native/vulkan/api/Utils.h>
-#include <c10/util/accumulate.h>
 
 namespace at {
 namespace native {
@@ -42,9 +41,9 @@ api::GPUMemoryLayout get_gpu_memory_layout(
  * Calculates the strides of a contiguous tensor. empty_tensor_restride from
  * TensorImpl.h was used as a reference.
  */
-c10::SmallVector<int64_t, 6u> calc_contiguous_strides(const IntArrayRef sizes) {
+std::vector<int64_t> calc_contiguous_strides(const IntArrayRef sizes) {
   int64_t ndim = static_cast<int64_t>(sizes.size());
-  c10::SmallVector<int64_t, 6u> strides(ndim);
+  std::vector<int64_t> strides(ndim);
 
   int64_t running_product = 1;
   if (ndim >= 1) {
@@ -58,9 +57,8 @@ c10::SmallVector<int64_t, 6u> calc_contiguous_strides(const IntArrayRef sizes) {
   return strides;
 }
 
-c10::SmallVector<int64_t, 6u> calc_channels_last_strides(
-    const IntArrayRef sizes) {
-  c10::SmallVector<int64_t, 6u> strides(sizes.size());
+std::vector<int64_t> calc_channels_last_strides(const IntArrayRef sizes) {
+  std::vector<int64_t> strides(sizes.size());
 
   switch (sizes.size()) {
     case 4:
@@ -87,7 +85,7 @@ c10::SmallVector<int64_t, 6u> calc_channels_last_strides(
  * that strides are only valid for vTensors that are backed by buffer storage;
  * if texture storage is used then the strides are invalid and set to zeros.
  */
-c10::SmallVector<int64_t, 6u> calc_strides(
+std::vector<int64_t> calc_strides(
     const IntArrayRef sizes,
     const api::GPUMemoryLayout memory_layout,
     const api::StorageType storage_type) {
@@ -106,7 +104,7 @@ c10::SmallVector<int64_t, 6u> calc_strides(
       break;
     case api::StorageType::TEXTURE_3D:
     case api::StorageType::TEXTURE_2D:
-      return c10::SmallVector<int64_t, 6u>(sizes.size());
+      return std::vector<int64_t>(sizes.size());
     default:
       TORCH_CHECK(false, "Invalid storage type used to create vTensor!");
   }
@@ -120,7 +118,7 @@ c10::SmallVector<int64_t, 6u> calc_strides(
  * returns a sizes array describing the dimensions of the memory used to store
  * the tensor data on the GPU.
  */
-c10::SmallVector<int64_t, 6u> calc_gpu_sizes(
+std::vector<int64_t> calc_gpu_sizes(
     const IntArrayRef sizes,
     const api::GPUMemoryLayout memory_layout,
     const api::StorageType storage_type) {
@@ -131,7 +129,7 @@ c10::SmallVector<int64_t, 6u> calc_gpu_sizes(
   // For buffer formats, the innermost dim (i.e. where the stride is 1) will be
   // aligned up. Which dim is the innermost is described by the GPUMemoryLayout.
   if (storage_type == api::StorageType::BUFFER) {
-    c10::SmallVector<int64_t, 6u> gpu_sizes{sizes};
+    std::vector<int64_t> gpu_sizes(sizes.begin(), sizes.end());
 
     switch (memory_layout) {
       case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
@@ -172,7 +170,7 @@ c10::SmallVector<int64_t, 6u> calc_gpu_sizes(
         "Texture storage only valid for 0 <= ndim <= 4, received: ",
         ndim);
 
-    c10::SmallVector<int64_t, 6u> gpu_sizes(ndim == 4 ? 4 : 3);
+    std::vector<int64_t> gpu_sizes(ndim == 4 ? 4 : 3);
 
     // Channel dim will be be aligned to the next multiple of 4
     switch (ndim) {
@@ -351,7 +349,7 @@ api::UniformParamsBuffer make_metadata_uniform(
       api::utils::make_nchw_uvec4(sizes),
       api::utils::make_nchw_uvec4(strides),
       api::utils::safe_downcast<uint32_t>(sizes.size()),
-      api::utils::safe_downcast<uint32_t>(c10::multiply_integers(sizes)),
+      api::utils::safe_downcast<uint32_t>(api::utils::multiply_integers(sizes)),
   };
 
   return api::UniformParamsBuffer(context, metadata);
@@ -372,7 +370,7 @@ vTensor::vTensor(
     : dtype_(dtype),
       memory_layout_(memory_layout),
       // Calculate sizes and strides
-      sizes_{sizes},
+      sizes_(sizes.begin(), sizes.end()),
       strides_{calc_strides(sizes, memory_layout_, storage_type)},
       gpu_sizes_{calc_gpu_sizes(sizes, memory_layout_, storage_type)},
       gpu_strides_{calc_strides(gpu_sizes_, memory_layout_, storage_type)},
@@ -401,7 +399,7 @@ vTensor::vTensor(
     : dtype_(dtype),
       memory_layout_(memory_layout),
       // Calculate sizes and strides
-      sizes_{sizes},
+      sizes_(sizes.begin(), sizes.end()),
       strides_{calc_strides(sizes, memory_layout_, storage_type)},
       gpu_sizes_{calc_gpu_sizes(sizes, memory_layout_, storage_type)},
       gpu_strides_{calc_strides(gpu_sizes_, memory_layout_, storage_type)},
@@ -488,7 +486,8 @@ vTensor::BufferMetadata vTensor::get_cpu_buffer_metadata() const {
       api::utils::make_nchw_uvec4(sizes_),
       api::utils::make_nchw_uvec4(strides_),
       api::utils::safe_downcast<uint32_t>(sizes_.size()),
-      api::utils::safe_downcast<uint32_t>(c10::multiply_integers(sizes_)),
+      api::utils::safe_downcast<uint32_t>(
+          api::utils::multiply_integers(sizes_)),
   };
 }
 
@@ -568,7 +567,7 @@ vTensorStorage::vTensorStorage(
       storage_type_{storage_type},
       extents_(
           create_image_extents(gpu_sizes, storage_type, gpu_memory_layout)),
-      buffer_length_{c10::multiply_integers(gpu_sizes)},
+      buffer_length_{api::utils::multiply_integers(gpu_sizes)},
       image_(allocate_image(
           context_,
           extents_,
@@ -619,19 +618,19 @@ void vTensorStorage::transition(
     pipeline_barrier.stage.dst |= dst_stage;
 
     if (image_) {
-      pipeline_barrier.images.push_back(api::ImageMemoryBarrier(
+      pipeline_barrier.images.emplace_back(
           api::vk_access(prev_stage, prev_access),
           api::vk_access(cur_stage, cur_access),
           cur_layout,
           new_layout,
-          image_));
+          image_);
 
       image_.set_layout(new_layout);
     } else if (buffer_) {
-      pipeline_barrier.buffers.push_back(api::BufferMemoryBarrier(
+      pipeline_barrier.buffers.emplace_back(
           api::vk_access(prev_stage, prev_access),
           api::vk_access(cur_stage, cur_access),
-          buffer_));
+          buffer_);
     }
   }
 
@@ -665,10 +664,10 @@ void add_buffer_barrier(
     pipeline_barrier.stage.src |= src_stage;
     pipeline_barrier.stage.dst |= dst_stage;
 
-    pipeline_barrier.buffers.push_back(api::BufferMemoryBarrier(
+    pipeline_barrier.buffers.emplace_back(
         api::vk_access(prev_stage, prev_access),
         api::vk_access(cur_stage, cur_access),
-        buffer));
+        buffer);
   }
 }
 
