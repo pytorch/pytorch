@@ -15570,7 +15570,13 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_select_scatter,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_out=False),
+           skips=(
+               # RuntimeError: Internal error: pybind11::error_already_set called while
+               # Python error indicator not set.
+               # TODO: Investigate this more
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_out'),
+           ),
+           supports_out=True),
     OpInfo('slice',
            op=torch.ops.aten.slice.Tensor,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool, torch.chalf),
