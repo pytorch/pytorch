@@ -5658,6 +5658,7 @@ else:
         actual = t_non_contig.masked_scatter_(mask_contig, source)
         self.assertEqual(actual, expected)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo doesn't init AccumulateGrad nodes on forward")
     def test_tensor_use_count(self, device):
         t = torch.empty(2, 3, device=device)
         self.assertEqual(torch._C._tensor_use_count(t._cdata), 1)

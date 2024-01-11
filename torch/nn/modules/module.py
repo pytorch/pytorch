@@ -817,11 +817,12 @@ class Module:
                 return False
 
         def compute_should_use_swap_tensors(tensor):
-            # print(id(tensor), tensor._cdata, torch._C._tensor_use_count(tensor._cdata), getweakrefcount(tensor))
             if torch.__future__.get_swap_module_params_on_conversion():
-                return torch._C._tensor_use_count(tensor._cdata) == 1 and getweakrefcount(tensor) == 0
+                swap_param = torch._C._tensor_use_count(tensor._cdata) == 1 and getweakrefcount(tensor) == 0
+                swap_grad = torch._C._tensor_use_count(tensor.grad._cdata) == 1 and getweakrefcount(tensor.grad) == 0
+                return (swap_param, swap_grad)
             else:
-                return False
+                return (False, False)
 
         for key, param in self._parameters.items():
             if param is None:
@@ -832,11 +833,12 @@ class Module:
             with torch.no_grad():
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
-            p_should_use_swap_tensors = compute_should_use_swap_tensors(param)
-            # FIXME: This is wrong, param_grad bumps the use_count so we will never swap_tensors for grad
-            # nevertheless, passing param.grad to any function (even swap_tensors) bumps its use_count,
-            # so it seems like we are maybe doomed?
+            p_should_use_swap_tensors, g_should_use_swap_tensors = compute_should_use_swap_tensors(param)
             param_grad = param.grad
+            if g_should_use_swap_tensors:
+                # grad use_count was 1 according to g_should_use_swap_tensors but
+                # was bumped by param_grad = param.grad, decrement it so swapping grad works
+                param.grad = None
             if p_should_use_set_data:
                 if p_should_use_swap_tensors:
                     param_applied = torch.nn.Parameter(param_applied, requires_grad=param.requires_grad)
@@ -854,10 +856,7 @@ class Module:
             if param_grad is not None:
                 with torch.no_grad():
                     grad_applied = fn(param_grad)
-                    # print(param_grad._cdata, grad_applied._cdata)
                 g_should_use_set_data = compute_should_use_set_data(param_grad, grad_applied)
-                g_should_use_swap_tensors = compute_should_use_swap_tensors(param_grad)
-                # print(key, p_should_use_set_data, p_should_use_swap_tensors, g_should_use_set_data, g_should_use_swap_tensors)
                 if g_should_use_set_data:
                     if g_should_use_swap_tensors:
                         grad_applied.requires_grad_(param_grad.requires_grad)

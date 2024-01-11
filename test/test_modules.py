@@ -857,7 +857,9 @@ class TestModule(TestCase):
     @modules([module for module in module_db if not module.is_lazy])
     def test_to(self, device, dtype, module_info, training):
         module_cls = module_info.module_cls
-        devices = ['cpu', 'cuda']
+        devices = ['cpu']
+        if torch.cuda.is_available():
+            devices += ['cuda']
         if torch.backends.mps.is_available():
             devices += ['mps']
         dtypes = module_info.dtypes
@@ -872,7 +874,7 @@ class TestModule(TestCase):
             m = module_cls(*c_args, **c_kwargs)
             m_forward_pass_ran = module_cls(*c_args, **c_kwargs)
 
-            # RNNBase overrides `_apply` and installs weakrefs
+            # RNNBase overrides `_apply` and adds weakrefs to params
             is_rnn_base = isinstance(m, torch.nn.RNNBase)
 
             def _to(m):
@@ -887,30 +889,30 @@ class TestModule(TestCase):
                     setattr(m, n, new_b)
             _to(m)
             _to(m_forward_pass_ran)
-            # run forward pass once to init AccumulateGrad Nodes which increments use_count
+            # forward pass to init AccumulateGrad Nodes which increments params' use_count
             out = m_forward_pass_ran(*fw_args, **fw_kwargs)
 
+            prev_device, prev_dtype = device, dtype
             for swap in [False, True, None]:
                 if swap is None:
                     torch.__future__.set_swap_module_params_on_conversion(True)
-                    # run forward pass once to init AccumulateGrad Nodes which increment use_count
-                    # of parameters' TensrorImpls
                     m = m_forward_pass_ran
+                    prev_device, prev_dtype = device, dtype
                 else:
                     torch.__future__.set_swap_module_params_on_conversion(swap)
-
                 for device_, dtype_ in product(devices, dtypes):
                     if device_ == 'mps' and dtype_ == torch.float64:
                         continue
+                    no_cdata_change = device_ == prev_device and dtype_ == prev_dtype
+                    p_no_swap, g_no_swap = is_rnn_base or no_cdata_change, no_cdata_change
+                    prev_device, prev_dtype = device_, dtype_
 
-                    # gs = [p.grad for p in m.parameters()]
                     p_ids_before = [(weakref.getweakrefcount(p), p._cdata) for p in m.parameters()]
                     g_ids_before = [(weakref.getweakrefcount(p.grad), p.grad._cdata) for p in m.parameters()]
-                    p_refs = [(id(p), torch._C._tensor_use_count(p._cdata)) for p in m.parameters()]
-                    g_refs = [(id(p.grad), torch._C._tensor_use_count(p.grad._cdata)) for p in m.parameters()]
 
                     m.to(device=device_, dtype=dtype_)
 
+                    self.assertTrue(isinstance(p, torch.nn.Parameter) for p in m.parameters())
                     self.assertTrue(all(p.device.type == device_ for p in m.parameters()))
                     self.assertTrue(all(p.dtype == dtype_ for p in m.parameters()))
                     self.assertTrue(all(p.grad.device.type == device_ for p in m.parameters()))
@@ -918,20 +920,23 @@ class TestModule(TestCase):
 
                     p_ids_after = [p._cdata for p in m.parameters()]
                     g_ids_after = [p.grad._cdata for p in m.parameters()]
-                    p_refs_after = [(id(p), torch._C._tensor_use_count(p._cdata)) for p in m.parameters()]
-                    g_refs_after = [(id(p.grad), torch._C._tensor_use_count(p.grad._cdata)) for p in m.parameters()]
                     if swap:
                         # ._cdata differs --> swapped TensorImpls
                         self.assertTrue(all(
-                            a == b if wr or is_rnn_base else a != b for (wr, a), b in zip(p_ids_before, p_ids_after)))
+                            a == b if wr or p_no_swap else a != b for (wr, a), b in zip(p_ids_before, p_ids_after)))
                         self.assertTrue(
-                            all(a == b if wr or is_rnn_base else a != b for (wr, a), b in zip(g_ids_before, g_ids_after)))
+                            all(a == b if wr or g_no_swap else a != b for (wr, a), b in zip(g_ids_before, g_ids_after)))
+                    elif swap is None:
+                        # swap=None is swap=True with forward pass run once,
+                        # .data setting should be used for param but not for grad
+                        self.assertTrue(all(a == b for (_, a), b in zip(p_ids_before, p_ids_after)))
+                        self.assertTrue(
+                            all(a == b if wr or g_no_swap else a != b for (wr, a), b in zip(g_ids_before, g_ids_after)))
                     else:
                         # _cdata remains the same --> .data setting
-                        # swap=None case is swap=True with forward pass run once, .data setting will be used
                         self.assertTrue(all(a == b for (_, a), b in zip(p_ids_before, p_ids_after)))
-                        # FIXME should be a != b for the grads when swap=True
                         self.assertTrue(all(a == b for (_, a), b in zip(g_ids_before, g_ids_after)))
+
 
 instantiate_device_type_tests(TestModule, globals(), allow_mps=True)
 
