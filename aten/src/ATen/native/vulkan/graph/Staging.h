@@ -2,6 +2,8 @@
 
 #ifdef USE_VULKAN_API
 
+#include <string.h>
+
 #include <ATen/native/vulkan/graph/Graph.h>
 
 namespace at {
