@@ -5456,6 +5456,30 @@ class CommonTemplate:
         args = [torch.tensor([1], dtype=torch.int64), torch.randn(8, 4), torch.randn(4)]
         self.common(fn, args)
 
+    def test_index_put_reinplace(self):
+        def fn(x, idx):
+            src = torch.ones(idx.size(0), device=x.device)
+            x.index_put_((idx,), src)
+            return x.expand((2, x.shape[0]))
+
+        a = torch.randn(1024)
+        idx = torch.arange(10)
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(fn, (a, idx))
+        assertGeneratedKernelCountEqual(self, 1)
+
+    def test_index_put_failed_reinplace(self):
+        def fn(x, idx):
+            src = torch.ones(idx.size(0), device=x.device)
+            y = x.index_put((idx,), src)
+            return x, y
+
+        a = torch.randn(1024)
+        idx = torch.arange(10)
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(fn, (a, idx))
+        assertGeneratedKernelCountEqual(self, 2)
+
     def test_adding_tensor_offsets(self):
         @torch.compile(fullgraph=True)
         def fn(x):
