@@ -894,7 +894,26 @@ Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   }
 }
 
+Tensor reshape_nested_symint(const Tensor& self, SymIntArrayRef proposed_shape) {
+  // Jagged layout NT decomp
+  if (self.layout() == at::kJagged) {
+    // TODO: Expand decomp to handle other viewable cases
+    bool viewable = self.is_contiguous();
+    return (
+        viewable ? self.view_symint(proposed_shape) :
+        self.clone(at::MemoryFormat::Contiguous).view_symint(proposed_shape)
+    );
+  }
+
+  return reshape_nested(self, C10_AS_INTARRAYREF_SLOW(proposed_shape));
+}
+
 Tensor reshape_as_nested(const Tensor& self, const Tensor& other) {
+  // Jagged layout NT decomp
+  if (self.layout() == at::kJagged) {
+    return self.reshape_symint(other.sym_sizes());
+  }
+
   auto other_ptr = get_nested_tensor_impl(other);
   // TODO: this is to reproduce other_ptr->opt_sizes_
   //       if an accessor is provided in the future, can replace this

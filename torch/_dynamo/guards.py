@@ -401,7 +401,7 @@ class GuardBuilder(GuardBuilderBase):
             assert istype(
                 val,
                 ok_types,
-            ), t.__name__
+            ), f"Unexpected type {type(val)}, not in {ok_types}"
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
