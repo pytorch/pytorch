@@ -117,7 +117,7 @@ static_assert(static_cast<int>(c10::ScalarType::NumOptions) < 45);
 // Python code to regenerate generate code below:
 #if 0
 
-num_args = 32
+num_args = 45
 
 nums = ', '.join(str(i) for i in reversed(range(num_args+1)))
 args = ', '.join(f'_{i}' for i in range(1, num_args+1))

@@ -15,7 +15,6 @@
 #include <c10/util/quint2x4.h>
 #include <c10/util/quint4x2.h>
 #include <c10/util/quint8.h>
-#include <c10/util/uint1_to_7.h>
 
 #include <array>
 #include <cstddef>
@@ -25,6 +24,11 @@
 #include <type_traits>
 
 namespace c10 {
+
+// dummy struct for uint1 to uint7, actual functionality
+// of these dtypes will be implemented in python with Tensor subclass
+template <unsigned int N>
+struct dummy_uint1_7_t {};
 
 // For the macros below:
 //
@@ -79,13 +83,13 @@ namespace c10 {
   _(uint16_t, UInt16) /* 27 */                           \
   _(uint32_t, UInt32) /* 28 */                           \
   _(uint64_t, UInt64) /* 29 */                           \
-  _(c10::uint1_t, UInt1) /* 30 */                        \
-  _(c10::uint2_t, UInt2) /* 31 */                        \
-  _(c10::uint3_t, UInt3) /* 32 */                        \
-  _(c10::uint4_t, UInt4) /* 33 */                        \
-  _(c10::uint5_t, UInt5) /* 34 */                        \
-  _(c10::uint6_t, UInt6) /* 35 */                        \
-  _(c10::uint7_t, UInt7) /* 36 */
+  _(c10::dummy_uint1_7_t<1>, UInt1) /* 30 */             \
+  _(c10::dummy_uint1_7_t<2>, UInt2) /* 31 */             \
+  _(c10::dummy_uint1_7_t<3>, UInt3) /* 32 */             \
+  _(c10::dummy_uint1_7_t<4>, UInt4) /* 33 */             \
+  _(c10::dummy_uint1_7_t<5>, UInt5) /* 34 */             \
+  _(c10::dummy_uint1_7_t<6>, UInt6) /* 35 */             \
+  _(c10::dummy_uint1_7_t<7>, UInt7) /* 36 */
 
 // If you want to support ComplexHalf for real, add ComplexHalf
 // into this macro (and change the name).  But beware: convert()
