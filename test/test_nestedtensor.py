@@ -3515,7 +3515,7 @@ class TestNestedTensorSubclass(TestCase):
                  SM80OrLater else [torch.float16, torch.float32])
     def test_sdpa(self, device, dtype):
         batch_size = 1
-        emb_dims = 64
+        emb_dims = 128
         n_heads = 8
         head_dims = emb_dims // n_heads
 
