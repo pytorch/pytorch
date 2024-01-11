@@ -75,22 +75,18 @@ VkImageLayout vk_layout(
           return VK_IMAGE_LAYOUT_GENERAL;
       }
       break;
-
     case PipelineStage::TRANSFER:
       switch (access) {
         case MemoryAccessType::READ:
           return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-
         case MemoryAccessType::WRITE:
           return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-
         default:
-          TORCH_INTERNAL_ASSERT(false, "Invalid!");
+          VK_THROW("Invalid memory access type for transfer stage!");
       }
       break;
-
     default:
-      TORCH_INTERNAL_ASSERT(false, "Invalid!");
+      VK_THROW("Cannot determine appropriate image layout");
   }
 
   return VK_IMAGE_LAYOUT_UNDEFINED;

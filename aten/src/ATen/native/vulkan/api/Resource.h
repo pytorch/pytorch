@@ -4,6 +4,8 @@
 
 #ifdef USE_VULKAN_API
 
+#include <ATen/native/vulkan/api/vk_api.h>
+
 #include <ATen/native/vulkan/api/Allocator.h>
 #include <ATen/native/vulkan/api/Utils.h>
 

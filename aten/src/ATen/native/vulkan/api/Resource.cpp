@@ -44,10 +44,7 @@ VkFormat vk_format(const at::ScalarType dtype) {
       return VK_FORMAT_R32G32B32A32_SINT;
 
     default:
-      TORCH_CHECK(
-          false,
-          "Vulkan vk_format(): no corresponding format for dtype: ",
-          dtype);
+      VK_THROW("No corresponding image format for dtype ", dtype);
   }
 }
 
@@ -66,7 +63,7 @@ c10::ScalarType c10_scalartype(const VkFormat image_format) {
       return c10::kQUInt8;
 
     default:
-      TORCH_CHECK(false, "vulkan c10_scalartype(): Unknown VkFormat.");
+      VK_THROW("No corresponding scalar type for unknown VkFormat ");
   }
 }
 
@@ -763,7 +760,7 @@ void VulkanFence::wait() {
       // The timeout (last) arg is in units of ns
       fence_status = vkWaitForFences(device_, 1u, &handle_, VK_TRUE, 100000);
 
-      TORCH_CHECK(
+      VK_CHECK_COND(
           fence_status != VK_ERROR_DEVICE_LOST,
           "Vulkan Fence: Device lost while waiting for fence!");
     } while (fence_status != VK_SUCCESS);
