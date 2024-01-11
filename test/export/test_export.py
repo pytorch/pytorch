@@ -2223,7 +2223,7 @@ def forward(self, l_x_):
         ep = export(M(), (torch.ones(16, 4),), dynamic_shapes={'x': {0: Dim("dim")}})
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
         FileCheck().check_count(
-            "torch.sym_sqrt", 1, exactly=True
+            "torch._sym_sqrt", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_check_specialized_int(self):

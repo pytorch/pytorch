@@ -524,10 +524,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # of value + args to determine this.
             fn_ = self.value
             if any(isinstance(x, SymNodeVariable) for x in args):
-                if self.value == math.sqrt:
-                    from torch.fx.experimental.sym_node import sym_sqrt
-
-                    fn_ = sym_sqrt
+                torch_sym_op = f"_sym_{self.value.__name__}"
+                if getattr(self.value, "__module__", None) == "math" and hasattr(
+                    torch, torch_sym_op
+                ):
+                    fn_ = getattr(torch, torch_sym_op)
 
             if fn_ is torch.tensor:
 
