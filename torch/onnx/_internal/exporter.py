@@ -1017,6 +1017,7 @@ class ONNXProgram:
                     "`destination` must be a string with a path when `model_state_dict` is specified."
                 )
             destination_path, destination_filename = os.path.split(destination)
+            destination_path = destination_path or os.getcwd()
             onnx_model_location = destination_filename
 
             # TODO: Should this be part of the serializer?
