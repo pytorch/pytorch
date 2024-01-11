@@ -64,13 +64,17 @@ kernel_side_table = KernelSideTable()
 # Mutation Tracker
 
 
+class IdentifyMutationException(Exception):
+    pass
+
+
 @dataclasses.dataclass
 class Proxy:
     mutated: bool = False
 
     def __add__(self, o):
         if isinstance(o, Proxy):
-            raise Exception("Proxy operation with Proxy")
+            raise IdentifyMutationException("Proxy operation with Proxy")
         return self
 
 
@@ -79,7 +83,7 @@ class Scalar:
     @staticmethod
     def check(o):
         if isinstance(o, Proxy):
-            raise Exception("Proxy operation with Scalar")
+            raise IdentifyMutationException("Proxy operation with Scalar")
 
     def __mul__(self, o):
         Scalar.check(o)
@@ -165,7 +169,7 @@ def identify_mutated_tensors(kernel, kwargs):
                 # Do not optimize
 
                 def fn(*args, **kwargs):
-                    raise Exception("inline_asm_elementwise in kernel")
+                    raise IdentifyMutationException("inline_asm_elementwise in kernel")
 
             else:
                 # Any operation not listed above, do not mutate a kernel
@@ -184,7 +188,15 @@ def identify_mutated_tensors(kernel, kwargs):
             for key, value in proxy_kwargs.items()
             if isinstance(value, Proxy) and value.mutated
         ]
-    except Exception as e:
+    except (AttributeError, IdentifyMutationException, RuntimeError) as e:
+        # - AttributeError: Triton converts constexpr to special objects
+        #   TODO(oulgen): we also need to wrap them appropriately
+        #
+        # - IdentifyMutationException: An indication for us to not optimize
+        #
+        # - RuntimeError: Throw when the kernel calls another @triton.jit kernel
+        #   Cannot call @triton.jit'd outside of the scope of a kernel
+        #   TODO(oulgen): Find a way to monkey patch @triton.jit away
         import traceback
 
         log.debug(
