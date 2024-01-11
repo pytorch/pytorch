@@ -282,7 +282,6 @@ test_dynamo_shard() {
       profiler/test_profiler \
       profiler/test_profiler_tree \
       test_python_dispatch \
-      test_package \
       test_legacy_vmap \
       test_custom_ops \
       export/test_db \
