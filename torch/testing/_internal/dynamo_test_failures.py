@@ -83,10 +83,7 @@ FIXME_default_non_strict = {
     "test_content_store",
     "test_custom_ops",
     "test_dataloader",
-    "test_decomp",
-    "test_foreach",
     "test_fx",
-    "test_fx_experimental",
     "test_jit",
     "test_jit_fuser_te",
     "test_jit_llga_fuser",
@@ -101,7 +98,6 @@ FIXME_default_non_strict = {
     "test_public_bindings",
     "test_python_dispatch",
     "test_quantization",
-    "test_spectral_ops",
     "test_tensorexpr",
     "test_tensorexpr_pybind",
     "test_torch",
@@ -8527,4 +8523,10 @@ dynamo_skips = {
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_int8",  # known py38 fail
     "TestBinaryUfuncsCPU.test_long_tensor_pow_floats_cpu",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int32",  # known py38 fail
+    "TestFXExperimental.test_optimize_for_inference_cpu",  # known py38 fail
+    "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int32",  # known py38 fail
+    "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int64",  # known py38 fail
+    "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int16",  # known py38 fail
+    "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int8",  # known py38 fail
+    "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_uint8",  # known py38 fail
 }
