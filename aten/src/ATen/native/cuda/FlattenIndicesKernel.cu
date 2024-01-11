@@ -3,7 +3,7 @@
 #include <ATen/native/sparse/FlattenIndicesCommon.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
-#include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/detail/OffsetCalculator.h>
 #include <ATen/AccumulateType.h>
 
 namespace at::native {

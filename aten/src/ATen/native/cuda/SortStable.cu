@@ -8,7 +8,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/cub.cuh>
-#include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/detail/OffsetCalculator.h>
 #include <ATen/native/cuda/SortUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 
@@ -80,7 +80,7 @@ C10_LAUNCH_BOUNDS_1(at::cuda::detail::CUDA_NUM_THREADS)
 __global__ void fill_index_and_segment_kernel(
     int2* data,
     int numel,
-    at::cuda::detail::IntDivider<uint32_t> nsort_divider) {
+    at::detail::IntDivider<uint32_t> nsort_divider) {
   CUDA_KERNEL_LOOP(idx, numel) {
     auto div_mod = nsort_divider.divmod(idx);
     auto segment = static_cast<int>(div_mod.div);
@@ -93,7 +93,7 @@ C10_LAUNCH_BOUNDS_1(at::cuda::detail::CUDA_NUM_THREADS)
 __global__ void fill_reverse_indices_kernel(
     int64_t* data,
     int numel,
-    at::cuda::detail::IntDivider<uint32_t> nsort_divider) {
+    at::detail::IntDivider<uint32_t> nsort_divider) {
   CUDA_KERNEL_LOOP(idx, numel) {
     data[idx] = nsort_divider.mod(idx);
   }
@@ -114,7 +114,7 @@ inline void segmented_sort_large_segments(
   dim3 block = CUDA_NUM_THREADS;
   dim3 grid = GET_BLOCKS(nsort);
   c10::DeviceArray<int64_t> indices(*allocator, nsort);
-  at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
+  at::detail::IntDivider<uint32_t> nsort_divider(nsort);
   fill_reverse_indices_kernel<<<grid, block, 0, stream>>>(
       indices.get(), nsort, nsort_divider);
   const int64_t* initial_indices = indices.get();
@@ -149,7 +149,7 @@ inline void segmented_sort_pairs_by_full_sort(
   dim3 block = CUDA_NUM_THREADS;
   dim3 grid = GET_BLOCKS(numel);
   auto stream = c10::cuda::getCurrentCUDAStream();
-  at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
+  at::detail::IntDivider<uint32_t> nsort_divider(nsort);
   fill_index_and_segment_kernel<<<grid, block, 0, stream>>>(
       i_s_ptr, numel, nsort_divider);
 
@@ -197,7 +197,7 @@ void segmented_sort_pairs(
   dim3 block = CUDA_NUM_THREADS;
   dim3 grid = GET_BLOCKS(numel);
   auto stream = c10::cuda::getCurrentCUDAStream();
-  at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
+  at::detail::IntDivider<uint32_t> nsort_divider(nsort);
   fill_reverse_indices_kernel<<<grid, block, 0, stream>>>(
       reverse_indices_ptr, numel, nsort_divider);
 
