@@ -2739,7 +2739,7 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
     Args:
         output_tensor (Tensor): Output tensor to accommodate tensor elements
             from all ranks. It must be correctly sized to have one of the
-            following forms:git add
+            following forms:
             (i) a concatenation of all the input tensors along the primary
             dimension; for definition of "concatenation", see ``torch.cat()``;
             (ii) a stack of all the input tensors along the primary dimension;
