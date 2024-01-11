@@ -5,6 +5,7 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Context.h>
+#include <ATen/native/vulkan/api/Types.h>
 #include <c10/core/MemoryFormat.h>
 
 namespace at {
@@ -35,7 +36,7 @@ class vTensorStorage final {
       const api::StorageType storage_type,
       const api::GPUMemoryLayout gpu_memory_layout,
       const std::vector<int64_t>& sizes,
-      const at::ScalarType dtype);
+      const api::ScalarType dtype);
 
   vTensorStorage(const vTensorStorage&) = delete;
   vTensorStorage& operator=(const vTensorStorage&) = delete;
@@ -89,7 +90,7 @@ class vTensor final {
   vTensor(
       api::Context* context,
       const std::vector<int64_t>& sizes,
-      const c10::ScalarType dtype,
+      const api::ScalarType dtype,
       const api::StorageType storage_type,
       const api::GPUMemoryLayout memory_layout);
 
@@ -99,7 +100,7 @@ class vTensor final {
       const std::vector<int64_t>& sizes,
       double q_scale,
       int64_t q_zero_point,
-      const c10::ScalarType dtype,
+      const api::ScalarType dtype,
       const api::StorageType storage_type,
       const api::GPUMemoryLayout memory_layout);
 
@@ -107,7 +108,7 @@ class vTensor final {
   vTensor(
       api::Context* context,
       const std::vector<int64_t>& sizes,
-      const c10::ScalarType dtype = c10::kFloat,
+      const api::ScalarType dtype = api::kFloat,
       const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
       const c10::MemoryFormat memory_format = c10::MemoryFormat::Contiguous);
 
@@ -117,7 +118,7 @@ class vTensor final {
       const std::vector<int64_t>& sizes,
       double q_scale,
       int64_t q_zero_point,
-      const c10::ScalarType dtype = c10::kQUInt8,
+      const api::ScalarType dtype = api::kQUInt8,
       const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
       const c10::MemoryFormat memory_format = c10::MemoryFormat::Contiguous);
 
@@ -141,7 +142,7 @@ class vTensor final {
 
  private:
   // Tensor Options
-  c10::ScalarType dtype_;
+  api::ScalarType dtype_;
 
   // GPU specific memory layout qualifier
   api::GPUMemoryLayout memory_layout_;
@@ -218,17 +219,18 @@ class vTensor final {
   }
 
   /*
-   * Extract a ScalarType from the TensorOptions member
+   * Extract an `api::ScalarType` from the TensorOptions member
    */
-  inline c10::ScalarType dtype() const {
+  inline api::ScalarType dtype() const {
     return dtype_;
   }
 
   /*
-   * Get a c10::ScalarType that corresponds to the image format of the texture
+   * Get an `api::ScalarType` that corresponds to the image format of the
+   * texture
    */
-  inline c10::ScalarType texture_dtype() const {
-    return api::c10_scalartype(view_->texture_format());
+  inline api::ScalarType texture_dtype() const {
+    return api::element_scalartype(view_->texture_format());
   }
 
   inline api::GPUMemoryLayout gpu_memory_layout() const {
@@ -306,7 +308,7 @@ class vTensor final {
   }
 
   inline size_t nbytes() const {
-    return c10::elementSize(dtype()) * numel();
+    return api::element_size(dtype()) * numel();
   }
 
   /*
@@ -320,7 +322,7 @@ class vTensor final {
    * Return nbytes but bnased on gpu_sizes_ instead of sizes_
    */
   inline VkDeviceSize gpu_nbytes() const {
-    return c10::elementSize(dtype()) * gpu_numel();
+    return api::element_size(dtype()) * gpu_numel();
   }
 };
 

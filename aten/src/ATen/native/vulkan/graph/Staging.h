@@ -16,12 +16,12 @@ void memcpy_to_mapping(
     const void* src,
     api::MemoryMap& dst_mapping,
     const size_t nbytes,
-    const c10::ScalarType dtype);
+    const api::ScalarType dtype);
 void memcpy_from_mapping(
     const api::MemoryMap& src_mapping,
     void* dst,
     const size_t nbytes,
-    const c10::ScalarType dtype);
+    const api::ScalarType dtype);
 
 //
 // Utility functions for memcpy

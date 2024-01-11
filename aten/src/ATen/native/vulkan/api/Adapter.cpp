@@ -1,6 +1,7 @@
 #include <ATen/native/vulkan/api/Adapter.h>
 
 #include <bitset>
+#include <cstring>
 #include <iomanip>
 #include <sstream>
 #include <utility>

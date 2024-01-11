@@ -531,7 +531,7 @@ vTensor pack_weights(
   vTensor v_weight{
       api::context(),
       weight_rearranged.sizes().vec(),
-      weight_arg.scalar_type(),
+      convert_dtype(weight_rearranged.scalar_type()),
       api::StorageType::TEXTURE_2D,
   };
 
@@ -556,7 +556,7 @@ vTensor pack_biases(
   vTensor v_bias{
       api::context(),
       bias_rearranged.sizes().vec(),
-      bias_rearranged.scalar_type(),
+      convert_dtype(bias_rearranged.scalar_type()),
       api::StorageType::TEXTURE_2D,
   };
 
@@ -903,7 +903,7 @@ Tensor conv1d(
           weight_out_channels,
           v_input_sizes[2] - kernel_size + 1,
       },
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
 
   const struct Block final {
@@ -1186,7 +1186,7 @@ Tensor run_conv2d_context_impl(
   vTensor v_output{
       context,
       output_size,
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
 
   if (quantized) {

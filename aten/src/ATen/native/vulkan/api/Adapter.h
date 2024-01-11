@@ -10,6 +10,7 @@
 #include <ATen/native/vulkan/api/Shader.h>
 #include <ATen/native/vulkan/api/Utils.h>
 
+#include <array>
 #include <mutex>
 #include <ostream>
 

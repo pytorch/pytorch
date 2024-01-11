@@ -24,7 +24,7 @@ Tensor _clamp(
   vTensor v_output{
       context,
       v_self.sizes(),
-      self_arg.scalar_type(),
+      v_self.dtype(),
   };
 
   const struct Block final {
@@ -152,7 +152,7 @@ Tensor activation(
   vTensor v_output{
       context,
       v_self.sizes(),
-      self_arg.scalar_type(),
+      v_self.dtype(),
   };
 
   const struct Block final {
@@ -277,7 +277,7 @@ Tensor activation_scalar(
   vTensor v_output{
       context,
       v_self.sizes(),
-      self_arg.scalar_type(),
+      v_self.dtype(),
   };
 
   api::UniformParamsBuffer params;
