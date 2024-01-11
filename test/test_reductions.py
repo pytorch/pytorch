@@ -3530,7 +3530,8 @@ as the input tensor excluding its innermost dimension'):
             # Workaround https://github.com/pytorch/pytorch/issues/66556
             expected = np.asarray(expected)  # transform numpy scalars to numpy.ndarray instances
 
-            if expected.dtype == np.uint64:
+            # Numpy differs, producing uint32 on Windows
+            if expected.dtype in [np.uint64, np.uint32]:
                 exact_dtype = False
 
             msg = ("Failed to produce expected results! Input tensor was"
