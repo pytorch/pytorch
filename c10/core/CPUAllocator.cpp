@@ -40,6 +40,10 @@ struct C10_API DefaultCPUAllocator final : at::Allocator {
   at::DeleterFnPtr raw_deleter() const override {
     return &ReportAndDelete;
   }
+
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    default_copy_data(dest, src, count);
+  }
 };
 
 ProfiledCPUMemoryReporter& profiledCPUMemoryReporter() {
@@ -141,6 +145,16 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
 
   DeleterFnPtr raw_deleter() const override {
     return deleter;
+  }
+
+  bool is_simple_data_ptr(const c10::DataPtr& data_ptr) const final {
+    return reinterpret_cast<const uint8_t*>(data_ptr.get()) ==
+        reinterpret_cast<const uint8_t*>(data_ptr.get_context()) +
+        PreGuardBytes;
+  }
+
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    default_copy_data(dest, src, count);
   }
 };
 

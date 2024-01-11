@@ -23,6 +23,7 @@ from torch._prims_common import (
     dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    get_computation_dtype,
     is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
@@ -146,7 +147,7 @@ def decode_dtype(dtype: int):
 def is_integer_type(x):
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
-    elif isinstance(x, sympy.Symbol):
+    elif isinstance(x, sympy.Expr):
         return x.is_integer is True  # type: ignore[attr-defined]
     else:
         return isinstance(x, int)
@@ -353,13 +354,13 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
 
     if not any(isinstance(x, (sympy.Expr, int, float)) for x in inputs):
         return inputs
-    if all(isinstance(x, (int, float, sympy.Symbol)) for x in inputs):
+    if all(isinstance(x, (int, float, sympy.Expr)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
             *inputs, type_promotion_kind=type_promotion_kind
         )
 
         def const_func(x):
-            if isinstance(x, sympy.Symbol):
+            if isinstance(x, sympy.Expr):
                 return ir.IndexingConstant(x, dtype, decode_device(None))
             else:
                 return ir.Constant(x, dtype, decode_device(None))
@@ -1091,7 +1092,12 @@ def cat(inputs, dim=0):
 
         return False
 
-    if len(inputs) <= config.max_pointwise_cat_inputs:
+    # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
+    #             We will revisit this later after enabling vectorization on index_expr.
+    if (
+        len(inputs) <= config.max_pointwise_cat_inputs
+        and inputs[0].get_device().type != "cpu"
+    ):
         pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
         all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
         any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
@@ -1522,6 +1528,17 @@ def register_onednn_fusion_ops():
             unary_scalars,
             unary_algorithmm,
         ):
+            if (
+                binary_attr == "sum"
+                and output_dtype in [torch.float32, torch.bfloat16]
+                and accum.get_dtype() in [torch.float32, torch.bfloat16]
+                and accum.get_dtype() != output_dtype
+            ):
+                # For int8-mixed-bf16 quantization and inplace add,
+                # there is case when accum dtype is float32 but output dtype is bfloat16.
+                # Since the accum will be inplaced changed with post op sum,
+                # we will do accum dtype convertion here.
+                accum = to_dtype(accum, output_dtype)
             return TensorBox.create(
                 ir.QConvPointWiseBinaryPT2E.create(
                     x,
@@ -2042,7 +2059,8 @@ make_fallback(aten.randperm)
 
 
 def sdpa_constraint(fx_node, *args, **kwargs):
-    # sdpa requires dense last dimension
+    # sdpa requires dense last dimension]
+
     def apply_constraint(arg, fx_arg):
         if not isinstance(arg, ir.IRNode):
             return arg
@@ -2060,25 +2078,11 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
         ALIGNMENT = 8
 
-        is_backward = fx_node.target in (
-            aten._scaled_dot_product_efficient_attention_backward.default,
-            aten._scaled_dot_product_flash_attention_backward.default,
-        )
-
-        def is_aligned(x):
-            return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
-
         assert isinstance(arg, TensorBox)
+        if len(arg.get_size()) not in (3, 4):
+            return arg
 
-        # This correctly handles the forward case:
-        if isinstance(arg.data, (ir.SliceView, ir.ExpandView)):
-            if not is_aligned(arg):
-                # input is padded, requiring_stride_order will unwrap the view and unpad.
-                # Would be nice to be able to require certain padding from inductor ir, nyi
-                if is_aligned(arg.unwrap_view()):
-                    return arg
-
-        def is_aligned_backward(x):
+        def is_aligned_realized_tensor(x):
             aligned_strides = all(
                 (V.graph.sizevars.size_hint(x.get_stride()[i]) % ALIGNMENT) == 0
                 for i in range(len(x.get_stride()) - 1)
@@ -2087,13 +2091,20 @@ def sdpa_constraint(fx_node, *args, **kwargs):
                 V.graph.sizevars.size_hint(x.get_stride()[-1])
             ) == 1 and aligned_strides
 
-        if (
-            isinstance(arg.data, ir.StorageBox)
-            and arg.data.is_input_buffer()
-            and is_backward
-        ):
-            if len(arg.data.get_size()) == 4 and is_aligned_backward(arg):
+        try:
+            arg.get_stride()
+            if is_aligned_realized_tensor(arg):
                 return arg
+        except AttributeError:
+            pass
+
+        def is_aligned(x):
+            return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
+
+        if isinstance(arg.data, ir.BaseView):
+            if not is_aligned(arg):
+                if is_aligned(arg.unwrap_view()):
+                    return arg
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
@@ -2121,6 +2132,16 @@ make_fallback(
 )
 make_fallback(
     aten._scaled_dot_product_flash_attention_backward.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_flash_attention_for_cpu.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_flash_attention_for_cpu_backward.default,
     sdpa_constraint,
     warn=False,
 )
@@ -2228,7 +2249,6 @@ make_fallback(aten.special_scaled_modified_bessel_k0)
 make_fallback(aten.special_scaled_modified_bessel_k1)
 make_fallback(aten.special_spherical_bessel_j0, warn=False)
 make_fallback(aten.special_zeta, warn=False)
-make_fallback(aten.take)
 make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten._adaptive_avg_pool3d_backward)
@@ -2300,6 +2320,26 @@ def clone(x, *, memory_format=None):
         inner_fn=x.make_loader(),
         ranges=list(x.get_size()),
     )
+
+
+def clone_preserve_reinterpret_view(x):
+    reinterpret_view_layouts = []
+    if isinstance(x, TensorBox) and isinstance(x.data, ir.ReinterpretView):
+        x = x.data  # unwrap TensorBox
+        while isinstance(x, ir.ReinterpretView):
+            reinterpret_view_layouts.append(x.get_layout())
+            x = x.data
+        x = TensorBox(x)
+
+    x = clone(x)
+
+    if reinterpret_view_layouts:
+        x = x.data  # unwrap TensorBox
+        for layout in reinterpret_view_layouts[::-1]:
+            x = ir.ReinterpretView(x, layout)
+        x = TensorBox(x)
+
+    return x
 
 
 if hasattr(aten, "lift_fresh_copy"):
@@ -3638,12 +3678,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     # if padding is a complicated expression, hoist it
     bounds_precomp: List[Tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
-        l_precomp = (
-            V.graph.sizevars.lookup_precomputed_size(l)
-            if isinstance(l, sympy.Expr) and not l.is_number
-            else l
-        )
-        bounds_precomp.append((l_precomp, h))
+        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))
 
     output_size = list(sizes[:n])
     mask_sizes = []
@@ -4594,7 +4629,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
     if not return_mean:
-        return x_var
+        return (x_var,)
 
     x_mean = x_mean if keepdim else squeeze(x_mean, axis)
     return x_var, x_mean
@@ -4656,29 +4691,39 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     if return_mean:
         mean.realize()
         return var, mean
-    return var
+    return (var,)
+
+
+def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
+    out_dtype = x.get_dtype()
+    compute_dtype = get_computation_dtype(out_dtype)
+    x = to_dtype(x, compute_dtype, copy=False)
+    kwargs = dict(
+        x=x,
+        axis=axis,
+        correction=correction,
+        keepdim=keepdim,
+        return_mean=return_mean,
+    )
+    output = (
+        var_mean_sum_(**kwargs)
+        if use_two_step_variance(x, axis=axis, keepdim=keepdim)
+        else var_mean_welford_(**kwargs)
+    )
+    output = tuple(to_dtype(x, out_dtype, copy=False) for x in output)
+    return output[0] if not return_mean else output
 
 
 @register_lowering([aten.var, prims.var])
 def var_(x, axis=None, *, correction=None, keepdim=False):
-    if use_two_step_variance(x, axis=axis, keepdim=keepdim):
-        return var_mean_sum_(
-            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
-        )
-
-    return var_mean_welford_(
+    return var_mean_helper_(
         x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
     )
 
 
 @register_lowering(aten.var_mean)
 def var_mean(x, axis=None, *, correction=None, keepdim=False):
-    if use_two_step_variance(x, axis=axis, keepdim=keepdim):
-        return var_mean_sum_(
-            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
-        )
-
-    return var_mean_welford_(
+    return var_mean_helper_(
         x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
     )
 
@@ -5276,7 +5321,8 @@ def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
 @register_lowering(triton_kernel_wrapper_functional)
 def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
     kwargs = {
-        key: (clone(x) if key in tensors_to_clone else x) for key, x in kwargs.items()
+        key: (clone_preserve_reinterpret_view(x) if key in tensors_to_clone else x)
+        for key, x in kwargs.items()
     }
     return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
 
@@ -5422,6 +5468,18 @@ try:
                 group_size,
                 group_name,
             ),
+        )
+
+    @register_lowering(_c10d_functional.all_to_all_single)
+    def _all_to_all_single(inp, output_split_sizes, input_split_sizes, group_name):
+        return ir.TensorBox.create(
+            ir._CollectiveKernel.create_out_of_place(
+                _c10d_functional.all_to_all_single.default,
+                inp,
+                output_split_sizes,
+                input_split_sizes,
+                group_name,
+            )
         )
 
     @register_lowering(_c10d_functional.wait_tensor)

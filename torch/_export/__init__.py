@@ -3,7 +3,6 @@ import dataclasses
 import functools
 import io
 import json
-import pathlib
 import re
 import sys
 import os
@@ -35,6 +34,7 @@ from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.export.exported_program import (
     ExportedProgram,
     ModuleCallEntry,
@@ -88,57 +88,12 @@ from .wrappers import _wrap_submodules
 from torch._inductor import config
 
 
-def export__RC__(
-    f: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
-    *,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
-    strict: bool = True,
-    preserve_module_call_signature: Tuple[str, ...] = (),
-) -> ExportedProgram:
-    """
-    API for exporting with dynamic shape specifications instead of constraints.
-    It should be considered "release candidate" (RC), meant to replace `export`.
-
-    Here, `dynamic_shapes` is expected to be a dict from
-    argument names of `f` to dynamic shape specifications OR a tuple where each element
-    corresponds to the original order of the arguments defined in the function signature
-    ,as follows:
-    - The dynamic shape of a tensor argument can be specified as:
-      - Either a dict from dynamic dimension indices to Dim types. It is not
-        required to include static dimension indices in this dict, but when
-        they are, they should be mapped to None.
-      - Or a tuple of Dim types or None. The Dim types correspond to dynamic
-        dimensions, whereas static dimensions are denoted by None.
-    - Arguments that are dicts or tuples of tensors are recursively specified
-      by using mappings or sequences of contained specifications.
-
-    See `export` for documentation of `f`, `args`, `kwargs` and return.
-    """
-    from torch.export._trace import _export
-    warnings.warn("This function is deprecated. Please use torch.export.export instead.")
-
-    constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
-    return _export(
-        f,
-        args,
-        kwargs,
-        constraints=constraints,
-        strict=strict,
-        preserve_module_call_signature=preserve_module_call_signature
-    )
-
-
 @dataclasses.dataclass
 class ExportDynamoConfig:
     """
     Manage Export-specific configurations of Dynamo.
     """
     allow_rnn: bool = True
-
-
-DECOMP_TABLE = core_aten_decompositions()
 
 
 @compatibility(is_backward_compatible=False)
@@ -170,16 +125,10 @@ def capture_pre_autograd_graph(
     """
     from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG
 
-    decomp_table = {
-        torch.ops.aten.dropout.default: torch.ops.aten.dropout.default.decompose,
-        torch.ops.aten.batch_norm.default: torch.ops.aten.batch_norm.default.decompose,
-        torch.ops.aten._batch_norm_impl_index.default: torch.ops.aten._batch_norm_impl_index.default.decompose,
-        torch.ops.aten.native_batch_norm.default: torch.ops.aten.native_batch_norm.default.decompose,
-    }
-
     if kwargs is None:
         kwargs = {}
 
+    decomp_table = {op: op.decompose for op in FunctionalTensor.maybe_aliasing_or_mutating_ops}
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         m = torch._dynamo.export(
             f,
@@ -194,12 +143,6 @@ def capture_pre_autograd_graph(
             **kwargs,
         )[0]
 
-        def _train(self, mode: bool = True):
-            raise NotImplementedError("Calling train() is not supported yet.")
-
-        def _eval(self, mode: bool = True):
-            raise NotImplementedError("Calling eval() is not supported yet.")
-
         _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
 
         m.meta["inline_constraints"] = {
@@ -213,15 +156,21 @@ def capture_pre_autograd_graph(
             _restore_state_dict(f, m)
 
         flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
-        range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
-        unlifted_m = _create_stateful_graph_module(
+        range_constraints = _process_constraints(m, 0, flat_args)
+        module = _create_stateful_graph_module(
             m,
             range_constraints=range_constraints,
-            equality_constraints=equality_constraints,
         )
-        unlifted_m.train = types.MethodType(_train, m)  # type: ignore[method-assign]
-        unlifted_m.eval = types.MethodType(_eval, m)  # type: ignore[method-assign]
-        return unlifted_m
+
+    def _train(self, mode: bool = True):
+        raise NotImplementedError("Calling train() is not supported yet.")
+
+    def _eval(self, mode: bool = True):
+        raise NotImplementedError("Calling eval() is not supported yet.")
+
+    module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
+    module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
+    return module
 
 
 def export(
@@ -254,52 +203,9 @@ def export(
     )
 
 
-@_disable_prexisiting_fake_mode
-def _export(
-    f: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
-    *,
-    strict: bool = True,
-    preserve_module_call_signature: Tuple[str, ...] = (),
-) -> ExportedProgram:
-    """
-    Traces either an nn.Module's forward function or just a callable with PyTorch
-    operations inside and produce a ExportedProgram.
-
-    Args:
-        m: the `nn.Module` or callable to trace.
-
-        args: example positional inputs.
-
-        kwargs: optional example keyword inputs.
-
-        constraints: A optional list of constraints on the dynamic arguments specifying
-            their possible range of their shapes
-
-        preserve_module_call_signature: A list of submodule paths for which the original
-            calling conventions are preserved as metadata.
-
-    Returns:
-        An ExportedProgram containing the traced method.
-    """
-    from torch.export._trace import _export
-    warnings.warn("This function is deprecated. Please use torch.export.export instead.")
-
-    return _export(
-        f,
-        args,
-        kwargs,
-        constraints,
-        strict=strict,
-        preserve_module_call_signature=preserve_module_call_signature,
-    )
-
-
 def save(
     ep: ExportedProgram,
-    f: Union[str, pathlib.Path, io.BytesIO],
+    f: Union[str, os.PathLike, io.BytesIO],
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     opset_version: Optional[Dict[str, int]] = None,
@@ -308,8 +214,8 @@ def save(
     from .serde.schema import SCHEMA_VERSION
     artifact: SerializedArtifact = serialize(ep, opset_version)
 
-    if isinstance(f, (str, pathlib.Path)):
-        f = str(f)
+    if isinstance(f, (str, os.PathLike)):
+        f = os.fspath(f)
 
     with zipfile.ZipFile(f, 'w') as zipf:
         # Save every field the SerializedArtifact to a file
@@ -318,7 +224,7 @@ def save(
             serialized_field = getattr(artifact, field_name)
             zipf.writestr(f"serialized_{field_name}.json", serialized_field)
 
-        zipf.writestr('version', str(SCHEMA_VERSION))
+        zipf.writestr('version', ".".join(map(str, SCHEMA_VERSION)))
 
         # Add extra files if provided
         if extra_files:
@@ -328,20 +234,21 @@ def save(
 
 
 def load(
-    f: Union[str, pathlib.Path, io.BytesIO],
+    f: Union[str, os.PathLike, io.BytesIO],
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     expected_opset_version: Optional[Dict[str, int]] = None,
 ) -> ExportedProgram:
-    if isinstance(f, (str, pathlib.Path)):
-        f = str(f)
+    if isinstance(f, (str, os.PathLike)):
+        f = os.fspath(f)
 
     with zipfile.ZipFile(f, 'r') as zipf:
         # Check the version
-        version = int(zipf.read('version'))
+        version = zipf.read('version').decode().split('.')
         from .serde.schema import SCHEMA_VERSION
 
-        if version != SCHEMA_VERSION:
+        assert len(version) == len(SCHEMA_VERSION)
+        if version[0] != str(SCHEMA_VERSION[0]):
             raise RuntimeError(
                 f"Serialized version {version} does not match our current "
                 f"schema version {SCHEMA_VERSION}."
@@ -431,7 +338,10 @@ def aot_compile(
             args,
             kwargs,
             constraints,
-            disable_constraint_solver=disable_constraint_solver
+            disable_constraint_solver=disable_constraint_solver,
+            # Disabling this flag, because instead we can rely on the mapping
+            # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
+            restore_fqn=False,
         )
     flat_example_inputs = pytree.arg_tree_leaves(*args, **(kwargs or {}))
 
