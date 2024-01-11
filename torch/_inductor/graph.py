@@ -913,6 +913,7 @@ class GraphLowering(torch.fx.Interpreter):
                     ]
                     if torch._C.has_mkl:
                         fixed_layout_ops += [torch.ops.mkl._mkl_linear.default]
+
                 def needs_fixed_layout(t):
                     return t in fixed_layout_ops or (
                         isinstance(t, torch._ops.OpOverload)

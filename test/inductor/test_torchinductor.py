@@ -802,7 +802,7 @@ class CommonTemplate:
             w = torch.ops.mynamespace.mm(b)
             return z + w
 
-        self.common(fn, (torch.randn(2,2,2), torch.randn(2,2,2)))
+        self.common(fn, (torch.randn(2, 2, 2), torch.randn(2, 2, 2)))
 
     def test_horizonal_fusion1(self):
         def fn(a, b, c):
