@@ -1003,7 +1003,9 @@ class ONNXProgram:
                     continue
                 try:
                     # Loads checkpoint using memory-map on CPU to succeed with large models
-                    extra_state_dict = torch.load(path, map_location="cpu", mmap=True, weights_only=True)
+                    extra_state_dict = torch.load(
+                        path, map_location="cpu", mmap=True, weights_only=True
+                    )
                     extra_state_dict_file = io.BytesIO()
                     torch.save(extra_state_dict, extra_state_dict_file)
                     extra_state_dict_file.seek(0)
@@ -1018,6 +1020,7 @@ class ONNXProgram:
                     "`destination` must be a string with a path when `model_state_dict` is specified."
                 )
             destination_path, destination_filename = os.path.split(destination)
+            destination_path = destination_path or os.getcwd()
             onnx_model_location = destination_filename
 
             # TODO: Should this be part of the serializer?
