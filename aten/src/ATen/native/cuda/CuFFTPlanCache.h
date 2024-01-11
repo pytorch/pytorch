@@ -123,11 +123,7 @@ static bool is_pow_of_two(int64_t x) {
   return (x & (x - 1)) == 0;
 }
 
-#if defined(USE_ROCM)
-    using cufft_size_type = int;
-#else
-    using cufft_size_type = long long int;
-#endif
+using cufft_size_type = long long int;
 
 using CuFFTDimVector = c10::SmallVector<cufft_size_type, at::kDimVectorStaticSize>;
 
