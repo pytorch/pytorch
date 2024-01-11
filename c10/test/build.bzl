@@ -21,7 +21,6 @@ def define_targets(rules):
             "//c10/core:base",
             "//c10/util:base",
             "//c10/core:CPUAllocator",
-            "//c10/core:impl_cow",
             "@com_google_googletest//:gtest_main",
         ],
     )
