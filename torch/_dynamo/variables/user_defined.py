@@ -845,11 +845,29 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         # TODO this should probably be merged with the dict handling
 
-        index = (
-            key.source
-            if is_hashable(key) and key.source is not None
-            else key.as_python_constant()
-        )
+        if key.source and not is_hashable(key):
+            raise ValueError("Trying to use a non-hashable key in a dict")
+
+        # TODO(anijain2305) Is there a better way to insert guard than iterating through hashable variable trackers?
+        if isinstance(key, variables.ConstantVariable):
+            install_guard(key.source.make_guard(GuardBuilder.CONSTANT_MATCH))
+        elif isinstance(key, variables.BuiltinVariable):
+            install_guard(key.source.make_guard(GuardBuilder.BUILTIN_MATCH))
+        elif isinstance(
+            key,
+            (
+                variables.SymNodeVariable,
+                variables.user_defined.UserDefinedClassVariable,
+                variables.misc.SkipFilesVariable,
+                variables.misc.NumpyVariable,
+                variables.NNModuleVariable,
+            ),
+        ):
+            install_guard(key.source.make_guard(GuardBuilder.ID_MATCH))
+        else:
+            raise ValueError("Detected unhashable variable tracker in the dict key")
+
+        index = key.as_python_constant()
 
         return VariableBuilder(
             tx,
