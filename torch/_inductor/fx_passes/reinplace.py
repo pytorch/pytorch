@@ -157,6 +157,11 @@ _ALWAYS_MUTATING_SCATTER_OPS = {
 }
 
 
+def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
+    _, _, view_ops = node.args
+    return any(view.target in _ALWAYS_MUTATING_SCATTER_OPS for view in view_ops)
+
+
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -168,11 +173,10 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     inp, src, view_ops = node.args
 
     # Mutating scatter ops unconditionally realize input and output
-    if any(view.target in _ALWAYS_MUTATING_SCATTER_OPS for view in view_ops):
+    if scatter_always_uses_mutation(node):
         return True
 
     # Check if input is always a buffer, and output is always realized by users.
-
     def is_buffer(node):
         return node.op == "placeholder" or node.target in fallbacks
 
@@ -201,7 +205,7 @@ def decompose_generalized_scatter(graph: torch.fx.Graph) -> None:
 
         use_mutation = (
             node.target is _inplace_generalized_scatter
-            or should_reinplace_scatter(node)
+            or scatter_always_uses_mutation(node)
         )
 
         with graph.inserting_before(node):
