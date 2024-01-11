@@ -757,7 +757,7 @@ def jagged_scaled_dot_product_attention(
             query, key, value, attn_mask, dropout_p, is_causal, scale=scale
         )[0]
 
-        # convert strider layout Nested Tensor back to jagged layout Nested Tensor
+        # convert strided layout Nested Tensor back to jagged layout Nested Tensor
         attn_out = attn_out.transpose(1, 2).contiguous().values()
         attn_out = attn_out.view(-1, shape[-3], shape[-1])
         attn_out = ViewNestedFromBuffer.apply(attn_out, offsets)
