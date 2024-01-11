@@ -5385,15 +5385,6 @@
   autogen: slice_scatter.out
   tags: [core, view_copy]
 
-- func: select_scatter(Tensor self, Tensor src, int dim, SymInt index) -> Tensor
-  variants: function, method
-  device_check: NoCheck
-  device_guard: False
-  dispatch:
-    CompositeExplicitAutogradNonFunctional: select_scatter_symint
-  autogen: select_scatter.out
-  tags: [core, view_copy]
-
 # NB: This op exists to back the implementation of reverse view_funcs for various views (unbind,
 # select). Currently, these are only used during fake-ification of PT2 graph input subclass
 # instances that are views. This means:
@@ -5408,6 +5399,15 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: select_inverse_symint
+
+- func: select_scatter(Tensor self, Tensor src, int dim, SymInt index) -> Tensor
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: select_scatter_symint
+  autogen: select_scatter.out
+  tags: [core, view_copy]
 
 - func: diagonal_scatter(Tensor self, Tensor src, int offset=0, int dim1=0, int dim2=1) -> Tensor
   variants: function, method
