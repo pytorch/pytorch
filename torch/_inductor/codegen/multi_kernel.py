@@ -285,12 +285,23 @@ class MultiKernelCall:
     def run(self, *args, **kwargs):
         self._run(self, *args, **kwargs)
 
+    @staticmethod
+    def benchmark_sub_kernels(kernel_calls):
+        """
+        Benchmark all the sub kernels and return the execution time
+        (in milliseconds) for each of time.
+
+        Unit test may mock this method to force a specific kernel to
+        be picked.
+        """
+        return [
+            do_bench(lambda: kernel_call(True), rep=40, fast_flush=True)
+            for kernel_call in kernel_calls
+        ]
+
     def run_with_argless_kernels(self, kernel_calls):
         if self.picked_kernel is None:
-            timings = [
-                do_bench(lambda: kernel_call(True), rep=40, fast_flush=True)
-                for kernel_call in kernel_calls
-            ]
+            timings = self.benchmark_sub_kernels(kernel_calls)
             self.picked_kernel = timings.index(min(timings))
             k0 = self.kernels[0]
             log.debug(

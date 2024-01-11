@@ -1,12 +1,22 @@
 # Owner(s): ["module: inductor"]
 
+import os
+import re
+import unittest
+
 import torch
 from torch import nn
 from torch._dynamo.testing import reset_rng_state
 
 from torch._inductor import config
+from torch._inductor.codegen.multi_kernel import MultiKernelCall
+from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    TestCase,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -27,12 +37,50 @@ class TransformerSnippet(nn.Module):
 
 
 @config.patch({"triton.multi_kernel": 1, "benchmark_kernel": True})
+@instantiate_parametrized_tests
 class MultiKernelTest(TestCase):
     def test_softmax(self):
         x = torch.rand(2, 1024).cuda()
         ref = torch.softmax(x, -1)
-        act = torch.compile(torch.softmax)(x, -1)
+        compiled_fn = torch.compile(torch.softmax)
+        act, (wrapper_code,) = run_and_get_code(compiled_fn, x, -1)
         self.assertTrue(torch.allclose(ref, act))
+        self.assertTrue(
+            re.search(r"multi_kernel_[^ ]* = MultiKernelCall[(]", wrapper_code)
+            is not None
+        )
+
+    @parametrize("force_kernel", (0, 1))
+    @unittest.mock.patch.dict(
+        os.environ, {"TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE": "1"}
+    )
+    def test_softmax_force_non_persistent_reduction(self, force_kernel):
+        """
+        Force a specific sub-kernel being picked by mocking the benchmark result.
+        """
+        x = torch.rand(2, 1024).cuda()
+        mock_latency = [0.2, 0.2]
+        mock_latency[force_kernel] = 0.1  # this make sure force_kernel will be picked
+
+        def f(x):
+            return torch.softmax(x, -1) + force_kernel
+
+        orig_run = MultiKernelCall.run_with_argless_kernels
+        picked_kernel = None
+
+        def mock_run(self, kernel_calls):
+            out = orig_run(self, kernel_calls)
+            nonlocal picked_kernel
+            picked_kernel = self.picked_kernel
+            return out
+
+        with unittest.mock.patch.object(
+            MultiKernelCall, "run_with_argless_kernels", mock_run
+        ), unittest.mock.patch.object(
+            MultiKernelCall, "benchmark_sub_kernels", lambda *args: mock_latency
+        ):
+            torch.compile(f)(x)
+        self.assertEqual(picked_kernel, force_kernel)
 
     @config.patch("warn_mix_layout", True)
     def test_softmax_warn_mixed_layout(self):
