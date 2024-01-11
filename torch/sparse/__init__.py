@@ -6,7 +6,7 @@ from torch._C import _add_docstr, _sparse  # type: ignore[attr-defined]
 from torch import Tensor
 
 # Semi structured sparsity support
-from .semi_structured import SparseSemiStructuredTensor, to_sparse_semi_structured
+from .semi_structured import SparseSemiStructuredTensor, to_sparse_semi_structured, SparseSemiStructuredTensorCUSPARSELT, SparseSemiStructuredTensorCUTLASS
 
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
@@ -27,6 +27,8 @@ __all__ = [
     'softmax',
     'log_softmax',
     'SparseSemiStructuredTensor',
+    'SparseSemiStructuredTensorCUTLASS',
+    'SparseSemiStructuredTensorCUSPARSELT',
     'to_sparse_semi_structured',
     'as_sparse_gradcheck',
 ]
