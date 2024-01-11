@@ -247,11 +247,16 @@ class CPUReproTests(TestCase):
                 res = self.linear(res)
                 return res
 
+        dtypes = []
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
             with torch.no_grad():
-                m = M(224, 224).bfloat16().eval()
+                m = M(224, 224).to(dtype).eval()
                 m_opt = torch.compile(m)
-                x = torch.randn(224, 224, dtype=torch.bfloat16)
+                x = torch.randn(224, 224, dtype=dtype)
                 m_opt(x)
                 self.assertEqual(m(x), m_opt(x))
 
@@ -316,10 +321,15 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_packed(self):
+        dtypes = []
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
         options = itertools.product(
-            [[2, 3, 10], [2, 10], [10], [2, 0]], [3, 0], [True, False]
+            [[2, 3, 10], [2, 10], [10], [2, 0]], [3, 0], [True, False], dtypes
         )
-        for input_shape, out_dim, bias in options:
+        for input_shape, out_dim, bias, dtype in options:
             mod = torch.nn.Sequential(
                 torch.nn.Linear(input_shape[-1], out_dim, bias=bias)
             ).eval()
@@ -327,17 +337,9 @@ class CPUReproTests(TestCase):
             v = torch.randn(input_shape)
             with torch.no_grad():
                 self.common(
-                    mod,
-                    (v,),
+                    mod.to(dtype),
+                    (v.to(dtype),),
                 )
-            if torch.ops.mkldnn._is_mkldnn_bf16_supported() and len(input_shape) > 1:
-                mod = mod.to(torch.bfloat16)
-                v = v.to(torch.bfloat16)
-                with torch.no_grad():
-                    self.common(
-                        mod,
-                        (v,),
-                    )
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
@@ -378,6 +380,8 @@ class CPUReproTests(TestCase):
             dtypes = [torch.float]
             if torch.ops.mkldnn._is_mkldnn_bf16_supported():
                 dtypes.append(torch.bfloat16)
+            if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+                dtypes.append(torch.float16)
             for dtype in dtypes:
                 counters.clear()
                 num_directions = 2 if bidirectional else 1
@@ -2539,22 +2543,22 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     @config.patch(freezing=True)
     def test_linear_with_no_default_contiguous_input(self):
+        dtypes = [
+            torch.float32,
+        ]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
         mod = torch.nn.Sequential(torch.nn.Linear(16, 16)).eval()
         temp = torch.randn(1, 16, 1, 1)
         v = torch.as_strided(temp, [1, 16], [0, 1], 0)
         self.assertTrue(v.is_contiguous())
-        with torch.no_grad():
-            self.common(
-                mod,
-                (v,),
-            )
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-            mod = mod.to(torch.bfloat16)
-            v = v.to(torch.bfloat16)
+        for dtype in dtypes:
             with torch.no_grad():
                 self.common(
-                    mod,
-                    (v,),
+                    mod.to(dtype),
+                    (v.to(dtype),),
                 )
 
     @patch("torch.cuda.is_available", lambda: False)

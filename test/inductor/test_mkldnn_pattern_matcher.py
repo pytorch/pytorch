@@ -118,20 +118,33 @@ class TestPatternMatcherBase(TestCase):
         matcher_nodes=None,
         atol=1e-5,
         rtol=1.3e-6,
-        check_autocast=False,
+        check_autocast=torch.float32,
         check_quantization=False,
         is_qat=False,
         matcher_check_fn=None,
+        dtype=None,
     ):
         counters.clear()
         torch._dynamo.reset()
-        maybe_autocast = contextlib.nullcontext()
         assert matcher_check_fn is not None or (
             matcher_count is not None and matcher_nodes is not None
         )
-        if check_autocast and torch.ops.mkldnn._is_mkldnn_bf16_supported():
-            maybe_autocast = torch.cpu.amp.autocast()
+        if (
+            check_autocast == torch.bfloat16
+            and torch.ops.mkldnn._is_mkldnn_bf16_supported()
+        ):
+            maybe_autocast = torch.cpu.amp.autocast(dtype=torch.bfloat16)
             atol, rtol = 1e-2, 1e-2
+        elif (
+            check_autocast == torch.float16
+            and torch.ops.mkldnn._is_mkldnn_fp16_supported()
+        ):
+            maybe_autocast = torch.cpu.amp.autocast(dtype=torch.float16)
+            atol, rtol = 1e-2, 1e-2
+        else:
+            assert check_autocast == torch.float32
+            maybe_autocast = contextlib.nullcontext()
+
         if check_quantization:
             convert_model = self._generate_qdq_quantized_model(mod, inputs, is_qat)
             with torch.no_grad(), maybe_autocast:
@@ -208,16 +221,23 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 x = self.conv(x)
                 return self.unary_fn(x)
 
+        dtypes = [
+            torch.float,
+        ]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
         options = itertools.product(
             unary_list.keys(),
             [torch.contiguous_format, torch.channels_last],
-            [True, False] if torch.ops.mkldnn._is_mkldnn_bf16_supported() else [False],
+            dtypes,
         )
 
         for (
             unary_fn,
             memory_format,
-            check_autocast,
+            dtype,
         ) in options:
             x_shape = (1, 3, 56, 56)
             mod = M(unary_fn).to(memory_format=memory_format).eval()
@@ -229,10 +249,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
             # Add 1 for weight packing pass.
             match_nodes = unary_list[unary_fn] + 1
-            if check_autocast and self._check_unary_is_decomposed(unary_fn):
+            if dtype in (
+                torch.float16,
+                torch.bfloat16,
+            ) and self._check_unary_is_decomposed(unary_fn):
                 # Has extra dtype conversion nodes for autocast.
                 match_nodes += 2
-            self._test_common(mod, (v,), 2, match_nodes, check_autocast=check_autocast)
+            self._test_common(mod, (v,), 2, match_nodes, check_autocast=dtype)
 
     def test_linear_unary(self):
         class M(torch.nn.Module):
@@ -257,24 +280,27 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 x = self.linear(x)
                 return self.unary_fn(x)
 
-        options = itertools.product(unary_list, [True, False])
-        dtype = torch.bfloat16
+        dtypes = []
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-            for unary_fn, bias in options:
-                mod = M(unary_fn, 10, 30, bias=bias).eval()
-                # only fuse for linear when the dtype is bf16
-                mod = mod.to(dtype)
-                v = torch.randn(2, 10).to(dtype)
-                # packing pass + unary fusion.
-                matcher_count = 2
-                # Add 1 for weight packing pass.
-                matcher_nodes = unary_list[unary_fn] + 1
-                if self._check_unary_is_decomposed(unary_fn):
-                    # Has extra dtype conversion nodes for autocast.
-                    matcher_nodes += 2
-                self._test_common(
-                    mod, (v,), matcher_count, matcher_nodes, check_autocast=True
-                )
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        options = itertools.product(unary_list, [True, False], dtypes)
+        for unary_fn, bias, dtype in options:
+            mod = M(unary_fn, 10, 30, bias=bias).eval()
+            # only fuse for linear when the dtype is bf16
+            mod = mod
+            v = torch.randn(2, 10)
+            # packing pass + unary fusion.
+            matcher_count = 2
+            # Add 1 for weight packing pass.
+            matcher_nodes = unary_list[unary_fn] + 1
+            if self._check_unary_is_decomposed(unary_fn):
+                # Has extra dtype conversion nodes for autocast.
+                matcher_nodes += 2
+            self._test_common(
+                mod, (v,), matcher_count, matcher_nodes, check_autocast=dtype
+            )
 
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     def test_linear_fp32(self):
@@ -311,13 +337,21 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 x = self.conv_transpose2d(x)
                 return self.unary_fn(x)
 
+        dtypes = [
+            torch.float,
+        ]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+
         options = itertools.product(
             unary_list,
             [torch.contiguous_format, torch.channels_last],
-            [True, False] if torch.ops.mkldnn._is_mkldnn_bf16_supported() else [False],
+            dtypes,
         )
 
-        for unary_fn, memory_format, check_autocast in options:
+        for unary_fn, memory_format, dtype in options:
             x_shape = (1, 3, 28, 28)
             mod = M(unary_fn).eval()
 
@@ -326,10 +360,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
             # Add 1 for weight packing pass.
             match_nodes = unary_list[unary_fn] + 1
-            if check_autocast and self._check_unary_is_decomposed(unary_fn):
+            if dtype in (
+                torch.float16,
+                torch.bfloat16,
+            ) and self._check_unary_is_decomposed(unary_fn):
                 # Has extra dtype conversion nodes for autocast.
                 match_nodes += 2
-            self._test_common(mod, (v,), 2, match_nodes, check_autocast=check_autocast)
+            self._test_common(mod, (v,), 2, match_nodes, check_autocast=dtype)
 
     def test_conv2d_binary(self):
         class M(torch.nn.Module):
@@ -392,27 +429,32 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 x = self.binary_fn(x, y.clone())
                 return x
 
-        options = itertools.product(binary_list, [[2, 3, 10], [2, 10]], [True, False])
-        dtype = torch.bfloat16
-        out_feature = 30
+        dtypes = []
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-            for binary_fn, input_shape, bias in options:
-                torch._dynamo.reset()
-                # addmm(mm) + (linear+add)
-                match_count = 2
-                match_nodes = 3
-                if len(input_shape) == 3:
-                    is_inplace = binary_list[binary_fn][2]
-                    # view + linear + view(joint_graph+freeze pass)
-                    match_count = match_count + 5 if is_inplace else match_count + 3
-                    match_nodes = match_nodes + 7 if is_inplace else match_nodes + 5
-                mod = M(binary_fn, input_shape[-1], out_feature, bias).to(dtype).eval()
-                v = torch.randn(input_shape).to(dtype)
-                other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
-                mod_c = torch.compile(mod)
-                out, code = run_and_get_code(mod_c, v, other)
-                self.assertEqual(out, mod(v, other), rtol=1e-2, atol=1e-2)
-                # TODO - assert fusions work code
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        options = itertools.product(
+            binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
+        )
+        out_feature = 30
+        for binary_fn, input_shape, bias, dtype in options:
+            torch._dynamo.reset()
+            # addmm(mm) + (linear+add)
+            match_count = 2
+            match_nodes = 3
+            if len(input_shape) == 3:
+                is_inplace = binary_list[binary_fn][2]
+                # view + linear + view(joint_graph+freeze pass)
+                match_count = match_count + 5 if is_inplace else match_count + 3
+                match_nodes = match_nodes + 7 if is_inplace else match_nodes + 5
+            mod = M(binary_fn, input_shape[-1], out_feature, bias).to(dtype).eval()
+            v = torch.randn(input_shape).to(dtype)
+            other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
+            mod_c = torch.compile(mod)
+            out, code = run_and_get_code(mod_c, v, other)
+            self.assertEqual(out, mod(v, other), rtol=1e-2, atol=1e-2)
+            # TODO - assert fusions work code
 
     def test_multi_linear_share_same_input(self):
         # llama pattern.
@@ -427,9 +469,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def forward(self, x):
                 return F.silu(self.w1(x)) * F.relu(self.w2(x))
 
-        mod = M().to(torch.bfloat16).eval()
+        dtypes = []
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-            v = torch.randn(2, 4, 16).to(torch.bfloat16)
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
+            mod = M().to(dtype).eval()
+            v = torch.randn(2, 4, 16).to(dtype)
             # 1. view(match_count=4, match_nodes=4).
             # 2. mm to packed linear(match_count=2, match_nodes=2).
             # 3. view+linear+view to linear(match_count=2, match_nodes=6).
@@ -473,7 +520,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             mod,
             (v,),
             check_quantization=True,
-            check_autocast=int8_mixed_bf16,
+            check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
             matcher_check_fn=matcher_check_fn,
         )
 
@@ -531,7 +578,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             mod,
             (v,),
             check_quantization=True,
-            check_autocast=int8_mixed_bf16,
+            check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
             matcher_check_fn=matcher_check_fn,
         )
 
@@ -637,7 +684,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 mod,
                 (v,),
                 check_quantization=True,
-                check_autocast=int8_mixed_bf16,
+                check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
                 matcher_check_fn=matcher_check_fn,
             )
 
@@ -1152,7 +1199,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self._test_common(
             mod,
             inputs,
-            check_autocast=int8_mixed_bf16,
+            check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
             check_quantization=True,
             matcher_check_fn=matcher_check_fn
             if matcher_check_fn is not None
@@ -1289,7 +1336,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._test_common(
                 mod,
                 inputs,
-                check_autocast=int8_mixed_bf16,
+                check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
                 check_quantization=True,
                 matcher_check_fn=matcher_check_fn,
             )
@@ -1367,7 +1414,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self._test_common(
             mod,
             inputs,
-            check_autocast=int8_mixed_bf16,
+            check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
             check_quantization=True,
             matcher_check_fn=matcher_check_fn,
         )
@@ -2009,9 +2056,14 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
             def forward(self, x):
                 return F.silu(self.w1(x)) * F.relu(self.w2(x))
 
-        mod = M().to(torch.bfloat16).eval()
+        dtypes = []
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-            v = torch.randn(2, 4, 16).to(torch.bfloat16)
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
+            mod = M().to(dtype).eval()
+            v = torch.randn(2, 4, 16).to(dtype)
             # 1. view(match_count=4, match_nodes=4).
             # 2. mm to packed linear(match_count=2, match_nodes=2).
             # 3. view+linear+view to linear(match_count=2, match_nodes=6).
