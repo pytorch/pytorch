@@ -85,36 +85,49 @@ void convert_indices_from_coo_to_csr_cuda(const Tensor& result, const Tensor& in
 }
 
 template <typename input_t, typename output_t>
-__global__ void convert_indices_from_csr_to_coo_cuda_kernel(output_t* data_out, const input_t* data_in, const int64_t nrows) {
+__global__ void convert_indices_from_csr_to_coo_cuda_kernel(output_t* data_out, const input_t* data_in, const int64_t nrows, const int64_t nnz, const int64_t nbatches) {
   int64_t tid = blockDim.x * blockIdx.x + threadIdx.x;
 
-  if (tid < nrows) {
-    for (int64_t i = data_in[tid]; i < data_in[tid + 1]; i++)
-      data_out[i] = static_cast<output_t>(tid);
+  if (tid < nrows * nbatches) {
+    int64_t b = tid / nrows;
+    int64_t i_ = b * (nrows + 1) + tid % nrows;
+    for (int64_t i = data_in[i_]; i < data_in[i_ + 1]; i++) {
+      data_out[b * nnz + i] = static_cast<output_t>(tid % nrows);
+    }
   }
 }
 
 template <typename input_t, typename output_t>
 void convert_indices_from_csr_to_coo_cuda(const Tensor& indices, const Tensor& crow_indices, const Tensor& col_indices, const bool transpose=false) {
-  int64_t nrows = crow_indices.numel() - 1;
-  if (nrows == 0) {
+  int64_t nrows = crow_indices.size(-1) - 1;
+  int64_t nnz = col_indices.size(-1);
+  if (nrows == 0 || nnz == 0) {
     indices.zero_();
     return;
+  }
+  int64_t total_nnz = col_indices.numel();
+  int64_t batch_ndim = crow_indices.dim() - 1;
+  if (batch_ndim > 0) {
+    auto batch_indices = indices.narrow(0, 0, batch_ndim);
+    batch_indices.copy_(at::sparse::full_coo_indices(crow_indices.sizes().slice(0, batch_ndim), indices.options())
+                        .repeat_interleave(nnz, 1));
   }
 
   auto crow_indices_ = crow_indices.expect_contiguous();
   const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
   TORCH_INTERNAL_ASSERT(indices.is_contiguous());
-  auto row0 = indices.select(0, transpose?1:0);
-  auto row1 = indices.select(0, transpose?0:1);
+  auto row0 = indices.select(0, transpose?batch_ndim + 1:batch_ndim + 0);
+  auto row1 = indices.select(0, transpose?batch_ndim + 0:batch_ndim + 1);
+  auto col_indices_ = col_indices.expect_contiguous();
+  row1.copy_(col_indices_->view({-1}));
   output_t* data_out = row0.data_ptr<output_t>();
 
-  // Run nrows threads...
+  // Run nrows * nbatches threads...
+  int64_t nbatches = total_nnz / nnz;
   int64_t THREADS = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
-  int64_t BLOCKS = (nrows + THREADS) / THREADS;
+  int64_t BLOCKS = (nrows * nbatches + THREADS) / THREADS;
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
-  row1.copy_(*col_indices.expect_contiguous());
-  convert_indices_from_csr_to_coo_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(data_out, crow_indices_data_in, nrows);
+  convert_indices_from_csr_to_coo_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(data_out, crow_indices_data_in, nrows, nnz, nbatches);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 

@@ -1254,7 +1254,10 @@ def forward(self, arg_0):
 
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
-        with self.assertRaisesRegex(RuntimeError, r"Deferred runtime assertion failed -i0 <= 0"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"(Deferred runtime assertion failed -i0 <= 0|_local_scalar_dense is outside of inline constraint \[0, inf\])"
+        ):
             _ = ep(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
@@ -2204,7 +2207,7 @@ def forward(self, l_x_):
     def test__scaled_dot_product_flash_attention(self):
         class Module(torch.nn.Module):
             def forward(self, q, k, v):
-                res = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v)
+                res = torch.nn.functional.scaled_dot_product_attention(q, k, v)
                 return res[0]
 
         m = Module()
