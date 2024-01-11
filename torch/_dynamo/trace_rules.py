@@ -2818,7 +2818,7 @@ def lookup(obj):
     if isinstance(obj, functools._lru_cache_wrapper) or (
         is_function(obj) and hasattr(obj, "__wrapped__")
     ):
-        # TODO: Weird case, should not unwrap if it's wrapped as _VariableFunctionsClass.
+        # TODO: Weird case, should not unwrap if it's wrapped as _VariableFunctionsClass
         if not (
             hasattr(obj, "__qualname__")
             and str(obj.__qualname__).startswith("_VariableFunctionsClass")
