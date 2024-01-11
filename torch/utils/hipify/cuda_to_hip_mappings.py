@@ -7847,7 +7847,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cufftSetAutoAllocation",
             ("hipfftSetAutoAllocation", CONV_MATH_FUNC, API_FFT),
         ),
-        # add new conversions here
         ("cufftXtExec", ("hipfftXtExec", CONV_MATH_FUNC, API_FFT)),
         ("cufftXtMakePlanMany", ("hipfftXtMakePlanMany", CONV_MATH_FUNC, API_FFT)),
         ("cufftExecC2C", ("hipfftExecC2C", CONV_MATH_FUNC, API_FFT)),
