@@ -212,6 +212,7 @@ class TestUtils(TestCase):
             def __torch_dispatch__(cls, func, types, args, kwargs=None):
                 pass
 
+        # make sure it runs
         x = UInt4Tensor(torch.tensor([
             [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
             [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
