@@ -537,7 +537,10 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
     def test_dynamic_linear_int4_weight(self):
         quantizer = XNNPACKQuantizer()
         quantization_config = get_symmetric_quantization_config(
-            is_per_channel=True, is_dynamic=True, weight_qmin=0, weight_qmax=15,
+            is_per_channel=True,
+            is_dynamic=True,
+            weight_qmin=0,
+            weight_qmax=15,
         )
         quantizer.set_global(quantization_config)
         m_eager = TestHelperModules.TwoLinearModule().eval()
@@ -560,7 +563,9 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
         )
         qconfig = QConfig(
             activation=act_affine_quant_obs,
-            weight=per_channel_weight_observer_range_neg_127_to_127.with_args(quant_min=0, quant_max=15),
+            weight=per_channel_weight_observer_range_neg_127_to_127.with_args(
+                quant_min=0, quant_max=15
+            ),
         )
         qconfig_mapping = QConfigMapping().set_global(qconfig)
         # Test with 2d inputs
