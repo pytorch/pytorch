@@ -43,6 +43,9 @@ from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
 from .dicts import DefaultDictVariable
 
 
+_orig_module_call = torch.nn.Module.__call__
+
+
 class UserDefinedVariable(VariableTracker):
     pass
 
@@ -95,6 +98,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return ConstantVariable.create(self.value.__name__)
 
         source = AttrSource(self.source, name) if self.source is not None else None
+
+        if self.value is torch.nn.Module and name == "__call__":
+            return VariableBuilder(tx, source)(_orig_module_call)
+
         try:
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
