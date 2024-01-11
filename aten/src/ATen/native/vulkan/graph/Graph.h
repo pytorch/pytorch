@@ -8,7 +8,6 @@
 #include <ATen/native/vulkan/api/Tensor.h>
 
 #include <ATen/native/vulkan/graph/Config.h>
-#include <ATen/native/vulkan/graph/Exception.h>
 #include <ATen/native/vulkan/graph/Value.h>
 
 namespace at {
@@ -100,7 +99,7 @@ class ComputeGraph final {
     } else if (val.isTensorRef()) {
       return val.toTensorRef().sizes;
     }
-    VKGRAPH_THROW("Could not get sizes of value with type ", val.type());
+    VK_THROW("Could not get sizes of value with type ", val.type());
   }
 
   inline c10::ScalarType get_val_dtype(ValueRef idx) {
@@ -110,7 +109,7 @@ class ComputeGraph final {
     } else if (val.isTensorRef()) {
       return val.toTensorRef().dtype;
     }
-    VKGRAPH_THROW("Could not get dtype of value with type ", val.type());
+    VK_THROW("Could not get dtype of value with type ", val.type());
   }
 
   inline std::vector<std::unique_ptr<OpNode>>& prepack_nodes() {

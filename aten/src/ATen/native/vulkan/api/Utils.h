@@ -1,10 +1,13 @@
 #pragma once
 
+#include <numeric>
+
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Half.h> // For c10::overflows
 
-#include <ATen/native/vulkan/api/Common.h>
-#include <numeric>
+#include <ATen/native/vulkan/api/vk_api.h>
+
+#include <ATen/native/vulkan/api/Exception.h>
 
 #ifdef USE_VULKAN_API
 
@@ -62,7 +65,7 @@ namespace detail {
 
 template <typename To, typename From>
 inline constexpr To safe_downcast(const From& v) {
-  TORCH_CHECK(!c10::overflows<To>(v), "Cast failed: out of range!");
+  VK_CHECK_COND(!c10::overflows<To>(v), "Cast failed: out of range!");
   return static_cast<To>(v);
 }
 
@@ -78,7 +81,7 @@ template <
     typename From,
     std::enable_if_t<detail::is_signed_to_unsigned<To, From>(), bool> = true>
 inline constexpr To safe_downcast(const From& v) {
-  TORCH_CHECK(v >= From{}, "Cast failed: negative signed to unsigned!");
+  VK_CHECK_COND(v >= From{}, "Cast failed: negative signed to unsigned!");
   return detail::safe_downcast<To, From>(v);
 }
 
@@ -147,7 +150,7 @@ inline uint32_t val_at(int32_t index, const IntArrayRef sizes) {
 }
 
 inline ivec2 make_ivec2(IntArrayRef ints, bool reverse = false) {
-  TORCH_CHECK(ints.size() == 2);
+  VK_CHECK_COND(ints.size() == 2);
   if (reverse) {
     return {safe_downcast<int32_t>(ints[1]), safe_downcast<int32_t>(ints[0])};
   } else {
@@ -156,7 +159,7 @@ inline ivec2 make_ivec2(IntArrayRef ints, bool reverse = false) {
 }
 
 inline ivec4 make_ivec4(IntArrayRef ints, bool reverse = false) {
-  TORCH_CHECK(ints.size() == 4);
+  VK_CHECK_COND(ints.size() == 4);
   if (reverse) {
     return {
         safe_downcast<int32_t>(ints[3]),
@@ -175,7 +178,7 @@ inline ivec4 make_ivec4(IntArrayRef ints, bool reverse = false) {
 }
 
 inline ivec4 make_ivec4_prepadded1(IntArrayRef ints) {
-  TORCH_CHECK(ints.size() <= 4);
+  VK_CHECK_COND(ints.size() <= 4);
 
   ivec4 result = {1, 1, 1, 1};
   size_t base = 4 - ints.size();
