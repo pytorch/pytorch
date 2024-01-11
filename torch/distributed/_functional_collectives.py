@@ -8,7 +8,6 @@ import torch.distributed.distributed_c10d as c10d
 from torch._custom_ops import impl_abstract
 from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
-from torch._C._distributed_c10d import ProcessGroup
 
 from . import _functional_collectives_impl as fun_col_impl
 from ._functional_collectives_impl import _register_tensor_wrapper
