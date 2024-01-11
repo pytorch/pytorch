@@ -1785,6 +1785,7 @@ if(BUILD_TEST)
         endif()
       endif()
     endforeach()
+    target_link_libraries(context_gpu_test caffe2::curand caffe2::cublas)
   endif()
 
   if(USE_VULKAN)
