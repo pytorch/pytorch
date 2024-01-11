@@ -4174,197 +4174,6 @@ dynamo_expected_failures = {
     "TestNamedTensor.test_out_fn_semantics",  # test_namedtensor
     "TestNamedTensor.test_mm",  # test_namedtensor
     "TestNamedTensor.test_comparison_ops",  # test_namedtensor
-    "TestFX.test_erase_node_error",  # test_fx
-    "TestFX.test_node_tagging",  # test_fx
-    "TestFX.test_trace_function",  # test_fx
-    "TestFX.test_ellipsis",  # test_fx
-    "TestFX.test_pickle_nonetype_annotation",  # test_fx
-    "TestFX.test_imul_code_print",  # test_fx
-    "TestFX.test_varargs_concrete",  # test_fx
-    "TestFX.test_concrete_arg_none_assert",  # test_fx
-    "TestFX.test_ast_rewriter_wrap_fn_directly",  # test_fx
-    "TestCommonPass.test_correctness_factory_CSEPass_FactoryFunctionCall_cpu",  # test_fx
-    "TestFX.test_graph_edit_with_proxy",  # test_fx
-    "TestFX.test_graph_module_init_buffer_param_copied_mod_init",  # test_fx
-    "TestFX.test_find_uses",  # test_fx
-    "TestCommonPass.test_correctness_CSEPass_ReturnList_cpu",  # test_fx
-    "TestFX.test_tensor_constant",  # test_fx
-    "TestFX.test_torch_fx_len",  # test_fx
-    "TestFX.test_tracing_graphmodules_as_leaf_submodules",  # test_fx
-    "TestFX.test_torch_op_overloads",  # test_fx
-    "TestFX.test_torchbind_class_attribute_in_fx_tensor_arg",  # test_fx
-    "TestFX.test_custom_traceback_not_raised_when_exception_source_is_submodule",  # test_fx
-    "TestFX.test_deepcopy_graph_with_tracer_cls",  # test_fx
-    "TestFX.test_graph_module",  # test_fx
-    "TestFX.test_empty_graph_codegen",  # test_fx
-    "TestFX.test_enum",  # test_fx
-    "TestFX.test_example_shape_prop",  # test_fx
-    "TestFX.test_namedtuple_return_trace",  # test_fx
-    "TestFX.test_custom_proxy_dynamic_value",  # test_fx
-    "TestFX.test_pytree_concrete",  # test_fx
-    "TestFX.test_transformer_multi_outputs",  # test_fx
-    "TestFX.test_metadata_on_ph",  # test_fx
-    "TestFX.test_no_mutation",  # test_fx
-    "TestFX.test_stack_traces",  # test_fx
-    "TestFX.test_unpack_dict_better_error",  # test_fx
-    "TestFX.test_immutable_list_pytree_ops",  # test_fx
-    "TestCommonPass.test_correctness_factory_CSEPass_MutationFactory_cpu",  # test_fx
-    "TestFX.test_partial_trace",  # test_fx
-    "TestFX.test_deepcopy_with_submods_params",  # test_fx
-    "TestFX.test_annotations_with_forward_references",  # test_fx
-    "TestFX.test_inf_nan",  # test_fx
-    "TestFX.test_submodule_manipulation_API",  # test_fx
-    "TestFX.test_deepcopy_tracer",  # test_fx
-    "TestFX.test_unpack",  # test_fx
-    "TestFX.test_leaf_module",  # test_fx
-    "TestCommonPass.test_correctness_CSEPass_MutationTorchTensorCall_cpu",  # test_fx
-    "TestFX.test_disallow_override",  # test_fx
-    "TestFX.test_deepcopy_graphmodule",  # test_fx
-    "TestFX.test_ast_rewriter_reassigns_submodules",  # test_fx
-    "TestFX.test_update_kwargs_api",  # test_fx
-    "TestFX.test_interpreter_partial_eval",  # test_fx
-    "TestFX.test_script_method_trace",  # test_fx
-    "TestFX.test_args_kwargs_no_self",  # test_fx
-    "TestFX.test_unpack_list_better_error",  # test_fx
-    "TestFX.test_transformer_op_swap",  # test_fx
-    "TestFX.test_custom_traceback_raised_when_exception_source_is_graphmodule",  # test_fx
-    "TestFX.test_fx_stateless",  # test_fx
-    "TestFX.test_namedtuple_return_qualname",  # test_fx
-    "TestFX.test_tuple_no_subscript",  # test_fx
-    "TestFX.test_wrapped_method",  # test_fx
-    "TestFX.test_pretty_print_targets",  # test_fx
-    "TestFX.test_pickle_custom_import",  # test_fx
-    "TestFX.test_throw_out_variant",  # test_fx
-    "TestFX.test_symbolic_trace_sequential",  # test_fx
-    "TestFX.test_inf_nan_kwds",  # test_fx
-    "TestFX.test_shape_prop_layout",  # test_fx
-    "TestFX.test_custom_codegen",  # test_fx
-    "TestFX.test_torch_custom_ops",  # test_fx
-    "TestCommonPass.test_correctness_CSEPass_TakeList_cpu",  # test_fx
-    "TestFX.test_interpreter_default_args",  # test_fx
-    "TestFX.test_pytree",  # test_fx
-    "TestFX.test_custom_import",  # test_fx
-    "TestFX.test_graph_unique_names_manual",  # test_fx
-    "TestFX.test_deepcopy_no_recursion",  # test_fx
-    "TestFX.test_shape_prop_aggregate",  # test_fx
-    "TestFX.test_custom_codegen_with_transformer",  # test_fx
-    "TestFX.test_pretty_print_graph",  # test_fx
-    "TestFX.test_annotation_with_future",  # test_fx
-    "TestFX.test_pretty_print",  # test_fx
-    "TestFX.test_regular_and_default_args",  # test_fx
-    "TestFX.test_matmul_tracing",  # test_fx
-    "TestFX.test_torch_fx_getattr",  # test_fx
-    "TestPassManager.test_pass_manager",  # test_fx
-    "TestFX.test_custom_proxy_type",  # test_fx
-    "TestFX.test_control_flow_tracing",  # test_fx
-    "TestFX.test_deepcopy_recursion_depth",  # test_fx
-    "TestFX.test_transformer_preserves_nn_module_stack_for_get_attr",  # test_fx
-    "TestFX.test_multiple_default_args",  # test_fx
-    "TestFX.test_wrap_decorated_function",  # test_fx
-    "TestFX.test_interpreter_not_enough_args",  # test_fx
-    "TestFX.test_trace_return_namedtuple",  # test_fx
-    "TestFX.test_graph_fns",  # test_fx
-    "TestFX.test_tensor_attribute_coalseced",  # test_fx
-    "TestFX.test_wrapped_retrace",  # test_fx
-    "TestFX.test_graph_module_init_buffer_param_copied_dict_init",  # test_fx
-    "TestFX.test_interpreter_star_args",  # test_fx
-    "TestFX.test_wrong_topo",  # test_fx
-    "TestFX.test_ast_rewriter_rewrites_assert",  # test_fx
-    "TestFX.test_user_friendly_call_provenance_with_module",  # test_fx
-    "TestFX.test_replace_input",  # test_fx
-    "TestFX.test_wrap_with_submodule",  # test_fx
-    "TestFX.test_wrapped_via_decorator",  # test_fx
-    "TestFX.test_copy_no_remap",  # test_fx
-    "TestFX.test_ast_rewriter_rewrites_assert_with_message",  # test_fx
-    "TestFX.test_wrap_fn_directly",  # test_fx
-    "TestFX.test_insertion_point",  # test_fx
-    "TestFX.test_annotations_with_non_torch_reference_and_internal_forward_references",  # test_fx
-    "TestConstFold.test_check_skip_folding_quant_dequant_pattern",  # test_fx
-    "TestFX.test_move_before",  # test_fx
-    "TestFX.test_snake_case",  # test_fx
-    "TestFX.test_wrapped_via_decorator_and_transformed",  # test_fx
-    "TestFX.test_torchbind_class_attribute_in_fx",  # test_fx
-    "TestFX.test_ast_rewriter_wrapped_via_decorator_and_transformed",  # test_fx
-    "TestFX.test_layout",  # test_fx
-    "TestFX.test_all_input_nodes",  # test_fx
-    "TestFX.test_annotations_with_non_torch_reference_and_no_internal_forward_references",  # test_fx
-    "TestFX.test_getitem_subproc",  # test_fx
-    "TestFX.test_reserved_getattr",  # test_fx
-    "TestFX.test_immutable_dict_pytree_ops",  # test_fx
-    "TestFX.test_remove_uses",  # test_fx
-    "TestFX.test_trace_dict_int_keys",  # test_fx
-    "TestFX.test_update_args_api",  # test_fx
-    "TestFX.test_nonetype_annotation",  # test_fx
-    "TestFX.test_custom_proxy_input_dependent_control_flow",  # test_fx
-    "TestFX.test_user_friendly_call_provenance_with_function",  # test_fx
-    "TestFX.test_interpreter_run_node_override",  # test_fx
-    "TestFX.test_args_kwargs",  # test_fx
-    "TestFX.test_ast_rewriter_wrap",  # test_fx
-    "TestFX.test_fn_type_annotations",  # test_fx
-    "TestFX.test_trace_return_dataclass_nested",  # test_fx
-    "TestFX.test_interpreter_onthefly_swap",  # test_fx
-    "TestCommonPass.test_correctness_CSEPass_Mutation_cpu",  # test_fx
-    "TestFX.test_string_literal_return",  # test_fx
-    "TestFX.test_ctx_mgr",  # test_fx
-    "TestFX.test_multi_insert_point",  # test_fx
-    "TestFX.test_informative_co_filename",  # test_fx
-    "TestFX.test_insert_arg",  # test_fx
-    "TestFX.test_copy_it",  # test_fx
-    "TestFX.test_autowrap_functions",  # test_fx
-    "TestFX.test_lineno_map",  # test_fx
-    "TestFX.test_construct_root_dict",  # test_fx
-    "TestFX.test_trace_multiple_funcs",  # test_fx
-    "TestFX.test_single_default_arg",  # test_fx
-    "TestFX.test_interpreter_with_codegen",  # test_fx
-    "TestFX.test_trace_fn_constant",  # test_fx
-    "TestFX.test_shape_prop_layout_3d",  # test_fx
-    "TestFX.test_trace_return_dataclass",  # test_fx
-    "TestFX.test_script_tensor_constant",  # test_fx
-    "TestFX.test_typename_print",  # test_fx
-    "TestFX.test_dict",  # test_fx
-    "TestFX.test_named_tuple_inlined",  # test_fx
-    "TestFX.test_return_type_exists",  # test_fx
-    "TestFX.test_return_tuple",  # test_fx
-    "TestFX.test_fx_create_arg",  # test_fx
-    "TestCommonPass.test_correctness_CSEPass_MutationInput_cpu",  # test_fx
-    "TestFX.test_remove_uses_with_custom_filter",  # test_fx
-    "TestFX.test_annotations_with_no_forward_references",  # test_fx
-    "TestFX.test_profiler_ranges_side_effect",  # test_fx
-    "TestFX.test_ast_rewriter_wrapped_via_decorator",  # test_fx
-    "TestFX.test_graph_unique_names",  # test_fx
-    "TestFX.test_fn_type_annotation_empty",  # test_fx
-    "TestFX.test_nn_module_stack",  # test_fx
-    "TestCommonPass.test_correctness_CSEPass_MutationMetadata_cpu",  # test_fx
-    "TestFX.test_interpreter_other_graph",  # test_fx
-    "TestFX.test_pickle_graphmodule",  # test_fx
-    "TestFX.test_inline_graph",  # test_fx
-    "TestFX.test_sequential",  # test_fx
-    "TestFX.test_deepcopy_graphmodule_with_transform",  # test_fx
-    "TestFXAPIBackwardCompatibility.test_public_api_surface",  # test_fx
-    "TestFX.test_delete_unused_submodules_leaf",  # test_fx
-    "TestFX.test_direct_param_use",  # test_fx
-    "TestFX.test_interpreter",  # test_fx
-    "TestFX.test_custom_proxy_type_literal",  # test_fx
-    "TestFX.test_prepend_self",  # test_fx
-    "TestFX.test_wrong_target_type",  # test_fx
-    "TestFX.test_pretty_print_node",  # test_fx
-    "TestFX.test_module_deepcopy_edit_nodes",  # test_fx
-    "TestFX.test_reassign_args_kwargs_uses",  # test_fx
-    "TestFX.test_fx_and_or",  # test_fx
-    "TestFX.test_get_torch_func_signature",  # test_fx
-    "TestFX.test_sqrt",  # test_fx
-    "TestFX.test_trace_dict_proxy_keys",  # test_fx
-    "TestFX.test_tensor_attribute",  # test_fx
-    "TestFX.test_fx_shifts",  # test_fx
-    "TestFX.test_pickle_torch_custom_ops",  # test_fx
-    "TestFX.test_stack_traces_with_transformer",  # test_fx
-    "TestFX.test_update_args_kwargs_yells_at_you",  # test_fx
-    "TestFX.test_symbolic_trace_assert",  # test_fx
-    "TestFX.test_transformer_noop",  # test_fx
-    "TestFX.test_native_callable",  # test_fx
-    "TestFX.test_wrap",  # test_fx
-    "TestFX.test_ast_rewriter_wrap_with_submodule",  # test_fx
-    "TestFX.test_graph_module_replicate_for_dp",  # test_fx
     "TestContentStoreCPU.test_repeated_hash_cpu",  # test_content_store
     "TestLazyTensor.test_tensor_ctr",  # lazy/test_ts_opinfo
 }
@@ -8774,6 +8583,7 @@ dynamo_skips = {
     "TestBinaryUfuncsCPU.test_long_tensor_pow_floats_cpu",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int32",  # known py38 fail
     "TestFXExperimental.test_optimize_for_inference_cpu",  # known py38 fail
+    "TestFXExperimental.test_optimize_for_inference_cpu_torchvision",
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int32",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int64",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int16",  # known py38 fail
@@ -8782,8 +8592,6 @@ dynamo_skips = {
     "TestDataLoaderPersistentWorkers.test_early_exit",  # known py38 fail
     "TestDataLoader.test_fd_limit_exceeded",  # known py38 fail
     "TestDataLoaderPersistentWorkers.test_fd_limit_exceeded",  # known py38 fail
-    "TestFX.test_annotations_empty_tuple",  # known py38 fail
-    "TestFX.test_assert",  # known py38 fail
     "TestLazyDynamicOps.test_nonzero_dynamic",  # known py311 fail
     "TestLazyTensor.test_view_mark_step_preserved",  # known py311 fail
 }

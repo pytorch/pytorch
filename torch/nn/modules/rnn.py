@@ -857,6 +857,7 @@ class LSTM(RNNBase):
                                       max_batch_size, self.hidden_size,
                                       dtype=input.dtype, device=input.device)
                 hx = (h_zeros, c_zeros)
+                self.check_forward_args(input, hx, batch_sizes)
             else:
                 if is_batched:
                     if (hx[0].dim() != 3 or hx[1].dim() != 3):
