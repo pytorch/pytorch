@@ -9198,6 +9198,19 @@ fn
 """,
         )
 
+    def test_return_dict_with_graph_break_and_update(self):
+        def create():
+            torch._dynamo.graph_break()
+            return {0: torch.tensor(3)}
+
+        def fn():
+            return {**create()}
+
+        opt_fn = torch.compile(backend="eager")(fn)
+        result = opt_fn()
+        self.assertIn(0, result)
+        self.assertTrue(same(result[0], torch.tensor(3)))
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
