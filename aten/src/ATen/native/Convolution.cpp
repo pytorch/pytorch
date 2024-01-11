@@ -539,7 +539,8 @@ struct ConvParams {
   }
   bool use_nnpack(const at::Tensor& input, const at::Tensor& weight) const  {
 #if AT_NNPACK_ENABLED()
-    return at::_nnpack_available() &&
+    return at::globalContext().userEnabledNNPACK() &&
+           at::_nnpack_available() &&
            input.device().is_cpu() &&
            input.scalar_type() == kFloat && // only on CPU Float Tensors
            !is_dilated() && // or dilation

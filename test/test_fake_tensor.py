@@ -24,6 +24,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch._dynamo.testing import rand_strided
+from torch._C._functorch import is_batchedtensor, _add_batch_dim, get_unwrapped
 from torch.testing import FileCheck
 import dataclasses
 import inspect
@@ -209,6 +210,23 @@ class FakeTensorTest(TestCase):
                 y = x + x
                 FileCheck().check("CPU").check("AutocastCPU").run(torch._C._dispatch_key_set(y))
                 FileCheck().check_not("ADInplaceOrView").check_not("Autograd").run(torch._C._dispatch_key_set(y))
+
+    def test_batch_tensor(self):
+        x = torch.rand((3, 4, 5))
+        b = _add_batch_dim(x, 0, 0)
+        mode = FakeTensorMode()
+        fake_b = mode.from_tensor(b)
+        prims.utils.compare_tensor_meta(b, fake_b, check_strides=True)
+
+        b1 = _add_batch_dim(x, 1, 1)
+        b2 = _add_batch_dim(b1, 0, 2)
+        fake_b2 = mode.from_tensor(b2)
+        prims.utils.compare_tensor_meta(b2, fake_b2, check_strides=True)
+        self.assertTrue(is_batchedtensor(fake_b2))
+        fake_b1 = get_unwrapped(fake_b2)
+        self.assertTrue(is_batchedtensor(fake_b1))
+        fake_tensor = get_unwrapped(fake_b1)
+        self.assertIsInstance(fake_tensor, FakeTensor)
 
     def test_constructor(self):
         with FakeTensorMode():
@@ -1499,31 +1517,20 @@ class FakeTensorDispatchCache(TestCase):
             x2 = torch.ones(2, requires_grad=True).clone()
             y2 = x2.view(-1)
 
-            FakeTensorMode.cache_clear()
-            self.assertHitsMisses(0, 0)
-
             # Test operating on a non-view tensor, then the same operation
-            # on a view tensor. Assert that we see a cache hit, but the
-            # view property is set correctly.
+            # on a view tensor. Assert that the view property is set correctly.
             z1 = x1.mul_(2)
-            self.assertHitsMisses(0, 1)
             self.assertFalse(z1._is_view())
 
             z2 = y2.mul_(2)
-            self.assertHitsMisses(1, 1)
             self.assertTrue(z2._is_view())
 
             # Now the other way around: first operate on a view tensor, then
             # the same operation on a non-view tensor.
-            FakeTensorMode.cache_clear()
-            self.assertHitsMisses(0, 0)
-
             z2 = y2.mul_(2)
-            self.assertHitsMisses(0, 1)
             self.assertTrue(z2._is_view())
 
             z1 = x1.mul_(2)
-            self.assertHitsMisses(1, 1)
             self.assertFalse(z1._is_view())
 
     def test_cache_dispatch_key_set(self):

@@ -1,5 +1,7 @@
 #ifdef USE_VULKAN_API
 
+// @lint-ignore-every CLANGTIDY
+
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/Dispatcher.h>
