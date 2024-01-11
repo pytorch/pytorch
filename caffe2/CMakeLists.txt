@@ -80,6 +80,9 @@ if(INTERN_BUILD_ATEN_OPS)
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_CPP_SRCS})
+  list(APPEND Caffe2_XPU_SRCS ${ATen_XPU_SRCS})
+  list(APPEND Caffe2_XPU_INCLUDE ${ATen_XPU_INCLUDE})
+  list(APPEND Caffe2_XPU_DEPENDENCY_LIBS ${ATen_XPU_DEPENDENCY_LIBS})
   list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_GPU_CU_SRCS ${ATen_CUDA_CU_SRCS})
   list(APPEND Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY})
@@ -171,6 +174,7 @@ endif()
 if(CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_CPU_SRCS CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_SRCS CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_XPU_SRCS CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_SRCS_W_SORT_BY_KEY CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_CU_SRCS CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY CAFFE2_ALLOWLISTED_FILES)
@@ -655,6 +659,8 @@ if(USE_CUDA)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
 endif()
 
+
+
 if(USE_FLASH_ATTENTION AND NOT MSVC)
   # Cutlass contains a sign-compare violation in its codebase to be fixed by https://github.com/NVIDIA/cutlass/pull/869
   set_source_files_properties(
@@ -1059,6 +1065,8 @@ elseif(USE_CUDA)
     target_precompile_headers(torch_cuda PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
   endif()
+elseif(USE_XPU)
+  add_library(torch_xpu ${Caffe2_XPU_SRCS})
 endif()
 
 if(NOT MSVC AND USE_XNNPACK)
@@ -1507,6 +1515,8 @@ if(USE_CUDA)
   caffe2_interface_library(torch_cuda torch_cuda_library)
 elseif(USE_ROCM)
   caffe2_interface_library(torch_hip torch_hip_library)
+elseif(USE_XPU)
+  caffe2_interface_library(torch_xpu torch_xpu_library)
 endif()
 
 caffe2_interface_library(torch torch_library)
@@ -1517,6 +1527,8 @@ if(USE_CUDA)
   install(TARGETS torch_cuda torch_cuda_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 elseif(USE_ROCM)
   install(TARGETS torch_hip torch_hip_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+elseif(USE_XPU)
+  install(TARGETS torch_xpu torch_xpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
 install(TARGETS torch torch_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
@@ -1527,6 +1539,7 @@ if(USE_CUDA)
 elseif(USE_ROCM)
   target_link_libraries(torch PUBLIC torch_hip_library)
 endif()
+
 
 if(PRINT_CMAKE_DEBUG_INFO)
   print_target_properties(torch)
@@ -1565,6 +1578,15 @@ if(USE_CUDA)
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
   target_link_libraries(torch_cuda PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+endif()
+
+if(USE_XPU)
+  target_include_directories(torch_xpu PRIVATE ${Caffe2_XPU_INCLUDE})
+  target_link_libraries(torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
+  target_include_directories(
+    torch_xpu INTERFACE $<INSTALL_INTERFACE:include>)
+
+  target_link_libraries(torch_xpu PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 endif()
 
 # ---[ Metal(OSX) modification
