@@ -1015,6 +1015,7 @@ class HasDecompTest(TestCase):
         core_aten_ops = useful_decomps - core_decomps
         self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
 
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
     def test_compile_rrelu(self):
         def f(x):
             return torch.rrelu(x)
