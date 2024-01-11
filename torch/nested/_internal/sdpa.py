@@ -736,18 +736,22 @@ def jagged_scaled_dot_product_attention(
             attention.squeeze(0), output_nt_info["offsets"]
         ).transpose(1, 2)
     elif backend_choice == SDPBackend.MATH:
+        # save the offsets and shape of the inputs, so we can reshape the final output
+        # query @ key = attn: [B, D1, j0, D'] @ [B, D1, D' j1] = [B, D1, j0, j1]
+        # attn @ value = out: [B, D1, j0, j1] @ [B, D1, j1, D2] = [B, D1, j0, D2]
+        offsets = query.offsets()
+        d1 = query._size[1]
+        d2 = value._size[-1]
+
         # convert jagged layout Nested Tensor to strided layout Nested Tensor
         # which support the math implementation of SDPA
-        offsets = query.offsets()
-        shape = query._size
-
         def get_strided_layout_nested_tensor(jagged_layout_nt):
             lengths = jagged_layout_nt._offsets[1:] - jagged_layout_nt._offsets[:-1]
             transpose = torch.transpose(jagged_layout_nt, 1, 2)
             tensor_list = buffer_from_jagged(transpose).split(list(lengths), dim=0)
-            c_nt = torch.nested.as_nested_tensor(list(tensor_list))
-            c_nt = c_nt.transpose(1, 2).contiguous()
-            return c_nt
+            strided_nt = torch.nested.as_nested_tensor(list(tensor_list))
+            strided_nt = strided_nt.transpose(1, 2).contiguous()
+            return strided_nt
 
         query = get_strided_layout_nested_tensor(query)
         key = get_strided_layout_nested_tensor(key)
@@ -759,7 +763,7 @@ def jagged_scaled_dot_product_attention(
 
         # convert strided layout Nested Tensor back to jagged layout Nested Tensor
         attn_out = attn_out.transpose(1, 2).contiguous().values()
-        attn_out = attn_out.view(-1, shape[-3], shape[-1])
+        attn_out = attn_out.view(-1, d1, d2)
         attn_out = ViewNestedFromBuffer.apply(attn_out, offsets)
         attn_out = attn_out.transpose(1, 2)
 
