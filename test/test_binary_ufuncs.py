@@ -4090,6 +4090,7 @@ class TestBinaryUfuncs(TestCase):
             torch.float_power(i, exp, out=out)
             self.assertEqual(expected_scalar_base, out)
 
+    @skipIfTorchDynamo("ConstantVariable(list) is banned")
     def test_float_power_exceptions(self, device):
         def _promo_helper(x, y):
             for i in (x, y):
