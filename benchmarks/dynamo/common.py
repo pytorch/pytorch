@@ -3783,7 +3783,7 @@ def run(runner, args, original_dir=None):
                                     batch_size=batch_size,
                                     extra_args=extra_args,
                                 )
-                except RuntimeError as e:
+                except Exception as e:
                     import traceback
 
                     mode = "train" if args.training else "eval"
