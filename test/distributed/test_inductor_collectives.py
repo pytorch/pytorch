@@ -738,6 +738,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
         assert counter.frame_count == 1
 
+        # should test more precisely, but the 3 is supposed to be (all_gather, wait, copy_)
+        assert counter.op_count == 3
+        assert same(outputs, correct_outputs)
+
     def test_dynamo_rewrite_dist_reduce_scatter(self):
 
         def func(inp, out, *, pg):
