@@ -3829,6 +3829,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
     def test_trace_while_stuck(self, timing_enabled):
+        os.environ["TORCH_NCCL_TIMEOUT_CHECK_MILSEC"] = '120000'
         if self.rank == self.MAIN_PROCESS_RANK:
             for c in self.children_pipes:
                 self.assertEqual(c.recv(), 'next')
@@ -3995,7 +3996,7 @@ class NCCLTraceTestTimeoutDumpOnIdleRanks(NCCLTraceTestDumpOnTimeoutBase):
 
             # Force rank 1 to idle so that it also gets debug info dump triggered.
             if self.rank == 1:
-                time.sleep(6)
+                time.sleep(8)
 
 if __name__ == "__main__":
     assert (

@@ -1355,11 +1355,14 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // we throw exception and make the whole process to be killed.
     // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
     // url here.
+    const auto timeOutPeriod = heartBeatTimeout != heartbeatTimeoutInSec_ * 1000
+        ? c10::str(heartBeatTimeout, " milliseconds ")
+        : c10::str(heartbeatTimeoutInSec_, " seconds ");
     const auto exitMsg = c10::str(
         logPrefix(),
         "ProcessGroupNCCL's watchdog got stuck for ",
-        heartbeatTimeoutInSec_,
-        "seconds without making progress in monitoring enqueued collectives. ",
+        timeOutPeriod,
+        "without making progress in monitoring enqueued collectives. ",
         "This typically indicates a NCCL/CUDA API hang blocking the watchdog, ",
         "and could be triggered by another thread holding the GIL inside a ",
         "CUDA api, or other deadlock-prone behaviors.",
