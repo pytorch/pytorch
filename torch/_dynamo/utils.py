@@ -1064,7 +1064,7 @@ def tensor_or_module_to_id(value):
 
 
 def const_repr(x, *, local) -> str:
-    from .trace_rules import is_builtin_callable
+    from .allowed_functions import is_builtin_callable
 
     if isinstance(x, (list, tuple)):
         elems_repr = ",".join(const_repr(s, local=local) for s in x)

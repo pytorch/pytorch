@@ -33,7 +33,7 @@ def is_hashable_python_var(x):
 
     # Note: Keep me in sync with is_hashable!
     # Even better, we should have a map of functions connecting the two
-    from ..trace_rules import is_builtin_callable, is_numpy
+    from ..allowed_functions import is_builtin_callable, is_numpy
 
     return (
         ConstantVariable.is_literal(x)
