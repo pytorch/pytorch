@@ -742,10 +742,13 @@ bool is_tensor_list_and_append_overloaded(
         tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
     if (!is_tensor_and_append_overloaded(iobj, overloaded_args)) {
       if (throw_error) {
-        throw TypeError(
-            "expected Tensor as element %d in argument %d, but got %s",
-            static_cast<int>(idx),
+        TORCH_CHECK_TYPE(
+            false,
+            "expected Tensor as element ",
+            idx,
+            " in argument ",
             argnum,
+            ", but got ",
             Py_TYPE(iobj)->tp_name);
       }
       return false;
