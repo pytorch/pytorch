@@ -14411,6 +14411,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: split_with_sizes_copy_out
+    CUDA: split_with_sizes_copy_out_cuda
 
 - func: view_copy(Tensor self, SymInt[] size) -> Tensor
   variants: function
