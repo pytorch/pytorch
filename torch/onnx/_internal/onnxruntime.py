@@ -196,51 +196,6 @@ def _move_placeholder_to_front(graph_module: torch.fx.GraphModule) -> None:
         first_not_placeholder.prepend(placeholder)
 
 
-def _replace_to_copy_with_to(fx_module: torch.fx.GraphModule) -> None:
-    # aten._to_copy doesn't have exporter so we replace it with aten.to.
-    for node in fx_module.graph.nodes:
-        if (
-            isinstance(node.target, torch._ops.OpOverload)
-            and node.target.overloadpacket == torch.ops.aten._to_copy
-        ):
-            is_default_layout = True
-            is_on_same_device = True
-            is_cast = True
-            are_kwargs_supported = True
-            if "layout" in node.kwargs and node.kwargs["layout"] != torch.strided:
-                is_default_layout = False
-            if (
-                "device" in node.kwargs
-                and node.kwargs["device"] != node.args[0].meta["val"].device
-            ):
-                is_on_same_device = False
-            if "dtype" not in node.kwargs:
-                is_cast = False
-            for kwarg in node.kwargs:
-                if kwarg not in ["layout", "device", "dtype"]:
-                    are_kwargs_supported = False
-
-            if (
-                len(node.args) == 1
-                and is_default_layout
-                and is_on_same_device
-                and is_cast
-                and are_kwargs_supported
-            ):
-                # This aten::_to_copy looks like ONNX Cast, so other kwargs are ignored.
-                # This change could lead to invalid FX graph but it doesn't matter, as long as the downstream backend,
-                # ONNXRuntime, can execute the exported ONNX graph.
-                node.kwargs = {"dtype": node.kwargs["dtype"]}
-
-                node.target = torch.ops.aten.to.dtype
-            else:
-                raise RuntimeError(
-                    f"aten._to_copy must be replaced with other ONNX-supported aten ops. \
-                         args={[arg.meta for arg in node.args]}, kwargs={node.kwargs}"
-                )
-    fx_module.recompile()
-
-
 def _infer_ep_from_device(*args) -> Tuple[str, ...]:
     """Return the first valid device (i.e., GPU or CPU) in argument list."""
     eps = []
@@ -1050,9 +1005,6 @@ class OrtBackend:
             partitioned_prim_graph_module = self._partitioner_cache[graph_module]
         else:
             prim_graph_module = graph_module
-            # TODO(wschin): this is required for removing aten::_to_copy in _replace_to_copy_with_to.
-            # See https://github.com/pytorch/pytorch/issues/106871.
-            _replace_to_copy_with_to(prim_graph_module)
             partitioner = CapabilityBasedPartitioner(
                 prim_graph_module,
                 self._supported_ops,
