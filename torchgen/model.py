@@ -116,6 +116,7 @@ class DispatchKey(Enum):
     AutogradFunctionality = auto()
     AutogradNestedTensor = auto()
     Tracer = auto()
+    AutocastFunctionality = auto()
     Autocast = auto()
     AutocastCPU = auto()
     AutocastCUDA = auto()

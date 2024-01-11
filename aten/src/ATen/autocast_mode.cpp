@@ -7,43 +7,43 @@
 namespace at::autocast {
 
 bool is_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Autocast);
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastFunctionality);
 }
 
 void set_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::Autocast, !new_enabled);
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastFunctionality, !new_enabled);
 }
 
 bool is_cpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Autocast);
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastFunctionality);
 }
 
 void set_cpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::Autocast, !new_enabled);
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastFunctionality, !new_enabled);
 }
 
 bool is_xpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Autocast);
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastFunctionality);
 }
 
 void set_xpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::Autocast, !new_enabled);
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastFunctionality, !new_enabled);
 }
 
 bool is_hpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Autocast);
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastFunctionality);
 }
 
 void set_hpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::Autocast, !new_enabled);
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastFunctionality, !new_enabled);
 }
 
 bool is_privateuseone_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Autocast);
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastFunctionality);
 }
 
 void set_privateuseone_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::Autocast, !new_enabled);
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastFunctionality, !new_enabled);
 }
 
 namespace {

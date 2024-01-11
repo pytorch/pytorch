@@ -654,7 +654,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
 });
 
 constexpr DispatchKeySet autocast_dispatch_keyset =
-    DispatchKeySet(DispatchKey::Autocast);
+    DispatchKeySet(DispatchKey::AutocastFunctionality);
 
 // See Note [TLS Initialization]
 constexpr DispatchKeySet default_included_set = DispatchKeySet({
@@ -663,7 +663,7 @@ constexpr DispatchKeySet default_included_set = DispatchKeySet({
 });
 
 constexpr DispatchKeySet default_excluded_set =
-    DispatchKeySet(DispatchKey::Autocast);
+    DispatchKeySet(DispatchKey::AutocastFunctionality);
 
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
     autograd_dispatch_keyset | DispatchKeySet(DispatchKey::ADInplaceOrView);

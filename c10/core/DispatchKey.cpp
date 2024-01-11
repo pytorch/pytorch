@@ -126,6 +126,9 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Tracer:
       return "Tracer";
 
+    case DispatchKey::AutocastFunctionality:
+      return "AutocastFunctionality";
+
     case DispatchKey::FuncTorchBatched:
       return "FuncTorchBatched";
     case DispatchKey::BatchedNestedTensor:
@@ -266,6 +269,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradFunctionality", c10::DispatchKey::AutogradFunctionality},
       {"AutogradNestedTensor", c10::DispatchKey::AutogradNestedTensor},
       {"Tracer", c10::DispatchKey::Tracer},
+      {"AutocastFunctionality", c10::DispatchKey::AutocastFunctionality},
       {"FuncTorchBatched", c10::DispatchKey::FuncTorchBatched},
       {"BatchedNestedTensor", c10::DispatchKey::BatchedNestedTensor},
       {"FuncTorchVmapMode", c10::DispatchKey::FuncTorchVmapMode},
