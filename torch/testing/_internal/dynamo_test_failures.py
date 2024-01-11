@@ -87,14 +87,11 @@ FIXME_default_non_strict = {
     "test_ops_gradients",
     "test_ops_jit",
     "test_legacy_vmap",
-    "test_package",
     "test_python_dispatch",
     "test_quantization",
     "test_tensorexpr",
     "test_tensorexpr_pybind",
     "test_torch",
-    "test_vulkan",
-    "test_xnnpack_integration",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -4367,6 +4364,7 @@ dynamo_expected_failures = {
     "TestFX.test_graph_module_replicate_for_dp",  # test_fx
     "TestContentStoreCPU.test_repeated_hash_cpu",  # test_content_store
     "TestLazyTensor.test_tensor_ctr",  # lazy/test_ts_opinfo
+    "TestAnalyze.test_trace_dependencies",  # test_package
 }
 
 dynamo_skips = {
@@ -8786,4 +8784,6 @@ dynamo_skips = {
     "TestFX.test_assert",  # known py38 fail
     "TestLazyDynamicOps.test_nonzero_dynamic",  # known py311 fail
     "TestLazyTensor.test_view_mark_step_preserved",  # known py311 fail
+    "TestRepackage.test_repackage_import_indirectly_via_parent_module",  # known py311 fail
+    "TestPackageScript.test_load_shared_tensors_repackaged",  # known py311 fail
 }
