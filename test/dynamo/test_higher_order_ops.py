@@ -25,6 +25,7 @@ from torch._dynamo.testing import (
 from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._higher_order_ops.wrap import wrap
 from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
@@ -2368,6 +2369,57 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
                 r"Cond doesn't work unless it is captured completely with torch.compile",
             ):
                 torch.compile(fn, backend="eager")(pred, pytree_in)
+
+
+class HigherOrderOpLoggingTests(LoggingTestCase):
+    @config.patch(capture_func_transforms=True)
+    @make_logging_test(recompiles=True)
+    def test_vmap_guard_ok(self, records):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return torch.vmap(lambda x: x.sin())(x)
+
+        x = torch.randn(3, 3, 4, 5)
+        y = fn(x)
+        # sanity check
+        self.assertEqual(len(records), 0)
+        self.assertEqual(x.sin(), y)
+
+        # Calling the same function again won't have any effect on guards
+        z = fn(x)
+        self.assertEqual(len(records), 0)
+        self.assertEqual(x.sin(), z)
+
+        # calling with a different object will also not affect guards
+        w = fn(z)
+        self.assertEqual(len(records), 0)
+        self.assertEqual(z.sin(), w)
+
+    @config.patch(capture_func_transforms=True)
+    @make_logging_test(recompiles=True)
+    def test_vmap_guard_fail(self, records):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return torch.vmap(lambda x: x.sin())(x)
+
+        x = torch.zeros(3, 3, 4, 5)
+        y = torch.vmap(fn)(x)
+        self.assertEqual(x.sin(), y)
+        self.assertEqual(len(records), 0)
+
+        # call vmap(vmap(fn))(x) should retrigger compilation as
+        # _functorch.current_level() is not the same
+        x = torch.zeros(3, 3, 3, 4, 5)
+        y = torch.vmap(torch.vmap(fn))(x)
+        self.assertEqual(x.sin(), y)
+        self.assertGreater(len(records), 0)
+        record = self.getRecord(records, "peek_interpreter_stack()")
+        self.assertIn(
+            """\
+    triggered by the following guard failure(s):
+    - torch._C._functorch.peek_interpreter_stack() is None          # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:399 in _flat_vmap""",
+            record.getMessage(),
+        )
 
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):

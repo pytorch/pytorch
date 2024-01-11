@@ -2051,16 +2051,16 @@ class InstructionTranslator(InstructionTranslatorBase):
             speculation_log=speculation_log,
         )
 
-        ci = torch._C._functorch.peek_interpreter_stack()
         compiler_is_eager = False
-        if hasattr(compiler_fn, 'compiler_name'):
-            compiler_is_eager= compiler_fn.compiler_name == 'eager'
-        elif hasattr(compiler_fn, '__name__'):
-            compiler_name = compiler_fn.__name__ == 'eager'
+        if hasattr(compiler_fn, "compiler_name"):
+            compiler_is_eager = compiler_fn.compiler_name == "eager"
+        elif hasattr(compiler_fn, "__name__"):
+            compiler_name = compiler_fn.__name__ == "eager"
         else:
             # aot_eager won't match here as it has a "compiler_name" attribute
-            compiler_is_eager = 'eager' in str(compiler_fn)
+            compiler_is_eager = "eager" in str(compiler_fn)
 
+        ci = torch._C._functorch.peek_interpreter_stack()
         if (
             ci is not None
             and ci.key() == torch._C._functorch.TransformType.Vmap

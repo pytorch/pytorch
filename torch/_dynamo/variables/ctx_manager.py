@@ -151,6 +151,15 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
 class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     """represents torch VMap increment/decrement nesting"""
 
+    # A guard is needed as the vmap level is baked into the torch FX graph
+    # generated. This is fine if vmap is only called from within the function
+    # being compiled. But the FX graph may be invalid in the case of a vmap
+    # call from eager that calls the compiled function, as the vmap levels
+    # may be different.
+    _guards_singleton = Guard(
+        GlobalStateSource(), GuardBuilder.VMAP_INCREMENT_NESTING_MATCH
+    )
+
     @staticmethod
     def create(tx, target_values, **kwargs):
         var = VmapIncrementNestingCtxManagerVariable(
@@ -161,6 +170,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         return var
 
     def enter(self, tx):
+        install_guard(self._guards_singleton)
         batch_size, randomness = self.target_values
         vmap_level = torch._C._functorch._vmap_increment_nesting(batch_size, randomness)
         self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
