@@ -746,8 +746,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 10 /*10 Mins*/);
   waitTimeoutDumpInMilSec_ =
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 2000);
-  timeoutCheckIntervalMilSec_ =
-      getCvarInt(TORCH_NCCL_TIMEOUT_CHECK_MILSEC, 1000);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
@@ -814,21 +812,22 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
   std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
-  LOG(INFO)
-      << logPrefix() << "ProcessGroupNCCL initialization options: "
-      << "NCCL version: " << getNcclVersion() << ", size: " << size
-      << ", global rank: " << globalRank()
-      << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-      << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
-      << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: " << waitTimeoutDumpInMilSec_
-      << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
-      << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
-      << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
-      << ", TIMEOUT(ms): " << options_->timeout.count()
-      << ", USE_HIGH_PRIORITY_STREAM: " << options_->is_high_priority_stream
-      << ", SPLIT_FROM: " << options_->split_from
-      << ", SPLIT_COLOR: " << options_->split_color
-      << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
+            << "NCCL version: " << getNcclVersion() << ", size: " << size
+            << ", global rank: " << globalRank()
+            << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+            << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
+            << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: "
+            << waitTimeoutDumpInMilSec_
+            << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
+            << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
+            << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
+            << ", TIMEOUT(ms): " << options_->timeout.count()
+            << ", USE_HIGH_PRIORITY_STREAM: "
+            << options_->is_high_priority_stream
+            << ", SPLIT_FROM: " << options_->split_from
+            << ", SPLIT_COLOR: " << options_->split_color
+            << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
 #ifdef NCCL_HAS_COMM_REGISTER
       << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
       << useTensorRegisterAllocatorHook_
@@ -1537,6 +1536,38 @@ void ProcessGroupNCCL::watchdogHandler() {
         [&]() -> bool { return terminateProcessGroup_.load(); });
     // Bump up heart beat by one.
     heartbeat_++;
+
+    // Assuming that we always init a process group containing all ranks,
+    // we only use the watchdog thread to listen for the global signal to dump
+    // and abort. We poll store to see if some ranks have flagged a timeout when
+    // we haven't polled for `heartbeat_timeout` seconds and there haven't
+    // any work added or removed for `watchdog_timeout` seconds.
+    if (dumpOnTimeout_ && uid_ == 0) {
+      auto currentTime = std::chrono::steady_clock::now();
+      auto timeSinceLastWorkListUpdate =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              (currentTime - lastWorkListUpdateTime_))
+              .count();
+      auto timeSinceLastPollStore =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              (currentTime - lastTimePollStore))
+              .count();
+      if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
+          timeSinceLastPollStore >= heartbeatTimeoutInSec_ * 1000) {
+        lastTimePollStore = currentTime;
+        if (globalStore_->check({std::string(TIMEOUT_DUMP)}) &&
+            !optAsyncDebugDump) {
+          auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
+          optAsyncDebugDump = launchAsyncDebugDump();
+          waitForDumpOrTimeout(*optAsyncDebugDump, wakeUpTime);
+          const auto exitMsg = c10::str(
+              logPrefix(),
+              "Another rank reported a timeout and signaled a global abort.");
+          LOG(ERROR) << exitMsg;
+          C10_THROW_ERROR(DistBackendError, exitMsg);
+        }
+      }
+    }
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {

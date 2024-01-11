@@ -3138,22 +3138,41 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt.shape[:2], view.shape[:2])
 
     @xfailIfTorchDynamo
-    def test_reshape_decomp(self, device):
+    @parametrize("requires_grad", [False, True])
+    def test_reshape_decomp(self, device, requires_grad):
         # contiguous NT should result in view
         nt = random_nt_from_dims(
-            [3, None, 10], device=device, dtype=torch.float32, layout=torch.jagged)
+            [3, None, 10],
+            device=device,
+            dtype=torch.float32,
+            layout=torch.jagged,
+            requires_grad=requires_grad
+        )
         view = nt.reshape(-1, -1, 5, 2)
         self.assertEqual(view.shape[:2], nt.shape[:2])
         self.assertTrue(view._is_view() and view._base is nt)
+        # make sure gradients flow back
+        if requires_grad:
+            view.backward(torch.ones_like(view))
+            self.assertEqual(nt.grad, torch.ones_like(nt))
 
         # non-contiguous NT should result in contiguous copy
         nt = random_nt_from_dims(
-            [3, None, 5, 2], device=device, dtype=torch.float32, layout=torch.jagged)
+            [3, None, 5, 2],
+            device=device,
+            dtype=torch.float32,
+            layout=torch.jagged,
+            requires_grad=requires_grad
+        )
         nt_noncontig = nt.transpose(-1, -2)
         self.assertFalse(nt_noncontig.is_contiguous())
         copy = nt_noncontig.reshape(-1, -1, 10)
         self.assertTrue(copy.is_contiguous())
         self.assertEqual(copy.shape[:2], nt.shape[:2])
+        # make sure gradients flow back
+        if requires_grad:
+            copy.backward(torch.ones_like(copy))
+            self.assertEqual(nt.grad, torch.ones_like(nt))
 
     def test_flatten_decomp(self, device):
         nt = random_nt_from_dims(
