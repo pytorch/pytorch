@@ -366,9 +366,10 @@ class CachingAutotuner(KernelInterface):
 
         scope["runner"] = get_first_attr(binary, "run", "c_wrapper")
         scope["function"] = get_first_attr(binary, "function", "cu_function")
-        cluster_dims = get_first_attr(binary, "cluster_dims", "clusterDims")
         scope["cta_args"] = (
-            (binary.num_ctas, *cluster_dims) if hasattr(binary, "num_ctas") else ()
+            (binary.num_ctas, *get_first_attr(binary, "cluster_dims", "clusterDims"))
+            if hasattr(binary, "num_ctas")
+            else ()
         )
 
         exec(
@@ -1001,6 +1002,9 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
         num_warps = conditional_product(x, r) // 128
     num_warps = next_power_of_2(min(max(num_warps, 2), 8))
     check_config(cfg, xnumel=size_hints[0])
+    assert (
+        r <= config.triton.max_block["R"]
+    ), f"increase config.triton.MAX_BLOCK['r'] to {r}"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -1031,6 +1035,9 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
     cfg = {"XBLOCK": x, "YBLOCK": y, "RBLOCK": r}
     num_warps = next_power_of_2(min(max(conditional_product(x, y, r) // 256, 1), 8))
     check_config(cfg, xnumel=size_hints[0], ynumel=size_hints[1])
+    assert (
+        r <= config.triton.max_block["R"]
+    ), f"increase config.triton.MAX_BLOCK['r'] to {r}"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -1046,6 +1053,7 @@ def pointwise(
     Construct @triton.heuristics() based on size_hints.
     """
     inductor_meta = {} if inductor_meta is None else inductor_meta
+    assert not inductor_meta.get("no_x_dim")
 
     numel = functools.reduce(operator.mul, size_hints)
     bs = max(256, min(numel // 128, 1024))
@@ -1154,6 +1162,8 @@ def reduction(
 ):
     """args to @triton.heuristics()"""
     inductor_meta = {} if inductor_meta is None else inductor_meta
+    if inductor_meta.get("no_x_dim"):
+        size_hints = [1, *size_hints[1:]]
 
     assert triton_meta is not None
     rnumel = size_hints[-1]
@@ -1231,6 +1241,8 @@ def persistent_reduction(
     filename=None,
     inductor_meta=None,
 ):
+    if inductor_meta and inductor_meta.get("no_x_dim"):
+        size_hints = [1, *size_hints[1:]]
     xnumel, rnumel = size_hints
 
     configs = [

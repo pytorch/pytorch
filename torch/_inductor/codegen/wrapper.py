@@ -383,6 +383,7 @@ class WrapperCodeGen(CodeGen):
         self.unbacked_symbol_decls = set()
         self.allow_stack_allocation = None
         self.stack_allocated_buffers = {}
+        self.computed_sizes = set()
 
         self.write_header()
         self.write_prefix()
@@ -658,7 +659,6 @@ class WrapperCodeGen(CodeGen):
 
             self.generate_return(output_refs)
 
-        self.append_precomputed_sizes_to_prefix()
         self.finalize_prefix()
         result.splice(self.prefix)
 
@@ -763,12 +763,15 @@ class WrapperCodeGen(CodeGen):
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
 
-    def append_precomputed_sizes_to_prefix(self):
-        with self.prefix.indent():
-            for sym, expr in V.graph.sizevars.inv_precomputed_replacements.items():
-                self.prefix.writeline(
-                    f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
-                )
+    def ensure_size_computed(self, sym: sympy.Symbol):
+        if isinstance(sym, sympy.Symbol) and sym.name.startswith("ps"):
+            if sym in self.computed_sizes:
+                return
+            self.computed_sizes.add(sym)
+            expr = V.graph.sizevars.inv_precomputed_replacements[sym]
+            self.writeline(
+                f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
+            )
 
     def finalize_prefix(self):
         pass
@@ -2168,7 +2171,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.writeline(
                 f"AtenTensorHandle {tensor_handle_array_var}[] = {{{', '.join(indices)}}};"
             )
-            args = [x, tensor_handle_array_var, values, accumulate, num_indices]
+            args = [x, tensor_handle_array_var, num_indices, values, accumulate]
         else:
             indices_str = (
                 f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
