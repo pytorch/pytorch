@@ -620,7 +620,6 @@ dynamo_expected_failures = {
     "TestShuffle.test_1d_use_numpy_False",
     "TestShuffle.test_2d_use_numpy_True",
     "TestShuffle.test_2d_use_numpy_False",
-    "TestArrayCreationCopyArgument.test_buffer_interface",
     "TestWritebackIfCopy.test_take_mode_raise",
     "TestArange.test_infinite",
     "TestArrayConstruction.test_array_empty",
@@ -2426,9 +2425,7 @@ dynamo_expected_failures = {
     "TestBufferProtocolCPU.test_shared_buffer_cpu_uint8",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_with_count_and_offset_cpu_complex128",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_same_type_cpu_complex128",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_float16",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_requires_grad_cpu_int32",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_uint8",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_with_count_cpu_complex128",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_requires_grad_cpu_uint8",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_with_count_cpu_uint8",  # test_tensor_creation_ops
@@ -2441,7 +2438,6 @@ dynamo_expected_failures = {
     "TestBufferProtocolCPU.test_with_offset_cpu_int64",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_same_type_cpu_int16",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_with_offset_cpu_float64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_float64",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_same_type_cpu_float32",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_with_count_and_offset_cpu_uint8",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_with_count_and_offset_cpu_bool",  # test_tensor_creation_ops
@@ -2454,18 +2450,14 @@ dynamo_expected_failures = {
     "TestBufferProtocolCPU.test_with_count_and_offset_cpu_int8",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_from_buffer_cpu_int8",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_requires_grad_cpu_float16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_int64",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_same_type_cpu_int64",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_with_count_and_offset_cpu_float16",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_from_buffer_cpu_complex64",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_alias_from_buffer_cpu_uint8",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_with_count_and_offset_cpu_int64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_complex128",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_with_count_and_offset_cpu_complex64",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_from_buffer_cpu_uint8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_bool",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_with_count_cpu_int32",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_int16",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_from_buffer_cpu_complex128",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_from_buffer_cpu_float32",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_with_offset_cpu_int16",  # test_tensor_creation_ops
@@ -2477,7 +2469,6 @@ dynamo_expected_failures = {
     "TestBufferProtocolCPU.test_shared_buffer_cpu_int8",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_from_buffer_cpu_float64",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_with_count_cpu_int8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_int8",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_with_count_and_offset_cpu_float32",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_alias_from_buffer_cpu_complex64",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_same_type_cpu_float16",  # test_tensor_creation_ops
@@ -2508,7 +2499,6 @@ dynamo_expected_failures = {
     "TestBufferProtocolCPU.test_with_offset_cpu_float16",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_with_offset_cpu_int8",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_bfloat16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_int32",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_bool",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_shared_buffer_cpu_bool",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_same_type_cpu_float64",  # test_tensor_creation_ops
@@ -2519,7 +2509,6 @@ dynamo_expected_failures = {
     "TestBufferProtocolCPU.test_requires_grad_cpu_float64",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_complex128",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_same_type_cpu_int8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_float32",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_shared_buffer_cpu_int16",  # test_tensor_creation_ops
     "TestTensorCreationCPU.test_tensor_factory_copy_var_cpu",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int16",  # test_tensor_creation_ops
@@ -2534,7 +2523,6 @@ dynamo_expected_failures = {
     "TestBufferProtocolCPU.test_with_count_cpu_int16",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_alias_from_buffer_cpu_float64",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_with_count_cpu_float16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_complex64",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_shared_buffer_cpu_complex64",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_alias_from_buffer_cpu_int8",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_shared_buffer_cpu_float32",  # test_tensor_creation_ops
