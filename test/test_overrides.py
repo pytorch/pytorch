@@ -1568,14 +1568,18 @@ class TestTorchFunctionMode(TestCase):
                     return out * 2
                 return out
 
-        @torch.compile(backend="eager")
-        def f(x):
-            return x.view(-1)
+        @torch.compile(backend="aot_eager")
+        def compiled(x):
+            return x.clone()
+
+        def uncompiled(x):
+            return x.clone()
 
         x = torch.ones(3, device="cpu")
         with Mul2ModeF():
-            _ = f(x)
-
+            y = compiled(x)
+            z = uncompiled(x)
+            self.assertEqual(y, z)
 
 if __name__ == '__main__':
     run_tests()

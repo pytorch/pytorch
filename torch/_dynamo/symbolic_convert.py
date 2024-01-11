@@ -22,6 +22,7 @@ from unittest.mock import patch
 
 import torch
 import torch._logging
+from torch._C import _is_torch_function_mode_enabled
 from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import config, exc, logging as torchdynamo_logging, skipfiles, variables
@@ -771,6 +772,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         return TracingContext.current_frame(None)
 
     def run(self):
+        if _is_torch_function_mode_enabled():
+            raise Unsupported("Torch function is mode not supported by torch.compile")
         with self.run_ctx_mgr():
             try:
                 self.output.push_tx(self)
