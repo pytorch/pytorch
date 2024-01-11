@@ -25,6 +25,12 @@ Tensor map_nt_binary(const Tensor& nt_1, const Tensor& nt_2, Func f){
   const auto& sizes = nt_impl_1->get_nested_sizes();
   return at::detail::make_tensor<NestedTensorImpl>(f(nt_impl_1->get_buffer(), nt_impl_2->get_buffer()), sizes);
 }
+template <typename Func>
+Tensor map_nt_scalar(const Tensor& nt, const Scalar& scalar, Func f){
+  auto* nt_impl = get_nested_tensor_impl(nt);
+  const auto& sizes = nt_impl->get_nested_sizes();
+  return at::detail::make_tensor<NestedTensorImpl>(f(nt_impl->get_buffer(), scalar), sizes);
+}
 
 C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_nested_layer_norm_inputs(
     const NestedTensorImpl& input,

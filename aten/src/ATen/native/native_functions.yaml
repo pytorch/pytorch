@@ -10005,6 +10005,7 @@
   variants: function, method
   dispatch:
     SparseCPU, SparseCUDA: pow_sparse_scalar
+    NestedTensorCPU, NestedTensorCUDA: pow_nested_scalar
   tags: [core, pointwise]
 
 - func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
