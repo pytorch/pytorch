@@ -28,7 +28,7 @@ enum class SDPBackend {
   math = 0,
   flash_attention = 1,
   efficient_attention = 2,
-  cudnn = 3
+  cudnn_attention = 3
 };
 
 // Note that if this changed make sure to update

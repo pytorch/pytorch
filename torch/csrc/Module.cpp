@@ -1856,7 +1856,8 @@ Call this whenever a new thread is created in order to propagate values from
       .value("ERROR", sdp::SDPBackend::error)
       .value("MATH", sdp::SDPBackend::math)
       .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
-      .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention);
+      .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention)
+      .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention);
 
   py_module.def(
       "_can_use_flash_attention",

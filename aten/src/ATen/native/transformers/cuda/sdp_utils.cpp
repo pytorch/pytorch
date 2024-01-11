@@ -45,7 +45,7 @@ namespace {
 // flash_attention V2 is universally faster than efficient_attention and Math
 std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
   constexpr std::array<SDPBackend, num_backends> default_order{
-      SDPBackend::cudnn,
+      SDPBackend::cudnn_attention,
       SDPBackend::flash_attention,
       SDPBackend::efficient_attention,
       SDPBackend::math};
@@ -347,8 +347,8 @@ static bool check_cudnn_compute_capability(sdp_params params, bool debug) {
   return dprops->minor == 0 && dprops->major >= 8;
 }
 
-inline bool use_cudnn(sdp_params const& kernel_params, bool print_debug) {
-  static bool supported = (c10::utils::check_env("TORCH_CUDNN_MHA_ENABLED") == true) &&
+inline bool can_use_cudnn_attention(sdp_params const& kernel_params, bool print_debug) {
+  static bool supported = (c10::utils::check_env("TORCH_CUDNN_SDP_ENABLED") == true) &&
                           check_cudnn_compute_capability(kernel_params, print_debug);
   if (print_debug) {
     if (!supported) { TORCH_WARN("cuDNN MHA is only supported on sm80 and sm90"); }
@@ -492,9 +492,9 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
   bool print_debug = false;
   for (auto& backend : ordering) {
     switch (backend) {
-      case SDPBackend::cudnn:
-        if (use_cudnn(kernel_params, print_debug)) {
-              return SDPBackend::cudnn;
+      case SDPBackend::cudnn_attention:
+        if (sdp::can_use_cudnn_attention(kernel_params, print_debug)) {
+              return SDPBackend::cudnn_attention;
         }
         break;
       case SDPBackend::flash_attention:

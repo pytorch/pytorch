@@ -562,7 +562,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
     // Mask type shape grossness
     if (!mask.has_value() && no_seq_len_1_nested &&
         (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention ||
-         backend == sdp::SDPBackend::cudnn)) {
+         backend == sdp::SDPBackend::cudnn_attention)) {
       auto x = at::linear(query, qkv_weight, qkv_bias);
       auto chunks = x.chunk(3, -1);
       auto x_size_0 = x.size(0);
