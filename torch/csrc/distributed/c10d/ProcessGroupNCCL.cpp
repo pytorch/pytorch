@@ -346,30 +346,6 @@ c10::optional<std::function<std::string()>>& get_cpp_trace_dumper() {
   return dumper;
 }
 
-c10::optional<std::function<bool()>>& get_gil_checker() {
-  static c10::optional<std::function<bool()>> gil_checker(c10::nullopt);
-  return gil_checker;
-}
-
-std::future<bool> launchAsyncGilCheck() {
-  std::promise<bool> resultPromise;
-  std::future<bool> resultFuture = resultPromise.get_future();
-
-  std::thread workerThread([promise = std::move(resultPromise)]() mutable {
-    try {
-      auto& gil_checker = get_gil_checker();
-      promise.set_value(gil_checker.value()());
-    } catch (...) {
-      promise.set_exception(std::current_exception());
-    }
-  });
-
-  // Detach the thread to allow it to run independently
-  workerThread.detach();
-
-  return resultFuture;
-}
-
 // Return CUDA device with ordinal given by input rank.  If we aren't
 // bound to a specific device, there is no strict guarantee that this
 // heuristic is the correct assignment of ranks to GPUs that Python
@@ -770,6 +746,13 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 10 /*10 Mins*/);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
+  // store_ usually is wrapped with PrefixStore and the prefix is different
+  // across different ProcessGroupNCCL(PG) instances. We need to get the
+  // underlying non-PrefixStore for sharing global information shared across
+  // different PGs.
+  PrefixStore* prefixStore = dynamic_cast<PrefixStore*>(store_.get());
+  globalStore_ =
+      prefixStore ? prefixStore->getUnderlyingNonPrefixStore() : store_;
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
       getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
@@ -1281,24 +1264,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     LOG(INFO) << "Dumping c++ stacktraces: " << cpp_dumper.value()();
   }
 
-  auto& gil_checker = get_gil_checker();
-  if (gil_checker.has_value()) {
-    auto fut = launchAsyncGilCheck();
-    auto kGilCheckTimeout = std::chrono::seconds(1);
-    auto futStatus = fut.wait_for(kGilCheckTimeout);
-    if (futStatus != std::future_status::ready) {
-      TORCH_CHECK(
-          futStatus != std::future_status::deferred,
-          "Expected the future to have been launched eagerly.");
-      LOG(ERROR)
-          << "Could not acquire GIL within 1 sec on exit, possible GIL induced hang";
-    }
-    LOG(INFO) << "Could acquire GIL on exit";
-  } else {
-    LOG(INFO)
-        << "GIL checker was not registered, perhaps this is a no-python build?";
-  }
-
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)
   std::future<bool> asyncDebugDump = launchAsyncDebugDump();
@@ -1530,7 +1495,8 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
           timeSinceLastPollStore >= heartbeatTimeoutInSec_ * 1000) {
         lastTimePollStore = currentTime;
-        if (store_->check({std::string(TIMEOUT_DUMP)}) && !optAsyncDebugDump) {
+        if (globalStore_->check({std::string(TIMEOUT_DUMP)}) &&
+            !optAsyncDebugDump) {
           optAsyncDebugDump = launchAsyncDebugDump();
           waitForDumpOrTimeout(*optAsyncDebugDump);
           const auto exitMsg = c10::str(
@@ -1566,7 +1532,7 @@ void ProcessGroupNCCL::watchdogHandler() {
               // abort process immediately.
               collectiveDebugInfoMode_.store(true);
               std::vector<uint8_t> vec(1);
-              store_->set(std::string(TIMEOUT_DUMP), vec);
+              globalStore_->set(std::string(TIMEOUT_DUMP), vec);
             }
 
             if (dumpOnTimeout_ && !optAsyncDebugDump) {
