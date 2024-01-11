@@ -775,6 +775,19 @@ Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
 // Known limitations:
 //  - Only works if mat1 is row-major and mat2 is column-major
 //  - Only works if matrices sizes are divisible by 32
+//
+//  Arguments:
+//    - `mat1`: the first operand of the matrix multiply, can be type `torch.float8_e4m3fn` or `torch.float8_e5m2`
+//    - `mat2`: the second operand of the matrix multiply, can be type `torch.float8_e4m3fn` or `torch.float8_e5m2`
+//    - `bias`: the bias, can be type `torch.float16` or `torch.bfloat16`
+//    - `out_dtype`: the output dtype, can either be a float8 or a higher precision floating point type
+//    - `scale_a`: a scalar tensor with the inverse scale of `mat1`, only needed if `mat1` is a float8 type
+//    - `scale_b`: a scalar tensor with the inverse scale of `mat2`, only needed if `mat2` is a float8 type
+//    - `scale_result`: a scalar tensor with the scale of the output, only needed if the output is a float8 type
+//    - `use_fast_accum`: if true, enables fast float8 accumulation
+//    - `out`: a reference to the output tensor
+//    - `amax`: a reference to the amax tensor of the output, only needed if the output is a float8 type and will be updated inplace
+
 std::tuple<Tensor&, Tensor&>
 _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           const c10::optional<at::Tensor>& bias,
