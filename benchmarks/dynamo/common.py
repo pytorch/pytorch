@@ -65,7 +65,7 @@ from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 
 try:
     from torch._dynamo.utils import clone_inputs, graph_break_reasons
-    from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
+    from torch._inductor.utils import fresh_inductor_cache
 except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
@@ -1114,14 +1114,12 @@ class AOTInductorModelCache:
 
             so_path = torch._export.aot_compile(model, example_args, example_kwargs)
 
-            module = torch.utils.cpp_extension.load_inline(
-                name="aot_inductor",
-                cpp_sources=[aot_inductor_launcher(so_path, device)],
-                functions=["run", "get_call_spec"],
-                with_cuda=(device == "cuda"),
+            runner = (
+                torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
+                if device == "cpu"
+                else torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1)
             )
-
-            cls.cache[key] = module
+            cls.cache[key] = runner
 
         return cls.cache[key]
 
@@ -1141,8 +1139,8 @@ def export(model, example_inputs):
 
 
 def export_aot_inductor(model, example_inputs, device):
-    module = AOTInductorModelCache.load(model, example_inputs, device)
-    call_spec = module.get_call_spec()
+    runner = AOTInductorModelCache.load(model, example_inputs, device)
+    call_spec = runner.get_call_spec()
     in_spec = pytree.treespec_loads(call_spec[0])
     out_spec = pytree.treespec_loads(call_spec[1])
 
@@ -1152,7 +1150,7 @@ def export_aot_inductor(model, example_inputs, device):
         flat_inputs = fx_pytree.tree_flatten_spec(
             (example_args, example_kwargs), in_spec
         )
-        flat_outputs = module.run(flat_inputs)
+        flat_outputs = runner.run(flat_inputs)
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
     return opt_aot_inductor
@@ -3785,7 +3783,7 @@ def run(runner, args, original_dir=None):
                                     batch_size=batch_size,
                                     extra_args=extra_args,
                                 )
-                except RuntimeError as e:
+                except Exception as e:
                     import traceback
 
                     mode = "train" if args.training else "eval"

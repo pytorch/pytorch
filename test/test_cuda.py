@@ -3429,7 +3429,8 @@ exit(2)
             # Check that `cuInit` was not called during the import
             # By using ctypes and calling cuDeviceCountGet() and expect CUDA_ERROR_NOT_INITIALIZED == 3
             # See https://github.com/pytorch/pytorch/issues/116276 for more details
-            cuda_driver_api_call = "ctypes.CDLL('libcuda.so.1').cuDeviceGetCount(ctypes.byref(x))"
+            libcuda_name = "libcuda.so.1" if not IS_WINDOWS else "nvcuda.dll"
+            cuda_driver_api_call = f"ctypes.CDLL('{libcuda_name}').cuDeviceGetCount(ctypes.byref(x))"
             rc = check_output(f"import torch; import ctypes;x=ctypes.c_int(-1);print({cuda_driver_api_call})")
             self.assertEqual(rc, "3")
 

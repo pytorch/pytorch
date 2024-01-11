@@ -148,6 +148,15 @@ ScalarType toScalarType(const DLDataType& dtype) {
         case 8:
           stype = ScalarType::Byte;
           break;
+        case 16:
+          stype = ScalarType::UInt16;
+          break;
+        case 32:
+          stype = ScalarType::UInt32;
+          break;
+        case 64:
+          stype = ScalarType::UInt64;
+          break;
         default:
           TORCH_CHECK(
               false, "Unsupported kUInt bits " + c10::to_string(dtype.bits));
