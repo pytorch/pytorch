@@ -1023,7 +1023,7 @@ class ONNXProgram:
             fx_serialization.save_model_with_external_data(
                 destination_path,
                 onnx_model_location,
-                onnx_model_location,  # When initializers >2GB, must be in the same folder as the model
+                "",  # When initializers >2GB, must be in the same folder as the model
                 tuple(_model_state_dict_files),
                 self.model_proto,
             )
