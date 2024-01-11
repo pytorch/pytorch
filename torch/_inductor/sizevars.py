@@ -343,6 +343,23 @@ class SizeVarAllocator:
         else:
             return self.guard_equals(left, right)
 
+    def guarded_order(self, seq):
+        """
+        Return the order of a sequence as a permutation of range(len(seq)) and guard on that order not changing.
+        Used for generating block_ptrs.
+        """
+        seq = [*map(self.remove_precomputed_replacements, seq)]
+        seq = [(self.size_hint(var), orig_idx, var) for orig_idx, var in enumerate(seq)]
+        seq.sort()
+        order = [-1] * len(seq)
+        last_var = None
+        for new_index, (_, orig_index, var) in enumerate(seq):
+            order[orig_index] = new_index
+            if last_var is not None:
+                self.guard_leq(last_var, var)
+            last_var = var
+        return order
+
     # The evaluate functions evaluate some symbolic sympy expression
     # (NB: not necessarily an Expr) and return what the concrete result
     # is, guarding on the expression being that result
@@ -374,6 +391,11 @@ class SizeVarAllocator:
     def evaluate_static_shapes(self, left: List[Expr]) -> List[int]:
         return [self.evaluate_static_shape(x) for x in left]
 
+    def remove_precomputed_replacements(self, expr: Expr) -> Expr:
+        if any(s.name.startswith("ps") for s in expr.free_symbols):
+            return sympy_subs(expr, self.inv_precomputed_replacements)
+        return expr
+
     def symbolic_hint(self, expr: Expr) -> Expr:
         # Substitute all hints into expr, but leave unbacked symints alone
         if not isinstance(expr, Expr):
@@ -382,9 +404,7 @@ class SizeVarAllocator:
         free_symbols = expr.free_symbols
         if not free_symbols:
             return int(expr)
-        while any(s.name.startswith("ps") for s in free_symbols):
-            expr = sympy_subs(expr, self.inv_precomputed_replacements)
-            free_symbols = expr.free_symbols
+        expr = self.remove_precomputed_replacements(expr)
         return sympy_subs(expr, self.var_to_val)
 
     def size_hint(self, expr: Expr, *, fallback: Optional[int] = None) -> int:
@@ -512,6 +532,13 @@ class SizeVarAllocator:
         return order
 
     def lookup_precomputed_size(self, expr: Expr) -> sympy.Symbol:
+        if (
+            isinstance(expr, (int, sympy.Symbol, sympy.Number))
+            or expr.is_number
+            or expr.is_symbol
+        ):
+            return expr
+        expr = self.remove_precomputed_replacements(expr)
         if expr not in self.precomputed_replacements:
             sym = sympy_symbol(f"ps{len(self.precomputed_replacements)}")
             self.precomputed_replacements[expr] = sym
