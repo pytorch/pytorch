@@ -310,6 +310,42 @@ class TritonPrinter(PythonPrinter):
         assert len(expr.args) == 1
         return f"tl.abs({self._print(expr.args[0])})"
 
+    def _print_cos(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.math.cos(({self._print(expr.args[0])}).to(tl.float32))"
+
+    def _print_cosh(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.math.cosh(({self._print(expr.args[0])}).to(tl.float32))"
+
+    def _print_acos(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.math.acos(({self._print(expr.args[0])}).to(tl.float32))"
+
+    def _print_sin(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.math.sin(({self._print(expr.args[0])}).to(tl.float32))"
+
+    def _print_sinh(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.math.sinh(({self._print(expr.args[0])}).to(tl.float32))"
+
+    def _print_asin(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.math.asin(({self._print(expr.args[0])}).to(tl.float32))"
+
+    def _print_tan(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.math.tan(({self._print(expr.args[0])}).to(tl.float32))"
+
+    def _print_tanh(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.math.tanh(({self._print(expr.args[0])}).to(tl.float32))"
+
+    def _print_atan(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.math.atan(({self._print(expr.args[0])}).to(tl.float32))"
+
     def _print_FloorDiv(self, expr):
         if expr.is_integer:
             return super()._print_FloorDiv(expr)
