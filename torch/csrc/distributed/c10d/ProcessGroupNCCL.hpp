@@ -29,51 +29,63 @@
 #include <torch/custom_class.h>
 
 namespace c10d {
-// Environment variable which controls whether we perform a NCCL healt check
+// Control whether we perform a NCCL health check or not
 // which ensures communicators are healthy at the beginning of init.
 static std::vector<std::string> TORCH_ENABLE_NCCL_HEALTH_CHECK = {
     "TORCH_ENABLE_NCCL_HEALTH_CHECK",
     "ENABLE_NCCL_HEALTH_CHECK"};
 
-// Environment variable which controls whether or not wait() is blocking or
-// non-blocking.
+// Control whether or not wait() is blocking or non-blocking.
 static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
     "TORCH_NCCL_BLOCKING_WAIT",
     "NCCL_BLOCKING_WAIT"};
 
-// Environment variable which controls whether or not we perform Async Error
-// Handling with NCCL.
+// Control whether or not we perform Async Error Handling with NCCL.
 static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
     "TORCH_NCCL_ASYNC_ERROR_HANDLING",
     "NCCL_ASYNC_ERROR_HANDLING"};
 
-// Environment Variable to control whether dumping debug info on watchdog
+// Control whether dumping debug info on watchdog
 // timeout is enabled. This variable must be set together with
 // TORCH_NCCL_ENABLE_MONITORING=1 and TORCH_NCCL_TRACE_BUFFER_SIZE > 0.
 static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
     "TORCH_NCCL_DUMP_ON_TIMEOUT"};
 
-// Environment Variable to control whether Desync Debug is enabled.
-// This variable must be set together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
+// Control whether Desync Debug is enabled. This variable must be set
+// together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
 static std::vector<std::string> TORCH_NCCL_DESYNC_DEBUG = {
     "TORCH_NCCL_DESYNC_DEBUG",
     "NCCL_DESYNC_DEBUG"};
 
+// Enable recording start-events for all ProcessGroupNCCL collectives, and
+// compute accurate collective timing per-collective. (Note: end-events are
+// recorded by default. Turn on this flag can increase chances of a watchdog
+// hang due to performing a CUDA event query which eventually calls
+// cudaEventElapsedTime() API.
 static std::vector<std::string> TORCH_NCCL_ENABLE_TIMING = {
     "TORCH_NCCL_ENABLE_TIMING",
     "NCCL_ENABLE_TIMING"};
 
+// Enable monitoring thread which aborts the process when the ProcessGroupNCCL
+// Watchdog thread gets stuck and no heartbeat is detected after
+// TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC. This can happen due to calling CUDA/NCCL
+// APIs that may hang. It is Useful to prevent jobs being stuck for a prolonged
+// time than necessary tying up cluster resources.
 static std::vector<std::string> TORCH_NCCL_ENABLE_MONITORING = {
     "TORCH_NCCL_ENABLE_MONITORING"};
 
+// Control the watchdog heartbeat timeout period after which the monitoring
+// thread will abort the process.
 static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
     "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"};
 
+// The maximum number of events we store in the flight recorder's ring buffer.
+// (One event could be the start or end of a collective, for example).
 static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
     "TORCH_NCCL_TRACE_BUFFER_SIZE"};
 
-// Environment variable to control how much extra time we will wait for
-// dumping the debugging info before we exit and throws timeout exception.
+// Control how much extra time we will wait for dumping the debugging info
+// before we exit and throws timeout exception.
 static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC = {
     "TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC"};
 
