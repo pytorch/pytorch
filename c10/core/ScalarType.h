@@ -15,6 +15,7 @@
 #include <c10/util/quint2x4.h>
 #include <c10/util/quint4x2.h>
 #include <c10/util/quint8.h>
+#include <c10/util/uint1_to_7.h>
 
 #include <array>
 #include <cstddef>
@@ -77,7 +78,14 @@ namespace c10 {
   _(c10::Float8_e4m3fnuz, Float8_e4m3fnuz) /* 26 */      \
   _(uint16_t, UInt16) /* 27 */                           \
   _(uint32_t, UInt32) /* 28 */                           \
-  _(uint64_t, UInt64) /* 29 */
+  _(uint64_t, UInt64) /* 29 */                           \
+  _(c10::uint1_t, UInt1) /* 30 */                        \
+  _(c10::uint2_t, UInt2) /* 31 */                        \
+  _(c10::uint3_t, UInt3) /* 32 */                        \
+  _(c10::uint4_t, UInt4) /* 33 */                        \
+  _(c10::uint5_t, UInt5) /* 34 */                        \
+  _(c10::uint6_t, UInt6) /* 35 */                        \
+  _(c10::uint7_t, UInt7) /* 36 */
 
 // If you want to support ComplexHalf for real, add ComplexHalf
 // into this macro (and change the name).  But beware: convert()
@@ -460,8 +468,11 @@ static inline bool isBitsType(ScalarType t) {
 }
 
 static inline bool isBarebonesUnsignedType(ScalarType t) {
-  return t == ScalarType::UInt16 || t == ScalarType::UInt32 ||
-      t == ScalarType::UInt64;
+  return t == ScalarType::UInt1 || t == ScalarType::UInt2 ||
+    t == ScalarType::UInt3 || t == ScalarType::UInt4 ||
+    t == ScalarType::UInt5 || t == ScalarType::UInt6 ||
+    t == ScalarType::UInt7 || t == ScalarType::UInt16 ||
+    t == ScalarType::UInt32 || t == ScalarType::UInt64;
 }
 
 static inline ScalarType toQIntType(ScalarType t) {
