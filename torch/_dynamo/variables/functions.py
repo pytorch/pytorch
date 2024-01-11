@@ -278,9 +278,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
         return super().call_function(tx, args, kwargs)
 
-    def __str__(self):
-        return f"{self.__class__.__name__}({self.fn.__name__})"
-
 
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""
@@ -548,9 +545,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             codegen.extend_output(create_call_function(1, True))
 
         return []
-
-    def __str__(self):
-        return f"{self.__class__.__name__}({self.fn_name})"
 
 
 def _traceable_collective_remaps():
