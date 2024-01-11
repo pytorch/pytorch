@@ -76,15 +76,15 @@ if torch._C._has_mkldnn:
             _users=1,
         )
 
-    def _unary_fusion_pattern(unary_fusion, call_fn, users, lp_dtype):
-        # only insert to_dtype if lp_dtype is True
+    def _unary_fusion_pattern(unary_fusion, call_fn, users, lowp_dtype):
+        # only insert to_dtype if lowp_dtype is True
         computation_call = (
-            _to_float(call_fn(), users=users) if lp_dtype else call_fn(users=users)
+            _to_float(call_fn(), users=users) if lowp_dtype else call_fn(users=users)
         )
         out = unary_fusion(computation_call)
-        if lp_dtype == torch.bfloat16:
+        if lowp_dtype == torch.bfloat16:
             return _to_bf16(out)
-        elif lp_dtype == torch.float16:
+        elif lowp_dtype == torch.float16:
             return _to_fp16(out)
         else:
             return out
@@ -207,11 +207,11 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _is_valid_computation_unary_fusion(computation_op, lp_dtype=None):
+    def _is_valid_computation_unary_fusion(computation_op, lowp_dtype=None):
         def fn(match):
             matched = _is_single_computation_op(computation_op)(match)
             computation_node = filter_nodes(match.nodes, computation_op)[0]
-            if lp_dtype:
+            if lowp_dtype:
                 conversion_dtype_nodes = filter_nodes(
                     match.nodes, prims.convert_element_type.default
                 )
@@ -224,17 +224,17 @@ if torch._C._has_mkldnn:
                 else:
                     to_float = conversion_dtype_nodes[1].args[1]
                     to_lp = conversion_dtype_nodes[0].args[1]
-                matched = matched and to_float == torch.float and to_lp == lp_dtype
+                matched = matched and to_float == torch.float and to_lp == lowp_dtype
             return matched
 
         return fn
 
     def _register_unary_fusion_lowering(
-        pattern, unary_attr, computation_op, lp_dtype=None
+        pattern, unary_attr, computation_op, lowp_dtype=None
     ):
         @register_lowering_pattern(
             pattern,
-            extra_check=_is_valid_computation_unary_fusion(computation_op, lp_dtype),
+            extra_check=_is_valid_computation_unary_fusion(computation_op, lowp_dtype),
         )
         def fn(match, *args, **kwargs):
             computation_args = list(args)[:-3] + [
@@ -246,7 +246,7 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _register_leaky_relu_fusion_lowering(pattern, computation_op, lp_dtype=None):
+    def _register_leaky_relu_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
             pattern, extra_check=_is_single_computation_op(computation_op)
         )
@@ -256,14 +256,14 @@ if torch._C._has_mkldnn:
                 matched = False
             else:  # inp is a Number
                 matched = True
-            if lp_dtype:
+            if lowp_dtype:
                 dtype1 = kwargs.get("to_float")
                 dtype2 = (
                     kwargs.get("to_bf16")
-                    if lp_dtype == torch.bfloat16
+                    if lowp_dtype == torch.bfloat16
                     else kwargs.get("to_fp16")
                 )
-                matched = matched and dtype1 == torch.float and dtype2 == lp_dtype
+                matched = matched and dtype1 == torch.float and dtype2 == lowp_dtype
             computation_args = list(args)
             if matched:
                 computation_args = computation_args[:-3] + [
@@ -275,20 +275,20 @@ if torch._C._has_mkldnn:
             else:
                 # computation_args += ["none", [], ""]
                 out = L[computation_op](*computation_args)
-                if lp_dtype:
+                if lowp_dtype:
                     out = L[prims.convert_element_type.default](out, dtype=torch.float)
                 out = L[aten.where](
                     L[aten.gt](out, 0),
                     out,
                     L[aten.mul](out, negative_slope),
                 )
-                if lp_dtype:
+                if lowp_dtype:
                     out = L[prims.convert_element_type.default](out, dtype=dtype2)
                 return out
 
         return fn
 
-    def _register_hardtanh_fusion_lowering(pattern, computation_op, lp_dtype=None):
+    def _register_hardtanh_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
             pattern, extra_check=_is_single_computation_op(computation_op)
         )
@@ -302,14 +302,14 @@ if torch._C._has_mkldnn:
             else:  # inp is a Number
                 assert max_value is not None
                 matched = min_value <= max_value
-            if lp_dtype:
+            if lowp_dtype:
                 dtype1 = kwargs.get("to_float")
                 dtype2 = (
                     kwargs.get("to_bf16")
-                    if lp_dtype == torch.bfloat16
+                    if lowp_dtype == torch.bfloat16
                     else kwargs.get("to_fp16")
                 )
-                matched = matched and dtype1 == torch.float and dtype2 == lp_dtype
+                matched = matched and dtype1 == torch.float and dtype2 == lowp_dtype
             computation_args = list(args)
             if matched:
                 computation_args = computation_args[:-3] + [
@@ -320,10 +320,10 @@ if torch._C._has_mkldnn:
                 return L[computation_op](*computation_args)
             else:
                 out = L[computation_op](*computation_args)
-                if lp_dtype:
+                if lowp_dtype:
                     out = L[prims.convert_element_type.default](out, dtype=torch.float)
                 out = L[aten.clamp_max](L[aten.clamp_min](out, min_value), max_value)
-                if lp_dtype:
+                if lowp_dtype:
                     out = L[prims.convert_element_type.default](out, dtype=dtype2)
                 return out
 
@@ -542,30 +542,30 @@ if torch._C._has_mkldnn:
     def _register_unary_fusion():
         computation_call_fns = [_conv_call, _linear_call, _conv_transpose_call]
 
-        def _unary_fusion_patterns(lp_dtype):
+        def _unary_fusion_patterns(lowp_dtype):
             replacement_unary_fusion_patterns = {
                 UnaryAttr("gelu", algorithm_attr="tanh"): [
-                    _unary_fusion_pattern(_gelu_fusion_2, call_fn, 4, lp_dtype)
+                    _unary_fusion_pattern(_gelu_fusion_2, call_fn, 4, lowp_dtype)
                     for call_fn in computation_call_fns
                 ],
                 UnaryAttr("gelu", algorithm_attr="none"): [
-                    _unary_fusion_pattern(_gelu_fusion_1, call_fn, 2, lp_dtype)
+                    _unary_fusion_pattern(_gelu_fusion_1, call_fn, 2, lowp_dtype)
                     for call_fn in computation_call_fns
                 ],
                 UnaryAttr("hardswish"): [
-                    _unary_fusion_pattern(_hardswish_fusion, call_fn, 2, lp_dtype)
+                    _unary_fusion_pattern(_hardswish_fusion, call_fn, 2, lowp_dtype)
                     for call_fn in computation_call_fns
                 ],
                 UnaryAttr("hardsigmoid"): [
-                    _unary_fusion_pattern(_hardsigmoid_fusion, call_fn, 1, lp_dtype)
+                    _unary_fusion_pattern(_hardsigmoid_fusion, call_fn, 1, lowp_dtype)
                     for call_fn in computation_call_fns
                 ],
                 UnaryAttr("swish"): [
-                    _unary_fusion_pattern(_silu_fusion, call_fn, 2, lp_dtype)
+                    _unary_fusion_pattern(_silu_fusion, call_fn, 2, lowp_dtype)
                     for call_fn in computation_call_fns
                 ],
             }
-            if not lp_dtype:
+            if not lowp_dtype:
                 call_user1 = [call_fn(users=1) for call_fn in computation_call_fns]
                 replacement_unary_fusion_patterns.update(
                     {
@@ -583,30 +583,32 @@ if torch._C._has_mkldnn:
 
             return replacement_unary_fusion_patterns
 
-        for lp_dtype in [torch.bfloat16, torch.float16, None]:
-            replace_patterns = _unary_fusion_patterns(lp_dtype)
+        for lowp_dtype in [torch.bfloat16, torch.float16, None]:
+            replace_patterns = _unary_fusion_patterns(lowp_dtype)
             for unary_attr, patterns in replace_patterns.items():
                 _register_unary_fusion_lowering(
-                    patterns[0], unary_attr, computation_ops[0], lp_dtype
+                    patterns[0], unary_attr, computation_ops[0], lowp_dtype
                 )
                 _register_unary_fusion_lowering(
-                    patterns[1], unary_attr, computation_ops[1], lp_dtype
+                    patterns[1], unary_attr, computation_ops[1], lowp_dtype
                 )
                 _register_unary_fusion_lowering(
-                    patterns[2], unary_attr, computation_ops[2], lp_dtype
+                    patterns[2], unary_attr, computation_ops[2], lowp_dtype
                 )
             _leaky_relu_patterns = [
-                _unary_fusion_pattern(_leaky_relu_fusion, call_fn, 3, lp_dtype)
+                _unary_fusion_pattern(_leaky_relu_fusion, call_fn, 3, lowp_dtype)
                 for call_fn in computation_call_fns
             ]
             for pattern, computation_op in zip(_leaky_relu_patterns, computation_ops):
-                _register_leaky_relu_fusion_lowering(pattern, computation_op, lp_dtype)
+                _register_leaky_relu_fusion_lowering(
+                    pattern, computation_op, lowp_dtype
+                )
             hardtanh_patterns = [
-                _unary_fusion_pattern(_hardtanh_fusion, call_fn, 1, lp_dtype)
+                _unary_fusion_pattern(_hardtanh_fusion, call_fn, 1, lowp_dtype)
                 for call_fn in computation_call_fns
             ]
             for pattern, computation_op in zip(hardtanh_patterns, computation_ops):
-                _register_hardtanh_fusion_lowering(pattern, computation_op, lp_dtype)
+                _register_hardtanh_fusion_lowering(pattern, computation_op, lowp_dtype)
 
     def _register_inplace_fusion():
         binary_ops = [aten.add, ops.add]
