@@ -28,7 +28,8 @@ class ChunkStorageMetadata:
 
 
 class MEM_FORMAT_ENCODING(Enum):
-    """Describe the memory format of a tensor"""
+    """Describe the memory format of a tensor."""
+
     TORCH_CONTIGUOUS_FORMAT = 0
     TORCH_CHANNELS_LAST = 1
     TORCH_PRESERVE_FORMAT = 2
@@ -119,6 +120,8 @@ STATE_DICT_TYPE = Dict[str, Union[StatefulT, Any]]
 
 @dataclass
 class Metadata:
+    """This class represents the metadata of the checkpoint."""
+
     # Keys are the same from the `state_dict` used.
     state_dict_metadata: Dict[str, STORAGE_TYPES]
     # It is the responsibility of the planner and storage plugins to ensure
