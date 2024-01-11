@@ -3,8 +3,8 @@
 #include <ATen/ATen.h>
 #include <ATen/record_function.h>
 
-#include "Attr.h"
-#include "Utils.h"
+#include <Attr.h>
+#include <Utils.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
 
