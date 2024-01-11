@@ -85,14 +85,18 @@
 // to be interpreted as being multiple arguments
 #define AT_WRAP(...) __VA_ARGS__
 
-#define AT_FLOAT8_TYPES \
-  kFloat8_e5m2, kFloat8_e5m2fnuz, kFloat8_e4m3fn, kFloat8_e4m3fnuz
+#define AT_FLOAT8_TYPES                                          \
+  c10::kFloat8_e5m2, c10::kFloat8_e5m2fnuz, c10::kFloat8_e4m3fn, \
+      c10::kFloat8_e4m3fnuz
 
-#define AT_INTEGRAL_TYPES kByte, kChar, kInt, kLong, kShort
-#define AT_FLOATING_TYPES kDouble, kFloat
-#define AT_BAREBONES_UNSIGNED_TYPES kUInt16, kUInt32, kUInt64
-#define AT_COMPLEX_TYPES kComplexDouble, kComplexFloat
-#define AT_QINT_TYPES kQInt8, kQUInt8, kQInt32
+#define AT_INTEGRAL_TYPES \
+  c10::kByte, c10::kChar, c10::kInt, c10::kLong, c10::kShort
+#define AT_FLOATING_TYPES c10::kDouble, c10::kFloat
+#define AT_BAREBONES_UNSIGNED_TYPES c10::kUInt16, c10::kUInt32, c10::kUInt64
+#define AT_INTEGRAL_TYPES_V2 \
+  AT_EXPAND(AT_INTEGRAL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES)
+#define AT_COMPLEX_TYPES c10::kComplexDouble, c10::kComplexFloat
+#define AT_QINT_TYPES c10::kQInt8, c10::kQUInt8, c10::kQInt32
 // NB: not *actually* all types
 #define AT_ALL_TYPES AT_EXPAND(AT_INTEGRAL_TYPES), AT_EXPAND(AT_FLOATING_TYPES)
 #define AT_ALL_TYPES_AND_COMPLEX \
