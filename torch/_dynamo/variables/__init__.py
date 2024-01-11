@@ -18,6 +18,7 @@ from .dicts import (
     DefaultDictVariable,
     SetVariable,
 )
+from .flash_attention import SDPAParamsVariable
 from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
@@ -126,4 +127,5 @@ __all__ = [
     "UserMethodVariable",
     "VariableTracker",
     "WithExitFunctionVariable",
+    "SDPAParamsVariable",
 ]

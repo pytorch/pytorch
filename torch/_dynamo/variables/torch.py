@@ -208,6 +208,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             DeterministicAlgorithmsVariable,
             DisabledSavedTensorsHooksVariable,
             GradModeVariable,
+            SDPAParamsVariable,
             StreamContextVariable,
             SymNodeVariable,
             TensorVariable,
@@ -446,6 +447,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
         ):
             return ConstantVariable(None)
+        elif SDPAParamsVariable.is_sdpa_params(self.value):
+            return wrap_fx_proxy(
+                tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch._C._SDPAParams,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+                param_vars=args,
+            )
         elif is_constant_pg_functions(self.value):
             # becuase the input is a "ProcessGroupVariable", we'll be guarding on its
             # ID_MATCH based on how it was constructed.
