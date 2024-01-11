@@ -130,7 +130,7 @@
     url = https://github.com/pytorch/kineto
 [submodule "third_party/pocketfft"]
 	path = third_party/pocketfft
-	url = https://github.com/mreineck/pocketfft
+	url = https://github.com/iremyux/pocketfft
 [submodule "third_party/ittapi"]
 	path = third_party/ittapi
 	url = https://github.com/intel/ittapi.git
