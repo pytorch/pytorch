@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
+    parametrize,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase,
@@ -495,6 +496,33 @@ class TestInductorDynamic(TestCase):
         expect = fn(5)
         actual = cfn(5)
         self.assertEqual(expect, actual)
+
+    @parametrize(
+        "op",
+        [
+            math.sqrt,
+            math.sin,
+            math.cos,
+            math.cosh,
+            math.sin,
+            math.sinh,
+            math.tan,
+            math.tanh,
+            math.asin,
+            math.acos,
+            math.atan,
+        ],
+    )
+    def test_math_ops(self, device, op):
+        def func(x, fn, a):
+            return x + fn(a)
+
+        cfunc = self.compile_fn(func, fullgraph=True)
+        x = torch.rand(10, device=device)
+        a = -1 if op in (math.asin, math.acos) else 12
+        expected = func(x, op, a)
+        output = cfunc(x, op, a)
+        self.assertEqual(output, expected)
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals())

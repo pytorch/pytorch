@@ -146,6 +146,7 @@
 #include <ATen/ops/select_backward_native.h>
 #include <ATen/ops/select_copy_native.h>
 #include <ATen/ops/select_native.h>
+#include <ATen/ops/select_inverse_native.h>
 #include <ATen/ops/select_scatter_native.h>
 #include <ATen/ops/set_native.h>
 #include <ATen/ops/slice.h>
