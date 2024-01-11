@@ -7,36 +7,6 @@ namespace vulkan {
 
 namespace {
 
-/**
- * Determines an appropriate GPU Memory Layout qualifier based on the the
- * StorageType requested and the c10::MemoryFormat specified.
- */
-api::GPUMemoryLayout get_gpu_memory_layout(
-    const api::StorageType storage_type,
-    const c10::MemoryFormat memory_format) {
-  if (storage_type == api::StorageType::BUFFER) {
-    switch (memory_format) {
-      case c10::MemoryFormat::Contiguous:
-        return api::GPUMemoryLayout::TENSOR_WIDTH_PACKED;
-      case c10::MemoryFormat::ChannelsLast:
-        return api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED;
-      default:
-        VK_THROW("Invalid memory format used to create vTensor!");
-    }
-  }
-  // For texture storage, always return a memory layout that packs the channels
-  // dimension. for now. With the way texture storage currently works, for 2-dim
-  // tensors, a channel dimension is added, as well as 3 channels of zero
-  // padding resulting in a final shape of {4, H, W}. For 1-dim tensors, it is
-  // unsqueezed to size {1, 1, L} and 3 channels of zero padding are added to
-  // produce a final size of {4, 1, L}. This is to ensure that physical texture
-  // positions correspond directly to logical tensor coordinates (so
-  // texelFetch(ivec3(x, y, 0), 0) will correspond to tensor[y, x].
-  //
-  // TODO(ssjia): have 2D and 1D tensors use TENSOR_WIDTH_PACKED by default.
-  return api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED;
-}
-
 /*
  * Calculates the strides of a contiguous tensor. empty_tensor_restride from
  * TensorImpl.h was used as a reference.
@@ -422,36 +392,6 @@ vTensor::vTensor(
           memory_layout_,
           gpu_sizes_,
           dtype_)) {}
-
-vTensor::vTensor(
-    api::Context* const context,
-    const std::vector<int64_t>& sizes,
-    const api::ScalarType dtype,
-    const api::StorageType storage_type,
-    const c10::MemoryFormat memory_format)
-    : vTensor(
-          context,
-          sizes,
-          dtype,
-          storage_type,
-          get_gpu_memory_layout(storage_type, memory_format)) {}
-
-vTensor::vTensor(
-    api::Context* const context,
-    const std::vector<int64_t>& sizes,
-    double q_scale,
-    int64_t q_zero_point,
-    const api::ScalarType dtype,
-    const api::StorageType storage_type,
-    const c10::MemoryFormat memory_format)
-    : vTensor(
-          context,
-          sizes,
-          q_scale,
-          q_zero_point,
-          dtype,
-          storage_type,
-          get_gpu_memory_layout(storage_type, memory_format)) {}
 
 api::VulkanImage& vTensor::image(
     api::PipelineBarrier& pipeline_barrier,
