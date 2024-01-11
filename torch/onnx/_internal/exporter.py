@@ -1002,7 +1002,10 @@ class ONNXProgram:
                     # ignore duplicate
                     continue
                 try:
-                    extra_state_dict = torch.load(path)
+                    # Loads checkpoint using memory-map on CPU to succeed with large models
+                    extra_state_dict = torch.load(
+                        path, map_location="cpu", mmap=True, weights_only=True
+                    )
                     extra_state_dict_file = io.BytesIO()
                     torch.save(extra_state_dict, extra_state_dict_file)
                     extra_state_dict_file.seek(0)
