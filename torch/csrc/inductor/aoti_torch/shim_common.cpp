@@ -25,6 +25,7 @@
 #include <ATen/ops/convolution.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/from_blob.h>
+#include <ATen/ops/index_put.h>
 #include <ATen/ops/mm.h>
 #include <ATen/ops/nonzero.h>
 #include <ATen/ops/scatter.h>
@@ -635,6 +636,27 @@ AOTITorchError aoti_torch_scatter_reduce_out(
         *src_tensor,
         reduce,
         (bool)include_self);
+  });
+}
+
+AOTITorchError aoti_torch_index_put_out(
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    const AtenTensorHandle* indices,
+    const uint32_t num_indices,
+    const AtenTensorHandle values,
+    bool accumulate) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::List<std::optional<at::Tensor>> indices_;
+    indices_.reserve(num_indices);
+    for (size_t i = 0; i < num_indices; i++) {
+      indices_.emplace_back(*tensor_handle_to_tensor_pointer(indices[i]));
+    }
+    at::Tensor* out_tensor = tensor_handle_to_tensor_pointer(out);
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor* values_tensor = tensor_handle_to_tensor_pointer(values);
+    at::index_put_out(
+        *out_tensor, *self_tensor, indices_, *values_tensor, accumulate);
   });
 }
 
