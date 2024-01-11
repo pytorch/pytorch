@@ -314,17 +314,29 @@ def stride_at(var: sympy.Symbol, index: sympy.Expr):
 @functools.lru_cache
 def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: int):
     """
-    Simplify the index expression in the range of the vectorized loop.
+    Simplifies the index expression within the range of a vectorized loop.
+    Given a vectorized loop variable `var` in the range of a loop with `vec_length`,
+    this function transforms the `index` into an equivalent form. It handles
+    simplifications for cases where `var` can be expressed as `vec_length * a + b`,
+    where `b` ranges from 0 to `vec_length - 1`. The function reduces occurrences
+    of `FloorDiv` and `ModularIndexing` in the `index` with best-effort optimizations.
+
+    Examples:
+    1. If `var` is `x3` and `vec_length` is 16, and `x3 = 16*a + b`, then
+       `FloorDiv(x3, div)` or `ModularIndexing(x3, div, mod)` becomes a free variable
+       when `div` is divisible by 16.
+    2. `ModularIndexing(x3, 1, mod)` can be simplified to `x3 + c` where `c` is a free
+       variable when `mod` is divisible by 16.
     """
 
-    def collect(expr, sub_expr, collected, filter=None):
-        m = expr.match(sub_expr)
+    def collect(expr, pattern, collected, filter=None):
+        m = expr.match(pattern)
         if m is not None:
             if filter is None or filter(m):
-                collected[sub_expr.xreplace(m)] = m
+                collected[pattern.xreplace(m)] = m
             return
         for arg in expr.args:
-            collect(arg, sub_expr, collected, filter)
+            collect(arg, pattern, collected, filter)
 
     div = sympy.Wild("divisor")
     floor_divs: Dict[sympy.Expr, Dict[sympy.Expr, sympy.Expr]] = {}
