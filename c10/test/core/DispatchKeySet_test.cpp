@@ -17,7 +17,7 @@ static bool isRealDispatchKey(DispatchKey k) {
       k == DispatchKey::StartOfSparseCsrBackends ||
       k == DispatchKey::StartOfNestedTensorBackends ||
       k == DispatchKey::StartOfAutogradFunctionalityBackends ||
-      k == DispatchKey::StartOfAutocastBackends) {
+      k == DispatchKey::StartOfAutocastFunctionalityBackends) {
     return false;
   }
 

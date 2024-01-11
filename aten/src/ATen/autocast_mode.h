@@ -341,7 +341,8 @@ struct WrapFunction_<
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(
+        DispatchKey::AutocastFunctionality);
     return (*F)(cached_cast(
         get_lower_precision_fp_from_device_type(device_type),
         args,
@@ -364,7 +365,8 @@ struct WrapFunction_<
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(
+        DispatchKey::AutocastFunctionality);
     return (*F)(cached_cast(at::kFloat, args, device_type)...);
   }
 };
@@ -384,7 +386,8 @@ struct WrapFunction_<
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(
+        DispatchKey::AutocastFunctionality);
     if (firstarg_is_eligible(device_type, args...)) {
       return (*F)(set_opt_dtype(at::kFloat, args)...);
     } else {
@@ -411,7 +414,8 @@ struct WrapFunction_<
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(
+        DispatchKey::AutocastFunctionality);
     at::ScalarType out_type =
         type_from_firstarg(device_type, at::kFloat, args...);
     return (*F)(args..., out_type);
@@ -433,7 +437,8 @@ struct WrapFunction_<
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(
+        DispatchKey::AutocastFunctionality);
     auto to_type = promote_type(
         get_lower_precision_fp_from_device_type(device_type),
         device_type,
