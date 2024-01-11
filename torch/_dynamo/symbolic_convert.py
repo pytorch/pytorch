@@ -25,6 +25,7 @@ import torch._logging
 from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import config, exc, logging as torchdynamo_logging, skipfiles, variables
+from .allowed_functions import is_builtin_constant, is_forbidden
 from .bytecode_analysis import (
     get_indexof,
     JUMP_OPNAMES,
@@ -57,7 +58,6 @@ from .source import (
     LocalSource,
     Source,
 )
-from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     counters,
     get_fake_value,
