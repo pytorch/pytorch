@@ -277,7 +277,6 @@ test_dynamo_shard() {
       test_ao_sparsity \
       test_autograd \
       test_jit \
-      test_proxy_tensor \
       test_quantization \
       test_public_bindings \
       test_dataloader \
