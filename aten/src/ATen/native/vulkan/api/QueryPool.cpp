@@ -6,6 +6,7 @@
 #endif // USE_KINETO
 
 #include <cmath>
+#include <iomanip>
 #include <iostream>
 #include <utility>
 

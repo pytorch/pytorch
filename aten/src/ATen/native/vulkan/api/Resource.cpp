@@ -304,8 +304,15 @@ ImageSampler::~ImageSampler() {
 
 size_t ImageSampler::Hasher::operator()(
     const ImageSampler::Properties& props) const {
-  return c10::get_hash(
-      props.filter, props.mipmap_mode, props.address_mode, props.border_color);
+  size_t seed = 0;
+  seed = utils::hash_combine(seed, std::hash<VkFilter>()(props.filter));
+  seed = utils::hash_combine(
+      seed, std::hash<VkSamplerMipmapMode>()(props.mipmap_mode));
+  seed = utils::hash_combine(
+      seed, std::hash<VkSamplerAddressMode>()(props.address_mode));
+  seed =
+      utils::hash_combine(seed, std::hash<VkBorderColor>()(props.border_color));
+  return seed;
 }
 
 void swap(ImageSampler& lhs, ImageSampler& rhs) noexcept {
