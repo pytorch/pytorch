@@ -26,7 +26,7 @@ Tensor flip(const at::Tensor& self, const IntArrayRef dim_list) {
   vTensor v_output{
       context,
       v_input.sizes(),
-      self.scalar_type(),
+      convert_dtype(self.scalar_type()),
   };
 
   // Required to determine how to insert memory barriers in the command buffer

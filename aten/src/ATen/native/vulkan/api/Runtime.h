@@ -2,6 +2,8 @@
 
 // @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
 
+#include <functional>
+#include <memory>
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/vk_api.h>
