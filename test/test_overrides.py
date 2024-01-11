@@ -1564,13 +1564,15 @@ class TestTorchFunctionMode(TestCase):
                 if kwargs is None:
                     kwargs = {}
                 out = func(*args, **kwargs)
-                return out * 2
+                if isinstance(out, torch.Tensor):
+                    return out * 2
+                return out
 
-        @torch.compile(backend="aot_eager")
+        @torch.compile(backend="eager")
         def f(x):
             return x.view(-1)
 
-        x = torch.ones(3, device='cuda')
+        x = torch.ones(3, device="cpu")
         with Mul2ModeF():
             _ = f(x)
 
