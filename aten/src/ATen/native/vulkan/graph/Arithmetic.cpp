@@ -22,7 +22,7 @@ void add_arithmetic_node(
     graph.prepack_nodes().emplace_back(new ArithmeticPrepack(t1, t1_vten));
     arg1 = t1_vten;
   }
-  VKGRAPH_CHECK(graph.get_val(arg1).isTensor());
+  VK_CHECK_COND(graph.get_val(arg1).isTensor());
   // Prepacking second arg (if needed)
   ValueRef arg2 = t2;
   if (graph.get_val(t2).isTensorRef()) {
@@ -31,7 +31,7 @@ void add_arithmetic_node(
     graph.prepack_nodes().emplace_back(new ArithmeticPrepack(t2, t2_vten));
     arg2 = t2_vten;
   }
-  VKGRAPH_CHECK(graph.get_val(arg2).isTensor());
+  VK_CHECK_COND(graph.get_val(arg2).isTensor());
 
   graph.execute_nodes().emplace_back(
       new ArithmeticNode(arg1, arg2, out, alpha, optype));

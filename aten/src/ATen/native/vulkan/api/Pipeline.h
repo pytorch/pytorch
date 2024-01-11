@@ -4,12 +4,13 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/vk_api.h>
+
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
-#include <unordered_map>
 
 #include <mutex>
+#include <unordered_map>
 
 namespace at {
 namespace native {
