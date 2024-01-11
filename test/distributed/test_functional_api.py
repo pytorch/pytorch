@@ -427,7 +427,7 @@ WORLD_SIZE = 2
 
 
 def exit_if_lt_x_gpu(x):
-    if not torch.cuda.is_available() or torch.cuda.device_count() < x:
+    if torch.cuda.device_count() < x:
         sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
 
 
