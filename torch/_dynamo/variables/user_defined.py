@@ -96,7 +96,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         source = AttrSource(self.source, name) if self.source is not None else None
         try:
-            obj = inspect.getattr_static(self.value, name)
+            if self.value is torch.nn.Module and name == "__call__":
+                obj = getattr(self.value, "_wrapped_call_impl")
+            else:
+                obj = inspect.getattr_static(self.value, name)
         except AttributeError:
             obj = None
 
