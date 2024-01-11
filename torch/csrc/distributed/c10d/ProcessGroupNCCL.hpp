@@ -13,6 +13,7 @@
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 
@@ -756,8 +757,15 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   static const int64_t kWatchdogThreadSleepMillis;
 
-  // The store is used to broadcast the NCCL unique ID of rank 0.
+  // The store is used to broadcast the NCCL unique ID of rank 0. This store
+  // comes with prefix and it is different across ProcessGroup NCCL instances
+  // (aka, different ProcessGroups).
   c10::intrusive_ptr<Store> store_;
+
+  // Reference to the store without prefix so that keys are same across all
+  // ProcessGroup NCCL instances and (key, value) pairs written to the store are
+  // global.
+  c10::intrusive_ptr<Store> globalStore_;
 
   bool storeError_{false};
 
@@ -981,10 +989,6 @@ TORCH_API std::string dump_nccl_trace();
 // tracing
 TORCH_API c10::optional<std::function<std::string()>>& get_cpp_trace_dumper();
 
-// Similar to get_cpp_trace_dumper, this stores a function defined in
-// torch-python layer that lets us check whether the GIL can be acquired,
-// helpful for instrumenting in cases where a hang was observed.
-TORCH_API c10::optional<std::function<bool()>>& get_gil_checker();
 } // namespace c10d
 
 #endif // USE_C10D_NCCL
