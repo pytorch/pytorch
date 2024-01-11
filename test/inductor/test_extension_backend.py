@@ -20,7 +20,7 @@ except ImportError:
     )
 
 from torch._C import FileCheck
-from torch._inductor import metrics
+from torch._inductor import codecache, metrics
 from torch._inductor.codegen.common import (
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
@@ -131,7 +131,11 @@ class ExtensionBackendTests(TestCase):
         metrics.reset()
         opt_fn = torch.compile()(fn)
         _, code = run_and_get_cpp_code(opt_fn, x, y, z)
-        FileCheck().check("void kernel").check("loadu").check("extension_device").run(
+        if codecache.valid_vec_isa_list():
+            load_expr = 'loadu'
+        else:
+            load_expr = ' = in_ptr0[static_cast<long>(i0)];'
+        FileCheck().check("void kernel").check(load_expr).check("extension_device").run(
             code
         )
         opt_fn(x, y, z)
