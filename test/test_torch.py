@@ -8609,6 +8609,29 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(x[:, -2:3].tolist(), [[2], [6], [10], [14]])
         self.assertEqual(x[0:-1:2].tolist(), [[0, 1, 2, 3], [8, 9, 10, 11]])
 
+    def test_split_with_sizes_copy_out(self):
+        device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+        device = torch.device("cpu")
+        shape = (30, 40, 50)
+        x = torch.rand(*shape, device=device)
+        cases = [
+            (0, [3, 7, 8, 12]),
+            (1, [3, 7, 10, 20]),
+            (2, [3, 7, 10, 12, 18]),
+            (2, [3, 7, 10, 0, 30]),
+        ]
+        for dim, split_sizes in cases:
+            views = x.split_with_sizes(split_sizes, dim=dim)
+            expects = [v.clone() for v in views]
+            out = [torch.empty_like(v) for v in views]
+            for expect, t in zip(expects, out):
+                if expect.numel() != 0:
+                    self.assertFalse(expect.eq(t).all().item())
+
+            torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
+            for expect, t in zip(expects, out):
+                self.assertTrue(expect.eq(t).all().item())
+
     def test_type(self):
         x = torch.randn(3, 3).double()
         self.assertEqual(x.type('torch.FloatTensor').dtype, torch.float32)
