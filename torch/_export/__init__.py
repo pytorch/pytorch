@@ -329,7 +329,7 @@ def aot_compile(
         constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
 
     if config.is_predispatch:
-        gm = capture_pre_autograd_graph(f, args, kwargs, constraints)
+        gm = torch.export._trace._export(f, args, kwargs, constraints, pre_dispatch=True).module()
     else:
         # We want to export to Torch IR here to utilize the pre_grad passes in
         # inductor, which run on Torch IR.
