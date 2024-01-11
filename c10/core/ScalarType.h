@@ -473,10 +473,10 @@ static inline bool isBitsType(ScalarType t) {
 
 static inline bool isBarebonesUnsignedType(ScalarType t) {
   return t == ScalarType::UInt1 || t == ScalarType::UInt2 ||
-    t == ScalarType::UInt3 || t == ScalarType::UInt4 ||
-    t == ScalarType::UInt5 || t == ScalarType::UInt6 ||
-    t == ScalarType::UInt7 || t == ScalarType::UInt16 ||
-    t == ScalarType::UInt32 || t == ScalarType::UInt64;
+      t == ScalarType::UInt3 || t == ScalarType::UInt4 ||
+      t == ScalarType::UInt5 || t == ScalarType::UInt6 ||
+      t == ScalarType::UInt7 || t == ScalarType::UInt16 ||
+      t == ScalarType::UInt32 || t == ScalarType::UInt64;
 }
 
 static inline ScalarType toQIntType(ScalarType t) {
