@@ -1666,41 +1666,43 @@ class TestReductions(TestCase):
         def is_integral(dtype):
             return dtype in integral_types()
 
+        exact_dtype = True
         # On Windows CI, the current version of `numpy` promotes all lower integers
         # dtypes to int32 while `torch` promotes them to int64. Hence we skip on checking
         # the exact dtype.
         # Reference : https://dr.pytorch.org/api/view-log-full?build_id=122051580
         # PR : https://github.com/pytorch/pytorch/pull/38628#issuecomment-655905370
-        exact_dtype = False if (IS_WINDOWS and is_integral(dtype)) else True
-
+        if IS_WINDOWS and is_integral(dtype):
+            exact_dtype = False
+        # For uint8, numpy promotes to uint64 while torch promotes to int64.
+        # So we must skip this as well.
         if dtype == torch.uint8:
-            with self.assertRaises(TypeError):
-                self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype, with_extremal=with_extremal)
+            exact_dtype = False
+
+        # TODO: Investigate why the output is not close to numpy.
+        if dtype == torch.float16:
+            atol = 0.4
+            rtol = 1e-2
+        elif dtype == torch.float32:
+            atol = 7e-05
+            rtol = 3e-06
         else:
-            # TODO: Investigate why the output is not close to numpy.
-            if dtype == torch.float16:
-                atol = 0.4
-                rtol = 1e-2
-            elif dtype == torch.float32:
-                atol = 7e-05
-                rtol = 3e-06
-            else:
-                # Default values
-                atol = None
-                rtol = None
-            self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
-                                                     atol=atol, rtol=rtol, exact_dtype=exact_dtype,
-                                                     with_keepdim=with_keepdim, with_extremal=with_extremal)
+            # Default values
+            atol = None
+            rtol = None
+        self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
+                                                 atol=atol, rtol=rtol, exact_dtype=exact_dtype,
+                                                 with_keepdim=with_keepdim, with_extremal=with_extremal)
 
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and(torch.half))
+    @dtypes(*set(all_types_and(torch.half)) - {torch.uint8})
     def test_sum_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype)
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_extremal=True)
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_keepdim=True)
 
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and(torch.half))
+    @dtypes(*set(all_types_and(torch.half)) - {torch.uint8})
     def test_nansum_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype)
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_extremal=True)
@@ -3527,6 +3529,10 @@ as the input tensor excluding its innermost dimension'):
 
             # Workaround https://github.com/pytorch/pytorch/issues/66556
             expected = np.asarray(expected)  # transform numpy scalars to numpy.ndarray instances
+
+            # Numpy differs, producing uint32 on Windows
+            if expected.dtype in [np.uint64, np.uint32]:
+                exact_dtype = False
 
             msg = ("Failed to produce expected results! Input tensor was"
                    f" {t}, torch result is {actual}, and reference result is"

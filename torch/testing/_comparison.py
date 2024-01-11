@@ -800,7 +800,16 @@ class TensorLikePair(Pair):
             expected = expected.cpu()
 
         if actual.dtype != expected.dtype:
-            dtype = torch.promote_types(actual.dtype, expected.dtype)
+            actual_dtype = actual.dtype
+            expected_dtype = expected.dtype
+            # For uint64, this is not sound in general, which is why promote_types doesn't
+            # allow it, but for easy testing, we're unlikely to get confused
+            # by large uint64 overflowing into negative int64
+            if actual_dtype in [torch.uint64, torch.uint32, torch.uint16]:
+                actual_dtype = torch.int64
+            if expected_dtype in [torch.uint64, torch.uint32, torch.uint16]:
+                expected_dtype = torch.int64
+            dtype = torch.promote_types(actual_dtype, expected_dtype)
             actual = actual.to(dtype)
             expected = expected.to(dtype)
 
