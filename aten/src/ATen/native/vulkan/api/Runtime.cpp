@@ -1,9 +1,8 @@
+#include <iostream>
+#include <sstream>
+
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Runtime.h>
-#include <c10/util/Logging.h>
-#include <c10/util/irange.h>
-
-#include <sstream>
 
 namespace at {
 namespace native {
@@ -139,21 +138,13 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debug_report_callback_fn(
     const char* const layer_prefix,
     const char* const message,
     void* const /* user_data */) {
+  (void)flags;
+
   std::stringstream stream;
   stream << layer_prefix << " " << message_code << " " << message << std::endl;
   const std::string log = stream.str();
 
-  if (flags & VK_DEBUG_REPORT_ERROR_BIT_EXT) {
-    LOG(ERROR) << log;
-  } else if (flags & VK_DEBUG_REPORT_WARNING_BIT_EXT) {
-    LOG(WARNING) << log;
-  } else if (flags & VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT) {
-    LOG(WARNING) << "Performance:" << log;
-  } else if (flags & VK_DEBUG_REPORT_INFORMATION_BIT_EXT) {
-    LOG(INFO) << log;
-  } else if (flags & VK_DEBUG_REPORT_DEBUG_BIT_EXT) {
-    LOG(INFO) << "Debug: " << log;
-  }
+  std::cout << log;
 
   return VK_FALSE;
 }
@@ -208,7 +199,7 @@ uint32_t select_first(const std::vector<Runtime::DeviceMapping>& devices) {
   }
 
   // Select the first adapter that has compute capability
-  for (const uint32_t i : c10::irange(devices.size())) {
+  for (size_t i = 0; i < devices.size(); ++i) {
     if (devices[i].first.num_compute_queues > 0) {
       return i;
     }
@@ -313,7 +304,7 @@ Runtime::Runtime(const RuntimeConfiguration config)
 }
 
 Runtime::~Runtime() {
-  if C10_LIKELY (VK_NULL_HANDLE == instance_) {
+  if (VK_NULL_HANDLE == instance_) {
     return;
   }
 

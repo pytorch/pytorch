@@ -4,8 +4,18 @@
 #include <c10/util/Half.h> // For c10::overflows
 
 #include <ATen/native/vulkan/api/Common.h>
+#include <numeric>
 
 #ifdef USE_VULKAN_API
+
+// Compiler Macros
+
+// Suppress an unused variable. Copied from C10_UNUSED
+#if defined(_MSC_VER) && !defined(__clang__)
+#define VK_UNUSED __pragma(warning(suppress : 4100 4101))
+#else
+#define VK_UNUSED __attribute__((__unused__))
+#endif //_MSC_VER
 
 namespace at {
 namespace native {
@@ -182,6 +192,22 @@ inline uvec4 make_nchw_uvec4(const IntArrayRef arr) {
   uint32_t n = val_at(-4, arr);
 
   return {w, h, c, n};
+}
+
+/*
+ * Wrapper around std::accumulate that accumulates values of a container of
+ * integral types into int64_t. Taken from `multiply_integers` in
+ * <c10/util/accumulate.h>
+ */
+template <
+    typename C,
+    std::enable_if_t<std::is_integral_v<typename C::value_type>, int> = 0>
+inline int64_t multiply_integers(const C& container) {
+  return std::accumulate(
+      container.begin(),
+      container.end(),
+      static_cast<int64_t>(1),
+      std::multiplies<>());
 }
 
 } // namespace utils

@@ -7,7 +7,6 @@
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
-#include <c10/util/SmallVector.h>
 #include <c10/util/flat_hash_map.h>
 
 #include <mutex>
@@ -23,8 +22,8 @@ struct PipelineBarrier final {
     VkPipelineStageFlags dst;
   } stage;
 
-  c10::SmallVector<BufferMemoryBarrier, 4u> buffers;
-  c10::SmallVector<ImageMemoryBarrier, 4u> images;
+  std::vector<BufferMemoryBarrier> buffers;
+  std::vector<ImageMemoryBarrier> images;
 
   inline operator bool() const {
     return (0u != stage.src) || (0u != stage.dst) || !buffers.empty() ||

@@ -6,7 +6,6 @@
 
 #include <ATen/native/vulkan/api/Context.h>
 #include <c10/core/MemoryFormat.h>
-#include <c10/util/accumulate.h>
 
 namespace at {
 namespace native {
@@ -148,13 +147,13 @@ class vTensor final {
   api::GPUMemoryLayout memory_layout_;
 
   // Sizes and Strides
-  c10::SmallVector<int64_t, 6u> sizes_;
-  c10::SmallVector<int64_t, 6u> strides_;
+  std::vector<int64_t> sizes_;
+  std::vector<int64_t> strides_;
 
   // Storage Dimensions. When stored on the GPU, one dimension will be aligned
   // to the next multiple of 4 in order to take advantage of vec4 data types.
-  c10::SmallVector<int64_t, 6u> gpu_sizes_;
-  c10::SmallVector<int64_t, 6u> gpu_strides_;
+  std::vector<int64_t> gpu_sizes_;
+  std::vector<int64_t> gpu_strides_;
 
   // A Vulkan uniform buffer containing sizes and strides of the GPU buffer that
   // can be passed into a shader.
@@ -303,7 +302,7 @@ class vTensor final {
   }
 
   inline size_t numel() const {
-    return c10::multiply_integers(sizes());
+    return api::utils::multiply_integers(sizes());
   }
 
   inline size_t nbytes() const {

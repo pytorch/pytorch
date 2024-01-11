@@ -41,7 +41,7 @@ class DescriptorSet final {
   VkDevice device_;
   VkDescriptorSet handle_;
   ShaderLayout::Signature shader_layout_signature_;
-  c10::SmallVector<ResourceBinding, 6u> bindings_;
+  std::vector<ResourceBinding> bindings_;
 
  public:
   DescriptorSet& bind(const uint32_t, const VulkanBuffer&);

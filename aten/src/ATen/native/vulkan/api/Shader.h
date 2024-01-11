@@ -19,7 +19,7 @@ namespace api {
 
 class ShaderLayout final {
  public:
-  using Signature = c10::SmallVector<VkDescriptorType, 6u>;
+  using Signature = std::vector<VkDescriptorType>;
 
   explicit ShaderLayout(VkDevice, const Signature&);
 
@@ -58,7 +58,7 @@ struct ShaderInfo final {
   // Shader Metadata
   utils::uvec3 out_tile_size{1u, 1u, 1u};
 
-  c10::SmallVector<uint32_t, 4> tile_size;
+  std::vector<uint32_t> tile_size;
   StorageType bias_storage_type{StorageType::UNKNOWN};
   StorageType weight_storage_type{StorageType::UNKNOWN};
 
@@ -68,12 +68,12 @@ struct ShaderInfo final {
       std::string,
       const uint32_t*,
       const uint32_t,
-      const std::vector<VkDescriptorType>&);
+      std::vector<VkDescriptorType>);
   explicit ShaderInfo(
       std::string,
       const uint32_t*,
       const uint32_t,
-      const std::vector<VkDescriptorType>&,
+      std::vector<VkDescriptorType>,
       const std::vector<uint32_t>& tile_size,
       const StorageType bias_storage_type,
       const StorageType weight_storage_type);
