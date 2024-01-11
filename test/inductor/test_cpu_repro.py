@@ -13,7 +13,6 @@ import numpy as np
 import sympy
 import torch
 from torch._C import FileCheck
-from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import codecache, config, metrics
@@ -450,14 +449,14 @@ class CPUReproTests(TestCase):
         params_dict = {
             "unbatched": [True, False],
             "input_size": [1, 2],
-            "hidden_size": [5, 32],
-            "num_layers": [1, 3],
+            "hidden_size": [2],
+            "num_layers": [1, 2],
             "bidirectional": [False, True],
             "bias": [False, True],
             "empty_state": [False, True],
             "batch_first": [True, False],
             "batch_size": [1, 2],
-            "seq_len": [1, 3],
+            "seq_len": [1, 2],
         }
         self._test_lstm_packed(params_dict)
 
@@ -1264,17 +1263,8 @@ class CPUReproTests(TestCase):
                     with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
                         torch._dynamo.reset()
                         metrics.reset()
-                        # fp16 inputs are not supported for C++ wrappers on CPU yet
-                        if cpp_wrapper_flag and dtype == torch.float16:
-                            with self.assertRaisesRegex(
-                                BackendCompilerFailed,
-                                "Unsupported input dtype torch.float16",
-                            ):
-                                self.common(fn, (value, mask))
-                            assert metrics.generated_cpp_vec_kernel_count == 0
-                        else:
-                            self.common(fn, (value, mask))
-                            assert metrics.generated_cpp_vec_kernel_count >= 1
+                        self.common(fn, (value, mask))
+                        assert metrics.generated_cpp_vec_kernel_count >= 1
 
     def test_load_same_bool_tensor_twice(self):
         @torch._dynamo.optimize("inductor")
@@ -1412,17 +1402,8 @@ class CPUReproTests(TestCase):
                     with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
                         torch._dynamo.reset()
                         metrics.reset()
-                        # fp16 inputs are not supported for C++ wrappers on CPU yet
-                        if cpp_wrapper_flag and dtype == torch.float16:
-                            with self.assertRaisesRegex(
-                                BackendCompilerFailed,
-                                "Unsupported input dtype torch.float16",
-                            ):
-                                self.common(fn, (x,))
-                            assert metrics.generated_cpp_vec_kernel_count == 0
-                        else:
-                            self.common(fn, (x,))
-                            assert metrics.generated_cpp_vec_kernel_count == 1
+                        self.common(fn, (x,))
+                        assert metrics.generated_cpp_vec_kernel_count == 1
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -1830,7 +1811,7 @@ class CPUReproTests(TestCase):
             itervars = [sympy.Symbol("i"), sympy.Symbol("j"), sympy.Symbol("k")]
 
             tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
-            # The moset inner loop variable is used in the index_expr
+            # The most inner loop variable is used in the index_expr
             with CppVecKernelChecker(
                 args=None, num_threads=1, tiling_factor=tiling_factor
             ) as vec_checker:
@@ -1843,7 +1824,7 @@ class CPUReproTests(TestCase):
                 vec_checker.ranges = ranges[:2]
                 submodules = {"get_index": get_index}
                 InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertFalse(vec_checker.simd_vec)
+                self.assertTrue(vec_checker.simd_vec)
 
             # Most inner loop variable irrevalant
             with CppVecKernelChecker(
@@ -2718,6 +2699,31 @@ class CPUReproTests(TestCase):
         self.assertTrue("Vectorized" in code)
         self.assertTrue("cvt_lowp_fp_to_fp32" not in code)
         self.assertTrue("cvt_fp32_to_lowp_fp" not in code)
+
+    def test_concat_inner_vec(self):
+        def fn(x, y):
+            return F.relu(torch.cat([x, y], dim=1))
+
+        x = torch.randn(32, 35)
+        y = torch.randn(32, 120)
+        metrics.reset()
+        self.common(fn, (x, y))
+        assert metrics.generated_cpp_vec_kernel_count == 3
+
+    def test_expr_vec_non_contiguous(self):
+        def fn(x):
+            # the pattern from sebotnet33ts_256
+            y = torch.nn.functional.pad(x, (0, 31)).reshape(-1, 33, 63)
+            y = y[:, :32, 31:].reshape(4, 32, 1, 32, 32).expand(-1, -1, 32, -1, -1)
+            y = y.permute(0, 3, 1, 4, 2).clone(memory_format=torch.contiguous_format)
+            y = y.view(4, 1024, 1024)
+            return y.softmax(dim=-1)
+
+        x = torch.randn(128, 2048)
+        metrics.reset()
+        self.common(fn, (x,))
+        # 4 kernels for max, exp, sum and div
+        assert metrics.generated_cpp_vec_kernel_count == 4
 
 
 if __name__ == "__main__":

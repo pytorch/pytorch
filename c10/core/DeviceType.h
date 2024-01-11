@@ -116,5 +116,6 @@ struct hash<c10::DeviceType> {
 } // namespace std
 
 namespace torch {
+// NOLINTNEXTLINE(misc-unused-using-decls)
 using c10::DeviceType;
-}
+} // namespace torch

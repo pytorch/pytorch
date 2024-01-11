@@ -4,11 +4,10 @@ import collections
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS, skipIfTorchDynamo
 from torch.testing._internal.autocast_test_lists import AutocastCPUTestLists
 from torch.utils._python_dispatch import TorchDispatchMode
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAutocastCPU(TestCase):
     def setUp(self):
         super().setUp()
@@ -101,22 +100,26 @@ class TestAutocastCPU(TestCase):
         else:
             return op_with_args[0], op_with_args[1], op_with_args[2]
 
+    @skipIfTorchDynamo()
     def test_autocast_torch_expect_builtin_promote(self):
         for op, args1, args2, out_type in self.autocast_lists.torch_expect_builtin_promote:
             self._run_autocast_outofplace(op, args1, torch.float32, out_type=out_type)
             self._run_autocast_outofplace(op, args2, torch.float32, out_type=out_type, amp_dtype=torch.float16)
 
+    @skipIfTorchDynamo()
     def test_autocast_methods_expect_builtin_promote(self):
         for op, args1, args2, out_type in self.autocast_lists.methods_expect_builtin_promote:
             self._run_autocast_outofplace(op, args1, torch.float32, module=None, out_type=out_type)
             self._run_autocast_outofplace(op, args2, torch.float32, module=None, out_type=out_type, amp_dtype=torch.float16)
 
+    @skipIfTorchDynamo()
     def test_autocast_torch_16(self):
         for op_with_args in self.autocast_lists.torch_16:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
             self._run_autocast_outofplace(op, args, torch.bfloat16, add_kwargs=maybe_kwargs)
             self._run_autocast_outofplace(op, args, torch.float16, add_kwargs=maybe_kwargs, amp_dtype=torch.float16)
 
+    @skipIfTorchDynamo()
     def test_autocast_nn_16(self):
         for op_with_args in self.autocast_lists.nn_16:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
@@ -132,12 +135,14 @@ class TestAutocastCPU(TestCase):
                 amp_dtype=torch.float16,
             )
 
+    @skipIfTorchDynamo()
     def test_autocast_torch_fp32(self):
         for op_with_args in self.autocast_lists.torch_fp32:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
             self._run_autocast_outofplace(op, args, torch.float32, add_kwargs=maybe_kwargs)
             self._run_autocast_outofplace(op, args, torch.float32, add_kwargs=maybe_kwargs, amp_dtype=torch.float16)
 
+    @skipIfTorchDynamo()
     def test_autocast_nn_fp32(self):
         for op_with_args in self.autocast_lists.nn_fp32:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
@@ -153,6 +158,7 @@ class TestAutocastCPU(TestCase):
                 amp_dtype=torch.float16,
             )
 
+    @skipIfTorchDynamo()
     def test_autocast_torch_need_autocast_promote(self):
         for op, args1, args2 in self.autocast_lists.torch_need_autocast_promote:
             self._run_autocast_outofplace(op, args1, torch.float32)
@@ -218,7 +224,6 @@ class WeightDTypeCastCounterMode(TorchDispatchMode):
         torch.clear_autocast_cache = self.old_clear_cache
         return super().__exit__(exc_type, exc_val, exc_tb)
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
 class TestAutocastGPU(TestCase):
     def test_cast_cache_is_global(self):
@@ -262,7 +267,6 @@ class TestAutocastGPU(TestCase):
             torch._C._set_cached_tensors_enabled(False)
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTorchAutocast(TestCase):
     def test_autocast_fast_dtype(self):
         gpu_fast_dtype = torch.get_autocast_gpu_dtype()

@@ -10,6 +10,8 @@ on:
   push:
     tags:
       - ciflow/slow/*
+    branches:
+      - release/*
   workflow_dispatch:
 
 concurrency:

@@ -325,12 +325,12 @@ static api::ShaderInfo get_shader(
       if (kernel_size.size() == 4 && kernel_size[2] == 3 &&
           kernel_size[3] == 3) {
         // 1x1 refers to the output tile size
-        shader = VK_KERNEL(conv2d_dw_3x3);
+        shader = VK_KERNEL(conv2d_dw_output_tile_3x3);
       }
       if (kernel_size.size() == 4 && kernel_size[2] == 5 &&
           kernel_size[3] == 5) {
         // 1x1 refers to the output tile size
-        shader = VK_KERNEL(conv2d_dw_5x5);
+        shader = VK_KERNEL(conv2d_dw_output_tile_5x5);
       }
       break;
     case Conv2dPointwise:
