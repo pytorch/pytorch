@@ -277,16 +277,13 @@ test_dynamo_shard() {
       test_ao_sparsity \
       test_autograd \
       test_jit \
-      test_proxy_tensor \
       test_quantization \
       test_public_bindings \
       test_dataloader \
       test_reductions \
       test_namedtensor \
-      test_namedtuple_return_api \
       profiler/test_profiler \
       profiler/test_profiler_tree \
-      test_overrides \
       test_python_dispatch \
       test_fx \
       test_package \
