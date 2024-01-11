@@ -781,6 +781,29 @@ class CommonTemplate:
         a = torch.tensor([3])
         self.common(fn, (a,))
 
+    def test_custom_func(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("Non-deterministic CPU results")
+
+        @torch._custom_ops.custom_op("mynamespace::mm")
+        def mm(x: torch.Tensor) -> torch.Tensor:
+            raise NotImplementedError()
+
+        @torch._custom_ops.impl("mynamespace::mm")
+        def mm_impl(x):
+            return x.sum()
+
+        @torch._custom_ops.impl_abstract("mynamespace::mm")
+        def mm_abstract(x):
+            return torch.empty_like(x)
+
+        def fn(a):
+            z = torch.ops.mynamespace.mm(a)
+            w = torch.ops.mynamespace.mm(a)
+            return z + w
+
+        self.common(fn, (torch.randn(1)))
+
     def test_horizonal_fusion1(self):
         def fn(a, b, c):
             return (a + b, a - c, b * c)
