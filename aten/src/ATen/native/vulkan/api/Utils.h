@@ -24,6 +24,18 @@ namespace api {
 namespace utils {
 
 //
+// Hashing
+//
+
+/**
+ * hash_combine is taken from c10/util/hash.h, which in turn is based on
+ * implementation from Boost
+ */
+inline size_t hash_combine(size_t seed, size_t value) {
+  return seed ^ (value + 0x9e3779b9 + (seed << 6u) + (seed >> 2u));
+}
+
+//
 // Alignment
 //
 
