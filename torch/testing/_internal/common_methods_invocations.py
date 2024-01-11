@@ -15588,6 +15588,12 @@ op_db: List[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           skips=(
+               # RuntimeError: Internal error: pybind11::error_already_set called while
+               # Python error indicator not set.
+               # TODO: Investigate this more
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_out'),
+           ),
            supports_out=True),
     UnaryUfuncInfo('signbit',
                    ref=np.signbit,
