@@ -1513,6 +1513,8 @@
   src: grad.slice_symint(dim, start, end, step)
   result: auto_linear
 
+# NB: We have to manually specify this because select_inverse() is CompositeExplicit to
+# allow for it be directly implemented per subclass.
 - name: select_inverse(Tensor(a) self, Tensor src, int dim, SymInt index) -> Tensor(a)
   self: grad.select_symint(dim, index)
   src: select_scatter_symint(grad, zeros_like(self), dim, index)
