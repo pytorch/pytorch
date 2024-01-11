@@ -8,7 +8,7 @@ import inspect
 import logging
 from types import ModuleType
 
-from typing import Any, Callable, Mapping, Optional, Sequence, Set
+from typing import Any, Callable, Mapping, Optional, Sequence, Set, Union
 
 import torch
 import torch._ops
@@ -70,7 +70,9 @@ class TypePromotionSnapshot:
 
 
 @_beartype.beartype
-def _fake_tensor_from_node_val(node: torch.fx.Node) -> fake_tensor.FakeTensor:
+def _fake_tensor_from_node_val(
+    node: torch.fx.Node,
+) -> Union[fake_tensor.FakeTensor, int, float, bool]:
     """Syntactic sugar for retrieving fake tensor from node.meta['val']."""
     val = node.meta.get("val", None)
     if isinstance(val, fake_tensor.FakeTensor):
@@ -1687,7 +1689,9 @@ class InsertTypePromotion(_pass.Transform):
             diagnostic_context, module, type_promotion_table or TypePromotionTable()
         )
 
-    def _fetch_fake_args(self) -> Sequence[Optional[fake_tensor.FakeTensor]]:
+    def _fetch_fake_args(
+        self,
+    ) -> Sequence[Optional[Union[fake_tensor.FakeTensor, float, int, bool]]]:
         """Fetch fake args from fx graph.
 
         For each argument, try to fetch fake tensor from the matching placeholder node.
