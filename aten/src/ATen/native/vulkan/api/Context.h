@@ -241,21 +241,21 @@ class UniformParamsBuffer final {
 class StorageBuffer final {
  private:
   Context* context_p_;
-  c10::ScalarType dtype_;
+  ScalarType dtype_;
   size_t numel_;
   VulkanBuffer vulkan_buffer_;
 
  public:
   StorageBuffer(
       Context* context_p,
-      const c10::ScalarType dtype,
+      const ScalarType dtype,
       const size_t numel,
       const bool gpuonly = false)
       : context_p_(context_p),
         dtype_(dtype),
         numel_(numel),
         vulkan_buffer_(context_p_->adapter_ptr()->vma().create_storage_buffer(
-            c10::elementSize(dtype_) * numel_,
+            element_size(dtype_) * numel_,
             gpuonly)) {}
 
   StorageBuffer(const StorageBuffer&) = delete;
@@ -268,7 +268,7 @@ class StorageBuffer final {
     context_p_->register_buffer_cleanup(vulkan_buffer_);
   }
 
-  inline c10::ScalarType dtype() {
+  inline ScalarType dtype() {
     return dtype_;
   }
 
