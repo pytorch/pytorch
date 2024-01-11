@@ -217,6 +217,75 @@ TEST(TensorIteratorTest, FailNonPromotingBinaryOp) {
   ASSERT_ANY_THROW(config.build());
 }
 
+TEST(TensorIteratorTest, ForEachMutableInputErrorIfConst) {
+  at::Tensor out = at::zeros({10});
+  at::Tensor a = at::arange({10}).to(at::kFloat);
+  at::TensorIteratorConfig iter_config;
+  iter_config
+    .add_output(out)
+    .add_const_input(a);
+  auto iter = iter_config.build();
+  auto my_loop = [](char** mutable_data, const int64_t* mutable_strides, int64_t n) {};
+  try {
+    iter.for_each(my_loop);
+  } catch (const c10::Error& e) {
+    EXPECT_TRUE(std::string(e.what()).rfind(
+      "At least one const input was added to this TensorIterator") == 0);
+  }
+}
+
+TEST(TensorIteratorTest, ForEachMutableInput) {
+  at::Tensor out = at::zeros({10});
+  at::Tensor a = at::arange({10}).to(at::kFloat);
+  at::Tensor a_clone = a.clone();
+
+  at::TensorIteratorConfig iter_config;
+  iter_config
+    .add_output(out)
+    .add_input(a);
+  auto iter = iter_config.build();
+
+  auto my_loop = [](char** mutable_data, const int64_t* mutable_strides, int64_t n) {
+    auto* out_data = mutable_data[0];
+    auto* in_data = mutable_data[1];
+    for (int64_t i = 0; i < n; i++) {
+      *reinterpret_cast<float*>(out_data) += *reinterpret_cast<float*>(in_data);
+      *reinterpret_cast<float*>(in_data) += 15;
+      out_data += mutable_strides[0];
+      in_data += mutable_strides[1];
+    }
+  };
+
+  iter.for_each(my_loop);
+  EXPECT_TRUE(out.eq(a_clone).all().item<bool>());
+  EXPECT_TRUE(a.eq(a_clone + 15).all().item<bool>());
+}
+
+TEST(TensorIteratorTest, ForEachConstInput) {
+  at::Tensor out = at::zeros({10});
+  at::Tensor a = at::arange({10}).to(at::kFloat);
+
+  at::TensorIteratorConfig iter_config;
+  iter_config
+    .add_output(out)
+    .add_const_input(a);
+  ;
+  auto iter = iter_config.build();
+
+  auto my_loop = [](char** mutable_data, const int64_t* mutable_strides, const char** const_data, const int64_t* const_strides, int64_t n) {
+    auto* out_data = mutable_data[0];
+    auto* in_data = const_data[0];
+    for (int64_t i = 0; i < n; i++) {
+      *reinterpret_cast<float*>(out_data) += *reinterpret_cast<const float*>(in_data);
+      out_data += mutable_strides[0];
+      in_data += const_strides[0];
+    }
+  };
+
+  iter.for_each(my_loop);
+  EXPECT_TRUE(out.eq(a).all().item<bool>());
+}
+
 #define MULTIPLE_OUTPUTS_TEST_ITER_FOR_TYPE(ctype,name)                                             \
 TEST(TensorIteratorTest, CpuKernelMultipleOutputs_##name) {                                         \
   auto in1 = random_tensor_for_type(k##name);                                                       \
