@@ -80,49 +80,27 @@ FIXME_default_non_strict = {
     "test_schema_check",  # nb: times out
     "test_ao_sparsity",
     "test_autograd",
-    "test_binary_ufuncs",
     "test_content_store",
     "test_custom_ops",
     "test_dataloader",
-    "test_decomp",
-    "test_foreach",
     "test_fx",
-    "test_fx_experimental",
-    "test_fx_passes",
-    "test_fx_reinplace_pass",
     "test_jit",
-    "test_jit_autocast",
-    "test_jit_disabled",
     "test_jit_fuser_te",
     "test_jit_llga_fuser",
-    "test_jiterator",
-    "test_legacy_vmap",
-    "test_masked",
-    "test_maskedtensor",
     "test_modules",
     "test_namedtensor",
-    "test_namedtuple_return_api",
     "test_ops",
     "test_ops_fwd_gradients",
     "test_ops_gradients",
     "test_ops_jit",
-    "test_overrides",
+    "test_legacy_vmap",
     "test_package",
-    "test_prims",
-    "test_proxy_tensor",
     "test_public_bindings",
     "test_python_dispatch",
     "test_quantization",
-    "test_reductions",
-    "test_sparse",
-    "test_sparse_csr",
-    "test_sparse_semi_structured",
-    "test_spectral_ops",
     "test_tensorexpr",
     "test_tensorexpr_pybind",
     "test_torch",
-    "test_unary_ufuncs",
-    "test_utils",
     "test_vulkan",
     "test_xnnpack_integration",
 }
@@ -620,7 +598,6 @@ dynamo_expected_failures = {
     "TestShuffle.test_1d_use_numpy_False",
     "TestShuffle.test_2d_use_numpy_True",
     "TestShuffle.test_2d_use_numpy_False",
-    "TestArrayCreationCopyArgument.test_buffer_interface",
     "TestWritebackIfCopy.test_take_mode_raise",
     "TestArange.test_infinite",
     "TestArrayConstruction.test_array_empty",
@@ -631,7 +608,6 @@ dynamo_expected_failures = {
     "TestFromBuffer.test_basic_little_dtype2",
     "TestArrayCreationCopyArgument.test_striding_not_ok",
     "TestArange.test_require_range",
-    "TestStats.test_dtype_from_input",
     "TestArange.test_nan_step",
     "TestWritebackIfCopy.test_argmin_with_out",
     "TestArrayAttributeDeletion.test_multiarray_not_writable_attributes_deletion",
@@ -2424,122 +2400,23 @@ dynamo_expected_failures = {
     "TestTensorBoardSummary.test_hparams_string",  # test_tensorboard
     "TestTensorBoardSummary.test_hparams_bool",  # test_tensorboard
     "TestTensorBoardSummary.test_uint8_image",  # test_tensorboard
-    "TestBufferProtocolCPU.test_shared_buffer_cpu_uint8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_complex128",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_same_type_cpu_complex128",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_float16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_requires_grad_cpu_int32",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_uint8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_cpu_complex128",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_requires_grad_cpu_uint8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_cpu_uint8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_cpu_float64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_shared_buffer_cpu_complex128",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_float64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_cpu_float32",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int64",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_alias_from_buffer_cpu_float16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_offset_cpu_int64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_same_type_cpu_int16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_offset_cpu_float64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_float64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_same_type_cpu_float32",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_uint8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_bool",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_same_type_cpu_int32",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_alias_from_buffer_cpu_int16",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_alias_from_buffer_cpu_float32",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int32",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_requires_grad_cpu_int8",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_copy_from_buffer_cpu_int16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_int8",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_copy_from_buffer_cpu_int8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_requires_grad_cpu_float16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_int64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_same_type_cpu_int64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_float16",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_copy_from_buffer_cpu_complex64",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_alias_from_buffer_cpu_uint8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_int64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_complex128",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_complex64",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_copy_from_buffer_cpu_uint8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_bool",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_cpu_int32",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_int16",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_copy_from_buffer_cpu_complex128",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_copy_from_buffer_cpu_float32",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_offset_cpu_int16",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_float32",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_float64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_requires_grad_cpu_float32",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_same_type_cpu_uint8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_int16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_shared_buffer_cpu_int8",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_copy_from_buffer_cpu_float64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_cpu_int8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_int8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_float32",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_alias_from_buffer_cpu_complex64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_same_type_cpu_float16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_same_type_cpu_bool",  # test_tensor_creation_ops
     "TestTensorCreationCPU.test_tensor_factory_type_inference_cpu",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_copy_from_buffer_cpu_float16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_cpu_bool",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_byte_to_int_cpu",  # test_tensor_creation_ops
     "TestTensorCreationCPU.test_block_diag_cpu",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_offset_cpu_complex64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_offset_cpu_uint8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_cpu_int64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_requires_grad_cpu_int16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_requires_grad_cpu_complex128",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int8",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_alias_from_buffer_cpu_complex128",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_float16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_offset_cpu_complex128",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_offset_cpu_float32",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_offset_cpu_int32",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_copy_from_buffer_cpu_int32",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_copy_from_buffer_cpu_int64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_offset_cpu_bool",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_complex64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_and_offset_cpu_int32",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_shared_buffer_cpu_int64",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_uint8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_offset_cpu_float16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_offset_cpu_int8",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_bfloat16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_int32",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_bool",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_shared_buffer_cpu_bool",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_same_type_cpu_float64",  # test_tensor_creation_ops
     "TestTensorCreationCPU.test_constructor_dtypes_cpu",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_alias_from_buffer_cpu_int64",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_alias_from_buffer_cpu_bool",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_same_type_cpu_complex64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_requires_grad_cpu_float64",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_complex128",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_same_type_cpu_int8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_float32",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_shared_buffer_cpu_int16",  # test_tensor_creation_ops
     "TestTensorCreationCPU.test_tensor_factory_copy_var_cpu",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_requires_grad_cpu_int64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_requires_grad_cpu_bool",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_shared_buffer_cpu_int32",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_alias_from_buffer_cpu_int32",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_copy_from_buffer_cpu_bool",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_cpu_complex64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_shared_buffer_cpu_float64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_requires_grad_cpu_complex64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_cpu_int16",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_alias_from_buffer_cpu_float64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_with_count_cpu_float16",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_invalid_positional_args_cpu_complex64",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_shared_buffer_cpu_complex64",  # test_tensor_creation_ops
-    "TestAsArrayCPU.test_alias_from_buffer_cpu_int8",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_shared_buffer_cpu_float32",  # test_tensor_creation_ops
-    "TestBufferProtocolCPU.test_shared_buffer_cpu_float16",  # test_tensor_creation_ops
     "TestTensorCreationCPU.test_cartesian_prod_cpu",  # test_tensor_creation_ops
     "TestSubclass.test_parametrization_non_wrapper_tensor_leave_parametrized_True",  # test_subclass
     "TestSubclass.test_module_optimization_non_wrapper_tensor",  # test_subclass
@@ -3449,6 +3326,696 @@ dynamo_expected_failures = {
     "AutogradFunctionTests.test_print_in_bwd",  # dynamo/test_autograd_function
     "AutogradFunctionTests.test_graph_break_if_lifted_free_variable",  # dynamo/test_autograd_function
     "AotAutogradFallbackTests.test_aot_sequence_nr",  # dynamo/test_aot_autograd
+    "TestTorchFunctionOverride.test_Tensor_log",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_prod",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___iand__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_orgqr",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___isub__",  # test_overrides
+    "TestTorchFunctionOverride.test_tensor_subclass_propagation",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_detach_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_gcd_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addmv_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_matmul",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_copysign",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_add",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_chalf",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rfloordiv__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sign",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tolist",  # test_overrides
+    "TestRNN.test_rnn",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_retains_grad___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_squeeze_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_aminmax",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___lt__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_isclose",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase__backward_hooks___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_inverse",  # test_overrides
+    "TestNamedTuple.test_max",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___ror__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_hypot",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_max",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arccos",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase__cdata___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__update_names",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sinc_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___div__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_q_per_channel_scales",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tan_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_as_strided_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lgamma",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_shared",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logdet",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_scatter_reduce",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_erf",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_equal",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sinh",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_split",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addmv",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_kthvalue",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_relu",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_select",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___contains__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_mm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_det",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_igammac_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_atanh_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_int_repr",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_nested___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_digamma",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ormqr",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sparse_dim",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___irshift__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___imul__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nanmean",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_to",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_add_",  # test_overrides
+    "TestBroadcastAllOverride.test_broadcast_all",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_div",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_slice_scatter",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_remainder_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_baddbmm_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_renorm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_igamma_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_same_size",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_add_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sort",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clone",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_crow_indices",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log10",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_atan2_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_resize_as_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_subtract",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ne_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___index__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sparse_resize_and_clear_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_dot",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___reversed__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_msort",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_to_mkldnn",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addcmul_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ndimension",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_rsqrt_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__dimV",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logical_and_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_share_memory_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_rad2deg",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_greater_equal",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_coalesced",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clamp_min_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_swapaxes",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cosh_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___array__",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_mkldnn___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_short",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_le_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_var",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_hsplit",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___deepcopy__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fmin",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_expm1_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_slogdet",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_conj_physical_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logical_or_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clamp_max",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_erf_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sub_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nonzero",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_inner",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase__base___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fliplr",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unsafe_split",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nelement",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase__post_accumulate_grad_hooks___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___setstate__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logical_xor_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_allclose",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log1p",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_pow_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lerp_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_vdot",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_requires_grad___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_indices",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lgamma_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_mT___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__values",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_distributed",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_mtia___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_histc",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logical_or",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_svd",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cfloat",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_flipud",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___and__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_fill_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_swapdims_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_names___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_resolve_neg",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_output_nr___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cross",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_add",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_isposinf",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tile",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nan_to_num",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_trace",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___long__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_set_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arcsin_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_random_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_put",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_uniform_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_frac_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sigmoid_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_signbit",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_repeat_interleave",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bernoulli_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fill_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___lshift__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_map_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_isnan",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_long",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_subtract_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_ndim___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_data_ptr",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_i0",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_qscheme",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logcumsumexp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ldexp_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_neg",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sign_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unsqueeze_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arctan2_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clip_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cumprod_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_data___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_mode",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_layout___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_atan_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_xpu",  # test_overrides
+    "TestTorchFunctionMode.test_mode_notimplemented_loop",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_baddbmm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_reduce_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_requires_grad_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_minimum",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_erfinv",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_detach",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_dequantize",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_or_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_acos_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_trunc",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_quantile",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___mod__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__nested_tensor_storage_offsets",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_xlogy_",  # test_overrides
+    "TestTorchFunctionOverride.test_mm_semantics",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_multiply",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_expand",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___xor__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cholesky_inverse",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_storage_type",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___idiv__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_dim_order",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rrshift__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_contiguous",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_contiguous",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_isreal",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_min",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_col_indices",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_register_post_accumulate_grad_hook",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_floor",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___invert__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_left_shift_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_flip",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logit_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_div_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_resize_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_view_as",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_gather",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___mul__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_flatten",  # test_overrides
+    "TestTorchFunctionMode.test_disable_enable_subclass",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_numpy",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cumsum_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fmod",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_has_names",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_xpu___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tanh",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_eq_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ipu",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logsumexp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_expand_as",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_split_with_sizes",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cumprod",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fix_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_igamma",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_median",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nextafter_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_polygamma_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase__version___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_less_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lt_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_put_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nanmedian",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_half",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logaddexp2",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logit",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___dlpack__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nan_to_num_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cumsum",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_hardshrink",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_squeeze",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___add__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bernoulli",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sparse_resize_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_deg2rad_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_corrcoef",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_isfinite",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fmax",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lu_solve",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_rename_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_real___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_transpose",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__autocast_to_reduced_precision",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_any",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sinh_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_dsplit",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___setitem__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_amax",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_smm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_stft",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_asin_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ne",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_rad2deg_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_scatter_reduce_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bincount",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_chunk",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_floor_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_renorm_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_asinh_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sspaddmm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_reshape",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logical_xor",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_put",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_ort___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sgn_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___bool__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_q_scale",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_right_shift",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_refine_names",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_map2_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_negative_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_element_size",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_reduce",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bmm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_mean",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_leaf___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_size",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_q_zero_point",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_meta___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tan",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log2_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_scatter_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__to_dense",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_divide",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_asin",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_quantized___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_exp_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_imag___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_swapaxes_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_std",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___len__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_not_equal",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___ifloordiv__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fill_diagonal_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rmatmul__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_acosh",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arctanh_",  # test_overrides
+    "TestTorchFunctionOverride.test_mean_semantics",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_rot90",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_diag",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tril_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_softmax",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sparse_mask",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_double",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_erfc",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tensor_split",  # test_overrides
+    "TestGradCheckOverride.test_gradcheck",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_device___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_or",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___repr__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_less",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___cuda_array_interface_____get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clamp_max_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nansum",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cummin",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cauchy_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_igammac",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_mvlgamma_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addmm_",  # test_overrides
+    "TestTorchFunctionMode.test_modes_return_notimplemented",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_atan",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_acosh_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___dlpack_device__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_q_per_channel_zero_points",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ceil",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_histogram",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lcm_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_i0_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_atan2",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_narrow",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sinc",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sigmoid",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ldexp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logical_and",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_mvlgamma",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_diff",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_resize",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sum",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__nested_tensor_strides",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_movedim",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unsafe_chunk",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_resize_as_sparse_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_expm1",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_gcd",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_swapdims",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rmul__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logical_not",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lerp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_zero_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addcdiv",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_sparse___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_round_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_exp2_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_register_hook",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_diag_embed",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___array_wrap__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___radd__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_absolute_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ge_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___ge__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_type",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_T___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_dtype___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_less_equal",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_grad___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_volatile___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clamp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clip",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_put_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase__grad_fn___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_shape___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_permute",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_resolve_conj",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sqrt",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_true_divide_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_get_device",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_diagonal_scatter",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sub",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___ior__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_greater",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase__grad___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_apply_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_argsort",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_matrix_power",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cos_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log_softmax",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_erfinv_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__autocast_to_full_precision",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_untyped_storage",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_where",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_angle",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_coalesce",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rdiv__",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_nbytes___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_masked_fill_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bfloat16",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_hypot_",  # test_overrides
+    "TestEinsumOverride.test_wrapper",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sgn",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_char",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_triangular_solve",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_float",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___gt__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_scatter_add_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_exp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_scatter_add",  # test_overrides
+    "TestIterator.test_iterator",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___eq__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_masked_scatter_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tril",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nanquantile",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_masked_select",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_mv",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_negative",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_argwhere",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_matrix_exp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unique_consecutive",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unfold",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___format__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_round",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_deg2rad",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_grad_fn___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_align_as",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_complex",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cosh",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_align_to",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_square",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arcsinh_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unsqueeze",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_not",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_rename",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___reduce_ex__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_t_",  # test_overrides
+    "TestTorchFunctionMode.test_modes_handle_first",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___ne__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_item",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___le__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ccol_indices",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_nonzero",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_copy_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_broadcast_to",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_right_shift_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_cpu___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arccosh",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arcsin",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_as_strided",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nextafter",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_q_per_channel_axis",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_trunc_",  # test_overrides
+    "TestTorchFunctionMode.test_nested_modes_with_python_has_torch_function",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arctan",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_t",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_diagonal",  # test_overrides
+    "TestTorchFunctionMode.test_subclass_hash",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_isinf",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ger",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__coalesced_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_not_equal_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_multiply_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ge",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_abs",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___int__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_argmin",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_inference",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__is_view",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rmod__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_amin",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_select_scatter",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_fill",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_square_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addr",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_asinh",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_heaviside_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_adjoint",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_float_power",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_gt_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_xlogy",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__dimI",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_gt",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_copy_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___ixor__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_to_dense",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___complex__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_and_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_neg",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_norm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___float__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__sparse_mask_projection",  # test_overrides
+    "TestPickle.test_pickle",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___iadd__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_divide_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_geqrf",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_select",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___ilshift__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_frexp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_int",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_maximum",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_storage_offset",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_byte",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unbind",  # test_overrides
+    "TestIndexing.test_getitem_subclass",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_floating_point",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log10_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_xla___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cos",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_positive",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_resize_as",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_storage",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_pow",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_type_as",  # test_overrides
+    "TestGradNewOnesOverride.test_newones",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__indices",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_tanh_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_masked_scatter",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_not_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cholesky",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_all",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_heaviside",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lcm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_reshape_as",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_greater_equal_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_backward",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_greater_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logaddexp",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_xor",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_transpose_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_polygamma",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_row_indices",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addbmm_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_triu_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_atanh",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rxor__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_normal_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_index_copy",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_logical_not_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log1p_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_absolute",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_abs_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_count_nonzero",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_qr",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_relu_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_conj",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fmod_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unique",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___nonzero__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_geometric_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_topk",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rlshift__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_diagflat",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cummax",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cov",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_istft",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arctanh",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_name___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_nonzero_static",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_pin_memory",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arctan2",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_retain_grad",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_repeat",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_reciprocal_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lt",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_record_stream",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___truediv__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rand__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_fix",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_multinomial",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___imod__",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_itemsize___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_copysign_",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_vulkan___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_dense_dim",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_prelu",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sin_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_reciprocal",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_sparse_csr___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arccosh_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_dist",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_narrow_copy",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_conj_physical",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arctan_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sin",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cdouble",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_masked_fill",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log2",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sqrt_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clamp_min",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addr_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rshift__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_mul",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_roll",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_signed",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addcdiv_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_true_divide",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_pinned",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_cuda___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_xor_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_floor_divide_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_eq",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_neg_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_view",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_as_strided_scatter",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_pinverse",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_vsplit",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___matmul__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_unsafe_split_with_sizes",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_ipu___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_and",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arcsinh",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_float_power_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_values",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__nnz",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_outer",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_log_normal_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___sub__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addbmm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_mul_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor__nested_tensor_size",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bitwise_left_shift",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_digamma_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_isneginf",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_le",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_erfc_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_scatter",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_exp2",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_sum_to_size",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_take",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_take_along_dim",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rsub__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cholesky_solve",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_remainder",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_dim",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_triu",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_numel",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_acos",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_is_mps___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ravel",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_frac",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_moveaxis",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_lu",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_exponential_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___floordiv__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___getitem__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_rsqrt",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cpu",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_kron",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_cuda",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_less_equal_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_bool",  # test_overrides
+    "TestTorchFunctionOverride.test_TensorBase_mH___get__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_arccos_",  # test_overrides
+    "TestTorchFunctionOverride.test_precedence_semantics",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___or__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor___rpow__",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addcmul",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_addmm",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_conj",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_is_set_to",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_to_sparse",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_argmax",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_clamp_",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_floor_divide",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_ceil_",  # test_overrides
+    "TestNamedTupleAPI.test_namedtuple_return",  # test_namedtuple_return_api
 }
 
 dynamo_skips = {
@@ -3863,4 +4430,4002 @@ dynamo_skips = {
     "ReproTests.test_optim_state_references_cleared",  # weird
     "ReproTests.test_reformer_train",  # weird
     "TraceRuleTests.test_torch_name_rule_map_updated",  # weird
+    "TestTorchFunctionOverride.test_TensorBase_H___get__",  # known py311 fail
+    "TestCheckpoint.test_checkpoint_trigger",  # known py38 fail
+    "TestBottleneck.test_bottleneck_cpu_only",  # known py38 fail
+    "TestUnaryUfuncsCPU.test_sinc_cpu_float64",  # known py38 fail
+    "TestUnaryUfuncsCPU.test_silu_complex_cpu_complex64",  # known py38 fail
+    "TestUnaryUfuncsCPU.test_exp_cpu_complex128",  # known py38 fail
+    "TestUnaryUfuncsCPU.test_special_i0_i1_vs_scipy_cpu_float32",  # known py38 fail
+    "TestUnaryUfuncsCPU.test_silu_complex_cpu_complex128",  # known py38 fail
+    "TestUnaryUfuncsCPU.test_special_i0_i1_vs_scipy_cpu_float64",  # known py38 fail
+    "TestUnaryUfuncsCPU.test_log1p_complex_cpu_complex64",  # known py38 fail
+    "TestUnaryUfuncsCPU.test_exp_cpu_complex64",  # known py38 fail
+    "TestUnaryUfuncsCPU.test_log1p_complex_cpu_complex128",  # known py38 fail
+    "TestUnaryUfuncsCPU.test_special_i0_i1_vs_scipy_cpu_bfloat16",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csc_to_dense_cpu_int32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int64_cpu_int64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int64_cpu_int16",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int64_cpu_bfloat16",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int64_noncontiguous_False_cpu_float64",  # known py38 fail  # noqa: B950
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int64_noncontiguous_True_cpu_complex64",  # known py38 fail  # noqa: B950
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int32_noncontiguous_False_cpu_complex128",  # known py38 fail  # noqa: B950
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int32_cpu_float32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int64_cpu_int64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int32_cpu_int16",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int64_cpu_float32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int64_cpu_bool",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int32_noncontiguous_True_cpu_complex64",  # known py38 fail  # noqa: B950
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int32_cpu_int16",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int64_noncontiguous_True_cpu_complex64",  # known py38 fail  # noqa: B950
+    "TestSparseCSRCPU.test_csr_to_block_csr_blocksize_4_cpu_float64_int64",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int32_noncontiguous_True_cpu_float64",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csr_to_dense_cpu_int64",  # known py38 fail
+    "TestSparseCSRCPU.test_csr_to_block_csr_blocksize_4_cpu_float64_int32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int64_cpu_complex128",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int64_cpu_bfloat16",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csc_to_dense_cpu_int8",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int64_cpu_float64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int32_cpu_int64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int32_cpu_float16",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int32_noncontiguous_False_cpu_complex64",  # known py38 fail  # noqa: B950
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int64_noncontiguous_False_cpu_float64",  # known py38 fail  # noqa: B950
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int64_noncontiguous_False_cpu_complex128",  # known py38 fail  # noqa: B950
+    "TestSparseCSRCPU.test_sparse_csc_to_dense_cpu_uint8",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int64_cpu_int32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int64_cpu_bool",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int32_cpu_int32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int32_cpu_uint8",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int64_cpu_uint8",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int32_cpu_int16",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int64_noncontiguous_True_cpu_float32",  # known py38 fail
+    "TestSparseCSRCPU.test_dense_to_from_sparse_compressed_SparseCSC_NonBatched_NonHybrid_cpu",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csr_to_dense_cpu_float16",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int32_cpu_int64",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csc_to_dense_cpu_bfloat16",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int64_cpu_float64",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csr_to_dense_cpu_int8",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csc_to_dense_cpu_complex128",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_to_sparse_compressed_SparseCSR_cpu_float64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int32_cpu_complex64",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int32_noncontiguous_True_cpu_float32",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int64_noncontiguous_True_cpu_float64",  # known py38 fail
+    "TestSparseCSRCPU.test_csr_to_block_csr_blocksize_2_cpu_float64_int64",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csr_to_dense_cpu_int16",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int64_cpu_int8",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int32_cpu_complex64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int64_cpu_complex64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int32_cpu_float64",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int32_noncontiguous_True_cpu_complex128",  # known py38 fail  # noqa: B950
+    "TestSparseCSRCPU.test_sparse_csr_to_dense_cpu_float64",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csr_to_dense_cpu_bfloat16",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int32_cpu_int64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int64_cpu_int64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int64_cpu_complex64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int32_cpu_uint8",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int32_cpu_int16",  # known py38 fail
+    "TestSparseCSRCPU.test_dense_to_from_sparse_compressed_SparseBSR_NonBatched_NonHybrid_cpu",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int32_noncontiguous_False_cpu_float64",  # known py38 fail  # noqa: B950
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int64_cpu_bfloat16",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int64_noncontiguous_True_cpu_complex128",  # known py38 fail  # noqa: B950
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int64_cpu_float16",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int64_cpu_float32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int64_cpu_int16",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int64_cpu_int16",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int32_cpu_bfloat16",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int64_cpu_int8",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int64_cpu_int32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int32_cpu_float32",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int32_noncontiguous_True_cpu_float64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int64_cpu_float16",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int32_cpu_float64",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int64_noncontiguous_False_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int32_cpu_float16",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int64_cpu_float16",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int64_cpu_float64",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int32_noncontiguous_False_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int32_cpu_uint8",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int32_cpu_int32",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csc_to_dense_cpu_int64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int32_cpu_complex128",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int64_noncontiguous_True_cpu_float32",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csc_to_dense_cpu_float32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int64_cpu_float64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int32_cpu_int8",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int64_cpu_complex128",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csc_to_dense_cpu_float64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int32_cpu_bool",  # known py38 fail
+    "TestSparseCSRCPU.test_mm_errors_cpu_float32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int64_cpu_bool",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csc_to_dense_cpu_bool",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int32_cpu_uint8",  # known py38 fail
+    "TestSparseCSRCPU.test_dense_to_from_sparse_compressed_SparseCSR_NonBatched_NonHybrid_cpu",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int32_cpu_complex128",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int64_cpu_int8",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int32_noncontiguous_True_cpu_complex64",  # known py38 fail  # noqa: B950
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int32_noncontiguous_False_cpu_complex128",  # known py38 fail  # noqa: B950
+    "TestSparseCSRCPU.test_sparse_csr_to_dense_cpu_int32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int64_cpu_int32",  # known py38 fail
+    "TestSparseCSRCPU.test_addmm_errors_cpu_float32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int32_cpu_float32",  # known py38 fail
+    "TestSparseCSRCPU.test_dense_to_from_sparse_compressed_SparseBSR_Batched_NonHybrid_cpu",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csr_to_dense_cpu_complex64",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int64_noncontiguous_False_cpu_complex64",  # known py38 fail  # noqa: B950
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int64_cpu_complex64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int64_cpu_float32",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csc_to_dense_cpu_complex64",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_to_sparse_compressed_SparseCSC_cpu_float64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int32_cpu_float64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int32_cpu_float16",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int64_cpu_uint8",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int64_cpu_int16",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int64_noncontiguous_False_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int32_cpu_complex128",  # known py38 fail
+    "TestSparseCSRCPU.test_dense_to_from_sparse_compressed_SparseCSR_Batched_NonHybrid_cpu",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int32_cpu_int64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int32_cpu_bool",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int64_cpu_bool",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int32_cpu_bfloat16",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int32_cpu_complex64",  # known py38 fail
+    "TestSparseCSRCPU.test_csr_to_block_csr_blocksize_2_cpu_float64_int32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int64_cpu_bfloat16",  # known py38 fail
+    "TestSparseCSRCPU.test_dense_to_from_sparse_compressed_SparseBSC_Batched_NonHybrid_cpu",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int32_cpu_complex128",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int64_cpu_complex128",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csc_to_dense_cpu_int16",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csr_to_dense_cpu_uint8",  # known py38 fail
+    "TestSparseCSRCPU.test_dense_to_from_sparse_compressed_SparseCSC_Batched_NonHybrid_cpu",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int32_cpu_float16",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csr_to_dense_cpu_complex128",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int32_cpu_bfloat16",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csc_to_dense_cpu_float16",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int32_noncontiguous_False_cpu_complex64",  # known py38 fail  # noqa: B950
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int32_cpu_int8",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int64_cpu_uint8",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int64_cpu_complex128",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int64_cpu_uint8",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int32_cpu_float64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int64_cpu_int32",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int64_noncontiguous_False_cpu_complex64",  # known py38 fail  # noqa: B950
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int32_cpu_int8",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int64_noncontiguous_True_cpu_complex128",  # known py38 fail  # noqa: B950
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int32_noncontiguous_False_cpu_float64",  # known py38 fail  # noqa: B950
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int64_cpu_complex64",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int32_noncontiguous_True_cpu_float32",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int32_noncontiguous_False_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestSparseCSRCPU.test_sparse_csr_to_dense_cpu_bool",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int32_cpu_bool",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int32_cpu_int8",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int64_cpu_float32",  # known py38 fail
+    "TestSparseCSRCPU.test_sparse_csr_to_dense_cpu_float32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSR_int32_cpu_float32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int32_cpu_int32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int64_cpu_int64",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int32_noncontiguous_True_cpu_complex128",  # known py38 fail  # noqa: B950
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int64_noncontiguous_True_cpu_float64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int32_cpu_complex64",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int32_cpu_bool",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseCSC_int64_cpu_int8",  # known py38 fail
+    "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int64_noncontiguous_False_cpu_complex128",  # known py38 fail  # noqa: B950
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int64_cpu_float16",  # known py38 fail
+    "TestSparseCSRCPU.test_dense_to_from_sparse_compressed_SparseBSC_NonBatched_NonHybrid_cpu",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSR_int32_cpu_int32",  # known py38 fail
+    "TestSparseCompressedCPU.test_select_copy_SparseBSC_int32_cpu_bfloat16",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseBSC_masked_fast_cpu",  # known py38 fail
+    "TestSparseCPU.test_index_select_parallelization_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_sparse_spdiags_cpu_uint8",  # known py38 fail
+    "TestSparseCPU.test_sparse_to_numpy_cpu",  # known py38 fail
+    "TestSparseCPU.test_shared_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_sparse_sparse_mul_cpu_float32",  # known py38 fail
+    "TestSparseCPU.test_asin_arcsin_cpu_int32",  # known py38 fail
+    "TestSparseCPU.test_cat_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_add_zeros_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_sparse_mask_hybrid_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_index_select_exhaustive_index_large_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_select_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_float16",  # known py38 fail
+    "TestSparseCPU.test_sparse_dense_mul_cpu_int8",  # known py38 fail
+    "TestSparseCPU.test_index_select_parallelization_cpu_complex128",  # known py38 fail
+    "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_sparse_slow_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_asin_arcsin_cpu_int64",  # known py38 fail
+    "TestSparseCPU.test_sparse_add_coalesce_cpu_float32",  # known py38 fail
+    "TestSparseAnyCPU.test_constructor_autograd_SparseCSR_cpu",  # known py38 fail
+    "TestSparseCPU.test_zeros_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_clone_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_sum_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_permute_sparse_cpu_float64",  # known py38 fail
+    "TestSparseAnyCPU.test_constructor_autograd_SparseCOO_cpu",  # known py38 fail
+    "TestSparseCPU.test_basic_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_float32",  # known py38 fail
+    "TestSparseCPU.test_norm_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_sparse_mask_hybrid_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_factory_cpu_float32",  # known py38 fail
+    "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_masked_fast_cpu_complex128",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCOO_nonmasked_slow_cpu",  # known py38 fail
+    "TestSparseCPU.test_factory_type_inference_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_sparse_dense_mul_cpu_int16",  # known py38 fail
+    "TestSparseCPU.test_print_uncoalesced_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_index_select_empty_and_non_contiguous_index_cpu_float64",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseBSC_masked_slow_cpu",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCSC_nonmasked_fast_cpu",  # known py38 fail
+    "TestSparseAnyCPU.test_check_sparse_tensor_invariants_SparseBSR_cpu",  # known py38 fail
+    "TestSparseCPU.test_resize_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_complex64",  # known py38 fail
+    "TestSparseCPU.test_neg_negative_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_factory_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_sum_cpu_int8",  # known py38 fail
+    "TestSparseAnyCPU.test_constructor_autograd_SparseBSC_cpu",  # known py38 fail
+    "TestSparseCPU.test_asin_arcsin_cpu_float32",  # known py38 fail
+    "TestSparseCPU.test_sparse_mask_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_factory_type_inference_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_select_no_type_promotion_cpu_uint8",  # known py38 fail
+    "TestSparseCPU.test_sparse_dense_mul_cpu_bool",  # known py38 fail
+    "TestSparseCPU.test_sparse_dense_mul_cpu_float32",  # known py38 fail
+    "TestSparseCPU.test_index_select_empty_and_non_contiguous_index_cpu_complex128",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseBSR_masked_fast_cpu",  # known py38 fail
+    "TestSparseAnyCPU.test_check_sparse_tensor_invariants_SparseCOO_cpu",  # known py38 fail
+    "TestSparseCPU.test_mv_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_float32",  # known py38 fail
+    "TestSparseCPU.test_sparse_spdiags_cpu_int8",  # known py38 fail
+    "TestSparseCPU.test_sparse_add_coalesce_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_sparse_spdiags_cpu_bool",  # known py38 fail
+    "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_ctor_is_coalesced_with_gradcheck_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_sparse_spdiags_cpu_int32",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCSR_masked_fast_cpu",  # known py38 fail
+    "TestSparseCPU.test_neg_negative_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_sum_cpu_complex64",  # known py38 fail
+    "TestSparseCPU.test_sum_cpu_bool",  # known py38 fail
+    "TestSparseCPU.test_transpose_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_factory_type_inference_cpu_int64",  # known py38 fail
+    "TestSparseCPU.test_div_rounding_mode_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_legacy_new_device_cpu",  # known py38 fail
+    "TestSparseCPU.test_empty_like_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_pickle_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_to_dense_hybrid_masked_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_index_select_exhaustive_index_large_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_is_nonzero_cpu",  # known py38 fail
+    "TestSparseCPU.test_log1p_cpu_uint8",  # known py38 fail
+    "TestSparseCPU.test_log1p_cpu_int32",  # known py38 fail
+    "TestSparseCPU.test_sparse_broadcast_to_cpu_complex128",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCSR_masked_slow_cpu",  # known py38 fail
+    "TestSparseCPU.test_sparse_add_coalesce_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_to_dense_hybrid_sparse_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_asin_arcsin_cpu_uint8",  # known py38 fail
+    "TestSparseCPU.test_sparse_sum_cpu_float64",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCOO_masked_slow_cpu",  # known py38 fail
+    "TestSparseCPU.test_sparse_spdiags_cpu_int16",  # known py38 fail
+    "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_float16",  # known py38 fail
+    "TestSparseCPU.test_sum_cpu_float64",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCSR_nonmasked_slow_cpu",  # known py38 fail
+    "TestSparseCPU.test_log1p_cpu_float32",  # known py38 fail
+    "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_masked_fast_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_bfloat16",  # known py38 fail
+    "TestSparseCPU.test_log1p_cpu_int16",  # known py38 fail
+    "TestSparseCPU.test_sparse_mm_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_hsmm_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_permute_masked_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_sparse_spdiags_cpu_float32",  # known py38 fail
+    "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_masked_slow_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_legacy_new_cpu",  # known py38 fail
+    "TestSparseCPU.test_print_coalesced_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_mm_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_sparse_dense_mul_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_sparse_dense_mul_cpu_complex64",  # known py38 fail
+    "TestSparseCPU.test_sparse_dense_mul_cpu_uint8",  # known py38 fail
+    "TestSparseCPU.test_zeros_like_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_unsqueeze_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_basic_ops_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_factory_type_inference_cpu_complex64",  # known py38 fail
+    "TestSparseCPU.test_factory_copy_cpu",  # known py38 fail
+    "TestSparseCPU.test_small_nnz_coalesced_cpu",  # known py38 fail
+    "TestSparseCPU.test_sparse_sparse_mul_cpu_int8",  # known py38 fail
+    "TestSparseCPU.test_dsmm_cpu_float64",  # known py38 fail
+    "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_sparse_fast_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_factory_cpu_float16",  # known py38 fail
+    "TestSparseCPU.test_factory_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_asin_arcsin_cpu_int16",  # known py38 fail
+    "TestSparseAnyCPU.test_check_sparse_tensor_invariants_SparseCSR_cpu",  # known py38 fail
+    "TestSparseCPU.test_select_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_change_tensor_metadata_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_isnan_cpu",  # known py38 fail
+    "TestSparseCPU.test_contig_hybrid_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_index_select_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_select_no_type_promotion_cpu_int32",  # known py38 fail
+    "TestSparseCPU.test_zeros_like_cpu_complex128",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseBSR_nonmasked_slow_cpu",  # known py38 fail
+    "TestSparseCPU.test_index_select_cpu_complex128",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCOO_masked_fast_cpu",  # known py38 fail
+    "TestSparseCPU.test_log1p_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_saddmm_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_sparse_sparse_mul_cpu_int16",  # known py38 fail
+    "TestSparseCPU.test_sparse_broadcast_to_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_asin_arcsin_cpu_int8",  # known py38 fail
+    "TestSparseCPU.test_factory_type_inference_cpu_float16",  # known py38 fail
+    "TestSparseCPU.test_index_select_exhaustive_index_small_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_select_no_type_promotion_cpu_int64",  # known py38 fail
+    "TestSparseCPU.test_norm_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_sparse_dense_mul_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_sum_cpu_float32",  # known py38 fail
+    "TestSparseCPU.test_new_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_sparse_addmm_cpu_bfloat16",  # known py38 fail
+    "TestSparseCPU.test_sparse_addmm_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_to_dense_hybrid_sparse_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_cat_cpu_float64",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseBSC_nonmasked_slow_cpu",  # known py38 fail
+    "TestSparseCPU.test_sparse_spdiags_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_sparse_spdiags_cpu_complex128",  # known py38 fail
+    "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_sparse_slow_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_mm_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_factory_cpu_complex64",  # known py38 fail
+    "TestSparseCPU.test_sparse_dense_mul_cpu_int64",  # known py38 fail
+    "TestSparseCPU.test_sparse_add_out_bfloat16_cpu_float32",  # known py38 fail
+    "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_factory_type_inference_cpu_float32",  # known py38 fail
+    "TestSparseCPU.test_index_select_exhaustive_index_small_cpu_float64",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCSR_nonmasked_fast_cpu",  # known py38 fail
+    "TestSparseCPU.test_sum_cpu_int32",  # known py38 fail
+    "TestSparseCPU.test_resize_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_sparse_addmm_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_add_dense_sparse_mismatch_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_bmm_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_basic_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_sparse_sparse_mul_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_clone_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_log1p_cpu_int64",  # known py38 fail
+    "TestSparseCPU.test_sparse_spdiags_cpu_int64",  # known py38 fail
+    "TestSparseCPU.test_sum_cpu_int16",  # known py38 fail
+    "TestSparseCPU.test_to_dense_hybrid_masked_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_sum_cpu_uint8",  # known py38 fail
+    "TestSparseCPU.test_add_dense_sparse_mismatch_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_contig_hybrid_cpu_float64",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseBSR_nonmasked_fast_cpu",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCSC_masked_slow_cpu",  # known py38 fail
+    "TestSparseCPU.test_sparse_add_coalesce_cpu_complex64",  # known py38 fail
+    "TestSparseCPU.test_log1p_cpu_int8",  # known py38 fail
+    "TestSparseCPU.test_permute_masked_cpu_float64",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCSC_nonmasked_slow_cpu",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseBSC_nonmasked_fast_cpu",  # known py38 fail
+    "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_complex64",  # known py38 fail
+    "TestSparseAnyCPU.test_check_sparse_tensor_invariants_SparseCSC_cpu",  # known py38 fail
+    "TestSparseCPU.test_div_rounding_mode_cpu_float32",  # known py38 fail
+    "TestSparseCPU.test_any_cpu",  # known py38 fail
+    "TestSparseMeta.test_basic",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCSC_masked_fast_cpu",  # known py38 fail
+    "TestSparseAnyCPU.test_constructor_autograd_SparseBSR_cpu",  # known py38 fail
+    "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_bfloat16",  # known py38 fail
+    "TestSparseCPU.test_saddmm_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_shared_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_transpose_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_assign_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_permute_sparse_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_spadd_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_sparse_sparse_mul_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_sparse_dense_mul_cpu_int32",  # known py38 fail
+    "TestSparseCPU.test_asin_arcsin_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_change_tensor_metadata_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_sparse_sparse_mul_cpu_int32",  # known py38 fail
+    "TestSparseCPU.test_sparse_sparse_mul_cpu_complex64",  # known py38 fail
+    "TestSparseCPU.test_unsqueeze_cpu_complex128",  # known py38 fail
+    "TestSparseAnyCPU.test_constructor_autograd_SparseCSC_cpu",  # known py38 fail
+    "TestSparseCPU.test_sparse_spdiags_cpu_complex64",  # known py38 fail
+    "TestSparseCPU.test_add_zeros_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_new_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_contig_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_empty_like_cpu_complex128",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseCOO_nonmasked_fast_cpu",  # known py38 fail
+    "TestSparseAnyCPU.test_check_sparse_tensor_invariants_SparseBSC_cpu",  # known py38 fail
+    "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_masked_slow_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_sparse_sparse_mul_cpu_uint8",  # known py38 fail
+    "TestSparseCPU.test_sparse_sparse_mul_cpu_int64",  # known py38 fail
+    "TestSparseCPU.test_select_no_type_promotion_cpu_int16",  # known py38 fail
+    "TestSparseAnyCPU.test_as_sparse_gradcheck_SparseBSR_masked_slow_cpu",  # known py38 fail
+    "TestSparseCPU.test_select_no_type_promotion_cpu_int8",  # known py38 fail
+    "TestSparseCPU.test_zeros_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_sparse_mask_cpu_complex128",  # known py38 fail
+    "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_sparse_fast_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_contig_cpu_complex128",  # known py38 fail
+    "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_coalesce_transpose_mm_cpu_float64",  # known py38 fail
+    "TestSparseCPU.test_sum_cpu_int64",  # known py38 fail
+    "TestReductionsCPU.test_argminmax_multiple_cpu_float16",  # known py38 fail
+    "TestReductionsCPU.test_argminmax_multiple_cpu_int16",  # known py38 fail
+    "TestReductionsCPU.test_histogramdd_cpu_float32",  # known py38 fail
+    "TestReductionsCPU.test_argminmax_multiple_cpu_int8",  # known py38 fail
+    "TestReductionsCPU.test_tensor_compare_ops_empty_cpu",  # known py38 fail
+    "TestReductionsCPU.test_all_any_vs_numpy_cpu_float32",  # known py38 fail
+    "TestReductionsCPU.test_all_any_vs_numpy_cpu_float64",  # known py38 fail
+    "TestReductionsCPU.test_argminmax_multiple_cpu_float64",  # known py38 fail
+    "TestReductionsCPU.test_all_any_vs_numpy_cpu_uint8",  # known py38 fail
+    "TestReductionsCPU.test_argminmax_multiple_cpu_uint8",  # known py38 fail
+    "TestReductionsCPU.test_all_any_vs_numpy_cpu_int8",  # known py38 fail
+    "TestReductionsCPU.test_all_any_vs_numpy_cpu_int16",  # known py38 fail
+    "TestReductionsCPU.test_all_any_vs_numpy_cpu_int32",  # known py38 fail
+    "TestReductionsCPU.test_argminmax_multiple_cpu_float32",  # known py38 fail
+    "TestReductionsCPU.test_all_any_vs_numpy_cpu_complex64",  # known py38 fail
+    "TestReductionsCPU.test_all_any_vs_numpy_cpu_int64",  # known py38 fail
+    "TestReductionsCPU.test_all_any_vs_numpy_cpu_complex128",  # known py38 fail
+    "TestReductionsCPU.test_argminmax_multiple_cpu_int64",  # known py38 fail
+    "TestReductionsCPU.test_tensor_reduce_ops_empty_cpu",  # known py38 fail
+    "TestReductionsCPU.test_all_any_vs_numpy_cpu_float16",  # known py38 fail
+    "TestReductionsCPU.test_all_any_vs_numpy_cpu_bool",  # known py38 fail
+    "TestReductionsCPU.test_argminmax_multiple_cpu_int32",  # known py38 fail
+    "TestReductionsCPU.test_tensor_compare_ops_argmax_argmix_kthvalue_dim_empty_cpu",  # known py38 fail
+    "TestReductionsCPU.test_histogram_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_broadcast_tensors_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_adaptive_avg_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_isneginf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_polygamma_polygamma_n_1_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_ldexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_triplet_margin_with_distance_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_gather_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_interpolate_nearest_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_hstack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_resolve_neg_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_gt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_binary_cross_entropy_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_pinv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_new_empty_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_pinv_hermitian_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_var_mean_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_eigh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_cholesky_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_argsort_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cumsum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_inner_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_diagflat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_atleast_1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_max_unpool2d_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_guards_equal",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_var_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_byte_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_tril_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_log_softmax_with_dtype_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_addmm_decomposed_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_heaviside_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_digamma_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_randn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_tensorinv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_ldl_factor_ex_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorReal.test_varargs",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_embedding_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_argwhere_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_index_select_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_dsplit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_jiterator_4inputs_with_extra_args_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_normal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_i1e_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_NumpyNonzeroCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_i0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_rand_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_unfold_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_modified_bessel_k0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_l1_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cos_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_triu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_ldl_factor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_equal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_i0_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_pre_dispatch_mode_stack",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_shifted_chebyshev_polynomial_w_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_square_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_floor_divide_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_cond_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_xlog1py_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_shifted_chebyshev_polynomial_u_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_diag_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_binary_cross_entropy_with_logits_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_interpolate_bicubic_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_corrcoef_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_signal_windows_general_cosine_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_ifft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_view_as_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_NumpySplitCopyWithIntCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_std_mean_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_modified_bessel_k0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_zeros_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_scatter_reduce_amin_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_pr_86917",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_ldexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_lu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_hardshrink_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_amin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cumprod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_tan_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_resolve_neg_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_new_full_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cumsum_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_empty_like_doesnt_burn_in_defaults",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_polygamma_special_polygamma_n_0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_clamp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_pinverse_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_meshgrid_variadic_tensors_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_aminmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_dropout_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_ifftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_adaptive_avg_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_half_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_sqrt_size",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_argmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_triplet_margin_with_distance_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_broadcast_to_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_kthvalue_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_matrix_power_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_lt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_reshape_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive__native_batch_norm_legit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_reshape_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_new_ones_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_asin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_cross_entropy_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_remainder_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_view_as_complex_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_pre_dispatch_linear",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_neg_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_reciprocal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_topk_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_conv3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_var_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_transpose_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cumprod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nan_to_num_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_new_empty",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fmod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_hardshrink_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_bilinear_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_svd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_log_normal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_topk_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_polygamma_special_polygamma_n_0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_shifted_chebyshev_polynomial_t_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_div_floor_rounding_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_combinations_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_amin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_addcmul_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_fractional_max_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sparse_sampled_addmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_copysign_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_log_normal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_randint_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_shifted_chebyshev_polynomial_u_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_selu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_deg2rad_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_tensorsolve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_signal_windows_kaiser_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_multi_dot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sum_to_size_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_adaptive_avg_pool3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_triplet_margin_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_permute_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_interpolate_nearest-exact_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_smooth_l1_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_logical_or_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_count_nonzero_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive__upsample_bilinear2d_aa_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_unsqueeze_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_bool_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_bfloat16_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_matmul_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_float_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_signbit_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_proxy_tensor",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_max_pool1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_take_along_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_NumpyViewCopyCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_irfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_ldl_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_square_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_dsplit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_permute_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_unique_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_pad_circular_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_hardswish_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_add_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_empty_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_diagflat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_max_pool1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_round_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_lu_factor_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_max_unpool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_avg_pool3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inner_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_exp2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_matrix_rank_hermitian_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_bucketize_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_combinations_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_log10_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_bfloat16_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_complex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_pad_constant_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace___getitem___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_interpolate_bicubic_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cartesian_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_amax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_max_reduction_no_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_diag_embed_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_histc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_instance_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_vander_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_mul_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nonzero_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_make_fx_overloads",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_svd_lowrank_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive___getitem___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_logaddexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_expm1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_lt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_min_reduction_no_dim_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_guard_upperbound_range_refinement_multivariate",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_norm_nuc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_column_stack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_index_fill_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_argsort_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_bessel_y1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_unfold_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_take_along_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_max_unpool1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_argwhere_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_max_pool1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_signal_windows_hamming_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_unbind_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_inv_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_squeeze_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_index_select_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_float_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_interpolate_bilinear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_to_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_argmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_take_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cdist_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_addbmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_tensorinv_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorReal.test_pre_dispatch_mode_stack",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_polygamma_polygamma_n_3_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_polygamma_polygamma_n_0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_uniform_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_max_binary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_logspace_tensor_overload_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_empty_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_grid_sampler_2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_true_divide_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_median_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_sort_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_conv_transpose3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_gt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_repeat_interleave_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_airy_ai_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_diagonal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nonzero_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_double_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_soft_margin_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_ihfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_hermite_polynomial_he_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_pad_replicate_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_polygamma_special_polygamma_n_0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_bessel_j0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_matrix_rank_hermitian_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_solve_triangular_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_clamp_min_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_take_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_broadcast_to_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_dropout_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_frac_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_polar_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_round_decimals_0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_minimum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_normal_number_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_avg_pool1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_cumprod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_geometric_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_modified_bessel_i1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_combinations_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_scatter_reduce_amax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_clone_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_glu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_var_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_pixel_shuffle_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_bernoulli_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_zero__cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_matrix_rank_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_local_response_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_interpolate_nearest_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorReal.test_val_metadata_mutation",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_softplus_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_min_reduction_with_dim_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_max_unpool1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_logspace_tensor_overload_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_mvlgamma_mvlgamma_p_3_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_pad_circular_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fill_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_chebyshev_polynomial_w_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_new_zeros_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_bfloat16_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_index_select_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_pad_reflect_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_max_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_dropout3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_broadcast_shapes_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_empty_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_resolve_conj_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_logical_not_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_equal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cummin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_bessel_j1_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_householder_product_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_conj_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_ldl_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_ldl_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_scatter_reduce_mean_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_vector_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sort_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_lu_unpack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_mvlgamma_mvlgamma_p_1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_ne_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_polygamma_polygamma_n_3_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_repeat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_entr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_softplus_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_dot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_complex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_ctc_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_scaled_modified_bessel_k1_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_select_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_airy_ai_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_round_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_nll_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_stack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_rsub_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_varargs",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_expand_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_rfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_ones_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_jiterator_binary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_rrelu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_digamma_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_clone_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_erf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_spherical_bessel_j0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_new_full_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_sparse_sampled_addmm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_legendre_polynomial_p_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_sigmoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_select_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_sum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_erfc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_empty_permuted_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_squeeze_multiple_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_angle_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_split_with_sizes_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace___rmod___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_std_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_max_unpool2d_grad_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_abs_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace__native_batch_norm_legit_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_max_unpool3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_to_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_lu_unpack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_multi_head_attention_forward_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_eq_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_column_stack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_alpha_dropout_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_resize_as__cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_signal_windows_blackman_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_conv_transpose3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_select_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_shifted_chebyshev_polynomial_v_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_ndtr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_NumpyCatCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_scaled_modified_bessel_k0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_dsplit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_multi_dot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_log_ndtr_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_symbolic_repeat_interleave",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_scatter_reduce_sum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_avg_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_pad_circular_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_pixel_unshuffle_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_NumpySplitCopyCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_sin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_log2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_digamma_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sort_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_decomposition_interpreter",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_instance_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_lu_unpack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_pad_reflect_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_isposinf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_std_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_signal_windows_hann_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_constant_blowup",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_expand_as_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_index_select_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_tanh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_inner_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_min_binary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_tensordot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_celu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_constant_pad_nd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_double_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_irfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_mode_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_acos_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_rand_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_rand_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_lerp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_rrelu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_lu_unpack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_batch_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_byte_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_vander_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cholesky_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_amax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_view_as_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_le_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_ihfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_eq_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_chebyshev_polynomial_v_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out___rsub___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_flip_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_select_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_embedding_bag_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_floor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_select_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_randn_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace__segment_reduce_offsets_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_all_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_mul_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_view_as_complex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_signal_windows_hann_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_signal_windows_general_cosine_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_lstsq_grad_oriented_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_chebyshev_polynomial_t_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_softshrink_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_polygamma_polygamma_n_2_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_isneginf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_sparse_mm_reduce_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_bool_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_floor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_chebyshev_polynomial_v_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorFake.test_resnet18_backward_trace",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_trunc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_logical_or_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_addcdiv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_logspace_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_ones_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_cosine_embedding_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_feature_alpha_dropout_without_train_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_amax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_float_power_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_return_symint",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_det_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_isneginf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_eigvals_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_NumpySplitCopyWithIntCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_rfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_max_reduction_with_dim_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_short_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_isclose_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_dstack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_signal_windows_gaussian_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cfloat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_svdvals_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_vdot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_softmax_with_dtype_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_new_empty_strided_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_upsample_bilinear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_ldl_factor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_fftshift_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_polygamma_polygamma_n_2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cross_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_amin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_vsplit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_norm_fro_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_geometric_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_l1_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_sgn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_scatter_reduce_sum_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_clamp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_copysign_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_new_full_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_interpolate_bilinear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_resize_as__cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_atleast_1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_rfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_max_reduction_with_dim_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_repeat_interleave_unbacked_output_size",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_trapz_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_log_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_huber_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_avg_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_ctc_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_std_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_unflatten_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_heaviside_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_grid_sample_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_einsum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_uniform_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_std_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_expand_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_gather_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_var_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_as_strided_partial_views_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_i0e_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_signal_windows_blackman_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_jiterator_4inputs_with_extra_args_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cartesian_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_sinh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_var_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_multi_dot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_lt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_unique_consecutive_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_mvlgamma_mvlgamma_p_3_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_randn_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_NumpySplitCopyCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_zeta_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_softsign_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_flatten_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_rfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_signal_windows_gaussian_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_solve_triangular_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_index_reduce_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_resnet18_backward_trace",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_max_reduction_no_dim_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_avg_pool1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_relu_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_logical_or_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_exp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_alpha_dropout_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_searchsorted_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_new_empty_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_NumpyMulCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_bessel_j1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_ldl_factor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_ihfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_mvlgamma_mvlgamma_p_3_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_randint_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_round_decimals_3_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_addcdiv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_lu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_std_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_tril_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorReal.test_proxy_tensor_mode_with_decomp_table_preserves_proxy",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_var_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_baddbmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_vecdot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_conv_transpose2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_float_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive___rsub___cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_isolated_graphmodule",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_norm_fro_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_div_floor_rounding_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_block_diag_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_byte_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_igamma_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_asin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_pinv_singular_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_hfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_huber_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_char_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_upsample_nearest_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_to_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_exponential_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_max_pool2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_fill_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_log2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_sparse_sampled_addmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_allclose_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_count_nonzero_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_ones_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_cumsum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_sum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_expand_as_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_reshape_as_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_polygamma_polygamma_n_3_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_dstack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_atleast_1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_std_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_reciprocal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_resize_as__cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_mvlgamma_mvlgamma_p_1_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_movedim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_movedim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_argmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_softmin_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_diagonal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_ge_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_native_layer_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_expm1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_isin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_gelu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_softshrink_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_hstack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_round_decimals_neg_3_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_renorm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_solve_triangular_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_flipud_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_full_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_nll_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_remainder_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_stack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_clamp_min_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_bilinear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive___rmatmul___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_conv2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_diagflat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_outer_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_clone_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_corrcoef_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_meshgrid_variadic_tensors_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_zeros_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_cosine_similarity_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_grid_sampler_2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_index_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_multilabel_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_conv_transpose3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_trapezoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_as_strided_partial_views_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_hfftn_cpu_float32",  # known py38 fail
+    "TestFakeProxyTensor.test_free_fake",  # known py38 fail
+    "TestGenericProxyTensorReal.test_decomp_of_capture",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_diagonal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_tile_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_NumpyCubeCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_half_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_chebyshev_polynomial_u_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_randn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_unsqueeze_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_view_as_complex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_square_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_logsigmoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nanmedian_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_lstsq_grad_oriented_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_acos_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_solve_triangular_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_le_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_int_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_unique_consecutive_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_norm_subgradients_at_zero_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_T_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_bool_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nan_to_num_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_triu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_hsplit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_jiterator_binary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_logical_xor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_full_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_interpolate_nearest-exact_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_positive_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_block_diag_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_cumprod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_log1p_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_native_dropout_backward_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_round_decimals_3_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_bucketize_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_signal_windows_hann_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_isinf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_exp2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_split_list_args_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_hardtanh_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_unsafe_split_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_logit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_hermite_polynomial_he_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out___rmatmul___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_tril_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_addr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_mode_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_shifted_chebyshev_polynomial_u_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_dropout2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_std_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_zeta_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_embedding_bag_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_amax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_split_list_args_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_constant_pad_nd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_hfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_legendre_polynomial_p_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_zero__cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_scatter_reduce_amin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_ihfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_angle_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_searchsorted_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_shifted_chebyshev_polynomial_w_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_dist_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_hermite_polynomial_h_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_scatter_reduce_amax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_logdet_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cosh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_vector_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_ldl_factor_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_det_singular_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_amax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_zeros_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_movedim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_lu_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive___radd___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_var_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_addmm_decomposed_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_complex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_multi_head_attention_forward_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorSymbolic.test_amp_cache",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_baddbmm_cpu_float32",  # known py38 fail
+    "TestFakeProxyTensor.test_meta",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nan_to_num_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_sign_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_ifftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_narrow_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_logit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_tensordot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_logsumexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_max_pool2d_with_indices_backward_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorSymbolic.test_scalar_device",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_amin_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_unbacked_unification",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_eigvalsh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive___rsub___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_diagonal_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_aminmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_scatter_add_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_new_ones_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_cholesky_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_multilabel_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_view_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nanquantile_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_combinations_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_vecdot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_view_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_trace_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_xlogy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_adaptive_max_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_lu_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_kthvalue_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_constant_pad_nd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_div_trunc_rounding_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_tanhshrink_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nanquantile_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_i1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_max_pool2d_with_indices_backward_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_multi_dot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_polar_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_scatter_reduce_sum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cartesian_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_pad_replicate_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_hsplit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_conv_transpose1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_var_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_upsample_bilinear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestSymbolicTracing.test_invalidate_nonzero",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_clamp_max_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_squeeze_multiple_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_bilinear_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_chalf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cauchy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_softmin_with_dtype_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_new_empty_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_constant_proxy_tensor_mut",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_movedim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_signal_windows_exponential_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_clone_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_jiterator_binary_return_by_ref_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorSymbolic.test_strides",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_acosh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_inv_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nextafter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_ihfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_NumpyCubeCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_t_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_erfinv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_std_mean_unbiased_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_arange_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_softsign_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_add_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_kron_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_isnan_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_i0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_polygamma_polygamma_n_4_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_svd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_resolve_conj_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_scatter_reduce_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_any_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_ldl_factor_ex_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_pixel_unshuffle_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_fft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_householder_product_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_logdet_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linspace_tensor_overload_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_conj_physical_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_chebyshev_polynomial_u_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_scatter_reduce_amax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_max_pool2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_matrix_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_einsum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_real_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_decomp_of_capture",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_acosh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_polar_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_dot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_multi_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_scaled_dot_product_attention_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_view_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_grid_sample_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_lgamma_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_sub_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_xlog1py_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive___rdiv___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cumulative_trapezoid_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_positive_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_conv3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_exp_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_constant_blowup",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_max_reduction_no_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_NumpySortCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_median_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_tensor_split_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_make_fx_reentrant_dispatch",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_interpolate_trilinear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_norm_inf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_trace_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_zeros_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_normal_in_place_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_addmv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_laguerre_polynomial_l_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_atanh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_item_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_scatter_reduce_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_randn_like_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_constant_specialization",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_mm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_median_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_isreal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_mv_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_decomp_of_capture",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_ifftn_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorReal.test_pre_dispatch_linear",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_matrix_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_max_unpool3d_grad_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_sinc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_to_sparse_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_group_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_histogram_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_rsub_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_mish_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_pdist_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_diagonal_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_quantile_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_diagonal_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_max_unpool2d_grad_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_dot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_conj_physical_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_hfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_double_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_view_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_renorm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_matrix_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_dropout2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_transpose_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_diag_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_tanh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out__segment_reduce_lengths_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_true_divide_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_asin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_leaky_relu_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cummin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_topk_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_dropout_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_polygamma_polygamma_n_4_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sparse_mm_reduce_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_gaussian_nll_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_ceil_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_isfinite_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_diagonal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_ldl_factor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_avg_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_copysign_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_bucketize_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nanmean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_sort_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_irfftn_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_debug_interpreter",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_bessel_y0_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_tensor_constants",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_median_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_i1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_addbmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_acos_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_exp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_pinv_hermitian_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_jiterator_2inputs_2outputs_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_chebyshev_polynomial_v_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_multilabel_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_unique_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_baddbmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_max_unpool1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_eq_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_logsumexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_new_empty_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_interpolate_nearest-exact_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_index_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_prelu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_select_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_trapz_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_abs_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_geometric_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_layer_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_take_along_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nonzero_static_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_index_reduce_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_floor_divide_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_log1p_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_airy_ai_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_sgn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_randint_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_exponential_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_silu_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_fft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_view_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_renorm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace___rmatmul___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_max_unpool2d_grad_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_minimum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_argmax_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_broadcast_shapes",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_hypot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_max_pool1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_atan_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_conv1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_lu_factor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_new_ones_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_pre_dispatch_mode_stack",  # known py38 fail
+    "TestGenericProxyTensorFake.test_pickle_issue89626",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_pixel_shuffle_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_adaptive_max_pool1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_count_nonzero_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_multinomial_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive__segment_reduce_offsets_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_jiterator_binary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_signal_windows_cosine_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_mish_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_shifted_chebyshev_polynomial_t_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_pad_reflect_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_var_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_where_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_flatten_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive__softmax_backward_data_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_embedding_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_int_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_logsumexp_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_inplace_metadata",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linspace_tensor_overload_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_elu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_softsign_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_pinv_singular_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_fft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_lgamma_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_geometric_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_native_dropout_backward_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_frac_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorReal.test_pre_dispatch_no_grad",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_erfc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_ndtri_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_interpolate_bilinear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_logsumexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_diagonal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_float_power_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_interpolate_area_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorFake.test_mode_tracing_factory_function",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_acosh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_logit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_new_zeros_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_adaptive_max_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_polygamma_polygamma_n_3_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_cholesky_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_conv_transpose1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_log_normal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cumprod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_leaky_relu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_pairwise_distance_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_histc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_normal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_new_empty_strided_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_angle_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_digamma_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_square_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_erfinv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cauchy_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_sym_storage_offset",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_gradient_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_i0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_chebyshev_polynomial_w_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_round_decimals_3_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_addcmul_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_jiterator_2inputs_2outputs_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_logical_xor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_reciprocal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_i1e_cpu_float32",  # known py38 fail
+    "TestFakeProxyTensor.test_fused_adam",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_kthvalue_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_adaptive_avg_pool1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_pow_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_slice_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_to_sparse_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_ravel_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_max_pool3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_max_reduction_no_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_acos_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_ormqr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_column_stack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_randint_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_histogramdd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cosh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_conv1d_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_arange_unbacked_output_size",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_signal_windows_gaussian_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_hardtanh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_lu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_view_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_sinc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_constant_pad_nd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_logaddexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_pad_circular_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_mv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_argwhere_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_conj_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_log_ndtr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive___rmod___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_hermite_polynomial_h_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_cumsum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_scaled_dot_product_attention_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_unfold_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_as_strided_scatter_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_min_binary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_std_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_native_dropout_backward_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_NumpyMulCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_entr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_resize__cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_prelu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_poisson_nll_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_eigvals_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_make_fx_overloads",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_margin_ranking_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nan_to_num_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_true_divide_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_NumpyNonzeroCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_irfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_lstsq_grad_oriented_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_unique_consecutive_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_inplace_metadata",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_cosine_embedding_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_lt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_tensorsolve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_softmin_with_dtype_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_hstack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_var_mean_unbiased_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_adaptive_avg_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_float_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cdouble_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cosh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_entr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_ifftshift_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_slogdet_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_index_put_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_zeros_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_empty_permuted_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_logdet_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fliplr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_maximum_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_allclose",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_unfold_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_round_decimals_0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_atan2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_vector_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_logical_xor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_binary_cross_entropy_with_logits_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_ihfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_pad_replicate_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_tile_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sign_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_isin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_batch_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_layer_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_unfold_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_size_with_tensor",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_interpolate_trilinear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_grid_sample_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_norm_nuc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_kl_div_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_i1e_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_lu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_full_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_eye_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_adaptive_max_pool1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_diagonal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_cumsum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_searchsorted_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_var_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_matrix_power_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_double_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_geqrf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_qr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_logsigmoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_logaddexp2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_rad2deg_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_cross_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_transpose_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_mH_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_make_fx_model_fwd_bwd",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_view_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_H_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_split_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_div_no_rounding_mode_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_expand_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_ifft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_isnan_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_mv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_randn_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_view_as_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_addr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_sum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_vecdot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_diagonal_copy_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_proxy_tensor_mode_with_decomp_table_preserves_proxy",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_shifted_chebyshev_polynomial_t_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_ctc_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_sin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_lu_factor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_sigmoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_binary_cross_entropy_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_erfinv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_triangular_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_qr_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_int_input",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_amax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_rfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_NumpyCatCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_relu6_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_inner_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_modified_bessel_k1_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_poisson_nll_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cos_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_repeat_interleave_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_silu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_smooth_l1_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_broadcast_shapes_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_count_nonzero_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_NumpyNMSCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_avg_pool2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_avg_pool3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_view_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_min_binary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_norm_fro_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_slice_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_narrow_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_geqrf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_msort_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_norm_subgradients_at_zero_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive___rmul___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_lstsq_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_modified_bessel_i0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_zeros_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_einsum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_isreal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_norm_subgradients_at_zero_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_index_put_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_min_reduction_with_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_threshold_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_diagonal_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_signal_windows_hann_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_log_ndtr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_interpolate_nearest_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_signal_windows_hamming_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_mvlgamma_mvlgamma_p_1_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace__upsample_bilinear2d_aa_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linspace_tensor_overload_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_multi_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_huber_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_laguerre_polynomial_l_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_polygamma_polygamma_n_3_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_hsplit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_new_ones_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_squeeze_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_margin_ranking_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_mT_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_ndtri_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_quantile_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_det_singular_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_quantile_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_ones_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_std_mean_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_diagonal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_unfold_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_jiterator_binary_return_by_ref_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_scatter_reduce_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_tensordot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_feature_alpha_dropout_with_train_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nanmean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_zeta_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_polygamma_special_polygamma_n_0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nansum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_frac_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_hardswish_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_ihfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cumulative_trapezoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_triplet_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_max_unpool1d_grad_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_ifft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_normalize_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_pca_lowrank_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_bessel_j0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_qr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_inv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_hardsigmoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_split_with_sizes_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_empty_strided_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_std_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_batch_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_isnan_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_lstsq_grad_oriented_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_block_diag_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_matrix_rank_hermitian_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_logcumsumexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_hardsigmoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_hfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_feature_alpha_dropout_without_train_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_outer_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_randn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_signal_windows_general_cosine_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sinc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_logaddexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_fill_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_atan2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_modified_bessel_i0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_conv2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_sum_to_size_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cross_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_matmul_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_eye_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_jiterator_2inputs_2outputs_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_diag_embed_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_softmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_fill_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_broadcast_tensors_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_heaviside_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_atan_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_lstsq_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_partial_decomp",  # known py38 fail
+    "TestSymbolicTracing.test_rmethod",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_multilabel_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_clamp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_max_pool2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_xlog1py_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_bernoulli_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_eigvals_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_fft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_scaled_dot_product_attention_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_ravel_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_pad_reflect_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_logcumsumexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_bessel_y0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_embedding_bag_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_solve_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_ge_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_logsumexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_square_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_diagonal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_upsample_nearest_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_shifted_chebyshev_polynomial_w_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_signal_windows_nuttall_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_log_softmax_with_dtype_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_matmul_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_signal_windows_hann_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_argmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_conj_physical_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_smooth_l1_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_lu_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_scaled_modified_bessel_k1_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_triplet_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linspace_tensor_overload_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_mm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_huber_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_entr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_bessel_j1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_svdvals_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive___rsub___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_renorm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_split_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_randint_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_scatter_reduce_sum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_hypot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_adaptive_avg_pool2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_eig_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_cosine_embedding_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_median_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_legendre_polynomial_p_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_interpolate_linear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_min_reduction_no_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_scalar_tensor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nextafter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_chebyshev_polynomial_w_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_l1_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorReal.test_tensor_constants",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_ifft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_amin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_hardsigmoid_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_tensor_split_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_jiterator_binary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_lu_factor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_pad_replicate_negative_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_cholesky_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_sort_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_scatter_add_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_as_strided_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_logical_xor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_where_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_i1e_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_byte_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_scatter_add_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive___rpow___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_trapezoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_var_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_frexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_short_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_make_fx_model_fwd_bwd",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_NumpyNMSCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_NumpySplitCopyWithIntCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_embedding_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_softshrink_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_max_unpool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_index_add_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_split_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_lgamma_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_aminmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_diff_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_pdist_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_isfinite_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_cumprod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_laguerre_polynomial_l_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_feature_alpha_dropout_with_train_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_svd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_sum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive__segment_reduce_offsets_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_rsub_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_hfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_atleast_1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nextafter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_amin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_pad_replicate_negative_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_chebyshev_polynomial_t_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_trapezoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_mT_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive___radd___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_all_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_max_unpool1d_grad_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_conv_transpose1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_polygamma_polygamma_n_2_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nanmean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cfloat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_irfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_add_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_mega_guard",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_fractional_max_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_div_floor_rounding_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_trapezoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_argmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_isclose_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_sign_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_log_softmax_with_dtype_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_NumpyTakeCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_modified_bessel_i1_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out__upsample_bilinear2d_aa_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_NestedMapControlflowOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cholesky_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_normal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_frac_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_ifftshift_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_reshape_as_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_hfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_index_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_matrix_rank_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_scatter_reduce_amin_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_zero__cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_lu_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_diff_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_mvlgamma_mvlgamma_p_5_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_tanhshrink_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_atleast_2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_cosine_similarity_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_histc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_view_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nanmedian_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_NumpyNMSCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_new_empty_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_new_full_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_exp2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sgn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_tensorinv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_normal_number_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive___rmul___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_as_strided_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_pinv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_softplus_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_signal_windows_nuttall_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_baddbmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_chunk_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_outer_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_logcumsumexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_addcmul_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_signal_windows_bartlett_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_frac_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_hardtanh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_slogdet_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_pinverse_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_signal_windows_exponential_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_dstack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_matrix_rank_hermitian_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_narrow_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_feature_alpha_dropout_without_train_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_soft_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorFake.test_empty_like_doesnt_burn_in_defaults",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_slice_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_MapControlflowOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_shifted_chebyshev_polynomial_v_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_rfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_feature_alpha_dropout_with_train_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_nll_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_neg_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_scatter_reduce_amin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_stack_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_guard_lowerbound_range_refinement",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_NumpyCubeCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_adaptive_max_pool3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace___rsub___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_ones_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_scalar_tensor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_scalar_tensor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_isposinf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_logaddexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_gradient_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_pad_replicate_negative_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out___rmod___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_dropout2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_signal_windows_kaiser_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_isposinf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_unsqueeze_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_multinomial_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sparse_mm_reduce_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_T_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_logsumexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_rfft_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_neg_shape",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_max_pool3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_index_add_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_aminmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_argmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_isin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_pinv_singular_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_fft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_flip_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_NumpySortCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_hardswish_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_ifft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nansum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_max_reduction_with_dim_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_as_strided_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_irfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_flipud_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_lu_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_multilabel_soft_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_index_put_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_grid_sample_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_interpolate_linear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_allclose_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_silu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_amax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_vector_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_solve_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_celu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_igammac_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_var_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_lu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_round_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_empty_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_celu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_kl_div_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_matrix_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_as_strided_partial_views_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_resize_as__cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_ihfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_index_put_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_i1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_logical_not_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_add_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_hypot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_avg_pool1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_logaddexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_bmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_elu_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorReal.test_trace_subclasses",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_eq_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_smooth_l1_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fliplr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_unsafe_split_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_clamp_max_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_signal_windows_general_hamming_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_dist_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_clamp_min_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_repeat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_max_unpool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_addmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_scatter_reduce_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_signal_windows_bartlett_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_log10_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_conv_transpose2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_unsqueeze_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_matmul_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_logical_and_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_native_layer_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_glu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive__native_batch_norm_legit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_hermite_polynomial_he_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_softmax_with_dtype_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_gaussian_nll_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_polygamma_polygamma_n_1_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_instance_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_to_sparse_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_zero__cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_view_divisibility_unbacked",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_embedding_bag_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_roll_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_kl_div_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_conv_transpose2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_soft_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_irfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_randint_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_zeros_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_jiterator_unary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_inv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_celu_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestSymbolicTracing.test_item",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_softsign_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_svd_lowrank_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_scatter_add_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cholesky_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_vsplit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_outer_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_ifftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_unsafe_split_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_adaptive_max_pool1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_hfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_slogdet_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_vsplit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_addcdiv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_hermite_polynomial_h_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_svd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_conv2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace__softmax_backward_data_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_legendre_polynomial_p_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_normalize_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_signal_windows_bartlett_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_pca_lowrank_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_var_mean_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_diag_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_fft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_ihfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_exponential_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_sgn_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_split_unbacked_sizes",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_normal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_conv1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_rot90_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_trace_subclasses",  # known py38 fail
+    "TestSymbolicTracing.test_expand",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_stft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_normalize_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_MapControlflowOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_jiterator_2inputs_2outputs_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_index_put_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_erfcx_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_sum_to_size_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_atanh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_var_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_std_mean_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_jiterator_unary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_ldl_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive___rmatmul___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_real_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_count_nonzero_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_linear_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_mm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_H_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_acos_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_histogramdd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_remainder_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_mode_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_batch_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cumulative_trapezoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_vander_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_vsplit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_gather_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_adaptive_avg_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_sub_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_unbacked_unify_guard_transitivity",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_normal_number_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_corrcoef_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_mvlgamma_mvlgamma_p_5_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_scaled_modified_bessel_k0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_multi_head_attention_forward_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_conj_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_matrix_rank_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_pixel_unshuffle_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_binary_cross_entropy_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nan_to_num_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_randint_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_entr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_bessel_y1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_chalf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_heaviside_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_native_dropout_backward_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_var_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_multi_margin_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive___rmatmul___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_floor_divide_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_item_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_scatter_reduce_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_signal_windows_general_cosine_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_binary_cross_entropy_with_logits_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_eye_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_hardshrink_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_ctc_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_polygamma_polygamma_n_0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_real_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_logaddexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_zeta_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cdist_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_log10_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_NumpyTakeCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_gather_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_tanhshrink_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive__segment_reduce_lengths_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_int_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_tanhshrink_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_inner_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_outer_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_float_power_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_fill_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorReal.test_inplace_metadata",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_squeeze_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_fractional_max_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_threshold_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_unsafe_chunk_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_broadcast_shapes_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_igamma_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_round_decimals_0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_clamp_max_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_val_metadata_mutation",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_normalize_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_log_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_hermite_polynomial_he_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_polygamma_polygamma_n_2_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_make_fx_model_double_param",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_signal_windows_kaiser_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linspace_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_solve_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_rot90_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_fftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_nll_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out___rdiv___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_NumpyNMSCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_clamp_max_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_max_pool1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_addmv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_round_decimals_3_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_new_full_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_polygamma_polygamma_n_0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_tile_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_gaussian_nll_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_atleast_3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_expand_as_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_dsplit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_householder_product_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_kthvalue_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_binary_cross_entropy_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_zeros_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_int_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_float_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_isin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_div_no_rounding_mode_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_median_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_xlogy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_chalf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_sum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_stft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_polygamma_polygamma_n_1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_var_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_fractional_max_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cfloat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_max_unpool1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_slice_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_qr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_layer_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_abs_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_any_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_amp_cache",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_ifft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_interpolate_trilinear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_maximum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_logaddexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_eigvalsh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_irfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_max_unpool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_embedding_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_bessel_j0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_baddbmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_chunk_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_polygamma_polygamma_n_0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_alpha_dropout_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_floor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_signal_windows_gaussian_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_chebyshev_polynomial_u_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_eq_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_modified_bessel_k1_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_log_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_fftshift_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_selu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_qr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_eye_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_logspace_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_meshgrid_list_of_tensors_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_log_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_logical_not_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_prod_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_tensor_constants",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_ldexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_uniform_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_diag_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_erfcx_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_erfcx_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_igamma_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_min_reduction_no_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_chebyshev_polynomial_v_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive__softmax_backward_data_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_combinations_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cholesky_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_unfold_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_normal_in_place_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_pairwise_distance_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_empty_permuted_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_cosine_embedding_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_vstack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_as_strided_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_split_with_sizes_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_chebyshev_polynomial_t_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_argmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_max_unpool3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_softmin_with_dtype_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_normal_in_place_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_bfloat16_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_vdot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_select_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out___rpow___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_log_softmax_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_isclose_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_meshgrid_list_of_tensors_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_signal_windows_general_hamming_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_trunc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_adaptive_max_pool1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_real_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_sparse_sampled_addmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_logaddexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_fft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_NumpyMulCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_histogram_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_cosine_similarity_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_byte_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_roll_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_atleast_2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace___rdiv___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_std_mean_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_new_empty_strided_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_minimum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_max_binary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_addr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_conv2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_igammac_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_native_layer_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_adaptive_avg_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_lgamma_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_softmin_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_lu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_floor_divide_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_eig_cpu_float32",  # known py38 fail
+    "TestRealProxyTensor.test_error_on_data_dependent_ops",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_lu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sub_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_broadcast_tensors_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_unsqueeze_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_slice_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_ihfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_std_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_broadcast_to_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_logspace_tensor_overload_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_addmm_decomposed_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_tril_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_randint_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_det_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_signbit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_NumpyCatCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_cumsum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_cholesky_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_round_decimals_3_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_dsplit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_put_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_signal_windows_cosine_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorSymbolic.test_proxy_tensor",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_ldl_factor_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_matrix_exp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_pow_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_interpolate_nearest_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_lu_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_atleast_3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cumsum_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_constant_random",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_irfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_matrix_exp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_mm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_igamma_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_aminmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_std_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_i1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_xlogy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_sinh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_isnan_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_unique_consecutive_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_cholesky_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorReal.test_scalar_device",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_index_select_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_chebyshev_polynomial_u_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_ceil_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_split_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_kron_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_split_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_qr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_view_as_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_hermite_polynomial_h_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sigmoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_tan_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_as_strided_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_isin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cholesky_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_flip_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_resize_from_zero",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_sparse_mm_reduce_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_take_along_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_adaptive_max_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nansum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_amin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_celu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_det_singular_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_erfc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_chebyshev_polynomial_t_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_group_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_t_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_log2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_lt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_rsqrt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_linear_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_group_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_NumpyViewCopyCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_spherical_bessel_j0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_conv_transpose1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_complex_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_make_fx_with_custom_tracer_preserving_nn_module_stack",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_scatter_reduce_prod_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_matrix_exp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_NumpyCatCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nonzero_static_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_min_reduction_no_dim_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_max_pool2d_with_indices_backward_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorFake.test_make_fx_model_fwd_bwd_wgtupdate",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_split_with_sizes_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_where_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_repeat_interleave_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_div_trunc_rounding_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_narrow_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_index_reduce_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_adaptive_avg_pool1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_hinge_embedding_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_bucketize_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_stft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_signal_windows_exponential_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_i1e_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_mvlgamma_mvlgamma_p_5_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_fftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_contiguous_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_geqrf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_max_binary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_svdvals_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_std_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_NumpySplitCopyCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_repeat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_rad2deg_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive___rpow___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_unsafe_chunk_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_msort_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_acosh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_isfinite_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_scaled_modified_bessel_k1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_addbmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_adaptive_max_pool1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_contiguous_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_le_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_selu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_rsub_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_chebyshev_polynomial_v_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_norm_inf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_diagflat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_spherical_bessel_j0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_bessel_y1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_hinge_embedding_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_diagonal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_feature_alpha_dropout_without_train_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_dstack_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_make_fx_model_fwd_bwd_wgtupdate",  # known py38 fail
+    "TestFakeProxyTensor.test_issue82547",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_select_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_hfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_shifted_chebyshev_polynomial_w_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_expm1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_conv3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_interpolate_trilinear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_rsqrt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_fft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_matrix_exp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_vdot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_mT_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_max_unpool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_div_no_rounding_mode_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_new_zeros_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_triplet_margin_with_distance_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_native_batch_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_mode_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_svd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_polygamma_polygamma_n_4_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cartesian_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive__segment_reduce_lengths_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_pinv_singular_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_deg2rad_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_polar_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_corrcoef_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_chebyshev_polynomial_t_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_fractional_max_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_pca_lowrank_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_histogramdd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_tile_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_long_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_conv_transpose3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_select_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_narrow_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_any_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_quantile_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_pad_constant_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_lerp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_tanhshrink_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_view_copy_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_pre_dispatch_no_grad",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_gelu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_matrix_power_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_hermite_polynomial_h_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_round_decimals_neg_3_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_mvlgamma_mvlgamma_p_1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_ihfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_norm_subgradients_at_zero_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_householder_product_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_half_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_conv_transpose1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_cross_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cumulative_trapezoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_expand_as_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_rfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_meshgrid_list_of_tensors_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_kl_div_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_xlog1py_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_flatten_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_logical_and_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_nonidentity_transitive_guards",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_std_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_uniform_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_guard_upperbound_range_refinement",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_unfold_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_std_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_logical_or_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_bilinear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_T_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_jiterator_binary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_ldexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_hfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_new_empty_strided_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive__upsample_bilinear2d_aa_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_topk_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_pinv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_trace_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_max_unpool3d_grad_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_angle_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_bmm_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_scalar_device",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_ihfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_minimum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_empty_strided_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_fractional_max_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_cosine_embedding_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_dstack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_index_reduce_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_dropout3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_svd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_pad_constant_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_hardsigmoid_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorSymbolic.test_constant_proxy_tensor_mut",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_addmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_igammac_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_index_fill_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_lu_factor_ex_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_signal_windows_kaiser_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_ifft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_grid_sampler_2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nanmedian_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_div_trunc_rounding_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_long_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_logical_not_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_randint_like_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_make_fx_reentrant_dispatch",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_decomposition_interpreter",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_argmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_deg2rad_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_div_no_rounding_mode_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_gelu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_index_reduce_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_div_no_rounding_mode_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_std_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_tensordot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linspace_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_instance_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_resolve_neg_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cummax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_narrow_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_empty_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_signal_windows_blackman_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_gt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_constant_pad_nd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_triu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_hypot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_where_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_native_layer_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_max_unpool1d_grad_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_avg_pool1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_ormqr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_mH_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_max_unpool3d_grad_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_adaptive_max_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_slice_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_adaptive_avg_pool1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cholesky_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_hypot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cross_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_asin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_NumpyCubeCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_min_reduction_no_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_flipud_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_normalize_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_chebyshev_polynomial_u_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nonzero_static_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_cross_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_eig_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_triplet_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_triplet_margin_with_distance_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_atleast_2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_feature_alpha_dropout_with_train_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_mse_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nanmedian_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_remainder_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_shifted_chebyshev_polynomial_w_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_vecdot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_geqrf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_fftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_floor_divide_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_atan_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_rot90_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_softmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_eye_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_index_fill_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_movedim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_allclose_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_amax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_hfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_histc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive___getitem___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_conj_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_pad_constant_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_mT_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_TripleNestedMapControlflowOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_softmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_unsafe_split_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_meshgrid_variadic_tensors_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_char_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_mse_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_hardshrink_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_sqrt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_clamp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_mT_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_addcmul_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_squeeze_multiple_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_argmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_qr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive___rpow___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out__native_batch_norm_legit_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cauchy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_poisson_nll_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_max_binary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_interpolate_area_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cosh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_copysign_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_max_unpool1d_grad_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_contiguous_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_pdist_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_mul_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_hfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive__native_batch_norm_legit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_item_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_char_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_as_strided_partial_views_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorFake.test_partial_decomp",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_softmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_frexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_logaddexp2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_fft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nextafter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_round_decimals_neg_3_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_layer_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_stack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_glu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_H_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_log_normal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_isnan_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fill_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_bessel_y0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_equal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_ndtr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_flip_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_bilinear_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_gt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_log1p_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_new_zeros_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_std_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_conv_transpose2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cummin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_softsign_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorReal.test_partial_decomp",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_eigh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_atanh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_slogdet_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_log_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_NumpySortCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_polygamma_polygamma_n_4_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_NestedMapControlflowOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_polygamma_special_polygamma_n_0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_exp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_squeeze_multiple_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_histogram_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_stft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_inv_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_broadcast_to_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_diagonal_scatter_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorReal.test_pre_dispatch_functionalization_view_op",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_interpolate_area_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_unbacked_slice",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_lstsq_grad_oriented_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sum_to_size_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive___rmod___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_scaled_modified_bessel_k0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_pinv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_shifted_chebyshev_polynomial_u_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_permute_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_matrix_power_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_reciprocal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_argmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_polygamma_polygamma_n_0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_empty_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_isinf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_to_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cauchy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_unfold_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_tensor_split_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_erfc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_expm1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_tanh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_inv_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_real_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_solve_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_interpolate_bicubic_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_unfold_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cov_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_resize_as__cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_randn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_split_with_sizes_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_reciprocal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_as_strided_scatter_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_metadata",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_interpolate_bilinear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_logsumexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_kron_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_erfcx_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_searchsorted_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_ifft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_signal_windows_nuttall_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_threshold_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_vecdot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fill_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_max_reduction_with_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_addmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cummax_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_varargs",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_polygamma_polygamma_n_2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_conv2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_mvlgamma_mvlgamma_p_3_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorFake.test_constant_random",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_atleast_1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_bucketize_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_cholesky_ex_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_i0e_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_feature_alpha_dropout_without_train_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive__segment_reduce_lengths_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_isposinf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_put_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_svd_lowrank_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_normalize_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_atanh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_jiterator_unary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_H_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_t_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorReal.test_make_fx_reentrant_dispatch",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_i0e_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_eigh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_narrow_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_log_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_mse_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_var_unbiased_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_pre_dispatch_functionalization",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_einsum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_meshgrid_variadic_tensors_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_zeros_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_unique_consecutive_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_ge_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_rsqrt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_permute_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_transpose_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_matrix_rank_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_view_as_complex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_squeeze_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_interpolate_area_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_jiterator_binary_return_by_ref_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_neg_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_rsqrt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_gradient_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_softmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_chebyshev_polynomial_w_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorSymbolic.test_make_fx_simple",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cholesky_inverse_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_det_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_var_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_unflatten_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_kl_div_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_lu_factor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_softmax_with_dtype_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_sub_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_block_diag_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_multi_dot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_einsum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fmod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_new_zeros_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_bool_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_modified_bessel_k1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_lerp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_scatter_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_adv_index_batch",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_deg2rad_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_lu_factor_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cholesky_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_avg_pool1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_randint_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_broadcast_shapes_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_matrix_power_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_relu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_shifted_chebyshev_polynomial_v_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_lu_factor_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_put_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_logspace_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_nll_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_modified_bessel_k1_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_pinv_hermitian_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_leaky_relu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_relu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cholesky_inverse_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_erf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_broadcast_tensors_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_cumprod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_grid_sampler_2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_addcdiv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_arange_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_diagonal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_shifted_chebyshev_polynomial_u_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_threshold_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_round_decimals_0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_hstack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_as_strided_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_amin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_hinge_embedding_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_digamma_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_addmm_decomposed_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_poisson_nll_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_atan2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_rand_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_diagonal_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_NumpySplitCopyCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_bernoulli_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_gradient_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_diagonal_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_smooth_l1_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_empty_permuted_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_unfold_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_signal_windows_exponential_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_where_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_gaussian_nll_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_repeat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cfloat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_tile_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_ihfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_asin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_adaptive_max_pool2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_new_ones_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_pre_dispatch_linear",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_erfcx_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_squeeze_multiple_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cummax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_tensor_split_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_unsafe_chunk_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cdouble_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_normalize_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_clamp_min_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_lu_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_kron_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_sigmoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_log10_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_sin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_std_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_embedding_bag_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_normalize_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_rsub_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_scaled_dot_product_attention_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nanquantile_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sinh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_normal_number_mean_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_dynamic_pointwise_scalar",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_lu_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_dot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_any_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace___rpow___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_relu6_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_modified_bessel_k0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_pdist_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_logical_or_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_vstack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_float_power_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_deg2rad_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_max_reduction_with_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_eigvals_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_native_batch_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linspace_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_NumpyCubeCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_NumpyNonzeroCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_cumsum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_sum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_qr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_resize__cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_max_unpool2d_grad_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_log10_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_max_unpool3d_grad_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_unbind_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_mvlgamma_mvlgamma_p_3_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_broadcast_tensors_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_round_decimals_0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_positive_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_resolve_neg_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_signal_windows_cosine_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_hsplit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_diagonal_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_mish_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cholesky_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_max_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_eigh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_scaled_modified_bessel_k1_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_vdot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_lu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_true_divide_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_block_diag_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_abs_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_any_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_frexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_contiguous_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_flipud_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_glu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_ravel_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_diff_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_vstack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_cross_entropy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_NumpyViewCopyCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_sum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_positive_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_empty_strided_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_log_ndtr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_tensorinv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_silu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nonzero_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_chunk_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_logsumexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_isreal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_svd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_resize__cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_softmax_with_dtype_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_softmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_TripleNestedMapControlflowOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_signal_windows_hamming_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_erf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_index_fill_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_long_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_expm1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_logical_and_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_pixel_shuffle_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_signal_windows_general_hamming_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_signal_windows_general_cosine_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linspace_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_svdvals_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_atleast_3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_dropout2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_inv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_unique_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_pinv_singular_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_l1_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_argsort_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_airy_ai_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_TripleNestedMapControlflowOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_full_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out___rmul___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_relu6_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_H_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_prelu_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_modified_bessel_i0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_signal_windows_gaussian_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_pow_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_flatten_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_item_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_jiterator_binary_return_by_ref_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_pinv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_empty_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_xlogy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_mode_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_argwhere_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nonzero_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_histogram_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_empty_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_arange_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_median_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_tensor_split_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cdouble_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_slice_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cross_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_svd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_sinc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_addmm_decomposed_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_irfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_avg_pool2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_multinomial_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_NumpyNonzeroCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_addbmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_transpose_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sinc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_multilabel_soft_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_multilabel_soft_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestFakeProxyTensor.test_alias",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_rad2deg_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_signal_windows_kaiser_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_logsigmoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_bessel_y0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_put_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_addr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_interpolate_bicubic_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_sqrt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_stft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cumsum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_chalf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out__segment_reduce_offsets_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_minimum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_lu_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_argwhere_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_empty_permuted_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_neg_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cartesian_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_scatter_reduce_amax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_conv1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_embedding_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_native_layer_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_rot90_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_normalize_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_upsample_nearest_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestSymbolicTracing.test_unary",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_empty_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_addcmul_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_atleast_3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_triu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_amax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_arange_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_log_ndtr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_full_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_tensor_symfloat",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_narrow_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_take_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_rfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_unique_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive___getitem___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cumsum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_eig_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_signal_windows_blackman_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fmod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_cond_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_bessel_j1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_det_singular_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_norm_inf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_hardshrink_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_grid_sampler_2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_ormqr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_NumpyNonzeroCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_log_softmax_with_dtype_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_softplus_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_jiterator_unary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_norm_inf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_roll_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_adaptive_avg_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_lstsq_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_argmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_huber_loss_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_vector_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_bessel_y0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_normal_in_place_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_lu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_scatter_reduce_sum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cos_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_ldl_factor_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_pca_lowrank_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cov_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_adaptive_max_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_svd_lowrank_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_make_fx_model_double_param",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_var_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_pow_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_logspace_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_median_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_i0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_modified_bessel_i0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_signal_windows_bartlett_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_exponential_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_round_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_svd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_ndtri_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_ormqr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_diagonal_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_margin_ranking_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_log_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fliplr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cholesky_inverse_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_angle_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_interpolate_linear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_rrelu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_all_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cummax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_clamp_max_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_logical_xor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nanquantile_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_broadcast_to_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_slogdet_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_all_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_split_list_args_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_ormqr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_logical_not_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_jiterator_4inputs_with_extra_args_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_broadcast_shapes_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_dist_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_gather_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_pairwise_distance_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestSymbolicTracing.test_symint_to_tensor",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive__segment_reduce_offsets_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_pinverse_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_shifted_chebyshev_polynomial_t_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_div_trunc_rounding_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_linear_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_constant_unbind",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_addmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_pad_reflect_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_triangular_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_pinv_hermitian_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_log_softmax_with_dtype_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_round_decimals_neg_3_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_log1p_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_NumpyTakeCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_interpolate_nearest-exact_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_isfinite_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_dot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_chalf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_upsample_nearest_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_conj_physical_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_empty_strided_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_unsafe_chunk_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_hardtanh_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorFake.test_make_fx_simple",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_NumpyNMSCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_searchsorted_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_shifted_chebyshev_polynomial_v_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_fft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_max_unpool1d_grad_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_fill_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_repeat_interleave_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_scaled_modified_bessel_k0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_jiterator_4inputs_with_extra_args_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_NumpyViewCopyCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_adaptive_max_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_modified_bessel_k0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_isreal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_full_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_slice_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive___rmul___cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_setitem_symint",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_irfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_argmin_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_pr_86917",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_zeta_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_chunk_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_logaddexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_solve_triangular_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_rad2deg_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_interpolate_linear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_ravel_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_vstack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_pca_lowrank_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_uniform_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_max_pool3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linspace_tensor_overload_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_local_response_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_layer_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_split_list_args_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cummin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_meshgrid_variadic_tensors_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_dropout3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cholesky_inverse_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_ctc_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_scatter_reduce_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_max_pool2d_with_indices_backward_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cov_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_native_batch_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_frexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sigmoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_pinverse_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_pad_circular_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_erf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nanmedian_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cholesky_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_ifftshift_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_local_response_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_min_reduction_with_dim_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_unbind_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_interpolate_linear_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_ceil_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cos_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nonzero_static_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_asinh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_T_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_pad_replicate_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_logical_and_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_pad_replicate_negative_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_i0e_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_le_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_spherical_bessel_j0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_slice_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_i0e_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_elementwise_meta_with_sym_numbers",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_scalar_tensor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sgn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_mH_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_max_unpool2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_as_strided_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_chebyshev_polynomial_w_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_group_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace__segment_reduce_lengths_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_slice_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_triangular_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_item_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_log_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_upsample_nearest_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_copysign_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_ndtr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_matrix_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_lgamma_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_argsort_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_resolve_conj_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_signal_windows_nuttall_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_multinomial_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_lu_unpack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_trapz_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_addmv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_rsqrt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_conv3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_relu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_ceil_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_atleast_2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_max_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_hsplit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_norm_nuc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_mul_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_take_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_mv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_norm_fro_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_fftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nonzero_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_binary_cross_entropy_with_logits_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_long_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_mse_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_pixel_unshuffle_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_NumpyTakeCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_repeat_interleave_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_true_divide_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_interpolate_bilinear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_ldl_factor_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_stack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_ndtri_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linspace_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_short_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nansum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_msort_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_signal_windows_blackman_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_diff_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_tan_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_det_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_alpha_dropout_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_atan2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_multi_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_cross_entropy_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_le_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_select_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_std_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_cosine_similarity_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorReal.test_resnet18_backward_trace",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_var_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_norm_nuc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cdist_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_hfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_modified_bessel_i1_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_relu6_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_rfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_logaddexp2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_as_strided_partial_views_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_eigvalsh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_isinf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_put_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_matrix_rank_hermitian_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_adaptive_avg_pool1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nanmean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_interpolate_nearest_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_vdot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_signbit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_signal_windows_general_hamming_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_atanh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_lerp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_alpha_dropout_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cauchy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_select_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sign_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_equal_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_strides",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_flipud_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_mvlgamma_mvlgamma_p_5_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_signal_windows_bartlett_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_tensorsolve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_NumpyMulCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_scaled_modified_bessel_k1_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorSymbolic.test_val_metadata_mutation",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_tensorinv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_native_batch_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_narrow_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive__softmax_backward_data_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_isclose_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_igammac_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_signal_windows_cosine_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_softplus_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nonzero_static_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_multiply_shape",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_ldl_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_fftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_prelu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_histc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_signal_windows_cosine_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_silu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_mm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_neg_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_tensordot_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_trunc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_log_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_conv_transpose3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive___rmod___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_fractional_max_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_matrix_exp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_selu_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_unbind_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cosh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_polygamma_polygamma_n_1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_T_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_ifftshift_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cov_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_triplet_margin_with_distance_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestSymbolicTracing.test_item_to_constructor",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_feature_alpha_dropout_with_train_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_batch_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_median_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_pixel_unshuffle_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_NumpySplitCopyWithIntCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_irfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_logical_and_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_std_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_ifft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_cumprod_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_pickle_issue89626",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_proxy_tensor_mode_with_decomp_table_preserves_proxy",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_jiterator_4inputs_with_extra_args_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_matrix_rank_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_multilabel_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_prelu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cov_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_abs_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_bfloat16_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_to_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_histogramdd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_sqrt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_diff_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_NumpyMulCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_eig_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_sign_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out__softmax_backward_data_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_cross_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_exponential_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_pairwise_distance_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_asinh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_bool_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_pad_replicate_negative_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_irfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_conv3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_hinge_embedding_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_isreal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_shifted_chebyshev_polynomial_v_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_flip_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_allclose",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_pre_dispatch_no_grad",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_unsafe_chunk_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_metadata_fresh",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cholesky_inverse_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_cond_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_sum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_logit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_signal_windows_hamming_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_isposinf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_triangular_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_eigvalsh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_empty_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_ones_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_bmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_hardswish_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestGenericProxyTensorReal.test_proxy_tensor",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_householder_product_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_tanh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_bessel_j0_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_cpu_scalar_cuda",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_resolve_neg_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_column_stack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_max_pool2d_with_indices_backward_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cdist_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_irfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_log2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_div_trunc_rounding_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_mH_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_gelu_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_max_binary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_log_normal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_argmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_select_scatter_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_constant_unbind",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_trace_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_dist_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_as_strided_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_contiguous_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_dropout_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_argmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_trapz_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_round_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_select_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_mean_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_trace_subclasses",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fmod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fill_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_ravel_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_diagflat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_airy_ai_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_pinv_hermitian_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_rrelu_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_softshrink_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_reshape_as_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_mish_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cdist_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sqrt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_tensorsolve_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_NumpyCatCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_empty_strided_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_equal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_floor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_trunc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_NestedMapControlflowOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_meshgrid_list_of_tensors_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_soft_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_adaptive_max_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_relu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_bessel_y1_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_cond_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_interpolate_trilinear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_jiterator_2inputs_2outputs_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_histogram_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_log_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace___rmul___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_rrelu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_binary_cross_entropy_with_logits_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_inv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_conv1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_argmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_jiterator_binary_return_by_ref_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_signbit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_remainder_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_t_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_scatter_reduce_amax_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_index_fill_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_select_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_tril_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_softmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_interpolate_area_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_atan2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_multi_head_attention_forward_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_dropout_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_norm_inf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_unfold_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_conv_transpose2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_interpolate_bicubic_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nanquantile_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_atleast_2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_log_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_cholesky_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_spherical_bessel_j0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_resolve_conj_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_gt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_isneginf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_hardtanh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_amin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_half_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_polygamma_polygamma_n_4_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_unflatten_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fill_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_bessel_j0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_expand_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_triplet_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_multinomial_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_polar_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cdouble_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_l1_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_unfold_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_signal_windows_nuttall_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_argmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_trapezoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_exp2_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_binary_broadcast",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_maximum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_modified_bessel_k0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_addbmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_atleast_3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_index_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_leaky_relu_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_normal_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_inv_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_inv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_margin_ranking_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_geometric_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_short_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_trapz_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_pad_replicate_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out___radd___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_logsumexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_min_reduction_with_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_binary_cross_entropy_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_soft_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_elu_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_ifftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_amin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_logit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_mv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_logsumexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_ones_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_short_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_normal_in_place_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_ndtri_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_quantile_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_char_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_int_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_linear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_local_response_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_allclose_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_atan_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_floor_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_pre_dispatch_functionalization_view_op",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_split_list_args_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fmod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cos_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_logaddexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_maximum_cpu_float32",  # known py38 fail
+    "TestFakeProxyTensor.test_use_fake_and_tensor",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_ldexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_rot90_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_native_batch_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_reshape_as_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_clamp_min_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace___radd___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_norm_fro_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_double_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_threshold_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_exp2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_modified_bessel_i0_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_hstack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_index_add_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cummin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_norm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_char_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_ones_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_masked_std_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_msort_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_hardsigmoid_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_half_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_expand_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_lerp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_addcdiv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_mH_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_lu_factor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_maximum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_max_unpool2d_grad_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_scalar_tensor_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_acosh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_logdet_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_laguerre_polynomial_l_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_eigvals_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_normal_number_mean_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_logdet_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_max_unpool3d_grad_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_bessel_j1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_full_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_scaled_dot_product_attention_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_ihfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cfloat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_addr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_signal_windows_exponential_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_to_sparse_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_ceil_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_roll_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_unbacked_unify_guard",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_rad2deg_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_flatten_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive___rdiv___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_linalg_solve_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_isinf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_rfftn_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_non_symint_size_spec",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_isfinite_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_cross_entropy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_amax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nextafter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_clone_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_avg_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_lstsq_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_select_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nanmean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sinh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_bessel_y1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_t_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_reshape_as_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_multi_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_index_add_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_gelu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_zero__cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_logspace_tensor_overload_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_argsort_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_full_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_view_as_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fliplr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_scatter_reduce_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_reshape_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_reshape_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_permute_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorReal.test_strides",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_asinh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_max_reduction_no_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cumprod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_det_singular_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_lstsq_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_resize__cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_mean_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_isolated_graphmodule",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_NumpyViewCopyCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_scatter_reduce_mean_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_round_decimals_neg_3_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_xlog1py_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_min_reduction_with_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_sum_to_size_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_pad_constant_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_erfc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_sub_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_asinh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_unique_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_meshgrid_list_of_tensors_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_lu_factor_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_hfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_leaky_relu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_upsample_bilinear_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_norm_subgradients_at_zero_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_gaussian_nll_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_logsigmoid_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_erfinv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_avg_pool3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_norm_nuc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_fft_ifft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_scatter_reduce_amin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_triu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_log2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_NumpySortCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_special_hermite_polynomial_he_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_tan_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_linear_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_polygamma_polygamma_n_1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_kron_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_instance_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_roll_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_cumprod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_upsample_bilinear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_full_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_frexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_lu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_vander_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_guard_lowerbound_range_refinement_multivariate",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_svd_lowrank_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_pixel_shuffle_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_qr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_hinge_embedding_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_qr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_expand_as_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_igammac_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_allclose_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorFake.test_pre_dispatch_functionalization",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_mvlgamma_mvlgamma_p_1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_lu_solve_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorReal.test_pre_dispatch_functionalization",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_shifted_chebyshev_polynomial_t_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_positive_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_glu_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_unfold_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_view_as_complex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_scaled_modified_bessel_k0_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_logaddexp2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_full_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_argmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_logaddexp2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fliplr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_adaptive_max_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_ne_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_trace_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_resize__cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_kthvalue_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_ge_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_log_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_irfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cholesky_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_ndtr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_pdist_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_all_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_upsample_bilinear_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_vander_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_modified_bessel_i1_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_signal_windows_hamming_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_eigh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_conj_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_div_floor_rounding_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_cholesky_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive___radd___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_softmin_with_dtype_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_pinverse_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_max_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_addmv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_median_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_signbit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_grid_sample_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_randn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_narrow_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_complex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_logspace_tensor_overload_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_poisson_nll_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_linalg_eigvalsh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cummax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_hfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_index_add_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_dropout3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_vstack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_atan_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_rfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_vsplit_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_unfold_copy_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_reflect_r_over_x",  # known py38 fail
+    "TestGenericProxyTensorFake.test_pre_dispatch_functionalization_view_op",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_group_norm_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_unbacked_batch_resnet",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_softmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_ge_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_diag_embed_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_xlogy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_isclose_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_linalg_cross_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_logcumsumexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nansum_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_isinf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_max_unpool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_masked_log_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_det_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_masked_argmin_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_exp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_native_dropout_backward_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_reshape_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_logcumsumexp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_selu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_to_sparse_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_cdouble_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_cat",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_bmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_ifftshift_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_clamp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_logspace_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_NumpySortCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_new_empty_strided_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_geqrf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_fractional_max_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_erf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_corrcoef_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_unflatten_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_max_unpool1d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_arange_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_elu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_avg_pool2d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_adaptive_avg_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_topk_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_repeat_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_masked_log_softmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_hardswish_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_softshrink_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_bmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_column_stack_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_ne_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_rand_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_min_binary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_var_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_asinh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_multilabel_soft_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_conj_physical_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_special_laguerre_polynomial_l_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_fractional_max_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_rfft2_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_jiterator_unary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_fft_rfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_erfinv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_fft_fftshift_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_trunc_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_bernoulli_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_adaptive_avg_pool1d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_renorm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_sparse_mm_reduce_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_triangular_solve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_interpolate_nearest-exact_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_ihfft_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_diag_embed_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_argmax_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive__upsample_bilinear2d_aa_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_isneginf_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_tensorsolve_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_var_mean_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_ne_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_local_response_norm_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_cholesky_ex_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_ne_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_unbind_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_cross_entropy_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_cumulative_trapezoid_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_fractional_max_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_unsafe_split_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_logsigmoid_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out___getitem___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_float_power_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_msort_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_linalg_svdvals_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_pixel_shuffle_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_linalg_cond_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_dropout3d_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_scatter_add_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_bernoulli_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_masked_scatter_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_rfftn_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_softmax_with_dtype_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_cross_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_dropout2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_ones_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_heaviside_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_diag_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_nn_functional_cosine_similarity_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_zeros_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_resolve_conj_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_log1p_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_NumpyTakeCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_mul_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_igamma_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_multilabel_soft_margin_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_svd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_mvlgamma_mvlgamma_p_5_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_add_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_take_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_div_floor_rounding_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_boolean_index",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_tan_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_signal_windows_general_hamming_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_MapControlflowOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_tanh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_margin_ranking_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_dist_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_unflatten_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_long_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_softmin_with_dtype_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_prod_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_ndtr_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_pow_cpu_float32",  # known py38 fail
+    "TestGenericProxyTensorSymbolic.test_mode_tracing_factory_function",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_chunk_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_index_copy_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_NumpySplitCopyCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_pairwise_distance_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_fft_fftshift_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sparse_sampled_addmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_nn_functional_relu6_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_fft_fftshift_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_special_legendre_polynomial_p_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_ones_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_adaptive_avg_pool2d_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_multi_head_attention_forward_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_sinh_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_matmul_cpu_float32",  # known py38 fail
+    "TestSymbolicTracing.test_repeat_interleave",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_special_i1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_nn_functional_normalize_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_addmm_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_squeeze_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_mish_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_NumpySplitCopyWithIntCustomOp_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_addmv_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_gradient_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_var_mean_unbiased_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_modified_bessel_i1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_take_along_dim_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_min_binary_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive___rdiv___cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_nn_functional_mse_loss_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_randn_like_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_diag_embed_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_histogramdd_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_sqrt_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_special_modified_bessel_k1_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_elu_cpu_float32",  # known py38 fail
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cat_cpu_float32",  # known py38 fail
+    "TestRefsCPU.test_infinite_loop_from_py_dispatcher_cpu",  # known py38 fail
+    "TestReductions.test_all",  # known py38 fail
+    "TestReductions.test_mean_grad_case_1d",  # known py38 fail
+    "TestBasicsCPU.test_contiguous_cpu",  # known py38 fail
+    "TestReductions.test_mean",  # known py38 fail
+    "TestBasicsCPU.test_softmax_cpu",  # known py38 fail
+    "TestReductions.test_mean_dim_grad",  # known py38 fail
+    "TestReductions.test_amin_grad",  # known py38 fail
+    "TestBasicsCPU.test_invalid_sparse_csr_values_cpu",  # known py38 fail
+    "TestReductions.test_sum",  # known py38 fail
+    "TestReductions.test_mean_grad_case_1e",  # known py38 fail
+    "TestReductions.test_mean_grad_case_1f",  # known py38 fail
+    "TestBasicsCPU.test_where_cpu",  # known py38 fail
+    "TestReductions.test_prod_grad",  # known py38 fail
+    "TestBasicsCPU.test_invalid_sparse_coo_values_cpu",  # known py38 fail
+    "TestReductions.test_amax_grad",  # known py38 fail
+    "TestReductions.test_sum_grad",  # known py38 fail
+    "TestReductions.test_mean_grad_case_1b",  # known py38 fail
+    "TestReductions.test_prod",  # known py38 fail
+    "TestReductions.test_amax",  # known py38 fail
+    "TestReductions.test_amin",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_uint8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_int64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_int16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_pow_scalar_overloads_mem_overlap_cpu_float64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_float64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_int8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_int8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_float64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_uint8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_uint8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_int32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_int8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_float16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_int16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_sub_typing_cpu",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_float32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_float32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_int8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_int32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_int8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_int32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_add_cpu",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_float32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_bool",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_bool",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_bool",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_int32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_float64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_float16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_int64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_float64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_bool",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_float64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_int16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_uint8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_float32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_int32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_int64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_int64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_bool",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_gradients_cpu_float64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_int64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_float64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_float16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_uint8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_int32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_float64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_int32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_float32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_int64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_float16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_float32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_bool",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_bool",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_int16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_int16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_int16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_int_tensor_pow_neg_ints_cpu",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_int8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_uint8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_uint8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_bool",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_float16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_float32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_float16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_bool_int16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_uint8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_int64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_uint8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_float16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_int8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_bool",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float16_int32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_float16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_float64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_float64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float64_int16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_float32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_shift_limits_cpu_uint8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int32_float16",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_float32",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int64_int64",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int16_int8",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_long_tensor_pow_floats_cpu",  # known py38 fail
+    "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int32",  # known py38 fail
+    "TestFXExperimental.test_optimize_for_inference_cpu",  # known py38 fail
+    "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int32",  # known py38 fail
+    "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int64",  # known py38 fail
+    "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int16",  # known py38 fail
+    "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int8",  # known py38 fail
+    "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_uint8",  # known py38 fail
 }
