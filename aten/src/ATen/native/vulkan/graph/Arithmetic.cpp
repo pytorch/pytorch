@@ -43,7 +43,7 @@ ValueRef add_arithmetic_node(
     const ValueRef t2,
     const float alpha,
     const arithmetic::OpType optype) {
-  IntArrayRef t1_sizes = graph.get_val_sizes(t1);
+  std::vector<int64_t> t1_sizes = graph.get_val_sizes(t1);
   c10::ScalarType t1_dtype = graph.get_val_dtype(t1);
 
   ValueRef out = graph.add_tensor(t1_sizes, t1_dtype);
