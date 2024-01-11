@@ -3748,7 +3748,16 @@ class TestCudaMallocAsync(TestCase):
             torch.cuda.memory._set_allocator_settings("pinned_num_register_threads:1024")
 
 
-    def test_raises_oom(self):
+    @parametrize(
+        "max_split_size_mb_setting", [False, True]
+    )
+    def test_raises_oom(self, max_split_size_mb_setting):
+        if max_split_size_mb_setting:
+            # CudaCachingAllocator does early return when searching available blocks
+            # if max_split_size_mb is not set
+            # Setting this triggers more parts of the code
+            torch.cuda.memory._set_allocator_settings("max_split_size_mb:1024")
+            torch.cuda.memory.empty_cache()
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
 
@@ -4266,6 +4275,7 @@ class TestBlockStateAbsorption(TestCase):
 
 
 instantiate_parametrized_tests(TestCuda)
+instantiate_parametrized_tests(TestCudaMallocAsync)
 
 if __name__ == '__main__':
     run_tests()
