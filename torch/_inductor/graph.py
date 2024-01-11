@@ -881,45 +881,49 @@ class GraphLowering(torch.fx.Interpreter):
             # already too many reads and rematerializing can be bad.
             num_users = len(set(n.users))
             if num_users > 1 and isinstance(result, TensorBox):
+                # This inclusion is somewhat controversial (from
+                # discussion between Horace, Natalia, and Elias).
+                # Currently, it's not very clear why this is helpful.
+                # The general idea here is that even though a node may
+                # have FlexibleLayout, we still often *treat* it as if
+                # it was contiguous. This appears to sometimes result in
+                # suboptimal behavior.
+                #
+                # When we do a better job selecting layout, we should
+                # revisit this.
+                fixed_layout_ops = [
+                    torch.ops.aten.convolution_backward.default,
+                    torch.ops.aten.mm.default,
+                    torch.ops.aten._int_mm.default,
+                ]
+                if not self.layout_opt:
+                    fixed_layout_ops.append(torch.ops.aten.convolution.default)
+                if torch._C._has_mkldnn:
+                    fixed_layout_ops += [
+                        torch.ops.mkldnn._convolution_pointwise.default,
+                        torch.ops.mkldnn._convolution_pointwise.binary,
+                        torch.ops.mkldnn._convolution_pointwise_.binary,
+                        torch.ops.mkldnn._convolution_transpose_pointwise.default,
+                        torch.ops.mkldnn._linear_pointwise.default,
+                        torch.ops.mkldnn._linear_pointwise.binary,
+                        torch.ops.aten.mkldnn_rnn_layer.default,
+                        torch.ops.onednn.qconv2d_pointwise.default,
+                        torch.ops.onednn.qconv2d_pointwise.binary,
+                        torch.ops.onednn.qlinear_pointwise.default,
+                    ]
+                if torch._C.has_mkl:
+                    fixed_layout_ops += [torch.ops.mkl._mkl_linear.default]
+
+                def needs_fixed_layout(t):
+                    return t in fixed_layout_ops or (
+                        isinstance(t, torch._ops.OpOverload)
+                        and torch._C.Tag.needs_fixed_layout in t.tags
+                    )
+
                 for user in n.users:
                     if user.target in needs_realized_inputs:
                         result.realize_hint()
-                        # This inclusion is somewhat controversial (from
-                        # discussion between Horace, Natalia, and Elias).
-                        # Currently, it's not very clear why this is helpful.
-                        # The general idea here is that even though a node may
-                        # have FlexibleLayout, we still often *treat* it as if
-                        # it was contiguous. This appears to sometimes result in
-                        # suboptimal behavior.
-                        #
-                        # When we do a better job selecting layout, we should
-                        # revisit this.
-                        need_fixed_layout = [
-                            torch.ops.aten.convolution_backward.default,
-                            torch.ops.aten.mm.default,
-                            torch.ops.aten._int_mm.default,
-                        ]
-                        if not self.layout_opt:
-                            need_fixed_layout.append(torch.ops.aten.convolution.default)
-                        if torch._C._has_mkldnn:
-                            need_fixed_layout += [
-                                torch.ops.mkldnn._convolution_pointwise.default,
-                                torch.ops.mkldnn._convolution_pointwise.binary,
-                                torch.ops.mkldnn._convolution_pointwise_.binary,
-                                torch.ops.mkldnn._convolution_transpose_pointwise.default,
-                                torch.ops.mkldnn._linear_pointwise.default,
-                                torch.ops.mkldnn._linear_pointwise.binary,
-                                torch.ops.aten.mkldnn_rnn_layer.default,
-                                torch.ops.onednn.qconv2d_pointwise.default,
-                                torch.ops.onednn.qconv2d_pointwise.binary,
-                                torch.ops.onednn.qlinear_pointwise.default,
-                            ]
-                            if torch._C.has_mkl:
-                                need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
-                        if isinstance(user.target, torch._ops.OpOverload):
-                            if(torch._C.Tag.needs_fixed_layout in user.target.tags):
-                                need_fixed_layout.append(user.target)
-                        if user.target in need_fixed_layout:
+                        if needs_fixed_layout(user.target):
                             result = ir.ExternKernel.require_stride_order(
                                 result, ir.get_stride_order(n.meta["val"].stride())
                             )
