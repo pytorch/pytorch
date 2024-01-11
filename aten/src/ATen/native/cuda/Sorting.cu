@@ -247,8 +247,8 @@ struct MedianLauncher {
 void launch_kthvalue_kernel(
     const TensorBase &values, const TensorBase &indices,
     const TensorBase &self, int64_t dim, int64_t k) {
-  AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::Half, self.scalar_type(), "kthvalue_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "kthvalue_cuda", [&] {
     AT_DISPATCH_INDEX_TYPES(
         cuda::detail::canUse32BitIndexMath(self) &&
         cuda::detail::canUse32BitIndexMath(values) &&
@@ -263,8 +263,8 @@ void launch_kthvalue_kernel(
 void launch_median_kernel(
     const TensorBase &vals, const TensorBase &inds,
     const TensorBase &self, int64_t dim, bool ignore_nan) {
-  AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::Half, self.scalar_type(), "median_out_impl", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "median_out_impl", [&] {
         if (cuda::detail::canUse32BitIndexMath(vals) &&
             cuda::detail::canUse32BitIndexMath(inds) &&
             cuda::detail::canUse32BitIndexMath(self)) {
