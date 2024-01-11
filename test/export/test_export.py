@@ -1254,10 +1254,7 @@ def forward(self, arg_0):
 
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"(Deferred runtime assertion failed -i0 <= 0|_local_scalar_dense is outside of inline constraint \[0, inf\])"
-        ):
+        with self.assertRaisesRegex(RuntimeError, r"Deferred runtime assertion failed -i0 <= 0"):
             _ = ep(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
@@ -2226,7 +2223,7 @@ def forward(self, l_x_):
         ep = export(M(), (torch.ones(16, 4),), dynamic_shapes={'x': {0: Dim("dim")}})
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
         FileCheck().check_count(
-            "torch.sym_sqrt", 1, exactly=True
+            "torch._sym_sqrt", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_check_specialized_int(self):

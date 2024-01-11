@@ -2,8 +2,6 @@
 
 #include <exception>
 #include <memory>
-#include <mutex>
-#include <queue>
 #include <string>
 #include <system_error>
 
@@ -145,7 +143,7 @@ extern PyObject *THPException_FatalError, *THPException_LinAlgError,
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
 struct python_error : public std::exception {
-  python_error() {}
+  python_error() = default;
 
   python_error(const python_error& other)
       : type(other.type),
@@ -308,28 +306,11 @@ struct ValueError : public PyTorchError {
   }
 };
 
-// Translates to Python NotImplementedError
-struct NotImplementedError : public PyTorchError {
-  NotImplementedError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
-  NotImplementedError() = default;
-  PyObject* python_type() override {
-    return PyExc_NotImplementedError;
-  }
-};
-
 // Translates to Python AttributeError
 struct AttributeError : public PyTorchError {
   AttributeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
   PyObject* python_type() override {
     return PyExc_AttributeError;
-  }
-};
-
-// Translates to Python LinAlgError
-struct LinAlgError : public PyTorchError {
-  LinAlgError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
-  PyObject* python_type() override {
-    return THPException_LinAlgError;
   }
 };
 
@@ -373,15 +354,14 @@ using Arg = typename invoke_traits<Func>::template arg<i>::type;
 
 template <typename Func, size_t... Is>
 auto wrap_pybind_function_impl_(
+    // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
     Func&& f,
     std::index_sequence<Is...>,
     bool release_gil) {
-  using result_type = typename invoke_traits<Func>::result_type;
   namespace py = pybind11;
 
   // f=f is needed to handle function references on older compilers
-  return [f = std::forward<Func>(f),
-          release_gil](Arg<Func, Is>... args) -> result_type {
+  return [f = std::forward<Func>(f), release_gil](Arg<Func, Is>... args) {
     HANDLE_TH_ERRORS
     if (release_gil) {
       py::gil_scoped_release no_gil;
