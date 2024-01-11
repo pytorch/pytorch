@@ -2,11 +2,11 @@ import argparse
 import collections
 import importlib
 import sys
-from warnings import warn
 
 from pprint import pformat
 from typing import Dict, List, Sequence
 from unittest.mock import Mock, patch
+from warnings import warn
 
 from torchgen.api.python import (
     PythonSignatureGroup,
@@ -612,7 +612,9 @@ def gather_docstrs() -> Dict[str, str]:
             sys.modules["torch._tensor_docs"] = importlib.import_module("_tensor_docs")
         except ModuleNotFoundError:
             # Gracefully fail if these modules are not importable
-            warn("Failed to import _torch_docs/_tensor_docs, skipping docstring in pyi files.")
+            warn(
+                "Failed to import _torch_docs/_tensor_docs, skipping docstring in pyi files."
+            )
 
     return docstrs
 
