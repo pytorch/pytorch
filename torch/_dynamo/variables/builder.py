@@ -572,19 +572,14 @@ class VariableBuilder:
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
         elif isinstance(value, _StreamBase):
             self.install_guards(GuardBuilder.ID_MATCH)
-            return StreamVariable(
-                None,
+            return self.tx.output.register_attr_or_module(
                 value,
-                value.device.type,
-                source=self.source,
+                self.name,
+                source=self.get_source(),
+                device=value.device.type,
             )
         elif isinstance(value, _EventBase):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return EventVariable(
-                None,
-                value,
-                source=self.source,
-            )
+            unimplemented("EventVariable does not currently work soundly.")
         elif (
             isinstance(value, torch._C._TensorMeta)
             and value in config.traceable_tensor_subclasses

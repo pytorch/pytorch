@@ -87,6 +87,7 @@ from .utils import (
 )
 from .variables.base import VariableTracker
 from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
+from .variables.ctx_manager import StreamVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -754,6 +755,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 )
 
             # HACKY CODE REGION END
+        elif isinstance(target, torch.Stream):
+
+            def wrap_name(module_key):
+                return StreamVariable(
+                    self.create_proxy("get_attr", module_key, tuple(), {}),
+                    target,
+                    **options,
+                )
+
         else:
 
             def wrap_name(module_key):
