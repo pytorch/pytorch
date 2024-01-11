@@ -1532,6 +1532,28 @@ class AOTInductorTestsTemplate:
 
         self.check_model(MyModule(), (torch.randn(2, 3, device=self.device),))
 
+    def test_model_modified_weights(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        M = 16
+        N = 10
+        K = 128
+        batch = 8
+        example_inputs = (torch.randn(2, M, K, device=self.device),)
+        model = Model(N, K, self.device)
+        self.check_model(model, example_inputs)
+        # Update model weights, after this AOTInductor should re-generate model.so
+        # if weights are stored in the model.so
+        model.weight += 1
+        self.check_model(model, example_inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1601,6 +1623,7 @@ CPU_TEST_FAILURES = {
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_model_modified_weights": fail_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
@@ -1670,6 +1693,9 @@ if not IS_FBCODE:
             "test_empty_graph": fail_minimal_arrayref_interface(is_skip=True),
             "test_large": fail_minimal_arrayref_interface(is_skip=True),
             "test_missing_output": fail_minimal_arrayref_interface(is_skip=True),
+            "test_model_modified_weights": fail_minimal_arrayref_interface(
+                is_skip=True
+            ),
             "test_output_path_1": fail_minimal_arrayref_interface(is_skip=True),
             "test_repeat_interleave": fail_minimal_arrayref_interface(is_skip=True),
             "test_return_constant": fail_minimal_arrayref_interface(is_skip=True),

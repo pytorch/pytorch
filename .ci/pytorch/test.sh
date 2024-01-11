@@ -277,6 +277,7 @@ test_dynamo_shard() {
       test_ao_sparsity \
       test_autograd \
       test_jit \
+      test_fx \
       test_quantization \
       test_reductions \
       profiler/test_profiler \
