@@ -32,6 +32,7 @@
 #endif
 
 #include <ATen/native/Resize.h>
+#include <ATen/detail/PrivateUse1HooksInterface.h>
 
 #ifdef _MSC_VER
 #define LSEEK _lseeki64
@@ -149,7 +150,7 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
 #endif
   } else if (device_type == at::kMeta) {
     at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
-  } else if (device_type == at::kXPU || device_type == at::kPrivateUse1) {
+  } else if (device_type == at::kXPU) {
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
         !c10::overflows<int64_t>(size_bytes_i),
@@ -176,6 +177,10 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
       storage.unsafeGetStorageImpl()->set_allocator(
           new_tensor.storage().unsafeGetStorageImpl()->allocator());
       storage.set_nbytes(new_tensor.storage().nbytes());
+    }
+  } else if (device_type == at::kPrivateUse1) {
+    if (at::isPrivateUse1HooksRegistered()) {
+      at::GetPrivateUse1HooksInterface()->resizePrivateUse1Bytes(storage, newsize);
     }
   } else {
     TORCH_CHECK(
