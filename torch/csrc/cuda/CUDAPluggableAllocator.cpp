@@ -38,9 +38,8 @@ CUDAPluggableAllocator::CUDAPluggableAllocator(CUDAPluggableAllocator& other)
       memory_fraction_fn_(other.memory_fraction_fn_),
       base_alloc_fn_(other.base_alloc_fn_),
       record_stream_fn_(other.record_stream_fn_),
-      begin_allocate_stream_to_pool_fn_(
-          other.begin_allocate_stream_to_pool_fn_),
-      end_allocate_stream_to_pool_fn_(other.end_allocate_stream_to_pool_fn_),
+      begin_allocate_to_pool_fn_(other.begin_allocate_to_pool_fn_),
+      end_allocate_to_pool_fn_(other.end_allocate_to_pool_fn_),
       relase_pool_fn_(other.relase_pool_fn_) {}
 
 void CUDAPluggableAllocator::set_init_fn(std::function<void(int)> init_fn) {
@@ -66,15 +65,16 @@ void CUDAPluggableAllocator::set_record_stream_fn(
   record_stream_fn_ = std::move(record_stream_fn);
 }
 
-void CUDAPluggableAllocator::set_begin_allocate_stream_to_pool(
-    std::function<void(int, cudaStream_t, c10::cuda::MempoolId_t)>
+void CUDAPluggableAllocator::set_begin_allocate_to_pool(
+    std::function<
+        void(int, c10::cuda::MempoolId_t, std::function<bool(cudaStream_t)>)>
         capture_begin_fn) {
-  begin_allocate_stream_to_pool_fn_ = std::move(capture_begin_fn);
+  begin_allocate_to_pool_fn_ = std::move(capture_begin_fn);
 }
 
-void CUDAPluggableAllocator::set_end_allocate_stream_to_pool_fn(
-    std::function<void(int, cudaStream_t)> capture_about_to_end_fn) {
-  end_allocate_stream_to_pool_fn_ = std::move(capture_about_to_end_fn);
+void CUDAPluggableAllocator::set_end_allocate_to_pool_fn(
+    std::function<void(int, c10::cuda::MempoolId_t)> capture_about_to_end_fn) {
+  end_allocate_to_pool_fn_ = std::move(capture_about_to_end_fn);
 }
 
 void CUDAPluggableAllocator::set_release_pool(
@@ -232,20 +232,20 @@ std::shared_ptr<void> CUDAPluggableAllocator::getIpcDevPtr(std::string handle) {
 }
 
 // CUDAGraph interactions
-void CUDAPluggableAllocator::beginAllocateStreamToPool(
+void CUDAPluggableAllocator::beginAllocateToPool(
     int device,
-    cudaStream_t stream,
-    c10::cuda::MempoolId_t mempool_id) {
-  if (begin_allocate_stream_to_pool_fn_) {
-    begin_allocate_stream_to_pool_fn_(device, stream, mempool_id);
+    c10::cuda::MempoolId_t mempool_id,
+    std::function<bool(cudaStream_t)> filter) {
+  if (begin_allocate_to_pool_fn_) {
+    begin_allocate_to_pool_fn_(device, mempool_id, std::move(filter));
   }
 }
 
-void CUDAPluggableAllocator::endAllocateStreamToPool(
+void CUDAPluggableAllocator::endAllocateToPool(
     int device,
-    cudaStream_t stream) {
-  if (end_allocate_stream_to_pool_fn_) {
-    end_allocate_stream_to_pool_fn_(device, stream);
+    c10::cuda::MempoolId_t mempool_id) {
+  if (end_allocate_to_pool_fn_) {
+    end_allocate_to_pool_fn_(device, mempool_id);
   }
 }
 
@@ -328,6 +328,14 @@ cudaError_t CUDAPluggableAllocator::memcpyAsync(
 
 std::string CUDAPluggableAllocator::name() {
   return "pluggable";
+}
+
+void CUDAPluggableAllocator::copy_data(
+    void* dest,
+    const void* src,
+    std::size_t count) const {
+  C10_CUDA_CHECK(
+      cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
 }
 
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <functional>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -79,6 +81,8 @@ using DeleterFnPtr = void (*)(void*);
 namespace torch {
 namespace aot_inductor {
 
+inline void noop_deleter(void*) {}
+
 inline void delete_tensor_object(void* ptr) {
   AOTI_TORCH_ERROR_CODE_CHECK(
       aoti_torch_delete_tensor_object(reinterpret_cast<AtenTensorHandle>(ptr)));
@@ -87,7 +91,7 @@ inline void delete_tensor_object(void* ptr) {
 // RAIIAtenTensorHandle steals the tensor objects created by the libtorch C ABI
 class RAIIAtenTensorHandle {
  public:
-  RAIIAtenTensorHandle() = delete;
+  RAIIAtenTensorHandle() : handle_(nullptr, noop_deleter) {}
   RAIIAtenTensorHandle(const RAIIAtenTensorHandle& other) = delete;
   RAIIAtenTensorHandle& operator=(const RAIIAtenTensorHandle& other) = delete;
 
@@ -113,7 +117,7 @@ class RAIIAtenTensorHandle {
     return handle_.release();
   }
 
-  AtenTensorHandle get() {
+  AtenTensorHandle get() const {
     return handle_.get();
   }
 
@@ -146,6 +150,44 @@ class RAIIAtenTensorHandle {
 };
 
 using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
+
+class ConstantHandle {
+ public:
+  ConstantHandle() = default;
+
+  explicit ConstantHandle(AtenTensorHandle handle) : handle_(handle) {
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(handle_, &data_));
+  }
+
+  operator AtenTensorHandle() const {
+    return handle_;
+  }
+
+  AtenTensorHandle tensor() const {
+    return handle_;
+  }
+
+  void* data_ptr() const {
+    return data_;
+  }
+
+ private:
+  AtenTensorHandle handle_;
+  void* data_ = nullptr;
+};
+
+inline void* get_data_ptr_wrapper(const ConstantHandle& constant) {
+  return constant.data_ptr();
+}
+
+inline const ConstantHandle& unwrap_raii_handle_if_needed(
+    const ConstantHandle& handle) {
+  return handle;
+}
+
+// Shouldn't be called.
+inline AtenTensorHandle wrap_with_raii_handle_if_needed(
+    const ConstantHandle& handle) = delete;
 
 // Steal the ownership from raw AtenTensorHandle to RAIIAtenTensorHandle
 inline std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
@@ -234,7 +276,11 @@ class AOTInductorModelBase {
 
     std::vector<size_t> constants_internal_offset(num_constants);
     if (!is_cpu) {
-      make_cuda_constant_blob(constants_internal_offset);
+      size_t blob_size = 0;
+      compute_cuda_constant_blob(blob_size, constants_internal_offset);
+#ifdef USE_CUDA
+      constant_blob_ = RAII_cudaMalloc(blob_size);
+#endif
     }
 
     size_t bytes_read = 0;
@@ -247,7 +293,7 @@ class AOTInductorModelBase {
       bytes_read += data_size;
 
       // Create at::Tensor from copied memory.
-      auto dtype = this->constant_type(i);
+      auto dtype = this->constant_dtype(i);
       auto ndim = this->constant_ndim(i);
       auto size = this->constant_shape(i);
       auto stride = this->constant_stride(i);
@@ -275,7 +321,9 @@ class AOTInductorModelBase {
           &tensor_handle));
       constants_map_->emplace(std::move(name), tensor_handle);
     }
-    this->update_constants_map(constants_map_);
+    if (constants_map_) {
+      this->update_constants_array_from_map();
+    }
   }
 
 #ifdef USE_CUDA
@@ -283,6 +331,10 @@ class AOTInductorModelBase {
     return std::move(constant_blob_);
   }
 #endif
+
+  std::shared_ptr<std::vector<ConstantHandle>> get_constants_array() {
+    return constants_;
+  }
 
   uint8_t* constant_ptr(
       size_t constant_offset,
@@ -305,21 +357,22 @@ class AOTInductorModelBase {
 #endif // USE_CUDA
   }
 
-  void make_cuda_constant_blob(std::vector<size_t>& constants_internal_offset) {
+  void compute_cuda_constant_blob(
+      size_t& blob_size,
+      std::vector<size_t>& constants_internal_offset) {
 #ifdef USE_CUDA
     size_t num_constants = this->num_constants();
     // Compute required blob size with 64-alignment if on GPU.
-    size_t max_blob = 0;
+    blob_size = 0;
     for (size_t i = 0; i < num_constants; i++) {
       size_t data_size = this->constant_data_size(i);
       if (data_size % AOTI_CONST_GPU_ALIGNMENT) {
         data_size = AOTI_CONST_GPU_ALIGNMENT +
             (data_size / AOTI_CONST_GPU_ALIGNMENT) * AOTI_CONST_GPU_ALIGNMENT;
       }
-      constants_internal_offset[i] = max_blob;
-      max_blob += data_size;
+      constants_internal_offset[i] = blob_size;
+      blob_size += data_size;
     }
-    constant_blob_ = RAII_cudaMalloc(max_blob);
 #endif // USE_CUDA
   }
 
@@ -359,7 +412,7 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).stride.data();
   }
 
-  int32_t constant_type(int64_t idx) const {
+  int32_t constant_dtype(int64_t idx) const {
     return constants_info_.at(idx).dtype;
   }
 
@@ -371,6 +424,10 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).data_size;
   }
 
+  const char* constant_original_fqn(int64_t idx) const {
+    return constants_info_.at(idx).original_fqn;
+  }
+
   const char* get_in_spec() const {
     return in_spec_.c_str();
   }
@@ -379,20 +436,41 @@ class AOTInductorModelBase {
     return out_spec_.c_str();
   }
 
-  void update_constants_map(std::shared_ptr<ConstantMap> constants_map) {
-    constants_map_ = std::move(constants_map);
+  void update_constants_array_from_map() {
     if (!constants_map_) {
-      return;
+      throw std::runtime_error{
+          "constants_map_ was not ready when constants_ is trying to be constructed from it!"};
     }
-    constants_.resize(constants_info_.size());
+    if (!constants_) {
+      constants_ =
+          std::make_shared<std::vector<ConstantHandle>>(constants_info_.size());
+    } else {
+      constants_->resize(constants_info_.size());
+    }
     int idx = 0;
     for (const auto& info : constants_info_) {
       const auto it = constants_map_->find(info.name);
       if (it != constants_map_->end()) {
-        constants_[idx] = it->second;
+        constants_->at(idx) = ConstantHandle(it->second);
       }
       idx++;
     }
+  }
+
+  void update_constants_map(
+      std::shared_ptr<ConstantMap> constants_map,
+      bool remap_constants_array = true) {
+    constants_map_ = std::move(constants_map);
+    if (remap_constants_array) {
+      update_constants_array_from_map();
+    }
+  }
+
+  // This function allows us to update the constants_ that is used to look up
+  // the corresponding constant tensor during runtime.
+  void update_constants_array(
+      std::shared_ptr<std::vector<ConstantHandle>> constants_array) {
+    constants_ = std::move(constants_array);
   }
 
   /// Returns true if the model is complete.
@@ -440,6 +518,7 @@ class AOTInductorModelBase {
     int32_t dtype;
     int64_t offset;
     size_t data_size;
+    const char* original_fqn = nullptr;
   };
 
   std::vector<ParamInfo> inputs_info_;
@@ -449,7 +528,7 @@ class AOTInductorModelBase {
   std::string out_spec_;
 
   std::shared_ptr<ConstantMap> constants_map_;
-  std::vector<AtenTensorHandle> constants_;
+  std::shared_ptr<std::vector<ConstantHandle>> constants_;
 
 #ifdef USE_CUDA
   // Holds the blob storage for constants' at::Tensor for CUDA.
@@ -479,7 +558,10 @@ class AOTInductorModelKernelsBase {
 
 class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
  public:
-  AOTInductorModel(std::shared_ptr<ConstantMap>, std::optional<std::string>);
+  AOTInductorModel(
+      std::shared_ptr<ConstantMap>,
+      std::shared_ptr<std::vector<ConstantHandle>>,
+      std::optional<std::string>);
 
   void run_impl(
       AtenTensorHandle*
@@ -492,10 +574,18 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor);
 
+  template <typename Inputs, typename Outputs>
+  Outputs run_impl_minimal_arrayref_interface(
+      const Inputs& inputs,
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor);
+
   static std::unique_ptr<AOTInductorModel> Create(
-      std::shared_ptr<ConstantMap> constants,
+      std::shared_ptr<ConstantMap> constants_map,
+      std::shared_ptr<std::vector<ConstantHandle>> constants_array,
       std::optional<std::string> cubin_dir) {
-    return std::make_unique<AOTInductorModel>(std::move(constants), cubin_dir);
+    return std::make_unique<AOTInductorModel>(
+        std::move(constants_map), std::move(constants_array), cubin_dir);
   }
 
  private:

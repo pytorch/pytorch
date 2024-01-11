@@ -365,7 +365,7 @@ class RNNBase(Module):
 
 
 class RNN(RNNBase):
-    r"""__init__(self,input_size,hidden_size,num_layers=1,nonlinearity='tanh',bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
+    r"""__init__(input_size,hidden_size,num_layers=1,nonlinearity='tanh',bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
 
     Apply a multi-layer Elman RNN with :math:`\tanh` or :math:`\text{ReLU}`
     non-linearity to an input sequence. For each element in the input sequence,
@@ -596,7 +596,7 @@ class RNN(RNNBase):
 
 
 class LSTM(RNNBase):
-    r"""__init__(self,input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,proj_size=0,device=None,dtype=None)
+    r"""__init__(input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,proj_size=0,device=None,dtype=None)
 
     Apply a multi-layer long short-term memory (LSTM) RNN to an input sequence.
     For each element in the input sequence, each layer computes the following
@@ -857,6 +857,7 @@ class LSTM(RNNBase):
                                       max_batch_size, self.hidden_size,
                                       dtype=input.dtype, device=input.device)
                 hx = (h_zeros, c_zeros)
+                self.check_forward_args(input, hx, batch_sizes)
             else:
                 if is_batched:
                     if (hx[0].dim() != 3 or hx[1].dim() != 3):
@@ -894,7 +895,7 @@ class LSTM(RNNBase):
 
 
 class GRU(RNNBase):
-    r"""__init__(self,input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
+    r"""__init__(input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
 
     Apply a multi-layer gated recurrent unit (GRU) RNN to an input sequence.
     For each element in the input sequence, each layer computes the following

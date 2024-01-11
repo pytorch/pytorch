@@ -209,9 +209,9 @@ if not TEST_WITH_DEV_DBG_ASAN:
         def setUp(self):
             super(AbstractProcessGroupWrapperTest, self).setUp()
             self._spawn_processes()
-            # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
-            # that use NCCL_BLOCKING_WAIT will test it as expected.
-            os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+            # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+            # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+            os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
 
         @property
         def world_size(self) -> int:

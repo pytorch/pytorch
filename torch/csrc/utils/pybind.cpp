@@ -46,6 +46,7 @@ py::handle type_caster<c10::SymInt>::cast(
     }
   } else {
     auto m = si.maybe_as_int();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return py::cast(*m).release();
   }
 }
@@ -126,7 +127,11 @@ py::handle type_caster<c10::Scalar>::cast(
     if (scalar.isSymbolic()) {
       return py::cast(scalar.toSymInt()).release();
     } else {
-      return py::cast(scalar.toLong()).release();
+      if (scalar.type() == at::ScalarType::UInt64) {
+        return py::cast(scalar.toUInt64()).release();
+      } else {
+        return py::cast(scalar.toLong()).release();
+      }
     }
   } else if (scalar.isFloatingPoint()) {
     // This isn't strictly necessary but we add it for symmetry

@@ -2759,6 +2759,41 @@ class TestTensorCreation(TestCase):
         for num_test in range(50):
             self._test_signal_window_functions('kaiser', dtype, device, beta=random.random() * 30)
 
+    def _test_signal_windows_functions(self, name, dtype, device, **kwargs):
+        import scipy.signal as signal
+
+        torch_method = getattr(torch.signal.windows, name)
+        if not dtype.is_floating_point:
+            with self.assertRaisesRegex(RuntimeError, r'floating point'):
+                torch_method(3, dtype=dtype)
+            return
+        for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
+            for periodic in [True, False]:
+                res = torch_method(size, sym=not periodic, **kwargs, device=device, dtype=dtype)
+                # NB: scipy always returns a float64 result
+                ref = torch.from_numpy(signal.get_window((name, *(kwargs.values())), size, fftbins=periodic))
+                self.assertEqual(res, ref, exact_dtype=False)
+        self.assertTrue(torch_method(3, requires_grad=True).requires_grad)
+        self.assertFalse(torch_method(3).requires_grad)
+
+    # torch.signal.windows functions (except any with extra parameters)
+    @onlyNativeDeviceTypes
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    @dtypes(torch.float, torch.double)
+    @parametrize("window", ['bartlett', 'blackman', 'cosine', 'hamming', 'hann', 'nuttall'])
+    def test_signal_windows_functions(self, device, dtype, window):
+        self._test_signal_windows_functions(window, dtype, device)
+
+    # torch.signal.windows.kaiser
+    @onlyNativeDeviceTypes
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
+    @dtypes(torch.float, torch.double)
+    def test_kaiser(self, device, dtype):
+        for num_test in range(50):
+            self._test_signal_windows_functions('kaiser', dtype, device, beta=random.random() * 30)
+
     def test_tensor_factories_empty(self, device):
         # ensure we can create empty tensors from each factory function
         shapes = [(5, 0, 1), (0,), (0, 0, 1, 0, 2, 0, 0)]
@@ -4016,7 +4051,7 @@ class TestAsArray(TestCase):
             t = torch.asarray(e)
             self.assertEqual(t, original)
 
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     @onlyCPU
     def test_numpy_scalars(self, device):
         scalar = np.float64(0.5)

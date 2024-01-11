@@ -25,8 +25,8 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed._state_dict_utils import _gather_state_dict
 from torch.distributed._tensor import DTensor, Replicate
-from torch.distributed.checkpoint._state_dict_utils import _gather_state_dict
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
@@ -1018,10 +1018,9 @@ def _get_param_id_to_param_from_optim_input(
             'A parameter group should map "params" to a list of the '
             "parameters in the group"
         )
-        for param in param_group["params"]:  # type: ignore[index]
-            # Implicitly map `flat_param_id` (current length of the list) to
-            # `param`
-            param_id_to_param.append(param)
+        # Implicitly map `flat_param_id` (current length of the list) to
+        # `param`
+        param_id_to_param.extend(param_group["params"])  # type: ignore[index]
     return dict(enumerate(param_id_to_param))
 
 
@@ -1455,7 +1454,7 @@ def _unflatten_orig_param_states(
                 placement_dim = placement.dim  # type: ignore[attr-defined]
                 value_local = value.redistribute(placements=(Replicate(),))
                 reshape_size = list(flat_param._shapes[param_idx])
-                reshape_size[placement_dim] *= 2
+                reshape_size[placement_dim] *= value.device_mesh.size(0)
                 reshape_size = torch.Size(reshape_size)
                 value = value.reshape(reshape_size)
             # If gathered state is a replicate DTensor, we directly reshape it.
@@ -2069,13 +2068,13 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
 
 @no_type_check
 def _set_optim_use_dtensor(
-    module: nn.Module,
+    fsdp_state: _FSDPState,
     state_dict_settings: StateDictSettings,
 ) -> None:
     # If device_mesh is passed in when initalizing FSDP, we automatically turn the
     # _use_dtensor flag to be true for ShardedOptimStateDictConfig() if state_dict_type
     # has to be set to SHARDED_STATE_DICT.
-    if getattr(module, "device_mesh", None):
+    if getattr(fsdp_state, "_device_mesh", None):
         state_dict_type = state_dict_settings.state_dict_type
         if state_dict_type == StateDictType.LOCAL_STATE_DICT:
             raise RuntimeError(
