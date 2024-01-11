@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_types.h>
-#include "Utils.h"
+#include <Utils.h>
 
 namespace at {
 namespace native::xpu {
