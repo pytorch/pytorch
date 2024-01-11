@@ -339,7 +339,13 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.lda,
               args.matb->data_ptr<scalar_t>(),
               args.ldb,
+#if defined(USE_ROCM)
+              // This condition is needed for mm case on ROCm for hipblasLt path.
+              // Passing the bias ptr as null to avoid accuracy issues for mm case.
+              (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
+#else
               self.const_data_ptr<scalar_t>(),
+#endif
               args.result->data_ptr<scalar_t>(),
               args.result_ld,
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 11080) || defined(USE_ROCM)
