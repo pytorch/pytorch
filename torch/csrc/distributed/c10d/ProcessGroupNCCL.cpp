@@ -346,30 +346,6 @@ c10::optional<std::function<std::string()>>& get_cpp_trace_dumper() {
   return dumper;
 }
 
-c10::optional<std::function<bool()>>& get_gil_checker() {
-  static c10::optional<std::function<bool()>> gil_checker(c10::nullopt);
-  return gil_checker;
-}
-
-std::future<bool> launchAsyncGilCheck() {
-  std::promise<bool> resultPromise;
-  std::future<bool> resultFuture = resultPromise.get_future();
-
-  std::thread workerThread([promise = std::move(resultPromise)]() mutable {
-    try {
-      auto& gil_checker = get_gil_checker();
-      promise.set_value(gil_checker.value()());
-    } catch (...) {
-      promise.set_exception(std::current_exception());
-    }
-  });
-
-  // Detach the thread to allow it to run independently
-  workerThread.detach();
-
-  return resultFuture;
-}
-
 // Return CUDA device with ordinal given by input rank.  If we aren't
 // bound to a specific device, there is no strict guarantee that this
 // heuristic is the correct assignment of ranks to GPUs that Python
@@ -1263,11 +1239,18 @@ void ProcessGroupNCCL::terminateProcess(std::string errMsg) {
   LOG(FATAL) << logPrefix() << errMsg;
 }
 
+int computeDeltaMS(
+    std::chrono::time_point<std::chrono::steady_clock> start,
+    std::chrono::time_point<std::chrono::steady_clock> end) {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+      .count();
+}
+
 void ProcessGroupNCCL::heartbeatMonitor() {
   uint64_t heartBeatCounter = 0ULL;
   int heartBeatTimeout = (dumpOnTimeout_ && uid_ == 0)
-      ? timeoutCheckIntervalMilSec_ * 1000
-      : heartbeatTimeoutInSec_;
+      ? timeoutCheckIntervalMilSec_
+      : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   std::future<bool> asyncDebugDump;
   while (true) {
@@ -1276,7 +1259,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // somewhere else to avoid the deadlock.
     std::unique_lock<std::mutex> lock(monitorMutex_);
     if (monitorWakeUpCV_.wait_for(
-            lock, std::chrono::seconds(heartBeatTimeout), [&] {
+            lock, std::chrono::milliseconds(heartBeatTimeout), [&] {
               return terminateHeartbeatMonitorThread_.load();
             })) {
       // For the normal complete or user interception, monitorWakeUpCV_
@@ -1284,23 +1267,22 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       return;
     }
 
-    // Assuming that we always init a process group containing all ranks,
-    // we only use the default PG listen to the global signal to dump
-    // and abort. We poll store to see if some ranks have flagged a timeout when
-    // we haven't polled for `heartbeat_timeout` seconds and there haven't
-    // any work added or removed for `watchdog_timeout` seconds.
+    // We put extra functionality in the thread for the default PG (aka, uid_=0)
+    // because the signal is same across different PGs. We only need to run
+    // once per process to avoid duplicate things performed in too many separate
+    // threads. For example, we check a global flag on the TCPStore periodically
+    // to see if any PG on any rank observed a timeout and signaled peers to
+    // dump debugging info, and we avoid hammering the TCPStore from all PGs on
+    // the same rank.
     if (dumpOnTimeout_ && uid_ == 0) {
       auto currentTime = std::chrono::steady_clock::now();
-      auto timeSinceLastWorkListUpdate =
-          std::chrono::duration_cast<std::chrono::milliseconds>(
-              (currentTime - lastWorkListUpdateTime_))
-              .count();
-      auto timeSinceLastPollStore =
-          std::chrono::duration_cast<std::chrono::milliseconds>(
-              (currentTime - lastTimePollStore))
-              .count();
-      if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
-          timeSinceLastPollStore >= timeoutCheckIntervalMilSec_) {
+      // We poll store to see if some ranks have flagged a timeout when
+      // we haven't polled for `heartbeat_timeout` seconds and there haven't
+      // any work added or removed for `watchdog_timeout` seconds.
+      if (computeDeltaMS(lastWorkListUpdateTime_, currentTime) >=
+              kWatchdogThreadSleepMillis &&
+          computeDeltaMS(lastTimePollStore, currentTime) >=
+              timeoutCheckIntervalMilSec_) {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(TIMEOUT_DUMP)})) {
           auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
@@ -1335,24 +1317,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   auto& cpp_dumper = get_cpp_trace_dumper();
   if (cpp_dumper.has_value()) {
     LOG(INFO) << "Dumping c++ stacktraces: " << cpp_dumper.value()();
-  }
-
-  auto& gil_checker = get_gil_checker();
-  if (gil_checker.has_value()) {
-    auto fut = launchAsyncGilCheck();
-    auto kGilCheckTimeout = std::chrono::seconds(1);
-    auto futStatus = fut.wait_for(kGilCheckTimeout);
-    if (futStatus != std::future_status::ready) {
-      TORCH_CHECK(
-          futStatus != std::future_status::deferred,
-          "Expected the future to have been launched eagerly.");
-      LOG(ERROR)
-          << "Could not acquire GIL within 1 sec on exit, possible GIL induced hang";
-    }
-    LOG(INFO) << "Could acquire GIL on exit";
-  } else {
-    LOG(INFO)
-        << "GIL checker was not registered, perhaps this is a no-python build?";
   }
 
   auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);

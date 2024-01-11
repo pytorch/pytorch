@@ -569,13 +569,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
         if func in _side_effectful_need_to_be_preserved_pre_dispatch:
-            # It's for passing the export verifier which needs to verify the meta['val']
-            # TODO(chundian): we should systematically couple it with expoert verifier,
-            # instead of hardcoding it here.
-            node = self.tracer.create_node("call_function", func, args, {})
-            if func is torch._C._set_grad_enabled:
-                node.meta['val'] = None
-            return node
+            return self.tracer.create_node("call_function", func, args, {})
             # Don't actually run the function! We just want to trace the calls
             # into a graph. We don't actualy want to change global autograd state.
         return func(*args, **kwargs)

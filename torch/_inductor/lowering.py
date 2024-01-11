@@ -2563,6 +2563,14 @@ def _local_scalar_dense(data):
     return sym
 
 
+@register_lowering(aten._assert_scalar)
+def _assert_scalar(data, msg):
+    buffer = ir.AssertScalar(data, msg)
+    # This buffer isn't used by anyone (it returns None), so we must explicitly register it
+    buffer.name = V.graph.register_buffer(buffer)
+    return buffer
+
+
 def _full(fill_value, device, dtype, size):
     value = fill_value
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
@@ -3673,12 +3681,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     # if padding is a complicated expression, hoist it
     bounds_precomp: List[Tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
-        l_precomp = (
-            V.graph.sizevars.lookup_precomputed_size(l)
-            if isinstance(l, sympy.Expr) and not l.is_number
-            else l
-        )
-        bounds_precomp.append((l_precomp, h))
+        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))
 
     output_size = list(sizes[:n])
     mask_sizes = []
