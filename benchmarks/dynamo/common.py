@@ -64,10 +64,18 @@ from torch._dynamo.testing import (
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 
 try:
-    from torch._dynamo.utils import clone_inputs, graph_break_reasons
+    from torch._dynamo.utils import (
+        clone_inputs,
+        graph_break_reasons,
+        maybe_enable_compiled_autograd,
+    )
     from torch._inductor.utils import fresh_inductor_cache
 except ImportError:
-    from _dynamo.utils import clone_inputs, graph_break_reasons
+    from _dynamo.utils import (
+        clone_inputs,
+        graph_break_reasons,
+        maybe_enable_compiled_autograd,
+    )
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -662,7 +670,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             # call mark_step between the 2 calls to make the comparison fair.
             maybe_mark_step(args)
 
-            with maybe_mark_profile(p=p, mark="actual"):
+            with maybe_mark_profile(p=p, mark="actual"), maybe_enable_compiled_autograd(
+                args.compiled_autograd
+            ):
                 timings[rep, 1], actual_output = timed(
                     model,
                     frozen_model_iter_fn,
@@ -1879,6 +1889,12 @@ def get_dynamo_stats():
             "graph_breaks": sum(torch._dynamo.utils.counters["graph_break"].values()),
             # NB: The plus removes zero counts
             "unique_graph_breaks": len(+torch._dynamo.utils.counters["graph_break"]),
+            "autograd_captures": torch._dynamo.utils.counters["compiled_autograd"][
+                "captures"
+            ],
+            "autograd_compiles": torch._dynamo.utils.counters["compiled_autograd"][
+                "compiles"
+            ],
         }
     )
 
@@ -2428,7 +2444,8 @@ class BenchmarkRunner:
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-                    new_result = optimized_model_iter_fn(model_copy, example_inputs)
+                    with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+                        new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 log.exception(e)
                 print(
@@ -2620,9 +2637,10 @@ class BenchmarkRunner:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
                 aot_compilation_time = 0
 
-            dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
-                optimized_model_iter_fn, model, example_inputs, "dynamo"
-            )
+            with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+                dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
+                    optimized_model_iter_fn, model, example_inputs, "dynamo"
+                )
 
             compilation_time = dynamo_latency - eager_latency + aot_compilation_time
             compression_ratio = (
@@ -3138,6 +3156,12 @@ def parse_args(args=None):
         "--minify",
         action="store_true",
         help="Enable minification when failure is below tolerance. Save repro script for each model.",
+    )
+
+    parser.add_argument(
+        "--compiled-autograd",
+        action="store_true",
+        help="Enables compiled autograd on compiled benchmark",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
