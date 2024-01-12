@@ -126,7 +126,7 @@ def enable_decomposition_skips(
 ):
     """A context manager that enables the decomposition skips.
 
-    The original operator callables that are otherwise be decomposed are replaced with custom operators.
+    The original operator callables that are otherwise decomposed are replaced with custom operators.
     The ONNXScript functions for exporting the custom operators are added to the ONNX registry inside export_options.
     """
     try:
