@@ -1253,8 +1253,8 @@ class BuiltinVariable(VariableTracker):
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchInGraphFunctionVariable):
             member = getattr(obj.value, name)
-            if trace_rules.lookup(member) is not None:
-                return trace_rules.lookup(member)(member, **options)
+            if trace_rules.is_aten_op_or_tensor_method(member):
+                return TorchInGraphFunctionVariable(member, **options)
         elif isinstance(obj, PythonModuleVariable) and is_allowed(obj.value):
             member = getattr(obj.value, name)
             if is_utils_checkpoint(member):
