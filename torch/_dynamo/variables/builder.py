@@ -705,13 +705,7 @@ class VariableBuilder:
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
-        elif (
-            istype(value, (types.ModuleType, replay_record.DummyModule))
-            # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
-            # type(torch.ops) -> <class 'torch._ops._Ops'>
-            or value in [torch.backends.cudnn, torch.ops]
-            or isinstance(value, torch._ops._OpNamespace)
-        ):
+        elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonModuleVariable(
                 value,
@@ -726,7 +720,8 @@ class VariableBuilder:
         elif is_allowed(value):
             unimplemented("ybliang: _wrap")
         elif (
-            is_function(value)
+            not is_allowed(value)
+            and is_function(value)
             and skipfiles.check(value, is_inlined_call=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
             and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
@@ -737,13 +732,13 @@ class VariableBuilder:
                 skipfiles.check_verbose(value, is_inlined_call=True).reason,
                 source=self.source,
             )
-        elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
+        elif not is_allowed(value) and istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
             self.install_guards(GuardBuilder.CLOSURE_MATCH)
             return UserFunctionVariable(
                 value,
                 source=self.source,
             )
-        elif isinstance(value, types.MethodType) and isinstance(
+        elif not is_allowed(value) and isinstance(value, types.MethodType) and isinstance(
             value.__self__, torch.nn.Module
         ):
             # don't let MethodTypes fall through to UserDefinedObject,
@@ -769,13 +764,13 @@ class VariableBuilder:
                 self_obj,
                 source=self.source,
             )
-        elif isinstance(value, types.GetSetDescriptorType):
+        elif not is_allowed(value) and isinstance(value, types.GetSetDescriptorType):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return GetSetDescriptorVariable(value)
-        elif isinstance(value, types.MethodWrapperType):
+        elif not is_allowed(value) and isinstance(value, types.MethodWrapperType):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return MethodWrapperVariable(value)
-        elif issubclass(type(value), type):
+        elif not is_allowed(value) and issubclass(type(value), type):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return UserDefinedClassVariable(
                 value,
