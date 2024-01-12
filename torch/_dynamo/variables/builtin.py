@@ -712,7 +712,7 @@ class BuiltinVariable(VariableTracker):
 
             # result of an item call is a scalar convert to a tensor
             if isinstance(a, FakeItemVariable):
-                a = variables.TorchVariable(torch.tensor).call_function(tx, [a], {})
+                a = variables.TorchInGraphFunctionVariable(torch.tensor).call_function(tx, [a], {})
 
             # Dynamic input does not get resolved, rather, gets stored as call_function
             if isinstance(a, SymNodeVariable) or isinstance(b, SymNodeVariable):
@@ -1125,9 +1125,9 @@ class BuiltinVariable(VariableTracker):
             GetAttrVariable,
             PythonModuleVariable,
             TorchInGraphFunctionVariable,
-            TorchVariable,
             UserFunctionVariable,
         )
+        from ..allowed_functions import is_allowed
         from .builder import SourcelessBuilder, VariableBuilder
 
         name = name_var.as_python_constant()
@@ -1223,6 +1223,17 @@ class BuiltinVariable(VariableTracker):
                 if example_value.grad is not None:
                     unimplemented("getattr on non-None grad - NYI")
                 return ConstantVariable(None)
+        elif isinstance(obj, (variables.UserDefinedClassVariable, variables.UserDefinedObjectVariable)) and is_allowed(obj.value):
+            member = getattr(obj.value, name)
+            if is_utils_checkpoint(member):
+                options["source"] = source
+                return build_checkpoint_variable(**options)
+            elif trace_rules.lookup(member) is not None:
+                return trace_rules.lookup(member)(member, **options)
+            elif source is not None:
+                return VariableBuilder(tx, source)(member)
+            else:
+                return SourcelessBuilder()(tx, member)
         elif isinstance(
             obj,
             (
@@ -1241,7 +1252,7 @@ class BuiltinVariable(VariableTracker):
             member = getattr(obj.value, name)
             if trace_rules.lookup(member) is not None:
                 return trace_rules.lookup(member)(member, **options)
-        elif isinstance(obj, TorchVariable):
+        elif isinstance(obj, PythonModuleVariable) and is_allowed(obj.value):
             member = getattr(obj.value, name)
             if is_utils_checkpoint(member):
                 options["source"] = source

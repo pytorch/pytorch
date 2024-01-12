@@ -111,7 +111,6 @@ from .variables.tensor import (
     SymNodeVariable,
     TensorVariable,
 )
-from .variables.torch import TorchVariable
 from .variables.user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -1022,8 +1021,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if config.replay_record_enabled:
             self.exec_recorder.add_local_mod(recorded_name, value)
 
-        if is_allowed(value):
-            self.push(TorchVariable(value, source=source))
+        if is_allowed(value) and istype(value, (types.ModuleType, DummyModule)):
+            self.push(PythonModuleVariable(value, source=source))
         elif istype(value, (types.ModuleType, DummyModule)):
             self.push(PythonModuleVariable(value, source=source))
         else:

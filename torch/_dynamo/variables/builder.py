@@ -151,7 +151,6 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import torch_special_class_types, TorchVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
@@ -586,12 +585,13 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
         elif type(value).__name__ == "builtin_function_or_method" and isinstance(
-            value.__self__, torch_special_class_types
+            value.__self__, (torch._C.Generator,)
         ):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return TorchVariable(
-                value,
-            )
+            unimplemented(f"ybliang: {value}")
+            # self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            # return TorchVariable(
+            #     value,
+            # )
         elif isinstance(value, _StreamBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             return StreamVariable(
@@ -713,20 +713,23 @@ class VariableBuilder:
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
-        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
+        elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonModuleVariable(
                 value,
                 source=self.source,
             )
-        elif is_allowed(value):
+        elif is_allowed(value) and issubclass(type(value), type):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return TorchVariable(
+            return UserDefinedClassVariable(
                 value,
                 source=self.source,
             )
+        elif is_allowed(value):
+            unimplemented("ybliang: _wrap")
         elif (
-            is_function(value)
+            not is_allowed(value)
+            and is_function(value)
             and skipfiles.check(value, is_inlined_call=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
             and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
@@ -737,13 +740,13 @@ class VariableBuilder:
                 skipfiles.check_verbose(value, is_inlined_call=True).reason,
                 source=self.source,
             )
-        elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
+        elif not is_allowed(value) and istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
             self.install_guards(GuardBuilder.CLOSURE_MATCH)
             return UserFunctionVariable(
                 value,
                 source=self.source,
             )
-        elif isinstance(value, types.MethodType) and isinstance(
+        elif not is_allowed(value) and isinstance(value, types.MethodType) and isinstance(
             value.__self__, torch.nn.Module
         ):
             # don't let MethodTypes fall through to UserDefinedObject,
@@ -769,13 +772,13 @@ class VariableBuilder:
                 self_obj,
                 source=self.source,
             )
-        elif isinstance(value, types.GetSetDescriptorType):
+        elif not is_allowed(value) and isinstance(value, types.GetSetDescriptorType):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return GetSetDescriptorVariable(value)
-        elif isinstance(value, types.MethodWrapperType):
+        elif not is_allowed(value) and isinstance(value, types.MethodWrapperType):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return MethodWrapperVariable(value)
-        elif issubclass(type(value), type):
+        elif not is_allowed(value) and issubclass(type(value), type):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return UserDefinedClassVariable(
                 value,
@@ -1466,7 +1469,7 @@ def wrap_fx_proxy_cls(
         and isinstance(proxy.node.target.__self__, torch._C.Generator)
         or proxy.node.target == torch.random.set_rng_state
     ):
-        return TorchVariable(proxy.node.target)
+        return TorchInGraphFunctionVariable(proxy.node.target)
     elif (
         proxy.node.target == torch._C._DisableFuncTorch
         or proxy.node.target == torch.cuda._is_in_bad_fork
@@ -1886,10 +1889,16 @@ class SourcelessBuilder:
             return SourcelessBuilder.wrap_constant_literal(value)
         elif is_builtin_callable(value):
             return BuiltinVariable(value)
-        elif is_allowed(value):
+        elif is_allowed(value) and trace_rules.lookup(value) is not None:
             if is_user_defined_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
-            return TorchVariable(value)
+            return trace_rules.lookup(value)(value)
+        elif is_allowed(value) and isinstance(value, types.ModuleType):
+            return PythonModuleVariable(value)
+        elif is_allowed(value) and isinstance(value, (type, abc.ABCMeta)):
+            return UserDefinedClassVariable(value)
+        elif is_allowed(value):
+            unimplemented("ybliang: builder end")
         elif isinstance(value, types.FunctionType):
             return UserFunctionVariable(value)
         elif isinstance(value, enum.Enum):
