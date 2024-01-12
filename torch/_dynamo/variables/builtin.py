@@ -1291,6 +1291,12 @@ class BuiltinVariable(VariableTracker):
             if isinstance(obj, variables.TensorVariable):
                 from .builder import wrap_fx_proxy
 
+                if name == "grad":
+                    # TODO(voz): We want to support this properly, but DO NOT want
+                    # setattr in the graph - we need to sit down here and think about
+                    # a design. Potentially a set_grad op?
+                    unimplemented("Direct grad setting outside of an op - NYI")
+
                 if name == "requires_grad":
                     # TODO(voz): Make it work properly
                     unimplemented(
