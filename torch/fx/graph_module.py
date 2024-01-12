@@ -671,8 +671,7 @@ class {module_name}(torch.nn.Module):
                 # modules. For example, if we have the target
                 # `foo.bar.baz`, we'll add `foo`, `foo.bar`, and
                 # `foo.bar.baz` to the list.
-                for path in itertools.accumulate(fullpath, join_fn):
-                    used.append(path)
+                used.extend(itertools.accumulate(fullpath, join_fn))
 
                 # For a `call_module` node, also register all recursive submodules
                 # as used

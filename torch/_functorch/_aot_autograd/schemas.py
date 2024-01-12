@@ -636,6 +636,12 @@ class AOTConfig:
     aot_autograd_arg_pos_to_source: Optional[List[Source]] = None
     inference_compiler: Optional[Callable] = None
     enable_log: bool = True
+    # this is always false outside of export.
+    pre_dispatch: bool = False
+
+    def __post_init__(self):
+        if self.pre_dispatch:
+            assert self.is_export, "Can only have pre_dispatch IR for export."
 
 
 SubclassTracingInfo = collections.namedtuple(

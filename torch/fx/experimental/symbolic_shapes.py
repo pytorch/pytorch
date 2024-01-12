@@ -15,7 +15,21 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
-from typing import Any, cast, Callable, Dict, List, Optional, Sequence, Set, Tuple, Type, Union, Iterable
+from typing import (
+    Any,
+    cast,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    Union,
+    TYPE_CHECKING
+)
 
 import torch
 import torch.fx
@@ -43,6 +57,9 @@ from torch.utils._traceback import format_frame, CapturedTraceback
 from torch._utils_internal import signpost_event
 
 from torch._logging import LazyString
+
+if TYPE_CHECKING:
+    from torch._dynamo.source import TensorPropertySource
 
 InputList = List
 DimList = List
@@ -968,6 +985,8 @@ SYMPY_INTERP = {
     'floor': math.floor,
     'ceiling': math.ceil,
     'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
+    'Round': builtins.round,
+    'RoundDecimal': builtins.round,
 }
 
 
@@ -1340,7 +1359,7 @@ class DimConstraints:
         self.raise_inconsistencies()
         # as long as there are symbols with equalities, solve for them
         # NOTE(avik): this is guaranteed to terminate (#iterations <= #symbols)
-        while(self._symbols_with_equalities):
+        while self._symbols_with_equalities:
             s = self._symbols_with_equalities.pop()
             exprs = self._univariate_inequalities.pop(s)
             solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
@@ -1502,7 +1521,7 @@ class DimConstraints:
                 debug_names.update(k.split(" = ")[0] for k in forced_specializations.keys())
                 buf += (
                     f"Specializations unexpectedly required ({', '.join(debug_names)})! "
-                    "For more information, run with TORCH_LOGS=dynamic.\n"
+                    "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
                 )
                 for s, val in forced_specializations.items():
                     buf += f"  - {s} must be specialized to {val} because the guards generated for it are too complex.\n"
@@ -2064,7 +2083,7 @@ class ShapeEnv:
                            source: Source,
                            symbolic_context: SymbolicContext
                            ) -> List[sympy.Expr]:
-        return self._produce_dyn_sizes_from_int_tuple(tuple(ex.size()), source, symbolic_context)
+        return self._produce_dyn_sizes_from_int_tuple(tuple(ex_size), source, symbolic_context)
 
     def _produce_dyn_sizes_from_int_tuple(self,
                                           tensor_size: Tuple[int],
@@ -2999,7 +3018,7 @@ class ShapeEnv:
                 err = '\n'.join(error_msgs)
                 raise ConstraintViolationError(
                     f"Constraints violated ({debug_names})! "
-                    "For more information, run with TORCH_LOGS=dynamic.\n"
+                    "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
                     f"{err}"
                 )
             elif len(warn_msgs) > 0:
@@ -3336,7 +3355,7 @@ class ShapeEnv:
             "It appears that you're trying to get a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
             f"The expression we were trying to evaluate is {expr} (unhinted: {unhinted_expr}).  "
-            "Scroll up to see where each of these data-dependent accesses originally occurred."
+            "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )

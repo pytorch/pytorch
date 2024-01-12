@@ -3,8 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <torch/csrc/python_headers.h>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force = false);
 at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writeable = true);
@@ -23,5 +22,4 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj);
 void validate_numpy_for_dlpack_deleter_bug();
 bool is_numpy_dlpack_deleter_bugged();
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

@@ -12,6 +12,7 @@ It does so by:
 
 import warnings
 from contextlib import nullcontext
+from functools import wraps
 from typing import Any, Callable, List, Tuple, Union
 from unittest.mock import patch
 
@@ -63,6 +64,7 @@ def fn_input_mutations_to_outputs(
     meta: ViewAndMutationMeta,
     keep_data_input_mutations: bool,
 ) -> Any:
+    @wraps(fn)
     def inner_fn(*args):
         outs = fn(*args)
         assert len(meta.output_info) == len(outs)
@@ -95,6 +97,7 @@ def fn_prepped_for_autograd(
     fn: Callable,
     meta: ViewAndMutationMeta,
 ) -> Any:
+    @wraps(fn)
     def inner_fn(*args):
         args_maybe_cloned = [
             maybe_to_fresh_input(i, t, meta) for i, t in enumerate(args)
@@ -342,15 +345,15 @@ def create_functionalized_fn(
     aot_config: AOTConfig,
     trace_joint: bool,
 ) -> Any:
+    @wraps(fn)
     def _functionalized_f_helper(*args):
-        # Wrap inputs into functional wrappers
-        f_args = pytree.tree_map(to_fun, args)
-
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
-        with disable_above, FunctionalTensorMode():
+        with disable_above, FunctionalTensorMode(aot_config.pre_dispatch):
+            # Wrap inputs into functional wrappers
+            f_args = pytree.tree_map(to_fun, args)
             # Run the joint
             f_outs = fn(*f_args)
 
@@ -459,13 +462,11 @@ def create_functionalized_fn(
 
     # Kinda annoying, but needed to make sure that the fx graph we trace out has "primals"
     # and "tangents" as its input names (which are special-cased by the partitioner)
+    # TODO (tmanlaibaatar) revisit this if we ever need to turn on non-strict joint graph export
     def joint_helper(primals, tangents):
         return _functionalized_f_helper(primals, tangents)
 
-    def fwd_helper(*args):
-        return _functionalized_f_helper(*args)
-
-    helper = joint_helper if trace_joint else fwd_helper
+    helper = joint_helper if trace_joint else _functionalized_f_helper
     if config.functionalize_rng_ops:
         # Setup the wrapper for functionalization of rng ops
         helper, args = create_functionalized_rng_ops_wrapper(helper, args, trace_joint)
@@ -586,7 +587,7 @@ def aot_dispatch_subclass(
     )
 
 
-def create_functional_call(mod, params_spec, params_len):
+def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
     # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
     # https://github.com/pytorch/pytorch/issues/103569
 
@@ -611,5 +612,13 @@ def create_functional_call(mod, params_spec, params_len):
                 "have tuple outputs or use aot_module instead."
             )
         return out
+
+    # Note [Preserving the nn module stack metadata during export non-strict mode]
+    # This path is currently only used by the non-strict export flow,
+    # where we cannot rely on dynamo to preserve nn stack metadata in our captured graph.
+    # Instead, we stash the original user nn module here, and rely on `make_fx` to grab
+    # this stashed module and use it to track nn module stack metadata
+    if store_orig_mod and not hasattr(functional_call, "_orig_mod"):
+        functional_call._orig_mod = mod  # type: ignore[attr-defined]
 
     return functional_call

@@ -1564,11 +1564,11 @@ def forward(self, arg0_1):
                 def false_fn(*operands):
                     return inner_most_fn(*operands)
 
-            def fn(pred, operands):
+            def fn(*operands):
                 if len(operands) == 0 and len(closure_list) == 0:
                     return torch.zeros(1)
                 return cond(pred, true_fn, false_fn, operands)
-            return (pred, operands), fn
+            return operands, fn
         else:
             args, inner_fn = self._create_test_fns_for_cond(pred <= 0, inner_most_fn, operands, closure_list, nested_level - 1)
 
@@ -1578,11 +1578,11 @@ def forward(self, arg0_1):
             def false_fn(*operands):
                 return inner_most_fn(*operands) - inner_fn(*args)
 
-            def fn(pred, operands):
+            def fn(*operands):
                 if len(operands) == 0 and len(closure_list) == 0:
                     return torch.ones(1)
                 return cond(pred, true_fn, false_fn, operands)
-            return (pred, operands), fn
+            return operands, fn
 
     def _init_predicate(self, pred_type):
         if pred_type == "bool":
@@ -1623,6 +1623,142 @@ def forward(self, arg0_1):
             with self.subTest(tracing_mode=tracing_mode):
                 gm = make_fx(fn, tracing_mode=tracing_mode, _allow_non_fake_inputs=True)(*args)
                 self.assertEqual(gm(*args), eager_res)
+
+    @parametrize("predType", ["boolTensor"])
+    @parametrize("innerFnType", ["function", "module", "object"])
+    @parametrize("nOperands", [1, 2])
+    @parametrize("nClosure", [0, 1])
+    @parametrize("nesting", [0])
+    def test_cond_vmap(self, predType, innerFnType, nOperands, nClosure, nesting):
+        pred = self._init_predicate(predType)
+        inner_fn = self._init_fn(innerFnType)
+        operands = [torch.ones(2, 3) + i for i in range(nOperands)]
+        closure = [torch.ones(2, 3) - i for i in range(nClosure)]
+        args, fn = self._create_test_fns_for_cond(pred, inner_fn, operands, closure, nesting)
+        eager_res = fn(*args)
+        out = torch.vmap(fn)(*args)
+        if nClosure == 0:
+            self.assertEqual(eager_res, out)
+        else:
+            self.assertEqual(eager_res, out[0])
+            self.assertEqual(eager_res, out[1])
+
+    def test_cond_vmap_simple(self):
+
+        def fn(x):
+            return torch.cond(
+                pred=torch.tensor([True]),
+                true_fn=lambda x: x + 100,
+                false_fn=lambda x: x,
+                operands=(x,)
+            )
+
+        a = torch.arange(15).reshape((3, 5))
+        res = torch.vmap(fn, in_dims=(0,))(a)
+        self.assertEqual(res.shape, (3, 5))
+        self.assertEqual(res, a + 100)
+
+    def test_cond_vmap_multiple_inputs(self):
+
+        def fn(x, y):
+            return torch.cond(
+                pred=x.sum() < y.sum(),
+                true_fn=lambda x, y: x + 100,
+                false_fn=lambda x, y: y,
+                operands=(x, y)
+            )
+
+        a = torch.arange(15).reshape(3, 5)
+        b = torch.ones_like(a) + 3
+        res = torch.vmap(fn, in_dims=(0, 0))(a, b)
+        expected = torch.tensor(
+            [
+                [100, 101, 102, 103, 104],
+                [4, 4, 4, 4, 4],
+                [4, 4, 4, 4, 4]
+            ]
+        )
+        self.assertEqual(res.shape, (3, 5))
+        self.assertEqual(expected, res)
+
+    def test_cond_vmap_single_input_with_closure(self):
+
+        a = torch.ones((3, 5)) + 3
+        c = torch.arange(5)
+
+        def fn(x):
+            return torch.cond(
+                pred=torch.tensor([True]),
+                true_fn=lambda x: x + c,
+                false_fn=lambda x: x - c,
+                operands=(x,)
+            )
+
+        res = torch.vmap(fn, in_dims=(0,))(a,)
+        self.assertEqual(a + c, res)
+
+    def test_cond_vmap_multiple_args_with_closure(self):
+
+        a = torch.ones((3, 5), dtype=torch.int64) + 3
+        b = torch.arange(15).reshape(3, 5)
+        c = torch.arange(5)
+
+        def fn(x, y):
+            return torch.cond(
+                pred=torch.tensor([False]),
+                true_fn=lambda x, y: x + c,
+                false_fn=lambda x, y: y - c,
+                operands=(x, y)
+            )
+
+        res = torch.vmap(fn)(a, b)
+        self.assertEqual(b - c, res)
+
+    @parametrize("nClosure", [0, 1])
+    def test_cond_vmap_multiple_outputs(self, nClosure):
+
+        if nClosure:
+            c = torch.ones(5, dtype=torch.int64) + 5
+
+            def fn(x):
+                return torch.cond(
+                    pred=torch.tensor([True]),
+                    true_fn=lambda x: (x + c, x - c),
+                    false_fn=lambda x: (x, x),
+                    operands=(x,)
+                )
+        else:
+            def fn(x):
+                return torch.cond(
+                    pred=torch.tensor([True]),
+                    true_fn=lambda x: (x + 1, x - 1),
+                    false_fn=lambda x: (x, x),
+                    operands=(x,)
+                )
+
+        a = torch.arange(15).reshape(3, 5)
+        res = torch.vmap(fn)(a,)
+        self.assertEqual(len(res), 2)
+        if nClosure:
+            self.assertEqual(res, (a + c, a - c))
+        else:
+            self.assertEqual(res, (a + 1, a - 1))
+
+    def test_vmap_vmap(self):
+        def fn(x):
+            return torch.cond(
+                pred=torch.tensor([True]),
+                true_fn=lambda x: x + 1,
+                false_fn=lambda x: x - 1,
+                operands=(x,)
+            )
+
+        def wrapper(x):
+            return torch.vmap(fn)(x)
+
+        a = torch.ones((3, 4, 5))
+        res = torch.vmap(wrapper)(a)
+        self.assertEqual(res, a + 1)
 
 instantiate_parametrized_tests(TestControlFlowTraced)
 

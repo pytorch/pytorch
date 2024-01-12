@@ -67,10 +67,11 @@ c10d::ReduceOp to_reduce_op(const std::string& reduce_op) {
   return it->second;
 }
 
-at::Tensor all_reduce_(
-    at::Tensor input,
-    const std::string& reduce_op,
-    const std::string& group_name) {
+at::Tensor& all_reduce_(
+    at::Tensor& input,
+    std::string reduce_op,
+    // c10::string_view group_name,
+    std::string group_name) {
   c10d::AllreduceOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
 
@@ -83,16 +84,16 @@ at::Tensor all_reduce_(
 
 at::Tensor all_reduce(
     const at::Tensor& input,
-    const std::string& reduce_op,
-    const std::string& group_name) {
+    std::string reduce_op,
+    std::string group_name) {
   auto output = input.clone();
   return all_reduce_(output, reduce_op, group_name);
 }
 
 std::vector<at::Tensor> all_reduce_coalesced_(
     std::vector<at::Tensor> inputs,
-    const std::string& reduce_op,
-    const std::string& group_name) {
+    std::string reduce_op,
+    std::string group_name) {
   c10d::AllreduceCoalescedOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
 
@@ -105,9 +106,9 @@ std::vector<at::Tensor> all_reduce_coalesced_(
 }
 
 std::vector<at::Tensor> all_reduce_coalesced(
-    const std::vector<at::Tensor>& inputs,
-    const std::string& reduce_op,
-    const std::string& group_name) {
+    std::vector<at::Tensor> inputs,
+    std::string reduce_op,
+    std::string group_name) {
   std::vector<at::Tensor> outputs;
   for (const auto& tensor : inputs) {
     outputs.push_back(tensor.clone());
@@ -126,9 +127,9 @@ at::Tensor allocate_all_gather_output(
 }
 
 std::vector<at::Tensor> all_gather_into_tensor_coalesced(
-    const std::vector<at::Tensor>& inputs,
-    const int64_t group_size,
-    const std::string& group_name) {
+    std::vector<at::Tensor> inputs,
+    int64_t group_size,
+    std::string group_name) {
   std::vector<at::Tensor> outputs;
   for (const auto& tensor : inputs) {
     outputs.push_back(allocate_all_gather_output(tensor, group_size));
@@ -145,8 +146,8 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
 
 at::Tensor all_gather_into_tensor(
     const at::Tensor& input,
-    const int64_t group_size,
-    const std::string& group_name) {
+    int64_t group_size,
+    std::string group_name) {
   std::vector<at::Tensor> inputs{input};
   return all_gather_into_tensor_coalesced(inputs, group_size, group_name)[0];
 }
@@ -167,10 +168,10 @@ at::Tensor allocate_reduce_scatter_output(
 }
 
 std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
-    const std::vector<at::Tensor>& inputs,
-    const std::string& reduce_op,
-    const int64_t group_size,
-    const std::string& group_name) {
+    std::vector<at::Tensor> inputs,
+    std::string reduce_op,
+    int64_t group_size,
+    std::string group_name) {
   c10d::ReduceScatterOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
   std::vector<at::Tensor> outputs;
@@ -188,13 +189,33 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
 }
 
 at::Tensor reduce_scatter_tensor(
-    at::Tensor input,
-    const std::string& reduce_op,
-    const int64_t group_size,
-    const std::string& group_name) {
+    const at::Tensor& input,
+    std::string reduce_op,
+    int64_t group_size,
+    std::string group_name) {
   std::vector<at::Tensor> inputs{input};
   return reduce_scatter_tensor_coalesced(
       inputs, reduce_op, group_size, group_name)[0];
+}
+
+at::Tensor all_to_all_single(
+    const at::Tensor& input,
+    std::vector<int64_t> output_split_sizes,
+    std::vector<int64_t> input_split_sizes,
+    std::string group_name) {
+  std::vector<int64_t> output_sizes = input.sizes().vec();
+  output_sizes[0] =
+      std::accumulate(output_split_sizes.begin(), output_split_sizes.end(), 0);
+  auto output = input.new_empty(output_sizes);
+
+  auto group = c10d::resolve_process_group(group_name);
+  auto work = group->alltoall_base(
+      output,
+      const_cast<at::Tensor&>(input),
+      output_split_sizes,
+      input_split_sizes);
+  c10d::RankLocal<WorkRegistry>::get().register_work(output, work);
+  return output;
 }
 
 at::Tensor wait_tensor(const at::Tensor& tensor) {
@@ -255,6 +276,16 @@ TORCH_LIBRARY(_c10d_functional, m) {
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           ::reduce_scatter_tensor_coalesced),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "all_to_all_single("
+      "Tensor input, "
+      "SymInt[] output_split_sizes, "
+      "SymInt[] input_split_sizes, "
+      "str group_name) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, ::all_to_all_single),
       {at::Tag::pt2_compliant_tag});
 
   m.def(

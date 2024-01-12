@@ -160,7 +160,7 @@ def _replace_tuple_with_list(spec: pytree.TreeSpec) -> pytree.TreeSpec:
 
 
 def _open_top_level_list_if_single_element(spec: pytree.TreeSpec) -> pytree.TreeSpec:
-    if spec.type == list and len(spec.children_specs) == 1:
+    if spec.type == list and spec.num_children == 1:
         return spec.children_specs[0]
     return spec
 
@@ -315,7 +315,7 @@ class ConvertComplexToRealRepresentationInputStep(InputAdaptStep):
         """
         return (
             tuple(
-                torch.view_as_real(arg)
+                torch.view_as_real(arg.resolve_conj())
                 if isinstance(arg, torch.Tensor) and arg.is_complex()
                 else arg
                 for arg in model_args
@@ -531,7 +531,7 @@ class ConvertComplexToRealRepresentationOutputStep(OutputAdaptStep):
             A tuple of the model output.
         """
         return [
-            torch.view_as_real(output)
+            torch.view_as_real(output.resolve_conj())
             if isinstance(output, torch.Tensor) and torch.is_complex(output)
             else output
             for output in model_outputs
