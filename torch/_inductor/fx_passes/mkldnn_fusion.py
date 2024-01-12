@@ -435,15 +435,19 @@ if torch._C._has_mkldnn:
                 _compute_index = 1 if (_other_index == 0) else 0
                 return _binary_node.args[_compute_index]
 
-            if any(
-                len(
-                    _get_remaining_users(
-                        n.args[other_index], _get_compute_node(n, other_index)
+            def _other_input_not_inplaceable(_binary_node, _other_index):
+                _compute_node = _get_compute_node(_binary_node, _other_index)
+                return (
+                    len(
+                        _get_remaining_users(
+                            _binary_node.args[_other_index], _compute_node
+                        )
                     )
+                    > 1
+                    or _binary_node.args[_other_index] == _compute_node.args[0]
                 )
-                > 1
-                for n in binary_nodes
-            ):
+
+            if any(_other_input_not_inplaceable(n, other_index) for n in binary_nodes):
                 return False
             if any(
                 n.args[other_index].op in ["placeholder", "output"]
@@ -484,6 +488,17 @@ if torch._C._has_mkldnn:
 
         return fn
 
+    def _can_be_inplace(_other):
+        if isinstance(_other.data, ir.View):
+            return _can_be_inplace(_other.data)
+        else:
+            return not (
+                isinstance(_other.data, ir.ReinterpretView)
+                or isinstance(
+                    _other.get_layout(), (ir.MutationLayout, ir.AliasedLayout)
+                )
+            )
+
     def _register_binary_unary_maybe_inplace_fusion_lowering(
         pattern,
         computation_op,
@@ -517,11 +532,7 @@ if torch._C._has_mkldnn:
                     computation_args += [1.0, None, [], None]
             # Make sure the other is not an alias or mutation(fx side doesn't has such info).
             other.realize()
-            can_be_inplace = not (
-                isinstance(other.data, ir.ReinterpretView)
-                or isinstance(other.get_layout(), (ir.MutationLayout, ir.AliasedLayout))
-            )
-            if not can_be_inplace:
+            if not _can_be_inplace(other):
                 return L[outplace_fusion_op](*computation_args)
             return L[inplace_fusion_op](*computation_args)
 
