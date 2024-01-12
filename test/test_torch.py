@@ -6864,7 +6864,6 @@ class TestTorch(TestCase):
     def test_sobolengine_fast_forward_scrambled(self):
         self.test_sobolengine_fast_forward(scramble=True)
 
-    @skipIfTorchDynamo("np.float64 restored as float32 after graph break.")
     def test_sobolengine_distribution(self, scramble=False):
         d = 50
         engine = torch.quasirandom.SobolEngine(d, scramble=scramble, seed=123456)
@@ -6879,7 +6878,6 @@ class TestTorch(TestCase):
             np.percentile(sample, 75, axis=0), np.repeat(0.75, d), atol=2, rtol=2
         )
 
-    @skipIfTorchDynamo("np.float64 restored as float32 after graph break.")
     def test_sobolengine_distribution_scrambled(self):
         self.test_sobolengine_distribution(scramble=True)
 
