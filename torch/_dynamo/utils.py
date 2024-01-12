@@ -894,27 +894,24 @@ def rot_n_helper(n):
     return fn
 
 
-common_constant_types = {
-    int,
-    float,
-    bool,
-    str,
-    bytes,
-    type(None),
-    types.CodeType,
-    torch.device,
-    torch.dtype,
-    torch.memory_format,
-    torch.layout,
-}
-
-
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
     return isinstance(v, (enum.Enum, type)) or istype(
         v,
-        common_constant_types | {slice},
+        (
+            types.CodeType,
+            int,
+            float,
+            bool,
+            str,
+            bytes,
+            type(None),
+            slice,
+            type(type),
+            torch.device,
+            torch.dtype,
+        ),
     )
 
 
@@ -1070,7 +1067,7 @@ def tensor_or_module_to_id(value):
 
 
 def const_repr(x, *, local) -> str:
-    from .trace_rules import is_builtin_callable
+    from .allowed_functions import is_builtin_callable
 
     if isinstance(x, (list, tuple)):
         elems_repr = ",".join(const_repr(s, local=local) for s in x)

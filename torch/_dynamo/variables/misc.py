@@ -450,11 +450,11 @@ class AutogradFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ):
-        from ..trace_rules import is_callable_allowed
+        from ..allowed_functions import is_user_defined_allowed
         from .builder import wrap_fx_proxy
 
         if name == "apply":
-            if is_callable_allowed(self.fn_cls):
+            if is_user_defined_allowed(self.fn_cls):
                 trampoline_autograd_apply = produce_trampoline_autograd_apply(
                     self.fn_cls
                 )

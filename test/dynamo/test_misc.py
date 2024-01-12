@@ -6042,7 +6042,7 @@ def fn():
         import builtins
 
         # Cache the original builtin function ids
-        torch._dynamo.trace_rules._builtin_function_ids()
+        torch._dynamo.allowed_functions._builtin_function_ids()
 
         class MyClass:
             pass
