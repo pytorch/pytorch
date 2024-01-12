@@ -246,6 +246,8 @@ include_patterns = [
     'c10/**/*.cpp',
     'c10/core/**/*.h',
     'c10/util/**/*.h',
+    # Enable coverage of headers in torch/csrc and excluding sub-directories for now.
+    'torch/csrc/*.h',
     'torch/csrc/**/*.cpp',
 ]
 exclude_patterns = [
@@ -256,6 +258,8 @@ exclude_patterns = [
     '**/*pb.h',
     '**/*CUDA*',
     '**/cuda/*pp',
+    '**/*XPU*',
+    '**/xpu/*pp',
     'c10/util/complex_math.h',
     'c10/util/complex_utils.h',
     'c10/util/flat_hash_map.h',
@@ -2682,7 +2686,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.1.9',
+    'ruff==0.1.11',
 ]
 is_formatter = true
 

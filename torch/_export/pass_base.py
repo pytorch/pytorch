@@ -20,7 +20,7 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils import _pytree as pytree
 
 
-__all__ = ["_ExportPassBase"]
+__all__ = ["_ExportPassBaseDeprecatedDoNotUse"]
 
 
 Argument = Any
@@ -43,7 +43,7 @@ class ExportPassBaseError(RuntimeError):
     pass
 
 
-class _ExportPassBase(PassBase):
+class _ExportPassBaseDeprecatedDoNotUse(PassBase):
     """
     Interpreter-based pass class to help users maintain the IR spec while writing
     transformations.
@@ -55,10 +55,7 @@ class _ExportPassBase(PassBase):
 
 
     class ExportTracer(PythonKeyTracer):
-        """
-        Tracer used to create nodes during the retracing part of the Expo_ExportPassBasertPassBase
-        """
-        def __init__(self, callback: "_ExportPassBase", codegen: CodeGen) -> None:
+        def __init__(self, callback: "_ExportPassBaseDeprecatedDoNotUse", codegen: CodeGen) -> None:
             super().__init__()
             self.callback = callback
             self.root = torch.nn.Module()
@@ -153,10 +150,7 @@ class _ExportPassBase(PassBase):
             node.meta["tensor_meta"] = pytree.tree_map(make_tensor_meta, value)
 
     class ExportInterpreter(fx.Interpreter):
-        """
-        Interpreter to callback on any _ExportPassBase functions
-        """
-        def __init__(self, callback: "_ExportPassBase", gm: fx.GraphModule) -> None:
+        def __init__(self, callback: "_ExportPassBaseDeprecatedDoNotUse", gm: fx.GraphModule) -> None:
             super().__init__(gm)
             self.callback = callback
             self.node: torch.fx.Node = next(iter(gm.graph.nodes))
