@@ -322,6 +322,15 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scatter_out(
     AtenTensorHandle index,
     AtenTensorHandle src);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scatter_reduce_out(
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    int64_t dim,
+    AtenTensorHandle index,
+    AtenTensorHandle src,
+    const char* reduce,
+    int32_t include_self);
+
 #ifdef USE_CUDA
 
 struct CUDAStreamGuardOpaque;

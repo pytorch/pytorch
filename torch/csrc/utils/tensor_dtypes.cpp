@@ -16,6 +16,12 @@ std::pair<std::string, std::string> getDtypeNames(at::ScalarType scalarType) {
       // no "byte" because byte is signed in numpy and we overload
       // byte to mean bool often
       return std::make_pair("uint8", "");
+    case at::ScalarType::UInt16:
+      return std::make_pair("uint16", "");
+    case at::ScalarType::UInt32:
+      return std::make_pair("uint32", "");
+    case at::ScalarType::UInt64:
+      return std::make_pair("uint64", "");
     case at::ScalarType::Char:
       // no "char" because it is not consistently signed or unsigned; we want
       // to move to int8
