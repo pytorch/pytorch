@@ -1264,7 +1264,7 @@ class BuiltinVariable(VariableTracker):
             if trace_rules.is_aten_op_or_tensor_method(member):
                 return TorchInGraphFunctionVariable(member, **options)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
-            if obj.is_torch:
+            if is_allowed(obj.value):
                 member = getattr(obj.value, name)
             else:
                 member = obj.value.__dict__[name]
@@ -1272,15 +1272,18 @@ class BuiltinVariable(VariableTracker):
             if config.replay_record_enabled:
                 tx.exec_recorder.record_module_access(obj.value, name, member)
 
-            if is_utils_checkpoint(member):
-                options["source"] = source
-                return build_checkpoint_variable(**options)
-            elif trace_rules.lookup(member) is not None:
-                return trace_rules.lookup(member)(member, **options)
-            elif source is not None:
-                return VariableBuilder(tx, source)(member)
+            if is_allowed(obj.value):
+                if is_utils_checkpoint(member):
+                    options["source"] = source
+                    return build_checkpoint_variable(**options)
+                elif trace_rules.lookup(member) is not None:
+                    return trace_rules.lookup(member)(member, **options)
+                elif source is not None:
+                    return VariableBuilder(tx, source)(member)
+                else:
+                    return SourcelessBuilder()(tx, member)
             else:
-                return SourcelessBuilder()(tx, member)
+                return VariableBuilder(tx, source)(member)
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:

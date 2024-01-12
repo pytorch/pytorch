@@ -580,6 +580,10 @@ class VariableBuilder:
         elif isinstance(value, HigherOrderOperator):
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
+        elif type(value).__name__ == "builtin_function_or_method" and isinstance(
+            value.__self__, (torch._C.Generator,)
+        ):
+            unimplemented("ybliang: wrap 2")
         elif isinstance(value, _StreamBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             return StreamVariable(
@@ -740,7 +744,7 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, types.MethodType) and isinstance(
-            value.__self__, (torch.nn.Module, torch.utils._pytree.TreeSpec)
+            value.__self__, torch.nn.Module
         ):
             # don't let MethodTypes fall through to UserDefinedObject,
             # which doesn't support 'CALL_FUNCTION'

@@ -103,10 +103,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if isinstance(obj, staticmethod):
             func = obj.__get__(self.value)
-            if trace_rules.lookup(func) is not None:
-                return trace_rules.lookup(func).create_with_source(func, source=source)
-            else:
-                return variables.UserFunctionVariable(func, source=source)
+            return variables.UserFunctionVariable(func, source=source)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source and inspect.ismemberdescriptor(obj):
@@ -120,14 +117,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if self.value is collections.OrderedDict and name == "fromkeys":
             return super().var_getattr(tx, name)
 
-        if name in getattr(self.value, "__dict__", {}) or (
-            self.value.__module__.startswith("torch.")
-            or self.value.__module__ == "torch"
+        if name in getattr(self.value, "__dict__", {}) or ConstantVariable.is_literal(
+            obj
         ):
             if source:
                 return VariableBuilder(tx, source)(obj)
-        elif ConstantVariable.is_literal(obj):
-            return ConstantVariable.create(obj)
+            elif ConstantVariable.is_literal(obj):
+                return ConstantVariable.create(obj)
 
         return super().var_getattr(tx, name)
 
@@ -363,7 +359,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 user_cls_source=self.source,
                 mutable_local=MutableLocal(),
             )
-        elif self.value in self._in_graph_classes():
+        elif self.value in self._in_graph_classes() or is_allowed(self.value):
             # torch.LongTensor cannot accept a list of FakeTensors.
             # So we stack the list of FakeTensors instead.
             if (
@@ -720,10 +716,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
             func = subobj.__get__(self.value)
-            if trace_rules.lookup(func) is not None:
-                return trace_rules.lookup(func).create_with_source(func, source=source)
-            else:
-                return variables.UserFunctionVariable(func, source=source)
+            return variables.UserFunctionVariable(func, source=source)
         elif isinstance(subobj, classmethod):
             return variables.UserMethodVariable(subobj.__func__, self, source=source)
         elif isinstance(subobj, types.FunctionType) or (
