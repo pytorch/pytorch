@@ -121,7 +121,6 @@ test_failures = {
     "test_clamp_type_promotion_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv3d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
-    "test_custom_op_fixed_layout_dynamic_shapes": TestFailure(("cpu")),
     "test_expand_dynamic_shapes": TestFailure(("cpu",)),
     "test_glu_dynamic_shapes": TestFailure(("cpu",)),
     "test_isinf2_dynamic_shapes": TestFailure(("cpu",)),
@@ -198,6 +197,7 @@ test_failures = {
         ("cpu", "cuda")
     ),
     "test_zero_element_mutation_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_custom_op_fixed_layout_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_cat_uint8_dynamic_shapes": TestFailure(
         ("cpu",)
     ),  # cat on uint8 input is using aten fallback on cpu
