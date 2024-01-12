@@ -746,8 +746,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 10 /*10 Mins*/);
   waitTimeoutDumpInMilSec_ =
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 2000);
-  coordDumpCheckIntervalMilSec_ =
-      getCvarInt(TORCH_NCCL_COORD_DUMP_CHECK_MS, 1000);
+  coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
@@ -814,30 +813,32 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
   std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
-  LOG(INFO)
-      << logPrefix() << "ProcessGroupNCCL initialization options: "
-      << "NCCL version: " << getNcclVersion() << ", size: " << size
-      << ", global rank: " << globalRank()
-      << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-      << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
-      << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: " << waitTimeoutDumpInMilSec_
-      << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
-      << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
-      << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
-      << ", TIMEOUT(ms): " << options_->timeout.count()
-      << ", USE_HIGH_PRIORITY_STREAM: " << options_->is_high_priority_stream
-      << ", SPLIT_FROM: " << options_->split_from
-      << ", SPLIT_COLOR: " << options_->split_color
-      << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
+            << "NCCL version: " << getNcclVersion() << ", size: " << size
+            << ", global rank: " << globalRank()
+            << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+            << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
+            << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: "
+            << waitTimeoutDumpInMilSec_
+            << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
+            << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
+            << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
+            << ", TIMEOUT(ms): " << options_->timeout.count()
+            << ", USE_HIGH_PRIORITY_STREAM: "
+            << options_->is_high_priority_stream
+            << ", SPLIT_FROM: " << options_->split_from
+            << ", SPLIT_COLOR: " << options_->split_color
+            << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
 #ifdef NCCL_HAS_COMM_REGISTER
-      << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
-      << useTensorRegisterAllocatorHook_
+            << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
+            << useTensorRegisterAllocatorHook_
 #endif
-      << ", TORCH_NCCL_ENABLE_MONITORING: " << monitorThreadEnabled_.load()
-      << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
-      << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
-      << ", TORCH_NCCL_COORD_DUMP_CHECK_MS: " << coordDumpCheckIntervalMilSec_
-      << ", NCCL_DEBUG: " << nccl_debug << ", ID=" << this->getID();
+            << ", TORCH_NCCL_ENABLE_MONITORING: "
+            << monitorThreadEnabled_.load()
+            << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
+            << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
+            << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
+            << ", NCCL_DEBUG: " << nccl_debug << ", ID=" << this->getID();
 
   if (options_->global_ranks_in_group.empty()) {
     this->globalRankStart = 0;
@@ -1248,9 +1249,10 @@ int computeDeltaMS(
 
 void ProcessGroupNCCL::heartbeatMonitor() {
   uint64_t heartBeatCounter = 0ULL;
+  std::string logMsg;
   bool checkTimeoutSignal = (dumpOnTimeout_ && uid_ == 0);
-  int heartBeatTimeout = checkTimeoutSignal ? coordDumpCheckIntervalMilSec_
-                                            : heartbeatTimeoutInSec_ * 1000;
+  int monitorPollInterval = checkTimeoutSignal ? coordCheckIntervalMilSec_
+                                               : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
   std::future<bool> asyncDebugDump;
@@ -1260,7 +1262,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // somewhere else to avoid the deadlock.
     std::unique_lock<std::mutex> lock(monitorMutex_);
     if (monitorWakeUpCV_.wait_for(
-            lock, std::chrono::milliseconds(heartBeatTimeout), [&] {
+            lock, std::chrono::milliseconds(monitorPollInterval), [&] {
               return terminateHeartbeatMonitorThread_.load();
             })) {
       // For the normal complete or user interception, monitorWakeUpCV_
@@ -1283,24 +1285,20 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       if (computeDeltaMS(lastWorkListUpdateTime_, currentTime) >=
               kWatchdogThreadSleepMillis &&
           computeDeltaMS(lastTimePollStore, currentTime) >=
-              coordDumpCheckIntervalMilSec_) {
+              coordCheckIntervalMilSec_) {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(TIMEOUT_DUMP)})) {
-          auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
-          asyncDebugDump = launchAsyncDebugDump();
-          waitForDumpOrTimeout(asyncDebugDump, wakeUpTime);
-          const auto exitMsg = c10::str(
+          logMsg = c10::str(
               logPrefix(),
-              "Another rank reported a timeout and signaled a global abort.");
-          LOG(ERROR) << exitMsg;
-          C10_THROW_ERROR(DistBackendError, exitMsg);
+              "Received a global timeout from another rank and will ",
+              "start to dump the debug info.");
+          break;
         }
       }
     }
 
-    if (!checkTimeoutSignal ||
-        computeDeltaMS(lastTimeHeartBeatCheck, currentTime) >=
-            heartbeatTimeoutInSec_ * 1000) {
+    if (computeDeltaMS(lastTimeHeartBeatCheck, currentTime) >=
+        heartbeatTimeoutInSec_ * 1000) {
       // Check the heart beat of watchdog thread.
       lastTimeHeartBeatCheck = currentTime;
       auto heartbeat = heartbeat_.load();
@@ -1308,16 +1306,15 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         heartBeatCounter = heartbeat;
       } else {
         // No heartbeat increase detected and timeout.
+        logMsg = c10::str(
+            logPrefix(),
+            "Heartbeat monitor timed out! Process will be terminated after dumping debug info.",
+            " workMetaList_.size()=",
+            workMetaList_.size());
         break;
       }
     }
   }
-
-  const auto logMsg = c10::str(
-      logPrefix(),
-      "Heartbeat monitor timed out! Process will be terminated after dumping debug info.",
-      " workMetaList_.size()=",
-      workMetaList_.size());
   LOG(ERROR) << logMsg;
 
   auto& cpp_dumper = get_cpp_trace_dumper();
