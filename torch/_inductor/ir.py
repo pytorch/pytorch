@@ -2239,6 +2239,7 @@ class SliceView(View):
         [0, x.get_size()[dim]] and start <= end.
         """
         sizevars = V.graph.sizevars
+        dim_size = x.get_size()[dim]
 
         if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
 

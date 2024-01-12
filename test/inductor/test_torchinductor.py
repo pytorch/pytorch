@@ -7800,10 +7800,10 @@ class CommonTemplate:
         # empty slices that require clamping the start or end
         def fn(a):
             return (
-                aten.slice.default(a, 0, 2, 0, 1),
-                aten.slice.default(a, 0, a.shape[0], a.shape[0] + 10, 1),
-                aten.slice.default(a, 0, -20, 0, 1),
-                aten.slice.default(a, 0, -20, -16, 1),
+                aten.slice.Tensor(a, 0, 2, 0, 1),
+                aten.slice.Tensor(a, 0, a.shape[0], a.shape[0] + 10, 1),
+                aten.slice.Tensor(a, 0, -20, 0, 1),
+                aten.slice.Tensor(a, 0, -20, -16, 1),
             )
 
         x = torch.rand(10)
