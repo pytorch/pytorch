@@ -576,6 +576,17 @@ def free_symbol_has(index: sympy.Expr, pattern: str):
     return any(pattern in v.name for v in index.free_symbols)
 
 
+def is_symbolic(a: Any) -> bool:
+    return isinstance(a, torch.SymInt) or (
+        isinstance(a, torch.Tensor)
+        and any(is_symbolic(x) for x in itertools.chain(a.size(), a.stride()))
+    )
+
+
+def any_is_symbolic(*args: Any) -> bool:
+    return any(is_symbolic(a) for a in args)
+
+
 def has_incompatible_cudagraph_ops(gm):
     forbidden_set = {
         "aten._fused_moving_avg_obs_fq_helper.default",
@@ -586,11 +597,6 @@ def has_incompatible_cudagraph_ops(gm):
         "run_and_save_rng_state",
         "run_with_rng_state",
         "aten._local_scalar_dense",
-        # Technically, it's not necessary to ban this, because an
-        # assert_scalar with constant arguments can be validly run
-        # with CUDA graphs, but the operator is also pointless with
-        # constant arguments, so might as well ban
-        "aten._assert_scalar",
     }
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
@@ -611,11 +617,6 @@ def has_incompatible_cudagraph_ops(gm):
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
             return True
-        if hasattr(node.target, "tags"):
-            if torch.Tag.dynamic_output_shape in node.target.tags:
-                return True
-            if torch.Tag.data_dependent_output in node.target.tags:
-                return True
     return False
 
 
