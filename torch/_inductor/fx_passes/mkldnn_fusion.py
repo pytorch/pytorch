@@ -420,7 +420,7 @@ if torch._C._has_mkldnn:
                 _compute_index = 1 if (_other_index == 0) else 0
                 return _binary_node.args[_compute_index]
 
-            def _is_other_input_not_inplace_changeable(_binary_node, _other_index):
+            def _other_input_not_inplaceable(_binary_node, _other_index):
                 _compute_node = _get_compute_node(_binary_node, _other_index)
                 return (
                     len(
@@ -433,7 +433,7 @@ if torch._C._has_mkldnn:
                 )
 
             if any(
-                _is_other_input_not_inplace_changeable(n, other_index)
+                _other_input_not_inplaceable(n, other_index)
                 for n in binary_nodes
             ):
                 return False
