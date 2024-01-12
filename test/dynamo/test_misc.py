@@ -96,6 +96,16 @@ def onlyIfTranslationValidation(fn: typing.Callable) -> typing.Callable:
     return wrapper
 
 
+def cleanup_op(opname):
+    ns, name = opname.split("::")
+    if not hasattr(torch.ops, ns):
+        return
+    actual_ns = getattr(torch.ops, ns)
+    if not hasattr(actual_ns, name):
+        return
+    delattr(actual_ns, name)
+
+
 class MyPickledModule(torch.nn.Module):
     def __init__(self, z):
         super().__init__()
@@ -320,7 +330,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             optimized_g = torch._dynamo.optimize(counts, nopython=True)(f)
             _ = optimized_g(x)
         finally:
-            del torch.ops.mylib.bar
+            cleanup_op("mylib::bar")
             del lib
 
     @torch._dynamo.config.patch(only_allow_pt2_compliant_ops=True)
@@ -356,7 +366,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 optimized_g = torch._dynamo.optimize(counts, nopython=True)(f)
                 y = optimized_g(x)
         finally:
-            del torch.ops.mylib.bar2
+            cleanup_op("mylib::bar2")
             del lib
 
     @torch._dynamo.config.patch(only_allow_pt2_compliant_ops=True)
@@ -412,7 +422,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 y = optimized_h(x)
 
         finally:
-            del torch.ops.mylib.bar3
+            cleanup_op("mylib::bar3")
             del lib
 
     def test_generate_trivial_abstract_impl(self):
@@ -443,7 +453,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             output = torch.compile(f, backend="eager", fullgraph=True)(*args)
             self.assertEqual(output, None)
         finally:
-            del torch.ops.mylib.foo
+            cleanup_op("mylib::foo")
             del lib
 
     def test_can_auto_functionalize(self):
@@ -475,7 +485,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 )
                 self.assertFalse(can_auto_functionalize(torch.ops.mylib.a))
             finally:
-                del torch.ops.mylib.a
+                cleanup_op("mylib::a")
                 del lib
         for schema in expected_false:
             try:
@@ -486,7 +496,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 )
                 self.assertFalse(can_auto_functionalize(torch.ops.mylib.a))
             finally:
-                del torch.ops.mylib.a
+                cleanup_op("mylib::a")
                 del lib
 
     def test_auto_functionalize(self):
@@ -523,7 +533,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             f(*eager_args)
             self.assertEqual(compiled_args, eager_args)
         finally:
-            del torch.ops.mylib.foo
+            cleanup_op("mylib::foo")
             del lib
 
     def test_auto_functionalize_with_returns(self):
@@ -566,7 +576,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(compiled_args, eager_args)
             self.assertEqual(compiled_out, eager_out)
         finally:
-            del torch.ops.mylib.foo
+            cleanup_op("mylib::foo")
             del lib
 
     def test_auto_functionalize_on_view(self):
@@ -601,8 +611,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             y = f(x)
             self.assertEqual(y, x.sin())
         finally:
+            cleanup_op("mylib::foo")
             del lib
-            del torch.ops.mylib.foo
 
     def test_auto_functionalize_optional(self):
         try:
@@ -640,7 +650,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             f(*eager_args)
             self.assertEqual(compiled_args, eager_args)
         finally:
-            del torch.ops.mylib.foo
+            cleanup_op("mylib::foo")
             del lib
 
     def test_shape_int_inplace_binops(self):
