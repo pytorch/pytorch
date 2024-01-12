@@ -845,7 +845,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             "body_fn",
         )
         # We pick cond_shared but it shouldn't matter
-        merged_input = cond_shared + cond_unique + body_unique
+        merged_input = tuple(cond_shared + cond_unique + body_unique)
 
         cond_name = add_subgraph(
             tx,
