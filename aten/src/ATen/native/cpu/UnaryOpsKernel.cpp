@@ -523,8 +523,8 @@ static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length
     using opmath_t = at::opmath_type<scalar_t>;
     const opmath_t alpha = static_cast<opmath_t>((window_length - 1) / 2.0);
     const opmath_t beta_ = static_cast<opmath_t>(beta);
-    cpu_kernel(iter, [=](scalar_t a){
-        return calc_i0(beta_ * std::sqrt(1 - std::pow((static_cast<opmath_t>(a) - alpha) / alpha, static_cast<opmath_t>(2.0)))) / calc_i0(beta_);
+    cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
+        return calc_i0(beta_ * std::sqrt(std::abs(1 - std::pow((static_cast<opmath_t>(a) - alpha) / alpha, static_cast<opmath_t>(2.0))))) / calc_i0(beta_);
     });
   });
 }
