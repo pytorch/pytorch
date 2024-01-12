@@ -55,8 +55,8 @@ Tensor zeros(
   // Create the output texture
   vTensor v_output{
       context,
-      size,
-      ScalarType::Float,
+      size.vec(),
+      api::ScalarType::Float,
   };
 
   // Required to determine how to insert memory barriers in the command buffer
