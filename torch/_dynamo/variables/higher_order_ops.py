@@ -1364,8 +1364,9 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             return fn(*args)
 
         for i in val_range:
-            previous_locals = [body_node] + list(previous_locals)
+            previous_locals = list(previous_locals)
             previous_locals[self.store_target] = i.as_proxy()
+            previous_locals = [body_node] + list(previous_locals)
             previous_locals = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -1377,6 +1378,8 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 example_value=example_value,
             ).as_proxy()
 
+        previous_locals = list(previous_locals)
+        previous_locals[self.store_target] = i
         return previous_locals
 
 

@@ -1137,6 +1137,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 )
 
                 new_locals = op.functionalize(self)
+                for loc in new_locals:
+                    if isinstance(loc, torch.fx.Proxy):
+                        del loc.node.meta['example_value']
+                val = [wrap_fx_proxy(self, loc) if not isinstance(loc, VariableTracker) else loc for loc in new_locals]
+                for name, v in zip(self.f_code.co_varnames, val):
+                    self.symbolic_locals[name] = v
 
                 # Skip the rest of the loop completely, now that we transformed it.
                 # Also pop off the iterator.
