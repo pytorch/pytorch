@@ -113,9 +113,9 @@ class BaseTorchVariable(VariableTracker):
         self.value = value
 
     def reconstruct(self, codegen):
-        name = torch_get_name(value, f"allowed_fn_{id(value)}")
+        name = torch_get_name(self.value, f"allowed_fn_{id(self.value)}")
         unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
-        return codegen.setup_globally_cached(unique_var_name, value, False)
+        return codegen.setup_globally_cached(unique_var_name, self.value, False)
 
     def as_proxy(self):
         return self.value
