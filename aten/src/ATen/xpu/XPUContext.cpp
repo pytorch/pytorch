@@ -53,6 +53,16 @@ void initDeviceGlobalIdx(DeviceIndex device) {
       static_cast<int>(std::distance(devices.begin(), it));
 }
 
+inline void check_device(DeviceIndex device) {
+  TORCH_CHECK(
+      device >= 0 && device < num_gpus,
+      "device is out of range, device is ",
+      static_cast<int>(device),
+      ", total number of device is ",
+      static_cast<int>(num_gpus),
+      ".");
+}
+
 } // anonymous namespace
 
 DeviceProp* getCurrentDeviceProperties() {
@@ -64,13 +74,7 @@ DeviceProp* getDeviceProperties(DeviceIndex device) {
   c10::call_once(init_flag, initXPUContextVectors);
   if (device == -1)
     device = c10::xpu::current_device();
-  TORCH_CHECK(
-      device >= 0 && device < num_gpus,
-      "device is out of range, device is ",
-      device,
-      ", total number of device is ",
-      num_gpus,
-      ".");
+  check_device(device);
   c10::call_once(device_prop_flags[device], initDeviceProperty, device);
   return &device_properties[device];
 }
@@ -79,13 +83,7 @@ DeviceProp* getDeviceProperties(DeviceIndex device) {
 // index of a XPU device in the framework.
 int getGlobalIdxFromDevice(DeviceIndex device) {
   c10::call_once(init_flag, initXPUContextVectors);
-  TORCH_CHECK(
-      device >= 0 && device < num_gpus,
-      "device is out of range, device is ",
-      device,
-      ", total number of device is ",
-      num_gpus,
-      ".");
+  check_device(device);
   c10::call_once(device_global_idx_flags[device], initDeviceGlobalIdx, device);
   return device_global_idxs[device];
 }
