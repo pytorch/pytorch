@@ -242,6 +242,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         group being inter-node, setting ``NCCL_CROSS_NIC=1`` can help improve
         the all-reduce times over the replication process group for some
         cluster setups.
+        
+    .. note::
+        For advanced notes please refer to :ref:`fsdp_notes`.
 
     Args:
         module (nn.Module):
