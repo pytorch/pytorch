@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
+import torch.nn.functional as F
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
@@ -2528,6 +2529,41 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # this doesn't work today
         gm_unflat_strict = unflatten(ep)
 
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestOneOffModelExportResult(TestCase):
 
+    def test_scaled_dot_product_attention(self):
+        """
+        This test makes sure we are always getting the same decomposition result for SDPA.
+        As of now _scaled_dot_product_flash_attention_for_cpu is expected to show up in
+        export() result. Some downstream backend then further decompose it into core ATen
+        ops in torch/_decomp/decompositions.py (search for
+        _scaled_dot_product_flash_attention_for_cpu).
+
+        Export is decomposing based on the CompositeImplicitAutograd kernel implementation
+        of SDPA. If this test fails, it means the kernel is being modified. In this case
+        we strongly encourage you to change the decomposition rule under
+        torch/_decomp/decompositions.py along with the kernel changes, so all of the
+        downstream backends are not being affected.
+        """
+        class ScaledDotProductAttention(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, q, k, v):
+                attn_output = F.scaled_dot_product_attention(
+                    q, k, v, None, dropout_p=0.0, is_causal=True
+                )
+                return attn_output
+        q = torch.randn(1, 1, 8, 8)
+        k = torch.randn(1, 1, 8, 8)
+        v = torch.randn(1, 1, 8, 8)
+
+        ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
+        self.assertExpectedInline(ep.graph_module.code.strip(), """\
+def forward(self, l_q_, l_k_, l_v_):
+    _scaled_dot_product_flash_attention_for_cpu = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(l_q_, l_k_, l_v_, 0.0, True);  l_q_ = l_k_ = l_v_ = None
+    getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
+    return (getitem,)""")
 if __name__ == '__main__':
     run_tests()
