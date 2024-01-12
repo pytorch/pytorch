@@ -1625,7 +1625,9 @@ class TestTensorCreation(TestCase):
                         lambda: t.random_(from_, to_)
                     )
 
-    @dtypes(*all_types_and(torch.bfloat16, torch.half))
+    # NB: uint64 is broken because its max value is not representable in
+    # int64_t, but this is what random expects
+    @dtypes(*all_types_and(torch.bfloat16, torch.half, torch.uint16, torch.uint32))
     def test_random_full_range(self, device, dtype):
         size = 2000
         alpha = 0.1
@@ -1659,7 +1661,9 @@ class TestTensorCreation(TestCase):
         self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
         self.assertTrue((to_inc_ - delta) < t.to(torch.double).max() <= to_inc_)
 
-    @dtypes(*all_types_and(torch.bfloat16, torch.half))
+    # NB: uint64 is broken because its max value is not representable in
+    # int64_t, but this is what random expects
+    @dtypes(*all_types_and(torch.bfloat16, torch.half, torch.uint16, torch.uint32))
     def test_random_from_to(self, device, dtype):
         size = 2000
         alpha = 0.1
@@ -1748,7 +1752,7 @@ class TestTensorCreation(TestCase):
                         lambda: t.random_(from_, to_)
                     )
 
-    @dtypes(*all_types_and(torch.bfloat16, torch.half))
+    @dtypes(*all_types_and(torch.bfloat16, torch.half, torch.uint16, torch.uint32))
     def test_random_to(self, device, dtype):
         size = 2000
         alpha = 0.1
