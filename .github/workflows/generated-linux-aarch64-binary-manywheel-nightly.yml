@@ -4,6 +4,7 @@
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: linux-aarch64-binary-manywheel
 
+
 on:
   push:
     # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
@@ -16,6 +17,9 @@ on:
       - 'ciflow/binaries/*'
       - 'ciflow/binaries_wheel/*'
   workflow_dispatch:
+permissions:
+  id-token: write
+  contents: read
 
 env:
   # Needed for conda builds

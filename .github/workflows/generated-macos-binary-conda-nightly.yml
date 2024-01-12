@@ -17,6 +17,9 @@ on:
       - 'ciflow/binaries/*'
       - 'ciflow/binaries_conda/*'
   workflow_dispatch:
+permissions:
+  id-token: write
+  contents: read
 
 env:
   # Needed for conda builds

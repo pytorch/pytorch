@@ -7,6 +7,7 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
+
 on:
   push:
     {%- if branches == "nightly" %}
@@ -27,6 +28,12 @@ on:
       - '!{{ label }}/*'
 {%- endfor %}
   workflow_dispatch:
+
+{%- if branches == "nightly" %}
+permissions:
+  id-token: write
+  contents: read
+{%- endif %}
 
 env:
   # Needed for conda builds
