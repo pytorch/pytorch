@@ -690,14 +690,17 @@ class TupleIteratorVariable(ListIteratorVariable):
 class RangeIteratorVariable(ListIteratorVariable):
     """We only use this over ListIteratorVariable to hold the original range information."""
 
-    def __init__(self, *args, range_object=None, loop_bodies=None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        range_object: range,
+        cannot_convert_to_higher_order: bool = False,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         assert isinstance(range_object, range)
         self.range_object = range_object
-
-        # # Stores the loop body as a functional store, provided it is fully functional.
-        # # This allows it to express loop iteration as an inductive step.
-        self.loop_bodies = loop_bodies
+        self.cannot_convert_to_higher_order = cannot_convert_to_higher_order
 
     def next_variables(self, tx):
         assert self.mutable_local
@@ -706,9 +709,8 @@ class RangeIteratorVariable(ListIteratorVariable):
         next_iter = RangeIteratorVariable(
             self.items,
             self.index + 1,
-            loop_bodies=self.loop_bodies,
             range_object=self.range_object,
-            mutable_local=MutableLocal(),
+            cannot_convert_to_higher_order=self.cannot_convert_to_higher_order,
         )
         return self.items[self.index], next_iter
 

@@ -1165,6 +1165,36 @@ class CannotConvertRangeToHigherOrder(TorchDynamoException):
 
 
 class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    """
+    The general idea is that for a simple for loop like
+
+    ```
+    for i in range(10):
+        x = x + 1
+    ```
+
+    We can convert the loop body to a function and the loop itself
+    to a series of calls:
+
+    ```
+    def loop_body(local_0, local_1, local_...):
+        local_1 = local_1 + 1
+        return (local_0, local_1, local_...)
+
+    (x, i) = loop_body(x, i)
+    (x, i) = loop_body(x, i)
+    (x, i) = loop_body(x, i)
+    # ... 7 more times
+    ```
+
+    There are a few benefits to doing this, but mainly we bypass a ton
+    of stuff associated with tracing for loops. That itself provides some speedup.
+
+    Once we implement function compilation caching, or a higher order operator,
+    like jax.lax.fori_loop, for loops will compile in constant time, and perhaps even
+    better than what we currently have.
+    """
+
     # Any of these nested means the control flow is too complex to be
     # represented by a higher order op.
     FORBIDDEN_OPCODES = {
@@ -1223,7 +1253,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         assert loop_body_instructions[0].opname == "STORE_FAST"
         co_code: List[int] = []
-        # We skip the first instruction as it's a STORE_FAST, while we skip the lsat as it's the JUMP_BACKWARD.
+        # We skip the first instruction as it's a STORE_FAST, while we skip the last as it's the JUMP_BACKWARD.
         for inst in loop_body_instructions[1:-1]:
             co_code.extend((inst.opcode, inst.arg or 0))
             # 3.11 has inline cache entries too.
@@ -1309,7 +1339,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
     def functionalize(self, tx) -> VariableTracker:
         """Converts a for loop into a function call. Returns the modified
-        locals as a tuple of VariableTrackers.
+        locals as a tuple of Proxies and VariableTrackers.
         """
         from . import ConstantVariable
         from .builder import wrap_fx_proxy
