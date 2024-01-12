@@ -42,6 +42,10 @@ on:
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   test:
     # Don't run on forked repos or empty test matrix
@@ -60,6 +64,17 @@ jobs:
 
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+
+      - name: configure aws credentials
+        id: aws_creds
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Calculate docker image
         id: calculate-docker-image
