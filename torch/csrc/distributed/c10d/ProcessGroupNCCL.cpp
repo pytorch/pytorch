@@ -811,7 +811,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const std::string OFF = "OFF";
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
-  std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
             << "NCCL version: " << getNcclVersion() << ", size: " << size
             << ", global rank: " << globalRank()
@@ -836,7 +835,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << monitorThreadEnabled_.load()
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
-            << ", NCCL_DEBUG: " << nccl_debug << ", ID=" << this->getID();
+            << ", ID=" << this->getID();
 
   if (options_->global_ranks_in_group.empty()) {
     this->globalRankStart = 0;
@@ -1992,10 +1991,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
-  if (getRank() == 0) {
-    LOG(INFO) << logPrefix()
-              << "NCCL_DEBUG: " << getCvarString({"NCCL_DEBUG"}, "N/A");
-  }
+  LOG(INFO) << logPrefix()
+            << "NCCL_DEBUG: " << getCvarString({"NCCL_DEBUG"}, "N/A");
 
   // See [Group Start/End Note]
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
