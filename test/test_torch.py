@@ -5743,7 +5743,9 @@ else:
                     atol = 1e-2
                 self.assertEqual(src, dst.copy_(t), rtol=rtol, atol=atol)
 
-    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.complex32, torch.uint16, torch.uint32, torch.uint64))
+    @dtypes(*all_types_and_complex_and(
+        torch.bool, torch.half, torch.bfloat16, torch.complex32,
+        torch.uint16, torch.uint32, torch.uint64))
     def test_item(self, device, dtype):
         if torch.device(device).type == 'xla' and dtype in [torch.uint16, torch.uint32, torch.uint64]:
             self.skipTest('uint16,32,64 not implemented on XLA')
