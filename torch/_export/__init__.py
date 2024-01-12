@@ -329,7 +329,7 @@ def aot_compile(
         constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
 
     if config.is_predispatch:
-        gm = capture_pre_autograd_graph(f, args, kwargs, constraints)
+        gm = torch.export._trace._export(f, args, kwargs, constraints, pre_dispatch=True).module()
     else:
         # We want to export to Torch IR here to utilize the pre_grad passes in
         # inductor, which run on Torch IR.
@@ -338,7 +338,10 @@ def aot_compile(
             args,
             kwargs,
             constraints,
-            disable_constraint_solver=disable_constraint_solver
+            disable_constraint_solver=disable_constraint_solver,
+            # Disabling this flag, because instead we can rely on the mapping
+            # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
+            restore_fqn=False,
         )
     flat_example_inputs = pytree.arg_tree_leaves(*args, **(kwargs or {}))
 
