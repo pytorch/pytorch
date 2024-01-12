@@ -2,6 +2,7 @@ import contextlib
 import warnings
 import weakref
 from typing import ContextManager, List, Optional, Tuple, TYPE_CHECKING
+from unittest.mock import patch
 
 import torch
 from torch._C._functorch import (
@@ -482,8 +483,22 @@ class MetaConverter:
                                     t, outer_size=sizes, outer_stride=strides
                                 )
 
+                                from torch._subclasses.fake_tensor import (
+                                    maybe_get_fake_mode,
+                                )
+
                                 # fake_t -> fake_base via reverse view func
-                                fake_base = t._rev_view_func_unsafe(fake_t)
+                                maybe_allow_non_fake: ContextManager[
+                                    None
+                                ] = contextlib.nullcontext()
+                                fake_mode = maybe_get_fake_mode(fake_t)
+                                if fake_mode is not None:
+                                    maybe_allow_non_fake = patch.object(
+                                        fake_mode, "allow_non_fake_inputs", True  # type: ignore[arg-type]
+                                    )
+
+                                with maybe_allow_non_fake:
+                                    fake_base = t._rev_view_func_unsafe(fake_t)
 
                                 # TODO: Clean up this mess wrt requires_grad / is_leaf!
                                 # fake_base -> fake_input_base
