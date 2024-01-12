@@ -3599,7 +3599,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(actual, expected)
 
-    @unittest.expectedFailure
     @config.patch(capture_func_transforms=True)
     def test_vmap_disable_capture(self):
         counters.clear()

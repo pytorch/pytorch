@@ -20,6 +20,7 @@ import torch
 from .utils import hashable, is_function, NP_SUPPORTED_MODULES
 
 from .variables import (
+    FunctorchVmapHigherOrderVariable,
     SkipFilesVariable,
     TorchCtxManagerClassVariable,
     TorchInGraphFunctionVariable,
@@ -157,7 +158,7 @@ manual_torch_name_rule_map = {
     "torch._functorch.vmap.restore_vmap": UserFunctionVariable,
     "torch._functorch.apis.vmap": UserFunctionVariable,
     "torch._functorch.vmap.unwrap_batched": UserFunctionVariable,
-    "torch._functorch.vmap.vmap_impl": UserFunctionVariable,
+    "torch._functorch.vmap.vmap_impl": FunctorchVmapHigherOrderVariable,
     "torch._functorch.vmap.wrap_batched": UserFunctionVariable,
 }
 
