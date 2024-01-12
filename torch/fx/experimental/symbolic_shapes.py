@@ -3336,6 +3336,7 @@ class ShapeEnv:
                 return r
             if allow_none:
                 return None
+            breakpoint()
             raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
 
