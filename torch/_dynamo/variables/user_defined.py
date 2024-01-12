@@ -840,15 +840,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.ConstantVariable.create(False)
 
     def odict_getitem(self, tx, key):
+        # This helper function is called for dicts or OrderedDicts, when atleast
+        # one of the keys is not hashable. If all the keys were hashable, the
+        # dict would have already been tracked as ConstDictVariable. Here, we
+        # track the dict as UserDefinedObject.
+        # This function is called when the program accesses a key of the
+        # UserDefinedObject(dict). Here, we check if the key is hashable (or
+        # supported by Dynamo). If yes, we create the variable tracker for the
+        # accessed value. If not, we graph break.
         from .builder import VariableBuilder
         from .dicts import is_hashable
 
         # TODO this should probably be merged with the dict handling
 
         if key.source and not is_hashable(key):
-            raise ValueError("Trying to use a non-hashable key in a dict")
+            unimplemented("Non-hashable key in dict")
 
-        # TODO(anijain2305) Is there a better way to insert guard than iterating through hashable variable trackers?
+        # Tensors are also considered hashable, but we don't support them here.
+        # There is no way to create a ConstDictKeySource here because we don't
+        # have the original tensor (example value is a fake tensor) to find the
+        # index in the dictionary.  This is probably ok because we care about
+        # tensors mostly in optimizers where the dictionary is converted into a
+        # ConstDictVariable beforehand.
         if key.source:
             if isinstance(key, variables.ConstantVariable):
                 install_guard(key.source.make_guard(GuardBuilder.CONSTANT_MATCH))
@@ -866,7 +879,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 install_guard(key.source.make_guard(GuardBuilder.ID_MATCH))
             else:
-                raise ValueError("Detected unhashable variable tracker in the dict key")
+                unimplemented(f"Non-hashable key {key.source.name()} of type {key} in dict")
 
         index = key.as_python_constant()
 
