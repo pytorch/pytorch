@@ -329,40 +329,41 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
        variable when `mod` is divisible by 16.
     """
 
-    def collect(expr, pattern, collected, filter=None):
-        m = expr.match(pattern)
-        if m is not None:
-            if filter is None or filter(m):
-                collected[pattern.xreplace(m)] = m
-            return
-        for arg in expr.args:
-            collect(arg, pattern, collected, filter)
+    div_freevar_id = 0
+    mod_freevar_id = 0
+
+    def visit_indexing_div(divisor):
+        nonlocal div_freevar_id
+        result = FloorDiv(var, divisor)
+        if sympy.gcd(divisor, vec_length) == vec_length:
+            result = sympy.Symbol(f"{var}_div_c{div_freevar_id}")
+            div_freevar_id += 1
+        return result
+
+    def visit_modular_indexing(divisor, modulus):
+        nonlocal mod_freevar_id
+        result = ModularIndexing(var, modulus, mod)
+        if sympy.gcd(divisor, vec_length) == vec_length:
+            result = sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
+            mod_freevar_id += 1
+        elif divisor == 1 and sympy.gcd(modulus, vec_length) == vec_length:
+            result = var + sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
+            mod_freevar_id += 1
+        return result
+
+    original_index = index
 
     div = sympy.Wild("divisor")
-    floor_divs: Dict[sympy.Expr, Dict[sympy.Expr, sympy.Expr]] = {}
-    collect(index, FloorDiv(var, div), floor_divs, lambda m: m[div] % vec_length == 0)
-    for i, floor_div in enumerate(floor_divs):
-        freevar = sympy.Symbol(f"{var}_div_c{i}")
-        index = index.xreplace({floor_div: freevar})
+    index = index.replace(FloorDiv(var, div), visit_indexing_div)
 
     mod = sympy.Wild("modulus")
-    modulars: Dict[sympy.Expr, Dict[sympy.Expr, sympy.Expr]] = {}
-    collect(
-        index,
-        ModularIndexing(var, div, mod),
-        modulars,
-        lambda m: m[div] % vec_length == 0
-        or (m[div] == 1 and m[mod] % vec_length == 0),
-    )
-    for i, modular in enumerate(modulars):
-        freevar = sympy.Symbol(f"{var}_mod_c{i}")
-        m = modulars[modular]
-        if m[div] % vec_length == 0:
-            index = index.xreplace({modular: freevar})
-        else:
-            index = index.xreplace({modular: var + freevar})
+    index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
-    return sympy.simplify(index)
+    index = sympy.simplify(index)
+    if index != original_index:
+        return simplify_index_in_vec_range(index, var, vec_length)
+
+    return index
 
 
 @functools.lru_cache
