@@ -15,7 +15,6 @@ aten::_native_batch_norm_legit
 aten::_native_batch_norm_legit.no_stats
 aten::_native_batch_norm_legit_functional
 aten::_native_batch_norm_legit_no_training
-aten::_scaled_dot_product_flash_attention_for_cpu
 aten::_softmax
 aten::_softmax.out
 aten::_to_copy
