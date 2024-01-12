@@ -720,7 +720,8 @@ class VariableBuilder:
         elif is_allowed(value):
             unimplemented("ybliang: _wrap")
         elif (
-            is_function(value)
+            not is_allowed(value)
+            and is_function(value)
             and skipfiles.check(value, is_inlined_call=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
             and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
@@ -731,13 +732,13 @@ class VariableBuilder:
                 skipfiles.check_verbose(value, is_inlined_call=True).reason,
                 source=self.source,
             )
-        elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
+        elif not is_allowed(value) and istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
             self.install_guards(GuardBuilder.CLOSURE_MATCH)
             return UserFunctionVariable(
                 value,
                 source=self.source,
             )
-        elif isinstance(value, types.MethodType) and isinstance(
+        elif not is_allowed(value) and isinstance(value, types.MethodType) and isinstance(
             value.__self__, torch.nn.Module
         ):
             # don't let MethodTypes fall through to UserDefinedObject,
