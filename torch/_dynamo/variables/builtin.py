@@ -735,7 +735,7 @@ class BuiltinVariable(VariableTracker):
 
                     fn = variables.NumpyVariable(np.clip)
                 else:
-                    fn = variables.TorchVariable(torch.clamp)
+                    fn = variables.TorchInGraphFunctionVariable(torch.clamp)
                 kwargs = {"min": b} if (self.fn is max) else {"max": b}
                 result = fn.call_function(tx, [a], kwargs)
             else:
@@ -746,7 +746,7 @@ class BuiltinVariable(VariableTracker):
                     fn = variables.NumpyVariable(fn)
                 else:
                     fn = {max: torch.maximum, min: torch.minimum}[self.fn]
-                    fn = variables.TorchVariable(fn)
+                    fn = variables.TorchInGraphFunctionVariable(fn)
                 result = fn.call_function(tx, [a, b], {})
 
             # return unspec if both a, b are unspec or const

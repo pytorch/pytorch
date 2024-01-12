@@ -320,6 +320,8 @@ class VariableBuilder:
                     torch.Size,
                     torch.device,
                     torch.dtype,
+                    torch.memory_format,
+                    torch.layout,
                 ),
                 cls.wrap_literal,
             ),
