@@ -94,6 +94,14 @@ namespace detail {
         ts = ts | gen->key_set();
       }
     }
+    void operator()(const c10::SymIntArrayRef& xs) {
+      for (const auto& x : xs) {
+        if (x.is_heap_allocated() && x.toSymNode()->singleton_int().has_value()) {
+          ts = ts | DispatchKeySet({DispatchKey::Python, DispatchKey::PythonTLSSnapshot});
+          break;
+        }
+      }
+    }
     template <typename T>
     void operator()(const T&) {
       // do nothing
