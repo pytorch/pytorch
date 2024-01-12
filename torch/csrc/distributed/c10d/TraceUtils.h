@@ -514,7 +514,7 @@ struct NCCLTraceBuffer {
     EventList* endEvents = nullptr;
     c10::optional<float> duration = c10::nullopt;
 
-    std::lock_guard<std::mutex> guard(mutex_);
+    std::unique_lock<std::mutex> guard(mutex_);
 
     auto& entry = entries_.at(*id % max_entries_);
     if (entry.id_ == *id) {
@@ -528,26 +528,29 @@ struct NCCLTraceBuffer {
       }
     }
 
-    mutex_.unlock();
-    // Compute duration without without holding the lock, because
-    // cudaEventDuration() can hang, and we need to acquire the lock before we
-    // can dump(), which we never want to block.
     if (can_compute_duration) {
+      // Compute duration without without holding the lock, because
+      // cudaEventDuration() can hang, and we need to acquire the lock before we
+      // can dump(), which we never want to block.
+      guard.unlock();
       duration = getDurationFromFirstEvent(*startEvents, *endEvents);
-    }
-    mutex_.lock();
+      guard.lock();
 
-    if (entry.id_ == *id) {
+      // Refresh the entry ref, see if it has been overwritten
+      entry = entries_.at(*id % max_entries_);
+      if (entry.id_ != *id) {
+        LOG(INFO)
+            << "retire_id abandoned for id " << *id
+            << ", event was overwritten while waiting to compute duration.";
+        return;
+      }
       if (duration.has_value()) {
         entry.duration_ = duration.value();
       }
-      entry.retired_ = true;
-      entry.start_ = entry.end_ = nullptr;
-    } else {
-      LOG(INFO)
-          << "Failed retire_id " << *id
-          << ", maybe overwritten by another event before compute_duration() finished";
     }
+
+    entry.retired_ = true;
+    entry.start_ = entry.end_ = nullptr;
   }
 
   std::string dump() {
