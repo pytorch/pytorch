@@ -469,6 +469,17 @@ if torch._C._has_mkldnn:
 
         return fn
 
+    def _can_be_inplace(_other):
+        if isinstance(_other.data, ir.View):
+            return _can_be_inplace(_other.data)
+        else:
+            return not (
+                isinstance(_other.data, ir.ReinterpretView)
+                or isinstance(
+                    _other.get_layout(), (ir.MutationLayout, ir.AliasedLayout)
+                )
+            )
+
     def _register_binary_unary_maybe_inplace_fusion_lowering(
         pattern,
         computation_op,
@@ -502,11 +513,8 @@ if torch._C._has_mkldnn:
                     computation_args += [1.0, None, [], None]
             # Make sure the other is not an alias or mutation(fx side doesn't has such info).
             other.realize()
-            can_be_inplace = not (
-                isinstance(other.data, ir.ReinterpretView)
-                or isinstance(other.get_layout(), (ir.MutationLayout, ir.AliasedLayout))
-            )
-            if not can_be_inplace:
+
+            if not _can_be_inplace(other):
                 return L[outplace_fusion_op](*computation_args)
             return L[inplace_fusion_op](*computation_args)
 
