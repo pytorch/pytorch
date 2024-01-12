@@ -3561,7 +3561,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         compiled_f = torch._dynamo.optimize(cnts)(f)
         compiled_f(param)
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 2)
+        self.assertEqual(cnts.op_count, ifdynstaticdefault(2, 1))
 
     @skipIfNotPy311
     def test_linetable_311_writer1(self):
