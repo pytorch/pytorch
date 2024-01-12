@@ -543,10 +543,11 @@ class TestTensorCreation(TestCase):
             self.assertEqual(y, expected_y)
             self.assertEqual(x, expected_x)
 
-    @dtypes(*all_types_and_complex())
+    @dtypes(*all_types_and_complex(), torch.uint16, torch.uint32, torch.uint64)
     def test_cat_out_fast_path_dim0_dim1(self, device, dtype):
+        int_types = integral_types_and(torch.uint16, torch.uint32, torch.uint64)
         x = torch.zeros((0), device=device, dtype=dtype)
-        if dtype in integral_types():
+        if dtype in int_types:
             y = torch.randint(low=0, high=100, size=(4, 6), device=device, dtype=dtype)
         else:
             y = torch.randn((4, 6), device=device, dtype=dtype)
@@ -575,7 +576,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(b_fastcat, expected_b)
         # Finally, we need to make sure backward is not broken
         # Integral types will not have grad
-        if dtype not in integral_types():
+        if dtype not in int_types:
             a = torch.randn((4, 3), device=device, dtype=dtype, requires_grad=True)
             b = torch.randn((2, 3), device=device, dtype=dtype, requires_grad=True)
             c = torch.randn((5, 3), device=device, dtype=dtype, requires_grad=True)
@@ -1046,6 +1047,8 @@ class TestTensorCreation(TestCase):
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
 
     # Note: CUDA will fail this test on most dtypes, often dramatically.
+    # NB: torch.uint16, torch.uint32, torch.uint64 excluded as this
+    # nondeterministically fails, warning "invalid value encountered in cast"
     @onlyCPU
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
