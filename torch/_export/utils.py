@@ -55,7 +55,7 @@ def _check_input_constraints_for_graph(
     # symbols with given input dimension values to check equality constraints.
     unification_map: "Dict[sympy.Symbol, Any]" = {}
     for arg, node in zip(args, input_placeholders):
-        node_val = node.meta["val"]
+        node_val = node.meta.get("val")
         if isinstance(node_val, FakeTensor):
             check(
                 isinstance(arg, torch.Tensor),
