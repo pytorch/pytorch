@@ -50,9 +50,13 @@ nn/qat/ @jerryzh168
 /torch/onnx/ @bowenbao @abock @thiagocrepaldi @wschin
 /test/onnx/ @bowenbao @abock @thiagocrepaldi @wschin
 
+# CI
+/.ci  @pytorch/pytorch-dev-infra
+
 # Docker
 /.ci/docker/ @jeffdaily
-/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @ngimel @bertmaher @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @bertmaher @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+/.ci/docker/ci_commit_pins/triton-rocm.txt @jeffdaily @jataylo @jithunnair-amd @pruthvistony
 
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
@@ -76,15 +80,15 @@ nn/qat/ @jerryzh168
 /test/test_linalg.py @lezcano @nikitaved @IvanYashchuk
 
 # OpInfo-related files
-/torch/testing/_internal/common_methods_invocations.py @mruberry @ngimel
-/torch/testing/_internal/common_device_type.py @mruberry @ngimel
-test/test_ops.py @mruberry @ngimel
-test/test_ops_gradients.py @mruberry @ngimel @soulitzer
-test/test_ops_fwd_gradients.py @mruberry @ngimel @soulitzer
-test/test_unary_ufuncs.py @mruberry @ngimel
-test/test_binary_ufuncs.py @mruberry @ngimel
-test/test_reductions.py @mruberry @ngimel
-test/test_type_promotion.py @mruberry @ngimel
+/torch/testing/_internal/common_methods_invocations.py @mruberry
+/torch/testing/_internal/common_device_type.py @mruberry
+test/test_ops.py @mruberry
+test/test_ops_gradients.py @mruberry @soulitzer
+test/test_ops_fwd_gradients.py @mruberry @soulitzer
+test/test_unary_ufuncs.py @mruberry
+test/test_binary_ufuncs.py @mruberry
+test/test_reductions.py @mruberry
+test/test_type_promotion.py @mruberry
 
 # functorch-related things
 # This list is for people wanting to be notified every time there's a change
@@ -112,6 +116,16 @@ torch/utils/data/ @ejguan
 # hipify
 torch/utils/hipify/ @jeffdaily @jithunnair-amd
 tools/amd_build/ @jeffdaily @jithunnair-amd
+
+# ROCm-specific files
+aten/src/ATen/hip/ @jeffdaily @jithunnair-amd
+aten/src/ATen/miopen/ @jeffdaily @jithunnair-amd
+aten/src/ATen/native/miopen/ @jeffdaily @jithunnair-amd
+c10/hip @jeffdaily @jithunnair-amd
+caffe2/core/hip @jeffdaily @jithunnair-amd
+caffe2/operators/hip @jeffdaily @jithunnair-amd
+caffe2/operators/rnn/hip @jeffdaily @jithunnair-amd
+caffe2/utils/hip @jeffdaily @jithunnair-amd
 
 # torch.export
 /torch/export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17

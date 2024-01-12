@@ -279,6 +279,37 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         ):
             opt_model(x)
 
+    def test_enum_arg(self):
+        from enum import Enum
+
+        class SomeEnum(Enum):
+            A = 0
+            B = 1
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, e):
+                if e is SomeEnum.A:
+                    return x.sin()
+                else:
+                    return x.cos()
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x, enum):
+            output = Foo.apply(
+                x,
+                enum,
+            )
+            return output
+
+        x = torch.tensor([[1.0, 2, 3], [4, 5, 6]], requires_grad=True)
+        y = f(x, SomeEnum.A)
+        self.assertEqual(y, x.sin())
+
     def test_save_for_bwd(self):
         model = SaveForBwdModule()
         opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
@@ -594,7 +625,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
             @staticmethod
             def jvp(ctx, x_t):
-                if jvp_err:
+                if jvp_err:  # noqa: F821
                     return x_t
                 else:
                     return x_t.mul_(2)
@@ -610,7 +641,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
             @staticmethod
             def jvp(ctx, x_t, y_t):
-                return x_t + y_t, fn(x_t)
+                return x_t + y_t, fn(x_t)  # noqa: F821
 
         class MyFn3(torch.autograd.Function):
             @staticmethod
@@ -696,7 +727,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                 )
 
             @staticmethod
-            def __tensor_unflatten__(tensors, metadatas):
+            def __tensor_unflatten__(tensors, metadatas, outer_size, outer_stride):
                 return FooTensor(tensors["_data"], metadatas[0], metadatas[1])
 
             @classmethod
@@ -804,6 +835,26 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         foo(torch.randn(2, requires_grad=True))
         self.assertEqual(cnts.frame_count, 1)
+
+    def test_default_values(self):
+        from torch.autograd import Function
+
+        class Foo(Function):
+            @staticmethod
+            def forward(ctx, x, alpha=0.99):
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out
+
+        @torch.compile
+        def foo(x):
+            return Foo.apply(x)
+
+        # Make sure guards for default values do not crash
+        foo(torch.randn(2))
+        foo(torch.randn(2, requires_grad=True))
 
 
 if __name__ == "__main__":

@@ -515,7 +515,7 @@ def _use_cuda_memory_pool_manager(device, mem_pool, stream):
         try:
             yield
         finally:
-            torch._C._cuda_endAllocateCurrentStreamToPool(device)
+            torch._C._cuda_endAllocateCurrentStreamToPool(device, mem_pool)
             torch._C._cuda_releasePool(device, mem_pool)
 
 

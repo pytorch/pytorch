@@ -337,13 +337,13 @@ class TestPruningNN(NNTestCase):
         """
         m = nn.Linear(5, 2, bias=False)
 
-        tensor_id = id(list(m.parameters())[0])
+        tensor_id = id(next(iter(m.parameters())))
 
         prune.random_unstructured(m, name="weight", amount=0.9)
-        self.assertEqual(tensor_id, id(list(m.parameters())[0]))
+        self.assertEqual(tensor_id, id(next(iter(m.parameters()))))
 
         prune.remove(m, "weight")
-        self.assertEqual(tensor_id, id(list(m.parameters())[0]))
+        self.assertEqual(tensor_id, id(next(iter(m.parameters()))))
 
     def test_random_pruning_pickle(self):
         modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]

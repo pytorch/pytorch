@@ -3,6 +3,7 @@
 
 import os
 
+import torch
 import torch.testing._internal.common_utils as common
 import torch.testing._internal.common_nn as common_nn
 from cpp_api_parity.parity_table_parser import parse_parity_tracker_table
@@ -18,6 +19,7 @@ PARITY_TABLE_PATH = os.path.join(os.path.dirname(__file__), 'cpp_api_parity', 'p
 
 parity_table = parse_parity_tracker_table(PARITY_TABLE_PATH)
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppApiParity(common.TestCase):
     module_test_params_map = {}
     functional_test_params_map = {}

@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
+    parametrize,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase,
@@ -439,6 +440,21 @@ class TestInductorDynamic(TestCase):
         actual = cfn(a, b)
         self.assertEqual(expect, actual)
 
+    def test_float_is_integer(self, device):
+        def fn(x, mul, dim=-1):
+            size = x.size(dim)
+            m = size / mul
+            if m.is_integer():
+                return m
+            return size
+
+        a = torch.randn((3, 6, 4, 2), device=device)
+        cfn = self.compile_fn(fn)
+
+        expect = fn(a, 2)
+        actual = cfn(a, 2)
+        self.assertEqual(expect, actual)
+
     @onlyCPU
     def test_arithmetic_constant_folding(self, device):
         def test(fn):
@@ -480,6 +496,33 @@ class TestInductorDynamic(TestCase):
         expect = fn(5)
         actual = cfn(5)
         self.assertEqual(expect, actual)
+
+    @parametrize(
+        "op",
+        [
+            math.sqrt,
+            math.sin,
+            math.cos,
+            math.cosh,
+            math.sin,
+            math.sinh,
+            math.tan,
+            math.tanh,
+            math.asin,
+            math.acos,
+            math.atan,
+        ],
+    )
+    def test_math_ops(self, device, op):
+        def func(x, fn, a):
+            return x + fn(a)
+
+        cfunc = self.compile_fn(func, fullgraph=True)
+        x = torch.rand(10, device=device)
+        a = -1 if op in (math.asin, math.acos) else 12
+        expected = func(x, op, a)
+        output = cfunc(x, op, a)
+        self.assertEqual(output, expected)
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals())

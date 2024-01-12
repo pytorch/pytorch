@@ -10,7 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 
-namespace at { namespace native {
+namespace at::native {
 
 static CPUCapability compute_cpu_capability() {
   auto envar = std::getenv("ATEN_CPU_CAPABILITY");
@@ -192,4 +192,4 @@ void* DispatchStubImpl::choose_cpu_impl(
   return DEFAULT;
 }
 
-}}  // namespace at::native
+}  // namespace at::native

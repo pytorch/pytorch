@@ -152,9 +152,6 @@ class CacheBase:
                     "cuda": torch.version.cuda,
                     "triton": triton_version,
                 },
-                "other": {
-                    "allow_tf32": torch.backends.cuda.matmul.allow_tf32,
-                },
             }
         except (AssertionError, RuntimeError):
             # If cuda is not installed, none of the above config is relevant.
@@ -242,7 +239,7 @@ class PersistentCache(CacheBase):
     def lookup(
         self,
         choices: List[ChoiceCaller],
-        name: str,
+        op: str,
         inputs: str,
         benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
     ) -> Dict[ChoiceCaller, float]:
@@ -250,17 +247,20 @@ class PersistentCache(CacheBase):
         Check to see if we have benchmarked the given choice callers. For each
         choice caller:
 
-            1. Check global_cache[name][inputs][choice], return benchmark if cached.
-            2. Check local_cache[name][inputs][choice], return benchmark if cached.
+            1. Check global_cache[op][inputs][choice][precision], return benchmark if cached.
+            2. Check local_cache[op][inputs][choice][precision], return benchmark if cached.
             3.
                 a. `max_autotune_gemm=True`: benchmark the choice, update
-                    local_cache[name][inputs][choice], and return the benchmark.
+                    local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
+        precision = torch.get_float32_matmul_precision()
 
-        log_stats = partial(log_global_cache_stats, self.system, name, inputs)
-        log_vals = partial(log_global_cache_vals, self.system, name, inputs)
-        log_errors = partial(log_global_cache_errors, self.system, name, inputs)
+        log_stats = partial(log_global_cache_stats, self.system, op, inputs, precision)
+        log_vals = partial(log_global_cache_vals, self.system, op, inputs, precision)
+        log_errors = partial(
+            log_global_cache_errors, self.system, op, inputs, precision
+        )
         timings = {}
 
         def check_cache(cache, callback=None) -> bool:
@@ -268,9 +268,9 @@ class PersistentCache(CacheBase):
             hit = True
             for choice in choices:
                 choice_hash = choice.hash_key()
-                if choice_hash in cache.get(name, {}).get(inputs, {}):
+                if choice_hash in cache.get(op, {}).get(inputs, {}).get(precision, {}):
                     # cache hit
-                    timings[choice] = cache[name][inputs][choice_hash]
+                    timings[choice] = cache[op][inputs][precision][choice_hash]
                 else:
                     # cache miss
                     hit = False
@@ -290,11 +290,10 @@ class PersistentCache(CacheBase):
                     # re-benchmark everything to try to get consistent numbers from the same machine
                     timings = benchmark(choices)
                     assert all(choice in timings for choice in choices)
-
-                    local_cache.setdefault(name, {})
-                    local_cache[name].setdefault(inputs, {})
+                    local_cache.setdefault(op, {})
+                    local_cache[op].setdefault(inputs, {}).setdefault(precision, {})
                     for choice, timing in timings.items():
-                        local_cache[name][inputs][choice.hash_key()] = timing
+                        local_cache[op][inputs][precision][choice.hash_key()] = timing
                 except RuntimeError as e:
                     # catch and log autotuning failures
                     log_errors(e)
@@ -1032,6 +1031,9 @@ cdll.LoadLibrary("__lib_path__")
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
+        if config.is_fbcode():
+            return True
+
         key, input_path = write(VecISA._avx_code, "cpp")
         from filelock import FileLock
 
@@ -1342,11 +1344,12 @@ def get_include_and_linking_paths(
         if aot_mode and cuda:
             if macros is None:
                 macros = ""
-            macros += " -D USE_CUDA"
+            macros += " -D USE_ROCM" if torch.version.hip else " -D USE_CUDA"
 
         if cuda:
             if torch.version.hip is not None:
                 libs += ["c10_hip", "torch_hip"]
+                macros += " -D __HIP_PLATFORM_AMD__"
             else:
                 if config.is_fbcode():
                     libs += ["cuda"]
@@ -1533,10 +1536,7 @@ class CudaKernelParamCache:
         return cls.cache.get(key, None)
 
 
-class AotCodeCache:
-    cache: Dict[str, str] = dict()
-    clear = staticmethod(cache.clear)
-
+class AotCodeCompiler:
     @classmethod
     def compile(
         cls,
@@ -1576,139 +1576,124 @@ class AotCodeCache:
             specified_dir=specified_output_path,
         )
 
-        if key not in cls.cache or (
-            specified_output_path
-            and os.path.dirname(cls.cache[key]) != specified_output_path
-            or specified_so_name
-            and os.path.basename(cls.cache[key]) != specified_so_name
-        ):
-            from filelock import FileLock
+        from filelock import FileLock
 
-            lock_dir = get_lock_dir()
-            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-            with lock:
-                # Currently, this only support serializing extern nodes in fbcode
-                # Eventually, we should also have a serializer for OSS.
-                if config.is_fbcode() and serialized_extern_kernel_nodes:
-                    output_json = os.path.splitext(input_path)[0] + ".json"
-                    with open(output_json, "w") as f:
-                        f.write(serialized_extern_kernel_nodes)
+        lock_dir = get_lock_dir()
+        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+        with lock:
+            # Currently, this only support serializing extern nodes in fbcode
+            # Eventually, we should also have a serializer for OSS.
+            if config.is_fbcode() and serialized_extern_kernel_nodes:
+                output_json = os.path.splitext(input_path)[0] + ".json"
+                with open(output_json, "w") as f:
+                    f.write(serialized_extern_kernel_nodes)
 
-                output_so = (
-                    config.aot_inductor.output_path
-                    if specified_so_name
-                    else os.path.splitext(input_path)[0] + ".so"
+            output_so = (
+                config.aot_inductor.output_path
+                if specified_so_name
+                else os.path.splitext(input_path)[0] + ".so"
+            )
+
+            output_o = os.path.splitext(input_path)[0] + ".o"
+            cmd = cpp_compile_command(
+                input=input_path,
+                output=output_o,
+                vec_isa=picked_vec_isa,
+                cuda=cuda,
+                aot_mode=graph.aot_mode,
+                compile_only=True,
+                use_absolute_path=use_absolute_path,
+            )
+            log.debug("aot compilation command: %s", cmd)
+            if fbcode_aot_cpu_re:
+                compile_file(input_path, output_o, cmd.split())
+                os.chmod(output_o, 0o644)
+            else:
+                run_command_and_check(cmd)
+
+            def _to_bytes(t: torch.Tensor) -> bytes:
+                # This serializes the tensor's untyped_storage to bytes by accessing
+                # the raw data of the underlying structure.
+                import ctypes
+
+                if t.numel() == 0:
+                    return b""
+
+                t_cpu = t.untyped_storage().cpu()
+                raw_array = ctypes.cast(
+                    t_cpu.data_ptr(),
+                    ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes()),
                 )
 
-                if not os.path.exists(output_so):
-                    output_o = os.path.splitext(input_path)[0] + ".o"
-                    cmd = cpp_compile_command(
-                        input=input_path,
-                        output=output_o,
-                        vec_isa=picked_vec_isa,
-                        cuda=cuda,
-                        aot_mode=graph.aot_mode,
-                        compile_only=True,
-                        use_absolute_path=use_absolute_path,
-                    )
-                    log.debug("aot compilation command: %s", cmd)
-                    if fbcode_aot_cpu_re:
-                        compile_file(input_path, output_o, cmd.split())
-                        os.chmod(output_o, 0o644)
-                    else:
-                        run_command_and_check(cmd)
+                return bytes(raw_array.contents)
 
-                    def _to_bytes(t: torch.Tensor) -> bytes:
-                        # This serializes the tensor's untyped_storage to bytes by accessing
-                        # the raw data of the underlying structure.
-                        import ctypes
+            aot_constants = b"".join(
+                _to_bytes(tensor) for tensor in graph.constants.values()
+            )
 
-                        if t.numel() == 0:
-                            return b""
+            _, consts_path = write(
+                aot_constants,
+                "bin",
+                specified_dir=specified_output_path,
+            )
 
-                        t_cpu = t.untyped_storage().cpu()
-                        raw_array = ctypes.cast(
-                            t_cpu.data_ptr(),
-                            ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes()),
-                        )
+            consts_o = os.path.splitext(consts_path)[0] + ".o"
+            if fbcode_aot_cpu_re:
+                cmd = f"{ld_command} -r -b binary -o {os.path.basename(consts_o)} {os.path.basename(consts_path)}"
+                compile_file(consts_path, consts_o, cmd.split())
+                os.chmod(consts_o, 0o644)
+            else:
+                cmd = f"{ld_command} -r -b binary -o {consts_o} {consts_path}"
+                run_command_and_check(cmd)
+            log.debug("aot constant binary command: %s", cmd)
 
-                        return bytes(raw_array.contents)
+            cmd = (
+                f"{objcopy_command} --rename-section"
+                " .data=.lrodata,alloc,load,readonly,data,contents"
+                f" {consts_o} {consts_o}"
+            )
+            log.debug("aot constant obj command: %s", cmd)
+            run_command_and_check(cmd)
 
-                    aot_constants = b"".join(
-                        _to_bytes(tensor) for tensor in graph.constants.values()
-                    )
+            cmd = f"rm {consts_path}"
+            log.debug("aot constant bin removal command: %s", cmd)
+            run_command_and_check(cmd)
 
-                    consts_key, consts_path = write(
-                        aot_constants,
-                        "bin",
-                        specified_dir=specified_output_path,
-                    )
+            if fbcode_aot_cpu_re:
+                body = re.sub(r"[\W]", "_", os.path.basename(consts_path))
+            else:
+                body = re.sub(r"[\W]", "_", consts_path)
 
-                    consts_o = os.path.splitext(consts_path)[0] + ".o"
-                    if fbcode_aot_cpu_re:
-                        cmd = f"{ld_command} -r -b binary -o {os.path.basename(consts_o)} {os.path.basename(consts_path)}"
-                        compile_file(consts_path, consts_o, cmd.split())
-                        os.chmod(consts_o, 0o644)
-                    else:
-                        cmd = f"{ld_command} -r -b binary -o {consts_o} {consts_path}"
-                        run_command_and_check(cmd)
-                    log.debug("aot constant binary command: %s", cmd)
+            symbol_list = []
+            symbol_list.append(
+                f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"
+            )
+            symbol_list.append(
+                f"{objcopy_command} --redefine-sym _binary_{body}_size=_binary_constants_bin_size {consts_o}"
+            )
+            symbol_list.append(
+                f"{objcopy_command} --redefine-sym _binary_{body}_end=_binary_constants_bin_end {consts_o}"
+            )
+            log.debug("aot constant binary redefine symbol: %s", " ".join(symbol_list))
+            for cmd in symbol_list:
+                run_command_and_check(cmd)
 
-                    cmd = (
-                        f"{objcopy_command} --rename-section"
-                        " .data=.lrodata,alloc,load,readonly,data,contents"
-                        f" {consts_o} {consts_o}"
-                    )
-                    log.debug("aot constant obj command: %s", cmd)
-                    run_command_and_check(cmd)
+            cmd = cpp_compile_command(
+                input=[output_o, consts_o],
+                output=output_so,
+                vec_isa=picked_vec_isa,
+                cuda=cuda,
+                aot_mode=graph.aot_mode,
+                use_absolute_path=use_absolute_path,
+            )
+            log.debug("aot linkage command: %s", cmd)
+            if fbcode_aot_cpu_re:
+                compile_file([output_o, consts_o], output_so, cmd.split())
+                os.chmod(output_so, 0o755)
+            else:
+                run_command_and_check(cmd)
 
-                    cmd = f"rm {consts_path}"
-                    log.debug("aot constant bin removal command: %s", cmd)
-                    run_command_and_check(cmd)
-
-                    if fbcode_aot_cpu_re:
-                        body = re.sub(r"[\W]", "_", os.path.basename(consts_path))
-                    else:
-                        body = re.sub(r"[\W]", "_", consts_path)
-
-                    symbol_list = []
-                    symbol_list.append(
-                        f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"
-                    )
-                    symbol_list.append(
-                        f"{objcopy_command} --redefine-sym _binary_{body}_size=_binary_constants_bin_size {consts_o}"
-                    )
-                    symbol_list.append(
-                        f"{objcopy_command} --redefine-sym _binary_{body}_end=_binary_constants_bin_end {consts_o}"
-                    )
-                    log.debug(
-                        "aot constant binary redefine symbol: %s", " ".join(symbol_list)
-                    )
-                    for cmd in symbol_list:
-                        run_command_and_check(cmd)
-
-                    cmd = cpp_compile_command(
-                        input=[output_o, consts_o],
-                        output=output_so,
-                        vec_isa=picked_vec_isa,
-                        cuda=cuda,
-                        aot_mode=graph.aot_mode,
-                        use_absolute_path=use_absolute_path,
-                    )
-                    log.debug("aot linkage command: %s", cmd)
-                    if fbcode_aot_cpu_re:
-                        compile_file([output_o, consts_o], output_so, cmd.split())
-                        os.chmod(output_so, 0o755)
-                    else:
-                        run_command_and_check(cmd)
-                else:
-                    log.debug(
-                        "aot_inductor dynamic library already exist: %s", output_so
-                    )
-
-                cls.cache[key] = output_so
-
-        return cls.cache[key]
+        return output_so
 
 
 # Putting this fn in cpp.py (unfortunately) causes a deadlock, which is why it's in codecache.py.
@@ -1936,8 +1921,7 @@ class CppWrapperCodeCache:
     def load(cls, source_code: str, func_name: str, key: str, cuda: bool) -> CDLL:
         name = f"inline_extension_{key}"
         cpp_wrapper_dir = cpp_wrapper_cache_dir(name)
-        if not os.path.exists(cpp_wrapper_dir):
-            os.makedirs(cpp_wrapper_dir)
+        os.makedirs(cpp_wrapper_dir, exist_ok=True)
 
         ext = "so"
         filepath = os.path.join(cpp_wrapper_dir, f"{name}.{ext}")
@@ -2339,6 +2323,8 @@ def _async_compile_initializer(orig_ppid) -> None:
     global _watchdog_thread
     _watchdog_thread = Thread(target=run, daemon=True)
     _watchdog_thread.start()
+    # Ignore Ctrl-C (i.e. SIGINT) sent to pool workers to avoid meaningless log spam.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 _watchdog_thread: Optional[Thread] = None

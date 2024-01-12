@@ -4,10 +4,6 @@
 
 #if AT_CUDNN_ENABLED()
 
-#include <ATen/native/cudnn/Macros.h>
-
-#if HAS_CUDNN_V8()
-
 #include <ATen/cudnn/cudnn-wrapper.h>
 
 #include <c10/macros/Macros.h>
@@ -221,22 +217,8 @@ cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
     return nullptr;
   }
   if (lru_cache_limit) {
-    TORCH_INTERNAL_ASSERT(*(it->second.second) == key, "CUDNN V8 LRU Cache Corrupted (found key mismatches list). Please report a bug to PyTorch.");
-    auto engine_cache_order_size = engine_cache_order.size();
-    auto engine_cache_size = engine_cache.size();
-    TORCH_INTERNAL_ASSERT(engine_cache_order_size == engine_cache_size, "CUDNN V8 LRU Cache Corrupted (found list vs. map size mismatch). Please report a bug to PyTorch.");
     // update most recently accessed
-    auto plan = it->second.first;
-    engine_cache_order.erase(it->second.second);
-    engine_cache_order.push_back(key);
-    engine_cache.erase(key);
-    engine_cache.emplace(key, std::make_pair(plan, --engine_cache_order.end()));
-    // iterator was invalidated by the erase, so we grab it again
-    it = engine_cache.find(key);
-    TORCH_INTERNAL_ASSERT(it->first == *(it->second.second), "CUDNN V8 LRU Cache Corrupted (refresh list vs. map key mismatch). Please report a bug to PyTorch.");
-    TORCH_INTERNAL_ASSERT((long) engine_cache_order.size() <= lru_cache_limit, "CUDNN V8 LRU Cache Corrupted (refresh size exceeds limit: ", lru_cache_limit, " please report a bug to PyTorch.");
-    TORCH_INTERNAL_ASSERT(engine_cache_order.size() == engine_cache_order_size, "CUDNN V8 LRU Cache Corrupted (list size unexpectedly changed). Please report a bug to PyTorch.");
-    TORCH_INTERNAL_ASSERT(engine_cache.size() == engine_cache.size(), "CUDNN V8 LRU Cache Corrupted (cache size unexpectedly changed). Please report a bug to PyTorch.");
+    engine_cache_order.splice(engine_cache_order.begin(), engine_cache_order, it->second.second);
   }
   return &(it->second.first);
 }
@@ -248,24 +230,18 @@ void update(const KeyType& key, T& results) {
   } else if (lru_cache_limit) {
     auto it = engine_cache.find(key);
     if (it == engine_cache.end()) {
-      auto engine_cache_order_size = engine_cache_order.size();
-      auto engine_cache_size = engine_cache.size();
-      TORCH_INTERNAL_ASSERT(engine_cache_order_size == engine_cache_size, "CUDNN V8 LRU Cache Corrupted (list vs. map size mismatch). Please report a bug to PyTorch.");
-      if ((long) engine_cache_order_size >= lru_cache_limit) {
-        // need to perform eviction
-        TORCH_INTERNAL_ASSERT(engine_cache.find(engine_cache_order.front()) != engine_cache.end(), "CUDNN V8 LRU Cache Corrupted (eviction key not in map). Please report a bug to PyTorch.");
-        engine_cache.erase(engine_cache_order.front());
-        engine_cache_order.pop_front();
+      if ((long) engine_cache.size() >= lru_cache_limit) {
+        auto erase_count = engine_cache.erase(engine_cache_order.back());
+        TORCH_INTERNAL_ASSERT(erase_count == 1, "CUDNN V8 LRU Cache Corrupted (eviction key not in map). Please report a bug to PyTorch.");
+        engine_cache_order.pop_back();
       }
+      engine_cache_order.emplace_front(key);
+      engine_cache.emplace(key, std::make_pair(results, engine_cache_order.begin()));
     } else {
-      TORCH_INTERNAL_ASSERT(*(it->second.second) == key, "CUDNN V8 LRU Cache Corrupted (list iterator key mismatch). Please report a bug to PyTorch.");
-      engine_cache_order.erase(it->second.second);
+      it->second.first = results;
+      // update most recently accessed
+      engine_cache_order.splice(engine_cache_order.begin(), engine_cache_order, it->second.second);
     }
-    engine_cache_order.push_back(key);
-    engine_cache.erase(key);
-    engine_cache.emplace(key, std::make_pair(results, --engine_cache_order.end()));
-    TORCH_INTERNAL_ASSERT(engine_cache.find(key)->first == *(engine_cache.find(key)->second.second), "CUDNN V8 LRU Cache Corrupted (updated list vs. map key mismatch). Please report a bug to PyTorch.");
-    TORCH_INTERNAL_ASSERT((long) engine_cache_order.size() <= lru_cache_limit, "CUDNN V8 LRU Cache Corrupted (updated size exceeds limit: ", lru_cache_limit, " please report a bug to PyTorch.");
   } else {
     engine_cache.erase(key);
     engine_cache.emplace(key, std::make_pair(results, engine_cache_order.end())); // dummy iterator
@@ -800,5 +776,4 @@ void raw_cudnn_convolution_add_relu_out(
 
 }} // at::native
 
-#endif  // HAS_CUDNN_V8
 #endif  // AT_CUDNN_ENABLED

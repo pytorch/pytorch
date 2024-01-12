@@ -18,8 +18,8 @@ import torch
 
 import torch.autograd.profiler as autograd_profiler
 from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.utils import dynamo_timed
-from torch.utils._triton import has_triton, has_triton_package
+from torch._dynamo.utils import dynamo_timed, get_first_attr
+from torch.utils._triton import has_triton_package
 
 from . import config
 from .codecache import cache_dir, CudaKernelParamCache
@@ -44,16 +44,17 @@ if has_triton_package():
     from triton import Config
     from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
+
+    try:
+        from triton.compiler.compiler import ASTSource
+    except ImportError:
+        ASTSource = None
 else:
     Config = object
     triton = None
     KernelInterface = object
     OutOfResources = object
-
-if has_triton():
-    from triton.runtime.jit import get_cuda_stream
-else:
-    get_cuda_stream = None
+    ASTSource = None
 
 
 _NUM_THREADS_PER_WARP = 32
@@ -153,6 +154,12 @@ class CachingAutotuner(KernelInterface):
         self.configs = configs
         self.heuristic_type = heuristic_type
 
+        # Align the default design that default as cuda
+        self.device_type = (
+            triton_meta["device_type"] if "device_type" in triton_meta else "cuda"
+        )
+        self.gpu_device = get_interface_for_device(self.device_type)
+
         if log.isEnabledFor(logging.DEBUG):
             log.debug("CachingAutotuner gets %d configs", len(self.configs))
             for c in self.configs:
@@ -201,17 +208,16 @@ class CachingAutotuner(KernelInterface):
 
             seen_configs = set(self.configs)
 
-            device_interface = get_interface_for_device("cuda")
-            device_prop = device_interface.Worker.get_device_properties(
+            device_prop = self.gpu_device.Worker.get_device_properties(
                 self.triton_meta["device"]
             )
             if (
                 config.dynamic_scale_rblock
                 and self.heuristic_type == HeuristicType.REDUCTION
                 and self.size_hints is not None
-                # TODO not enable for H100 yet since we haven't got a chance to test this
-                # on H100. Will remove this check once we test on H100
-                and device_prop.major == 8
+                # Disable for AMDGPU as Triton is not ready to return n_regs for a compiled_binary.
+                and torch.version.hip is None
+                and device_prop.major >= 8
             ):
                 for triton_config, compiled_binary in zip(
                     self.configs, compiled_binaries
@@ -238,8 +244,11 @@ class CachingAutotuner(KernelInterface):
                     # from PLBartForCausalLM, latency improve from
                     # 7.795ms to 4.883ms.
                     #
-                    # Note both A100 and H100 have 65536 32-bit registers per SM.
-                    if nreg <= 65536 // device_prop.max_threads_per_multi_processor:
+                    if (
+                        nreg
+                        <= device_prop.regs_per_multiprocessor
+                        // device_prop.max_threads_per_multi_processor
+                    ):
                         continue
 
                     nreg_per_warp = nreg * 32
@@ -247,14 +256,16 @@ class CachingAutotuner(KernelInterface):
 
                     # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
                     # The formula below is a tighter upper bound since we have the assumption that
-                    #   nreg > 65536 // device_prop.max_threads_per_multi_processor
+                    #   nreg > device_prop.regs_per_multiprocessor // device_prop.max_threads_per_multi_processor
                     # due to the if condition above and:
-                    #   65536 / nreg_per_block
-                    #   = 65536 / (nreg * 32 * num_warps)
-                    #   < 65536 / ((65536 / max_threads_per_multi_processor) * 32 * num_warps)
+                    #   regs_per_multiprocessor / nreg_per_block
+                    #   = regs_per_multiprocessor / (nreg * 32 * num_warps)
+                    #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * 32 * num_warps)
                     #   = max_threads_per_multi_processor / (32 * num_warps)
                     # Using a tigher upper bound can reveal more optimization opportunities.
-                    max_blocks_per_sm = max(65536 // nreg_per_block, 1)
+                    max_blocks_per_sm = max(
+                        device_prop.regs_per_multiprocessor // nreg_per_block, 1
+                    )
 
                     if (
                         total_block
@@ -284,27 +295,58 @@ class CachingAutotuner(KernelInterface):
         )
 
         # Setting device_type="hip" required on ROCm to pass down to triton
-        compile_meta["device_type"] = "cuda" if torch.version.hip is None else "hip"
+        compile_meta["device_type"] = (
+            self.device_type if torch.version.hip is None else "hip"
+        )
+
+        if warm_cache_only_with_cc:
+            cc = warm_cache_only_with_cc
+        else:
+            # Use device_type 'cuda' for both cuda and hip devices to retrieve
+            # the compute capability.
+            device_type = self.device_type if torch.version.hip is None else "cuda"
+            device_id = compile_meta["device"]
+            device = torch.device(device_type, device_id)
+            cc = self.gpu_device.get_compute_capability(device)
+
+        compile_meta["cc"] = cc
+
+        if ASTSource:
+            compile_args = (
+                ASTSource(
+                    self.fn,
+                    compile_meta["signature"],
+                    compile_meta["constants"],
+                    compile_meta["configs"][0],
+                ),
+            )
+
+            target = (compile_meta["device_type"], cc)
+            options = {
+                "num_warps": compile_meta["num_warps"],
+                "num_stages": compile_meta["num_stages"],
+                "debug": compile_meta["debug"],
+            }
+            compile_kwargs = {
+                "target": target,
+                "options": options,
+            }
+        else:
+            compile_args = (self.fn,)
+            compile_kwargs = compile_meta
 
         if warm_cache_only_with_cc:
             return (
-                triton.compile(
-                    self.fn,
-                    warm_cache_only=True,
-                    cc=warm_cache_only_with_cc,
-                    **compile_meta,
-                ),
+                triton.compile(*compile_args, **compile_kwargs),
                 None,
             )
 
         # load binary to the correct device
-        with torch.cuda.device(compile_meta["device"]):
+        with self.gpu_device.device(compile_meta["device"]):  # type: ignore[attr-defined]
             # need to initialize context
-            torch.cuda.synchronize(torch.cuda.current_device())
-            binary = triton.compile(
-                self.fn,
-                **compile_meta,
-            )
+            self.gpu_device.synchronize(self.gpu_device.current_device())
+
+            binary = triton.compile(*compile_args, **compile_kwargs)
             binary._init_handles()
 
         call_args = [
@@ -318,9 +360,18 @@ class CachingAutotuner(KernelInterface):
             "grid_meta": cfg.kwargs,
             "bin": binary,
             "torch": torch,
-            "set_device": torch.cuda.set_device,
-            "current_device": torch.cuda.current_device,
+            "set_device": self.gpu_device.set_device,
+            "current_device": self.gpu_device.current_device,
         }
+
+        scope["runner"] = get_first_attr(binary, "run", "c_wrapper")
+        scope["function"] = get_first_attr(binary, "function", "cu_function")
+        scope["cta_args"] = (
+            (binary.num_ctas, *get_first_attr(binary, "cluster_dims", "clusterDims"))
+            if hasattr(binary, "num_ctas")
+            else ()
+        )
+
         exec(
             f"""
             def launcher({', '.join(def_args)}, grid, stream):
@@ -329,15 +380,10 @@ class CachingAutotuner(KernelInterface):
                 else:
                     grid_0, grid_1, grid_2 = grid
 
-                if hasattr(bin, "num_ctas"):
-                    bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps,
-                                bin.num_ctas, *bin.clusterDims, bin.shared,
-                                stream, bin.cu_function, None, None, None,
-                                {', '.join(call_args)})
-                else:
-                    bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps, bin.shared,
-                                stream, bin.cu_function, None, None, None,
-                                {', '.join(call_args)})
+                runner(grid_0, grid_1, grid_2, bin.num_warps,
+                            *cta_args, bin.shared,
+                            stream, function, None, None, None,
+                            {', '.join(call_args)})
                 return bin
             """.lstrip(),
             scope,
@@ -366,7 +412,9 @@ class CachingAutotuner(KernelInterface):
             )
             return float("inf")
 
-        stream = get_cuda_stream(torch.cuda.current_device())
+        stream = self.gpu_device.get_raw_stream(  # type: ignore[call-arg]
+            self.gpu_device.current_device()
+        )
 
         def kernel_call():
             if launcher.config.pre_hook is not None:
@@ -954,6 +1002,9 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
         num_warps = conditional_product(x, r) // 128
     num_warps = next_power_of_2(min(max(num_warps, 2), 8))
     check_config(cfg, xnumel=size_hints[0])
+    assert (
+        r <= config.triton.max_block["R"]
+    ), f"increase config.triton.MAX_BLOCK['r'] to {r}"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -984,6 +1035,9 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
     cfg = {"XBLOCK": x, "YBLOCK": y, "RBLOCK": r}
     num_warps = next_power_of_2(min(max(conditional_product(x, y, r) // 256, 1), 8))
     check_config(cfg, xnumel=size_hints[0], ynumel=size_hints[1])
+    assert (
+        r <= config.triton.max_block["R"]
+    ), f"increase config.triton.MAX_BLOCK['r'] to {r}"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -999,6 +1053,7 @@ def pointwise(
     Construct @triton.heuristics() based on size_hints.
     """
     inductor_meta = {} if inductor_meta is None else inductor_meta
+    assert not inductor_meta.get("no_x_dim")
 
     numel = functools.reduce(operator.mul, size_hints)
     bs = max(256, min(numel // 128, 1024))
@@ -1107,6 +1162,8 @@ def reduction(
 ):
     """args to @triton.heuristics()"""
     inductor_meta = {} if inductor_meta is None else inductor_meta
+    if inductor_meta.get("no_x_dim"):
+        size_hints = [1, *size_hints[1:]]
 
     assert triton_meta is not None
     rnumel = size_hints[-1]
@@ -1184,6 +1241,8 @@ def persistent_reduction(
     filename=None,
     inductor_meta=None,
 ):
+    if inductor_meta and inductor_meta.get("no_x_dim"):
+        size_hints = [1, *size_hints[1:]]
     xnumel, rnumel = size_hints
 
     configs = [

@@ -1,6 +1,6 @@
 #include <sstream>
 
-#include <nvtx3/nvToolsExt.h>
+#include <nvToolsExt.h>
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/ApproximateClock.h>

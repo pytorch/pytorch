@@ -23,6 +23,7 @@ from torch._prims_common import (
     dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    get_computation_dtype,
     is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
@@ -146,7 +147,7 @@ def decode_dtype(dtype: int):
 def is_integer_type(x):
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
-    elif isinstance(x, sympy.Symbol):
+    elif isinstance(x, sympy.Expr):
         return x.is_integer is True  # type: ignore[attr-defined]
     else:
         return isinstance(x, int)
@@ -161,7 +162,7 @@ def is_boolean_type(x):
 
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
     def construct_input(inp):
-        if isinstance(inp, (Number, sympy.Symbol)):
+        if isinstance(inp, (Number, sympy.Expr)):
             return inp
         else:
             assert hasattr(inp, "get_dtype")
@@ -198,7 +199,9 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
         else:
             # FIXME that's a crude approximation for promoting args
             promoting_args = [
-                a for a in args if isinstance(a, Number) or hasattr(a, "get_dtype")
+                a
+                for a in args
+                if isinstance(a, (Number, sympy.Expr)) or hasattr(a, "get_dtype")
             ]
             dtype = get_promoted_dtype(
                 *promoting_args, type_promotion_kind=type_promotion_kind
@@ -341,16 +344,23 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
-def promote_constants(inputs, override_return_dtype=None):
+def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=None):
+    assert (
+        override_return_dtype is None or type_promotion_kind is None
+    ), "only one of override_return_dtype or type_promotion_kind may be given"
+
+    if override_return_dtype is None and type_promotion_kind is None:
+        type_promotion_kind = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+
     if not any(isinstance(x, (sympy.Expr, int, float)) for x in inputs):
         return inputs
-    if all(isinstance(x, (int, float, sympy.Symbol)) for x in inputs):
+    if all(isinstance(x, (int, float, sympy.Expr)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
-            *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            *inputs, type_promotion_kind=type_promotion_kind
         )
 
         def const_func(x):
-            if isinstance(x, sympy.Symbol):
+            if isinstance(x, sympy.Expr):
                 return ir.IndexingConstant(x, dtype, decode_device(None))
             else:
                 return ir.Constant(x, dtype, decode_device(None))
@@ -524,7 +534,8 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
 
 
 def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
-    if x.get_dtype() == dtype:
+    x_dtype = x.get_dtype()
+    if x_dtype == dtype:
         return clone(x) if copy else x
 
     def _get_primitive_bitwidth(dtype):
@@ -533,15 +544,20 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
         else:
             return torch.iinfo(dtype).bits
 
-    src_bits = _get_primitive_bitwidth(x.get_dtype())
+    src_bits = _get_primitive_bitwidth(x_dtype)
     dst_bits = _get_primitive_bitwidth(dtype)
     if src_bits != dst_bits:
         raise NotImplementedError(
-            f"bitcast {x.get_dtype()} to different bitwidth type {dtype} is not supported yet."
+            f"bitcast {x_dtype} to different bitwidth type {dtype} is not supported yet."
         )
 
     def _to_dtype_bitcast(x):
-        return ops.to_dtype_bitcast(x, dtype)
+        # Because we may promote tensor type from float16 or bfloat16
+        # to float, we will need to pass the original src dtype (i.e. x_dtype),
+        # which is used for correctly constructing type conversion before bitcast,
+        # which requires the bitwidth of the input tensor type is the same as the
+        # target type.
+        return ops.to_dtype_bitcast(x, dtype, x_dtype)
 
     return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
 
@@ -1076,14 +1092,17 @@ def cat(inputs, dim=0):
 
         return False
 
+    # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
+    #             We will revisit this later after enabling vectorization on index_expr.
     if (
         len(inputs) <= config.max_pointwise_cat_inputs
         and inputs[0].get_device().type != "cpu"
     ):
         pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
-        all_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
+        all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
+        any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
 
-        if all_pointwise_inputs and pointwise_uses:
+        if all_pointwise_inputs or (any_pointwise_inputs and pointwise_uses):
             return pointwise_cat(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
@@ -1509,6 +1528,17 @@ def register_onednn_fusion_ops():
             unary_scalars,
             unary_algorithmm,
         ):
+            if (
+                binary_attr == "sum"
+                and output_dtype in [torch.float32, torch.bfloat16]
+                and accum.get_dtype() in [torch.float32, torch.bfloat16]
+                and accum.get_dtype() != output_dtype
+            ):
+                # For int8-mixed-bf16 quantization and inplace add,
+                # there is case when accum dtype is float32 but output dtype is bfloat16.
+                # Since the accum will be inplaced changed with post op sum,
+                # we will do accum dtype convertion here.
+                accum = to_dtype(accum, output_dtype)
             return TensorBox.create(
                 ir.QConvPointWiseBinaryPT2E.create(
                     x,
@@ -2020,8 +2050,6 @@ make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
-make_fallback(aten.cumsum, require_dense, warn=False)
-make_fallback(aten.cumprod, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
@@ -2031,7 +2059,8 @@ make_fallback(aten.randperm)
 
 
 def sdpa_constraint(fx_node, *args, **kwargs):
-    # sdpa requires dense last dimension
+    # sdpa requires dense last dimension]
+
     def apply_constraint(arg, fx_arg):
         if not isinstance(arg, ir.IRNode):
             return arg
@@ -2049,25 +2078,11 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
         ALIGNMENT = 8
 
-        is_backward = fx_node.target in (
-            aten._scaled_dot_product_efficient_attention_backward.default,
-            aten._scaled_dot_product_flash_attention_backward.default,
-        )
-
-        def is_aligned(x):
-            return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
-
         assert isinstance(arg, TensorBox)
+        if len(arg.get_size()) not in (3, 4):
+            return arg
 
-        # This correctly handles the forward case:
-        if isinstance(arg.data, (ir.SliceView, ir.ExpandView)):
-            if not is_aligned(arg):
-                # input is padded, requiring_stride_order will unwrap the view and unpad.
-                # Would be nice to be able to require certain padding from inductor ir, nyi
-                if is_aligned(arg.unwrap_view()):
-                    return arg
-
-        def is_aligned_backward(x):
+        def is_aligned_realized_tensor(x):
             aligned_strides = all(
                 (V.graph.sizevars.size_hint(x.get_stride()[i]) % ALIGNMENT) == 0
                 for i in range(len(x.get_stride()) - 1)
@@ -2076,13 +2091,20 @@ def sdpa_constraint(fx_node, *args, **kwargs):
                 V.graph.sizevars.size_hint(x.get_stride()[-1])
             ) == 1 and aligned_strides
 
-        if (
-            isinstance(arg.data, ir.StorageBox)
-            and arg.data.is_input_buffer()
-            and is_backward
-        ):
-            if len(arg.data.get_size()) == 4 and is_aligned_backward(arg):
+        try:
+            arg.get_stride()
+            if is_aligned_realized_tensor(arg):
                 return arg
+        except AttributeError:
+            pass
+
+        def is_aligned(x):
+            return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
+
+        if isinstance(arg.data, ir.BaseView):
+            if not is_aligned(arg):
+                if is_aligned(arg.unwrap_view()):
+                    return arg
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
@@ -2110,6 +2132,16 @@ make_fallback(
 )
 make_fallback(
     aten._scaled_dot_product_flash_attention_backward.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_flash_attention_for_cpu.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_flash_attention_for_cpu_backward.default,
     sdpa_constraint,
     warn=False,
 )
@@ -2141,11 +2173,9 @@ make_fallback(aten.addbmm)
 make_fallback(aten.addmv, warn=False)
 make_fallback(aten._addmm_activation, warn=False)
 make_fallback(aten.avg_pool3d)
-make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
-make_fallback(aten.cumprod, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
@@ -2191,8 +2221,6 @@ make_fallback(aten.pixel_shuffle)
 make_fallback(aten.pixel_unshuffle)
 make_fallback(aten.polygamma)
 make_fallback(aten.put)
-make_fallback(aten.reflection_pad1d)
-make_fallback(aten.replication_pad1d)
 make_fallback(aten.resize)
 make_fallback(aten.resize_)
 make_fallback(aten.resize_as)
@@ -2221,7 +2249,6 @@ make_fallback(aten.special_scaled_modified_bessel_k0)
 make_fallback(aten.special_scaled_modified_bessel_k1)
 make_fallback(aten.special_spherical_bessel_j0, warn=False)
 make_fallback(aten.special_zeta, warn=False)
-make_fallback(aten.take)
 make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten._adaptive_avg_pool3d_backward)
@@ -2235,7 +2262,6 @@ make_fallback(aten.fractional_max_pool3d_backward)
 make_fallback(aten._linalg_check_errors)
 make_fallback(aten.max_pool3d_with_indices_backward)
 make_fallback(aten._pdist_backward)
-make_fallback(aten.reflection_pad1d_backward)
 make_fallback(aten.replication_pad1d_backward)
 make_fallback(aten.replication_pad2d_backward)
 make_fallback(aten.soft_margin_loss_backward, warn=False)
@@ -2294,6 +2320,26 @@ def clone(x, *, memory_format=None):
         inner_fn=x.make_loader(),
         ranges=list(x.get_size()),
     )
+
+
+def clone_preserve_reinterpret_view(x):
+    reinterpret_view_layouts = []
+    if isinstance(x, TensorBox) and isinstance(x.data, ir.ReinterpretView):
+        x = x.data  # unwrap TensorBox
+        while isinstance(x, ir.ReinterpretView):
+            reinterpret_view_layouts.append(x.get_layout())
+            x = x.data
+        x = TensorBox(x)
+
+    x = clone(x)
+
+    if reinterpret_view_layouts:
+        x = x.data  # unwrap TensorBox
+        for layout in reinterpret_view_layouts[::-1]:
+            x = ir.ReinterpretView(x, layout)
+        x = TensorBox(x)
+
+    return x
 
 
 if hasattr(aten, "lift_fresh_copy"):
@@ -3497,52 +3543,24 @@ def upsample_bicubic2d_default(
     )
 
 
-@register_lowering(aten.reflection_pad2d)
-def reflection_pad2d(x, padding):
-    assert len(padding) == 4
-    left, right, top, bot = padding
-
-    x_loader = x.make_loader()
-    *batch, h, w = x.get_size()
-
-    def reflect(x, size, offset):
-        size_num = size
-        size = ops.index_expr(size - 1, torch.int32)
-        x = ops.index_expr(x, torch.int32)
-        x = ops.sub(x, ops.index_expr(offset, torch.int32))
-        x = ops.sub(size, ops.abs(ops.sub(size, ops.abs(x))))
-        return ops.indirect_indexing(x, size_num, check=False)
-
-    def fn(idx):
-        *b, x, y = idx
-        x = reflect(x, h, top)
-        y = reflect(y, w, left)
-        return x_loader([*b, x, y])
-
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=fn,
-        ranges=[*batch, h + top + bot, w + left + right],
-    )
-
-
+@register_lowering(aten.reflection_pad1d_backward)
 @register_lowering(aten.reflection_pad2d_backward)
-def reflection_pad2d_backward(grad_output, x, padding):
-    assert len(padding) == 4
-    left, right, top, bot = padding
+@register_lowering(aten.reflection_pad3d_backward)
+def _reflection_padnd_backward(grad_output, x, padding):
+    dim = len(padding) // 2
 
-    *_, h, w = x.get_size()
-    h = V.graph.sizevars.evaluate_static_shape(h) - 1
-    w = V.graph.sizevars.evaluate_static_shape(w) - 1
+    dhw = [h - 1 for h in x.get_size()[-dim:]]
     grad_loader = grad_output.make_loader()
-    *_, h_grad, w_grad = grad_output.get_size()
+
+    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
+    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
 
     def fn(idx):
-        *b, x, y = idx
+        b = idx[:-dim]
+        xyz = idx[-dim:]
 
-        def load_from_output(x, y):
-            return grad_loader([*b, x, y])
+        def load_from_output(x):
+            return grad_loader([*b, *x])
 
         def index_range_condition(index_range):
             i, lb, ub = index_range
@@ -3561,46 +3579,58 @@ def reflection_pad2d_backward(grad_output, x, padding):
         #
         # The center area is the original matrix. Other areas are reflections.
 
-        center_x, center_y = x + top, y + left
-        top_reflect_x, left_reflect_y = top - x, left - y
-        bot_reflect_x, right_reflect_y = 2 * h + top - x, 2 * w + left - y
+        center = [xyz[i] + padding_left[i] for i in range(dim)]
+        left_reflect = [padding_left[i] - xyz[i] for i in range(dim)]
+        right_reflect = [2 * dhw[i] + padding_left[i] - xyz[i] for i in range(dim)]
 
         # Accumulate gradients from different areas
         # If some of the padding is negative, center load is not always valid
-        range_cx = (center_x, 0, h + top + bot)
-        range_cy = (center_y, 0, w + left + right)
-        cond = ops.and_(
-            index_range_condition(range_cx), index_range_condition(range_cy)
+        range_c = [
+            (center[i], 0, dhw[i] + padding_left[i] + padding_right[i])
+            for i in range(dim)
+        ]
+        cond = functools.reduce(
+            ops.and_, [index_range_condition(range_c[i]) for i in range(dim)]
         )
-        grad = ops.masked(cond, lambda: load_from_output(center_x, center_y), 0.0)
+        grad = ops.masked(cond, lambda: load_from_output(center), 0.0)
 
-        def accumulate(out_x, out_y, index_range1, index_range2=None):
-            nonlocal grad
-
+        def accumulate(grad, out, index_ranges):
             # If the upper bound is less than the lower bound, we can get rid of one accumulation.
             # This happens when the padding size is zero.
-            upper_less_than_lower1 = index_range1[2] < index_range1[1]
-            if isinstance(upper_less_than_lower1, bool) and upper_less_than_lower1:
-                return
-            cond = index_range_condition(index_range1)
-            if index_range2 is not None:
-                upper_less_than_lower2 = index_range2[2] < index_range2[1]
-                if isinstance(upper_less_than_lower2, bool) and upper_less_than_lower2:
-                    return
-                cond = ops.and_(cond, index_range_condition(index_range2))
-            g = ops.masked(cond, lambda: load_from_output(out_x, out_y), 0.0)
-            grad = ops.add(grad, g)
+            for i in range(dim):
+                upper_less_than_lower = index_ranges[i][2] < index_ranges[i][1]
+                if isinstance(upper_less_than_lower, bool) and upper_less_than_lower:
+                    return grad
+            cond = functools.reduce(
+                ops.and_,
+                [index_range_condition(index_range) for index_range in index_ranges],
+            )
+            g = ops.masked(cond, lambda: load_from_output(out), 0.0)
+            return ops.add(grad, g)
 
-        accumulate(center_x, left_reflect_y, range_cx, (y, 1, left))
-        accumulate(center_x, right_reflect_y, range_cx, (y, w - right, w - 1))
-        accumulate(top_reflect_x, center_y, (x, 1, top), range_cy)
-        accumulate(bot_reflect_x, center_y, (x, h - bot, h - 1), range_cy)
-        accumulate(top_reflect_x, left_reflect_y, (x, 1, top), (y, 1, left))
-        accumulate(top_reflect_x, right_reflect_y, (x, 1, top), (y, w - right, w - 1))
-        accumulate(bot_reflect_x, left_reflect_y, (x, h - bot, h - 1), (y, 1, left))
-        accumulate(
-            bot_reflect_x, right_reflect_y, (x, h - bot, h - 1), (y, w - right, w - 1)
-        )
+        for area in itertools.product(*[[-1, 0, 1] for _ in range(dim)]):
+            if area == tuple([0] * dim):
+                # center, this is already done.
+                continue
+
+            outs = []
+            index_ranges = []
+
+            for i in range(dim):
+                if area[i] == 0:
+                    out = center[i]
+                    index_range = range_c[i]
+                elif area[i] == -1:
+                    out = left_reflect[i]
+                    index_range = (xyz[i], 1, padding_left[i])
+                elif area[i] == 1:
+                    out = right_reflect[i]
+                    index_range = (xyz[i], dhw[i] - padding_right[i], dhw[i] - 1)
+
+                outs.append(out)
+                index_ranges.append(index_range)
+
+            grad = accumulate(grad, outs, index_ranges)
 
         return grad
 
@@ -3648,12 +3678,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     # if padding is a complicated expression, hoist it
     bounds_precomp: List[Tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
-        l_precomp = (
-            V.graph.sizevars.lookup_precomputed_size(l)
-            if isinstance(l, sympy.Expr) and not l.is_number
-            else l
-        )
-        bounds_precomp.append((l_precomp, h))
+        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))
 
     output_size = list(sizes[:n])
     mask_sizes = []
@@ -4552,6 +4577,21 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
     return inner
 
 
+def _make_scan_inner(x, *, axis, dtype):
+    if dtype is not None:
+        x = to_dtype(x, dtype)
+    size = x.get_size()
+    axis = _validate_reduction_axis(x, axis)[0]
+
+    return dict(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=x.make_loader(),
+        size=x.get_size(),
+        axis=axis,
+    )
+
+
 @register_lowering(aten.mean)
 def mean(x, axis=None, keepdim=False, *, dtype=None):
     if dtype is not None:
@@ -4589,7 +4629,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
     if not return_mean:
-        return x_var
+        return (x_var,)
 
     x_mean = x_mean if keepdim else squeeze(x_mean, axis)
     return x_var, x_mean
@@ -4636,7 +4676,7 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     rnumel = sympy_product(size[i] for i in axis)
 
     def get_constant_or_index_expr(x, dtype):
-        if isinstance(x, sympy.Expr) and not x.is_constant():
+        if isinstance(x, sympy.Expr) and not x.is_number:
             return ops.to_dtype(ops.index_expr(x, torch.int64), dtype)
         return ops.constant(x, dtype)
 
@@ -4651,29 +4691,39 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     if return_mean:
         mean.realize()
         return var, mean
-    return var
+    return (var,)
+
+
+def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
+    out_dtype = x.get_dtype()
+    compute_dtype = get_computation_dtype(out_dtype)
+    x = to_dtype(x, compute_dtype, copy=False)
+    kwargs = dict(
+        x=x,
+        axis=axis,
+        correction=correction,
+        keepdim=keepdim,
+        return_mean=return_mean,
+    )
+    output = (
+        var_mean_sum_(**kwargs)
+        if use_two_step_variance(x, axis=axis, keepdim=keepdim)
+        else var_mean_welford_(**kwargs)
+    )
+    output = tuple(to_dtype(x, out_dtype, copy=False) for x in output)
+    return output[0] if not return_mean else output
 
 
 @register_lowering([aten.var, prims.var])
 def var_(x, axis=None, *, correction=None, keepdim=False):
-    if use_two_step_variance(x, axis=axis, keepdim=keepdim):
-        return var_mean_sum_(
-            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
-        )
-
-    return var_mean_welford_(
+    return var_mean_helper_(
         x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
     )
 
 
 @register_lowering(aten.var_mean)
 def var_mean(x, axis=None, *, correction=None, keepdim=False):
-    if use_two_step_variance(x, axis=axis, keepdim=keepdim):
-        return var_mean_sum_(
-            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
-        )
-
-    return var_mean_welford_(
+    return var_mean_helper_(
         x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
     )
 
@@ -4849,11 +4899,16 @@ def div_prim(a, b):
     return make_pointwise(fn)(a, b)
 
 
-div = register_lowering(
+@register_lowering(
     [aten.true_divide, aten.div.Tensor],
     broadcast=True,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)(div_prim)
+)
+def div(a, b):
+    a, b = promote_constants(
+        (a, b), type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    )
+    return div_prim(a, b)
 
 
 @register_lowering([aten.fmod, prims.fmod], broadcast=True)
@@ -4894,6 +4949,38 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 
     fn = make_reduction("sum", override_return_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
+
+
+fallback_cumsum = fallback_handler(aten.cumsum.default)
+fallback_cumprod = fallback_handler(aten.cumprod.default)
+
+
+@register_lowering(aten.cumsum)
+def cumsum(x, axis=None, dtype=None):
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+
+    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
+    result = ir.Scan.create(**kwargs, combine_fn=ops.add, init=0)
+    if result is None:
+        return fallback_cumsum(x, dim=axis, dtype=dtype)
+    return result
+
+
+@register_lowering(aten.cumprod)
+def cumprod(x, axis=None, dtype=None):
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+
+    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
+    result = ir.Scan.create(**kwargs, combine_fn=ops.mul, init=1)
+    if result is None:
+        return fallback_cumprod(x, dim=axis, dtype=dtype)
+    return result
 
 
 @register_lowering(aten.prod)
@@ -5234,7 +5321,8 @@ def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
 @register_lowering(triton_kernel_wrapper_functional)
 def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
     kwargs = {
-        key: (clone(x) if key in tensors_to_clone else x) for key, x in kwargs.items()
+        key: (clone_preserve_reinterpret_view(x) if key in tensors_to_clone else x)
+        for key, x in kwargs.items()
     }
     return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
 
@@ -5380,6 +5468,18 @@ try:
                 group_size,
                 group_name,
             ),
+        )
+
+    @register_lowering(_c10d_functional.all_to_all_single)
+    def _all_to_all_single(inp, output_split_sizes, input_split_sizes, group_name):
+        return ir.TensorBox.create(
+            ir._CollectiveKernel.create_out_of_place(
+                _c10d_functional.all_to_all_single.default,
+                inp,
+                output_split_sizes,
+                input_split_sizes,
+                group_name,
+            )
         )
 
     @register_lowering(_c10d_functional.wait_tensor)

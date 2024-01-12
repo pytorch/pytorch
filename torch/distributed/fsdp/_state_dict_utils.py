@@ -17,7 +17,7 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
 )
 from torch.distributed._tensor import DTensor
-from torch.distributed._tensor.device_mesh import _mesh_resources
+from torch.distributed.device_mesh import _mesh_resources
 
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,

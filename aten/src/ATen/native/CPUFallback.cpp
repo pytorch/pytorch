@@ -17,7 +17,7 @@
 #endif
 
 
-namespace at { namespace native {
+namespace at::native {
 
 // convenience helper for converting tensors to cpu
 
@@ -293,5 +293,4 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
