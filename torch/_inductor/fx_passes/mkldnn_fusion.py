@@ -420,13 +420,18 @@ if torch._C._has_mkldnn:
                 _compute_index = 1 if (_other_index == 0) else 0
                 return _binary_node.args[_compute_index]
 
+            # print("_get_compute_node(n, other_index) is: {}".format(_get_compute_node(binary_nodes[0], other_index)), flush=True)
+
             if any(
-                len(
-                    _get_remaining_users(
-                        n.args[other_index], _get_compute_node(n, other_index)
+                (
+                    len(
+                        _get_remaining_users(
+                            n.args[other_index], _get_compute_node(n, other_index)
+                        )
                     )
+                    > 1
+                    or n.args[other_index] == _get_compute_node(n, other_index).args[0]
                 )
-                > 1
                 for n in binary_nodes
             ):
                 return False

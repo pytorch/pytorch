@@ -1794,24 +1794,36 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 y = torch.ops.aten.permute.default(y, [0, 2, 1]).reshape(1, 32, 28, 28)
                 return x + y
 
+        class Model_v5(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(32, 32, 3, padding=1, bias=True)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, _, x):
+                x1 = self.relu(x)
+                return self.conv(x1) + x1
+
         input = torch.randn(1, 3, 28, 28).to(memory_format=torch.channels_last)
         others = [
             torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
             torch.randn(2, 32, 28, 28).to(memory_format=torch.channels_last),
             torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
             torch.randn(1, 14, 32 * 28),
+            torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
         ]
         mod_v1 = Model_v1().to(memory_format=torch.channels_last).eval()
         mod_v2 = Model_v2().to(memory_format=torch.channels_last).eval()
         mod_v3 = Model_v3().to(memory_format=torch.channels_last).eval()
         mod_v4 = Model_v4().to(memory_format=torch.channels_last).eval()
+        mod_v5 = Model_v5().to(memory_format=torch.channels_last).eval()
 
         if include_ops is None:
             include_ops = ["mkldnn._convolution_pointwise.binary"]
         if exclude_ops is None:
             exclude_ops = ["mkldnn._convolution_pointwise_.binary"]
 
-        for other, mod in zip(others, [mod_v1, mod_v2, mod_v3, mod_v4]):
+        for other, mod in zip(others, [mod_v1, mod_v2, mod_v3, mod_v4, mod_v5]):
             self._test_code_common(mod, (input, other), include_ops, exclude_ops)
 
     def test_conv2d_binary_fusion_failed(self):
