@@ -15,9 +15,11 @@ from __future__ import annotations
 import abc
 import contextlib
 
-from typing import Callable, Sequence
+from typing import Callable, Sequence, Type
 
-from onnxscript.function_libs.torch_lib.ops import nn as torchlib_nn
+from onnxscript.function_libs.torch_lib.ops import (  # type: ignore[import-not-found]
+    nn as torchlib_nn,
+)
 
 import torch
 
@@ -77,8 +79,8 @@ class DecompSkip:
 
 
 class UpsampleBilinear2DDecompSkip(DecompSkip):
-    op_callable = torch._C._nn.upsample_bilinear2d
-    onnxscript_function = torchlib_nn.aten_upsample_bilinear2d_vec
+    op_callable = torch._C._nn.upsample_bilinear2d  # type: ignore[attr-defined]
+    onnxscript_function = torchlib_nn.aten_upsample_bilinear2d_vec  # type: ignore[attr-defined]
     new_op_namespace = "onnx_export"
     new_op_name = "upsample_bilinear2d"
     new_op_schema = "(Tensor self, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> (Tensor)"
@@ -86,7 +88,7 @@ class UpsampleBilinear2DDecompSkip(DecompSkip):
     @classmethod
     def register(cls, export_options: torch.onnx.ExportOptions):
         cls.register_custom_op()
-        torch._C._nn.upsample_bilinear2d = torch.ops.onnx_export.upsample_bilinear2d
+        torch._C._nn.upsample_bilinear2d = torch.ops.onnx_export.upsample_bilinear2d  # type: ignore[attr-defined]
         if export_options.onnx_registry is None:
             export_options.onnx_registry = torch.onnx.OnnxRegistry()
         registry = export_options.onnx_registry
@@ -98,7 +100,7 @@ class UpsampleBilinear2DDecompSkip(DecompSkip):
 
     @classmethod
     def unregister(cls):
-        torch._C._nn.upsample_bilinear2d = cls.op_callable
+        torch._C._nn.upsample_bilinear2d = cls.op_callable  # type: ignore[attr-defined]
 
     @classmethod
     def abstract(cls, input, output_size, align_corners, scale_factors):
@@ -122,7 +124,7 @@ _DEFAULT_SKIP_LIST = [
 @contextlib.contextmanager
 def enable_decomposition_skips(
     export_options: torch.onnx.ExportOptions,
-    skips: Sequence[DecompSkip] = _DEFAULT_SKIP_LIST,
+    skips: Sequence[Type[DecompSkip]] = _DEFAULT_SKIP_LIST,
 ):
     """A context manager that enables the decomposition skips.
 

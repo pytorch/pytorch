@@ -6,6 +6,7 @@ import onnx.inliner
 import pytorch_test_common
 
 import torch
+from torch.testing._internal import common_utils
 
 
 def assert_op_in_onnx_model(model: onnx.ModelProto, op_type: str):
@@ -29,3 +30,7 @@ class TestDynamoExportDecompSkip(pytorch_test_common.ExportTestCase):
         onnx_program = torch.onnx.dynamo_export(TestModel(), torch.randn(1, 1, 2, 2))
         # If decomposition is skipped, the model will contain a Resize op instead of fine grained subgraph.
         assert_op_in_onnx_model(onnx_program.model_proto, "Resize")
+
+
+if __name__ == "__main__":
+    common_utils.run_tests()

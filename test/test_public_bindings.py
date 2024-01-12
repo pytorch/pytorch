@@ -250,6 +250,7 @@ class TestPublicBindings(TestCase):
             "torch._inductor.codegen.cuda.cuda_kernel",
             "torch.onnx._internal.fx._pass",
             "torch.onnx._internal.fx.analysis",
+            "torch.onnx._internal.fx.decomposition_skip",
             "torch.onnx._internal.fx.diagnostics",
             "torch.onnx._internal.fx.fx_onnx_interpreter",
             "torch.onnx._internal.fx.fx_symbolic_graph_extractor",
