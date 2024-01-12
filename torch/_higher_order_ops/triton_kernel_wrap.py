@@ -16,6 +16,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+from torch.utils._triton import has_triton
 
 log = logging.getLogger("torch._dynamo")
 
@@ -78,49 +79,32 @@ class Proxy:
         return self
 
 
-@dataclasses.dataclass
 class Scalar:
     @staticmethod
     def check(o):
         if isinstance(o, Proxy):
             raise IdentifyMutationException("Proxy operation with Scalar")
 
-    def __mul__(self, o):
-        Scalar.check(o)
-        return self
-
-    def __rmul__(self, o):
-        Scalar.check(o)
-        return self
-
-    def __add__(self, o):
-        Scalar.check(o)
-        return self
-
     def __radd__(self, o):
         if isinstance(o, Proxy):
             return o
         return self
 
-    def __gt__(self, o):
-        Scalar.check(o)
-        return self
 
-    def __lt__(self, o):
-        Scalar.check(o)
-        return self
+# This operation is only needed when triton is available
+if has_triton():
+    import triton
 
-    def __and__(self, o):
-        Scalar.check(o)
-        return self
+    for name, _ in inspect.getmembers(triton.language.core.tensor, inspect.isfunction):
+        if name in ["__init__", "__radd__"]:
+            continue
 
-    def __or__(self, o):
-        Scalar.check(o)
-        return self
+        def fn(self, *args, **kwargs):
+            if len(args) > 0:
+                Scalar.check(args[0])
+            return self
 
-    def __getitem__(self, idx):
-        Scalar.check(idx)
-        return self
+        setattr(Scalar, name, fn)
 
 
 # Given a triton kernel and the arguments for this kernel, this function traces
