@@ -28,15 +28,52 @@ enum LinearAlgebraOpType { ADDBMM_OP_TYPE, BADDBMM_OP_TYPE };
 static std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* graph,
                                                                            const Tensor& self,
                                                                            const Tensor& other) {
+  constexpr auto tile_size = 16384;
+  const auto M = self.size(0);
+  const auto N = self.size(1);
+  const auto K = other.size(1);
+
   if (self.numel() == 0 || other.numel() == 0) {
-    auto output = [graph constantWithScalar:0.0
-                                      shape:getMPSShape({self.size(0), other.size(1)})
-                                   dataType:getMPSDataType(self)];
+    auto output = [graph constantWithScalar:0.0 shape:getMPSShape({M, K}) dataType:getMPSDataType(self)];
     return {nil, nil, output};
   }
+
+  const bool needs_tiling = M > tile_size || N > tile_size || K > tile_size;
   auto selfTensor = mpsGraphRankedPlaceHolder(graph, self);
   auto otherTensor = mpsGraphRankedPlaceHolder(graph, other);
-  auto output = [graph matrixMultiplicationWithPrimaryTensor:selfTensor secondaryTensor:otherTensor name:nil];
+  if (!needs_tiling) {
+    auto output = [graph matrixMultiplicationWithPrimaryTensor:selfTensor secondaryTensor:otherTensor name:nil];
+    return {selfTensor, otherTensor, output};
+  }
+  NSMutableArray<MPSGraphTensor*>* rows = [NSMutableArray new];
+  for (int64_t i = 0; i < M; i += tile_size) {
+    const auto i_end = std::min(i + tile_size, M);
+    NSMutableArray<MPSGraphTensor*>* row_chunks = [NSMutableArray new];
+    for (int64_t j = 0; j < K; j += tile_size) {
+      const auto j_end = std::min(j + tile_size, K);
+      MPSGraphTensor* tile = nil;
+      for (int64_t k = 0; k < N; k += tile_size) {
+        const auto k_end = std::min(k + tile_size, N);
+        auto selfChunk = [graph sliceTensor:selfTensor
+                                     starts:@[ @(i), @(k) ]
+                                       ends:@[ @(i_end), @(k_end) ]
+                                    strides:@[ @(1), @(1) ]
+                                       name:nil];
+        auto otherChunk = [graph sliceTensor:otherTensor
+                                      starts:@[ @(k), @(j) ]
+                                        ends:@[ @(k_end), @(j_end) ]
+                                     strides:@[ @(1), @(1) ]
+                                        name:nil];
+        auto chunkMM = [graph matrixMultiplicationWithPrimaryTensor:selfChunk secondaryTensor:otherChunk name:nil];
+
+        tile = tile ? [graph additionWithPrimaryTensor:tile secondaryTensor:chunkMM name:nil] : chunkMM;
+      }
+      [row_chunks addObject:tile];
+    }
+    auto row = row_chunks.count > 1 ? [graph concatTensors:row_chunks dimension:1 name:nil] : row_chunks.firstObject;
+    [rows addObject:row];
+  }
+  auto output = rows.count > 1 ? [graph concatTensors:rows dimension:0 name:nil] : rows.firstObject;
   return {selfTensor, otherTensor, output};
 }
 
