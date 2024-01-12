@@ -324,6 +324,8 @@ def mps_ops_modifier(ops):
         '__rdiv__',
         'acos',
         'acosh',
+        'all',
+        'any',
         'argwhere',
         'asin',
         'atan',
@@ -6848,6 +6850,24 @@ class TestMPS(TestCaseMPS):
         helper(2, 0, 1, 1, 6)
         # test float16
         helper((2,), 0, [1], (1,), 6.0, x_dtype=torch.float16)
+
+    def test_index_64bit(self):
+        """ Test that index operations work for 4Gb+ tensors """
+        if product_version < 14.0:
+            raise unittest.SkipTest("Sonoma is needed for large tensors, see https://github.com/pytorch/pytorch/issues/84039")
+        # Cleanup memory
+        gc.collect()
+        torch.mps.empty_cache()
+        # Check that index operations work for 4+GB tensors
+        x = torch.rand(16000, 67120, device="mps")
+        self.assertGreater(x.element_size() * x.numel(), 2**32)
+        idx = torch.arange(0, 2, device="mps")
+        x_sampled = x[:, idx]
+        self.assertEqual(x[:, 0], x_sampled[:, 0])
+        # Reclaim memory after running the tests
+        del x
+        gc.collect()
+        torch.mps.empty_cache()
 
     # Test flip
     def test_flip(self):
