@@ -9,7 +9,7 @@ jobs:
     # Don't run on forked repos
     if: ${{ !github.event.pull_request.head.repo.fork }}
     permissions:
-     contents: read
+      contents: read
       pull-requests: write
     name: Auto Request Review
     runs-on: ubuntu-latest
