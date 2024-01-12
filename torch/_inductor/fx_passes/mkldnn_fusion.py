@@ -432,10 +432,7 @@ if torch._C._has_mkldnn:
                     or _binary_node.args[_other_index] == _compute_node.args[0]
                 )
 
-            if any(
-                _other_input_not_inplaceable(n, other_index)
-                for n in binary_nodes
-            ):
+            if any(_other_input_not_inplaceable(n, other_index) for n in binary_nodes):
                 return False
             if any(
                 n.args[other_index].op in ["placeholder", "output"]
