@@ -9,7 +9,6 @@
 #include <ostream>
 #include <sstream>
 #include <string>
-#include <vector>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
@@ -41,6 +40,7 @@ struct CanonicalizeStrTypes {
 };
 
 template <size_t N>
+// NOLINTNEXTLINE(*c-arrays*)
 struct CanonicalizeStrTypes<char[N]> {
   using type = const char*;
 };
@@ -181,11 +181,15 @@ inline void printQuotedString(std::ostream& stmt, const string_view str) {
         } else {
           // C++ io has stateful formatting settings. Messing with
           // them is probably worse than doing this manually.
+          // NOLINTNEXTLINE(*c-arrays*)
           char buf[4] = "000";
+          // NOLINTNEXTLINE(*narrowing-conversions)
           buf[2] += s % 8;
           s /= 8;
+          // NOLINTNEXTLINE(*narrowing-conversions)
           buf[1] += s % 8;
           s /= 8;
+          // NOLINTNEXTLINE(*narrowing-conversions)
           buf[0] += s;
           stmt << "\\" << buf;
         }

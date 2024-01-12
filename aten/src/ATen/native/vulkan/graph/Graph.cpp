@@ -9,7 +9,7 @@ ComputeGraph::ComputeGraph(GraphConfig config)
     : config_{config},
       context_{new api::Context(
           api::runtime()->default_adapter_i(),
-          config_.context_config)},
+          config_.contextConfig)},
       values_{},
       prepack_nodes_{},
       execute_nodes_{},
@@ -30,7 +30,7 @@ ComputeGraph::~ComputeGraph() {
 ValueRef ComputeGraph::add_tensor(
     const IntArrayRef sizes,
     const c10::ScalarType dtype) {
-  ValueRef idx(values_.size());
+  ValueRef idx(static_cast<int>(values_.size()));
   values_.emplace_back(vTensor(context(), sizes, dtype));
   return idx;
 }
@@ -39,7 +39,7 @@ ValueRef ComputeGraph::add_tensorref(
     const IntArrayRef sizes,
     const c10::ScalarType dtype,
     const void* const data) {
-  ValueRef idx(values_.size());
+  ValueRef idx(static_cast<int>(values_.size()));
   values_.emplace_back(TensorRef(sizes, dtype, data));
   return idx;
 }
@@ -47,7 +47,7 @@ ValueRef ComputeGraph::add_tensorref(
 ValueRef ComputeGraph::add_staging(
     const c10::ScalarType dtype,
     const size_t numel) {
-  ValueRef idx(values_.size());
+  ValueRef idx(static_cast<int>(values_.size()));
   values_.emplace_back(api::StorageBuffer(context(), dtype, numel));
   return idx;
 }

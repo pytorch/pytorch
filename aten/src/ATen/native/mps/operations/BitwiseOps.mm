@@ -161,15 +161,6 @@ static id<MTLComputePipelineState> getCPLState(id<MTLDevice> device,
   return rc;
 }
 
-static void dispatch1DJob(id<MTLComputeCommandEncoder> commandEncoder,
-                          id<MTLComputePipelineState> cplState,
-                          uint32_t length) {
-  uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
-  auto size = MTLSizeMake(length, 1, 1);
-  auto threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, length), 1, 1);
-  [commandEncoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
-}
-
 static void handle_tensor_tensor_binary_op(const Tensor& self,
                                            const Tensor& other,
                                            Tensor& output,
@@ -189,17 +180,13 @@ static void handle_tensor_tensor_binary_op(const Tensor& self,
 
     id<MTLComputeCommandEncoder> commandEncoder = stream->commandEncoder();
 
-    id<MTLBuffer> outBuf = __builtin_bit_cast(id<MTLBuffer>, output.storage().data());
-    id<MTLBuffer> selfBuf = __builtin_bit_cast(id<MTLBuffer>, self.storage().data());
-    id<MTLBuffer> otherBuf = __builtin_bit_cast(id<MTLBuffer>, other.storage().data());
-
     [commandEncoder pushDebugGroup:[NSString stringWithFormat:@"Dispatch %s kernel", kernel_name.c_str()]];
     [commandEncoder setComputePipelineState:cplState];
     [commandEncoder setBytes:&length length:sizeof(length) atIndex:0];
-    [commandEncoder setBuffer:outBuf offset:output.storage_offset() * output.itemsize() atIndex:1];
-    [commandEncoder setBuffer:selfBuf offset:self.storage_offset() * self.itemsize() atIndex:2];
-    [commandEncoder setBuffer:otherBuf offset:other.storage_offset() * other.itemsize() atIndex:3];
-    dispatch1DJob(commandEncoder, cplState, length);
+    mtl_setBuffer(commandEncoder, output, 1);
+    mtl_setBuffer(commandEncoder, self, 2);
+    mtl_setBuffer(commandEncoder, other, 3);
+    mtl_dispatch1DJob(commandEncoder, cplState, length);
 
     getMPSProfiler().endProfileKernel(cplState);
   });
@@ -224,16 +211,13 @@ static void handle_tensor_scalar_binary_op(const Tensor& self,
 
     id<MTLComputeCommandEncoder> commandEncoder = stream->commandEncoder();
 
-    id<MTLBuffer> outBuf = __builtin_bit_cast(id<MTLBuffer>, output.storage().data());
-    id<MTLBuffer> selfBuf = __builtin_bit_cast(id<MTLBuffer>, self.storage().data());
-
     [commandEncoder pushDebugGroup:[NSString stringWithFormat:@"Dispatch %s kernel", kernel_name.c_str()]];
     [commandEncoder setComputePipelineState:cplState];
     [commandEncoder setBytes:&length length:sizeof(length) atIndex:0];
-    [commandEncoder setBuffer:outBuf offset:output.storage_offset() * output.itemsize() atIndex:1];
-    [commandEncoder setBuffer:selfBuf offset:self.storage_offset() * self.itemsize() atIndex:2];
+    mtl_setBuffer(commandEncoder, output, 1);
+    mtl_setBuffer(commandEncoder, self, 2);
     [commandEncoder setBytes:&sval length:sizeof(sval) atIndex:3];
-    dispatch1DJob(commandEncoder, cplState, length);
+    mtl_dispatch1DJob(commandEncoder, cplState, length);
 
     getMPSProfiler().endProfileKernel(cplState);
   });
@@ -319,15 +303,12 @@ static void _bitwise_not_out_mps(const Tensor& self, const Tensor& output_) {
 
     id<MTLComputeCommandEncoder> commandEncoder = stream->commandEncoder();
 
-    id<MTLBuffer> outBuf = __builtin_bit_cast(id<MTLBuffer>, output.storage().data());
-    id<MTLBuffer> selfBuf = __builtin_bit_cast(id<MTLBuffer>, self.storage().data());
-
     [commandEncoder pushDebugGroup:@"Dispatch bitwise_not kernel"];
     [commandEncoder setComputePipelineState:cplState];
     [commandEncoder setBytes:&length length:sizeof(length) atIndex:0];
-    [commandEncoder setBuffer:outBuf offset:output.storage_offset() * output.itemsize() atIndex:1];
-    [commandEncoder setBuffer:selfBuf offset:self.storage_offset() * self.itemsize() atIndex:2];
-    dispatch1DJob(commandEncoder, cplState, length);
+    mtl_setBuffer(commandEncoder, output, 1);
+    mtl_setBuffer(commandEncoder, self, 2);
+    mtl_dispatch1DJob(commandEncoder, cplState, length);
 
     getMPSProfiler().endProfileKernel(cplState);
   });

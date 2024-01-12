@@ -284,6 +284,15 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
 
 } // namespace BCELoss
 
+static inline MPSGraphTensor* divisionNoNaN(MPSGraph* mpsGraph, MPSGraphTensor* divident, MPSGraphTensor* divisor) {
+  auto* div = [mpsGraph divisionWithPrimaryTensor:divident secondaryTensor:divisor name:@"divisionTensor"];
+  // Replace NaNs with 0 for divident elements equal to 0
+  return [mpsGraph selectWithPredicateTensor:castMPSTensor(mpsGraph, divisor, MPSDataTypeBool)
+                         truePredicateTensor:div
+                        falsePredicateTensor:[mpsGraph constantWithScalar:0.0 dataType:div.dataType]
+                                        name:nil];
+}
+
 // NLLLoss
 static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
                                      const Tensor& grad_output_arg,
@@ -354,22 +363,23 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
                                            falsePredicateTensor:castedTargetTensor
                                                            name:@"predicateTensor"];
 
-      MPSGraphTensor* oneHotTensor = [mpsGraph oneHotWithIndicesTensor:updatedTargetTensor
-                                                                 depth:numClasses
-                                                                  axis:1
-                                                              dataType:inputTensor.dataType
-                                                               onValue:-1.0f
-                                                              offValue:0.0f
-                                                                  name:nil];
+      // oneHotWithIndicesTensor only works for Float32 dtype
+      // cast it explicitly later if needed
+      auto* oneHotTensor = [mpsGraph oneHotWithIndicesTensor:updatedTargetTensor
+                                                       depth:numClasses
+                                                        axis:1
+                                                    dataType:MPSDataTypeFloat32
+                                                     onValue:-1.0f
+                                                    offValue:0.0f
+                                                        name:nil];
+      oneHotTensor = castMPSTensor(mpsGraph, oneHotTensor, inputTensor.dataType);
       if (isWeightsArrayValid) {
         oneHotTensor = [mpsGraph multiplicationWithPrimaryTensor:oneHotTensor
                                                  secondaryTensor:weightTensor
                                                             name:@"scaleByWeightTensor"];
       }
       if (reduction == Reduction::Mean) {
-        oneHotTensor = [mpsGraph divisionNoNaNWithPrimaryTensor:oneHotTensor
-                                                secondaryTensor:totalWeightTensor
-                                                           name:@"divisionTensor"];
+        oneHotTensor = divisionNoNaN(mpsGraph, oneHotTensor, totalWeightTensor);
       }
       MPSGraphTensor* gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:oneHotTensor
                                                                   secondaryTensor:gradOutputTensor
@@ -538,9 +548,7 @@ static void nllnd_loss_forward_impl(Tensor& output,
           mpsGraphBatchSizeTensor = [mpsGraph reductionSumWithTensor:mpsSelectOneTensor
                                                                 axes:nil
                                                                 name:@"batchSizeReductionTensor"];
-          mpsGraphReducedTensor = [mpsGraph divisionNoNaNWithPrimaryTensor:mpsGraphReducedTensor
-                                                           secondaryTensor:mpsGraphBatchSizeTensor
-                                                                      name:@"divisionTensor"];
+          mpsGraphReducedTensor = divisionNoNaN(mpsGraph, mpsGraphReducedTensor, mpsGraphBatchSizeTensor);
         }
       }
 

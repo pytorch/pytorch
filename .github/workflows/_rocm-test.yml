@@ -170,6 +170,7 @@ jobs:
             -e GITHUB_RUN_NUMBER \
             -e GITHUB_RUN_ATTEMPT \
             -e JOB_ID \
+            -e JOB_NAME \
             -e BRANCH \
             -e SHA1 \
             -e AWS_DEFAULT_REGION \

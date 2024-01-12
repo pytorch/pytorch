@@ -136,9 +136,9 @@ class MkldnnBatchNorm(torch.jit.ScriptModule):
     def __init__(self, dense_module):
         super().__init__()
 
-        assert(not dense_module.training)
-        assert(dense_module.track_running_stats)
-        assert(dense_module.affine)
+        assert not dense_module.training
+        assert dense_module.track_running_stats
+        assert dense_module.affine
 
         if dense_module.momentum is None:
             self.exponential_average_factor = 0.0
