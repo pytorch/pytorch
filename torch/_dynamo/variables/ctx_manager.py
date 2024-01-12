@@ -521,13 +521,6 @@ class StreamContextVariable(ContextWrappingVariable):
         )
         self.state.cleanup_assert()
 
-    def reconstruct(self, codegen):
-        codegen.load_import_from("torch", "cuda.stream")
-        assert len(self.target_values) == 1
-        codegen(self.target_values[0])
-        codegen.extend_output(create_call_function(1, False))
-        return []
-
 
 class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs):
