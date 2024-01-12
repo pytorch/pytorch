@@ -2708,7 +2708,7 @@ class CPUReproTests(TestCase):
         y = torch.randn(32, 120)
         metrics.reset()
         self.common(fn, (x, y))
-        assert metrics.generated_cpp_vec_kernel_count == 1
+        assert metrics.generated_cpp_vec_kernel_count == 3
 
     def test_expr_vec_non_contiguous(self):
         def fn(x):
