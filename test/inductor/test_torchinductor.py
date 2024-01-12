@@ -7976,6 +7976,7 @@ class CommonTemplate:
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_fixed_layout(self):
         import torch.library
+
         mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).cuda()
         inp = torch.rand(2, 3, 128, 128, device="cuda")
         expected_stride = mod(inp).stride()
@@ -7994,7 +7995,9 @@ class CommonTemplate:
         global libbar
         if libbar is None:
             libbar = torch.library.Library("bar", "DEF")
-            libbar.define("custom(Tensor self) -> Tensor", tags=[torch._C.Tag.needs_fixed_layout])
+            libbar.define(
+                "custom(Tensor self) -> Tensor", tags=[torch._C.Tag.needs_fixed_layout]
+            )
             libbar.impl("custom", foo_cpu, "CPU")
             libbar.impl("custom", foo_cuda, "CUDA")
             libbar.impl("custom", foo_meta, "Meta")
@@ -8009,13 +8012,13 @@ class CommonTemplate:
             # But because our custom op needs fixed layout, the assertions in the custom op will pass
             self.common(fn, (inp,), check_lowp=False)
 
-
     @requires_cuda()
     @torch._inductor.config.patch("layout_optimization", True)
     @torch._inductor.config.patch("keep_output_stride", False)
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_no_fixed_layout(self):
         import torch.library
+
         mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).cuda()
         inp = torch.rand(2, 3, 128, 128, device="cuda")
         expected_stride = mod(inp).stride()
@@ -8045,11 +8048,9 @@ class CommonTemplate:
             return output
 
         with torch.no_grad():
-            self.assertRaises(AssertionError, lambda: self.common(fn, (inp,), check_lowp=False))
-
-
-
-
+            self.assertRaises(
+                AssertionError, lambda: self.common(fn, (inp,), check_lowp=False)
+            )
 
     def test_buffer_use_after_remove(self):
         # https://github.com/pytorch/pytorch/issues/102857
