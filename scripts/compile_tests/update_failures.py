@@ -1,10 +1,11 @@
 import argparse
+
 from common import (
-    open_test_results,
     get_testcases,
-    key,
+    is_failure,
     is_unexpected_success,
-    is_failure
+    key,
+    open_test_results,
 )
 
 """
@@ -40,12 +41,11 @@ def patch_file(filename, unexpected_successes, new_xfails, new_skips):
 
     def format(testcase):
         classname = testcase.attrib["classname"]
-        name = testcase.attrib['name']
+        name = testcase.attrib["name"]
         return f"{classname}.{name}"
 
     formatted_unexpected_successes = {
-        f'{format(test)}'
-        for test in unexpected_successes.values()
+        f"{format(test)}" for test in unexpected_successes.values()
     }
     formatted_new_xfails = [
         f'    "{format(test)}",  # {test.attrib["file"]}\n'
@@ -87,8 +87,10 @@ def patch_file(filename, unexpected_successes, new_xfails, new_skips):
         formatted_unexpected_successes - covered_unexpected_successes
     )
     if len(leftover_unexpected_successes) > 0:
-        print("WARNING: we were unable to remove these "
-              f"{len(leftover_unexpected_successes)} expectedFailures:")
+        print(
+            "WARNING: we were unable to remove these "
+            f"{len(leftover_unexpected_successes)} expectedFailures:"
+        )
         for stuff in leftover_unexpected_successes:
             print(stuff)
 
@@ -125,6 +127,7 @@ def get_intersection_and_outside(a_dict, b_dict):
         for k in keys:
             result[k] = a_dict.get(k, b_dict[k])
         return result
+
     return build_dict(intersection), build_dict(outside)
 
 
@@ -133,8 +136,7 @@ def update(filename, py38_dir, py311_dir):
         xmls = open_test_results(directory)
         testcases = get_testcases(xmls)
         unexpected_successes = {
-            key(test): test for test in testcases
-            if is_unexpected_success(test)
+            key(test): test for test in testcases if is_unexpected_success(test)
         }
         failures = {key(test): test for test in testcases if is_failure(test)}
         return unexpected_successes, failures
@@ -142,23 +144,24 @@ def update(filename, py38_dir, py311_dir):
     py38_unexpected_successes, py38_failures = read_test_results(py38_dir)
     py311_unexpected_successes, py311_failures = read_test_results(py311_dir)
 
-    unexpected_successes = {
-        **py38_unexpected_successes, **py311_unexpected_successes
-    }
+    unexpected_successes = {**py38_unexpected_successes, **py311_unexpected_successes}
     _, skips = get_intersection_and_outside(
-        py38_unexpected_successes, py311_unexpected_successes)
-    xfails, more_skips = get_intersection_and_outside(
-        py38_failures, py311_failures)
+        py38_unexpected_successes, py311_unexpected_successes
+    )
+    xfails, more_skips = get_intersection_and_outside(py38_failures, py311_failures)
     all_skips = {**skips, **more_skips}
-    print(f"Discovered {len(unexpected_successes)} new unexpected successes, "
-          f"{len(xfails)} new xfails, {len(all_skips)} new skips")
+    print(
+        f"Discovered {len(unexpected_successes)} new unexpected successes, "
+        f"{len(xfails)} new xfails, {len(all_skips)} new skips"
+    )
     return patch_file(filename, unexpected_successes, xfails, all_skips)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="update_dynamo_test_failures",
-        description="Read from logs and update the dynamo_test_failures file")
+        description="Read from logs and update the dynamo_test_failures file",
+    )
     # dynamo_test_failures path
     parser.add_argument("filename")
     # linux-focal-py3.8-clang10 (dynamo) Test Reports (xml) directory
@@ -166,5 +169,4 @@ if __name__ == "__main__":
     # linux-focal-py3.11-clang10 (dynamo) Test Reports (xml) directory
     parser.add_argument("py311_test_reports_dir")
     args = parser.parse_args()
-    update(
-        args.filename, args.py38_test_reports_dir, args.py311_test_reports_dir)
+    update(args.filename, args.py38_test_reports_dir, args.py311_test_reports_dir)
