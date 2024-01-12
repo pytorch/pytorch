@@ -2563,10 +2563,10 @@ Tensor slice(
 Tensor slice_inverse_symint(
     const Tensor& self,
     const Tensor& base,
-    int64_t dim,
-    c10::optional<SymInt> start,
-    c10::optional<SymInt> end,
-    SymInt step) {
+    int64_t /* dim */,
+    c10::optional<SymInt> /* start */,
+    c10::optional<SymInt> /* end */,
+    SymInt /* step */) {
   // assume self has enough to storage to be viewed with base's metadata
   return self.as_strided_symint(base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
 }

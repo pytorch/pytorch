@@ -3392,6 +3392,7 @@ dynamo_expected_failures = {
     "TestTorchFunctionOverride.test_Tensor_index_add_",  # test_overrides
     "TestBroadcastAllOverride.test_broadcast_all",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor_div",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_slice_inverse",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor_slice_scatter",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor_remainder_",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor_baddbmm_",  # test_overrides
