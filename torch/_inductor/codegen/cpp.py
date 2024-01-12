@@ -3139,7 +3139,7 @@ class CppKernelProxy(CppKernel):
         if not self.picked_vec_isa:
             return
 
-        def select_tiling_indices():
+        def select_tiling_indices(tiling_factor):
             all_index = []
             for node in nodes:
                 rw = dependencies.extract_read_writes(node._body, *node._sizes)
@@ -3152,8 +3152,13 @@ class CppKernelProxy(CppKernel):
                 for var in index.free_symbols:
                     if not re.search(r"^d\d+$", var.name):
                         continue
-                    stride = stride_at(var, index)
-                    if stride == 1:
+                    index_vec_simplified = simplify_index_in_vec_range(
+                        index, var, tiling_factor
+                    )
+                    stride = stride_at(var, index_vec_simplified)
+                    if stride == 0:
+                        continue
+                    elif stride == 1:
                         contig_vars.add(int(var.name[1:]))
                         contig_vars_list.append(int(var.name[1:]))
                     elif all(s.name.startswith("s") for s in stride.free_symbols):
@@ -3183,7 +3188,7 @@ class CppKernelProxy(CppKernel):
         def select_tiling(dtype: torch.dtype = torch.float):
             # TODO(jgong5): support alternative tiling factors and data types
             tiling_factor = self.picked_vec_isa.nelements(dtype=dtype)
-            tiling_indices = select_tiling_indices()
+            tiling_indices = select_tiling_indices(tiling_factor)
             if tiling_indices:
                 could_vec = True
                 for tiling_indice in tiling_indices:
