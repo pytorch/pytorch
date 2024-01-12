@@ -14,9 +14,6 @@ FIXME_default_non_strict = {
     "export/test_unflatten",
     "export/test_upgrade",
     "export/test_verifier",
-    "functorch/test_aotdispatch",
-    "functorch/test_vmap",
-    "functorch/test_vmap_registrations",
     "inductor/test_aot_inductor",
     "inductor/test_aot_inductor_utils",
     "inductor/test_benchmark_fusion",
@@ -86,7 +83,6 @@ FIXME_default_non_strict = {
     "test_ops_fwd_gradients",
     "test_ops_gradients",
     "test_ops_jit",
-    "test_legacy_vmap",
     "test_python_dispatch",
     "test_quantization",
     "test_tensorexpr",
@@ -4073,6 +4069,150 @@ dynamo_expected_failures = {
     "TestContentStoreCPU.test_repeated_hash_cpu",  # test_content_store
     "TestLazyTensor.test_tensor_ctr",  # lazy/test_ts_opinfo
     "TestAnalyze.test_trace_dependencies",  # test_package
+    "TestVmapBatchedGradientLegacyCPU.test_slice_cpu",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_noop_in_inner_vmap",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_select_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_view_as",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_stack_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_chunk",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_permute_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_result_type",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_lgamma_cpu",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_multiple_outputs",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_diagonal",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_is_complex",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_accepts_nested_inputs",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_grad_unsupported_interaction",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_out_dim_out_of_bounds_err_msg",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_comparison_ops",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_non_tensor_output_raises",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_new_empty",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_unbind",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_split",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_is_contiguous",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_no_random_op_support",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_log_cpu",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_multiple_out_dims",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_clamp",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_backward_unsupported_interaction",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_transpose",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_logsumexp_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_new_zeros",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_unfold",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_min_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_cat",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_multiple_outputs_error_cases",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_inplace_manyview_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_binary_cross_entropy_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_sum_dim",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_select",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_fill_and_zero_inplace",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_out_dims_and_num_outputs_mismatch_err_msg",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_nested_with_different_map_dim",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_binary_pointwise_ops",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_stride",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_tensor_split",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_median_cpu",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_inplace_fallback_nary_different_levels",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_single_input",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_in_dim_not_in_tensor_err_msg",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_as_strided",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_nonzero_out_dims",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_reshape_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_add_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_sub_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_expand_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_is_floating_point",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_batched_gradient_basic",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_inplace_fallback_unary",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_max_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_div_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_unrelated_output_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_stack",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_log1p_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_clone",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_sigmoid_cpu",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_inplace_fallback_nary_same_levels",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_fallback_with_undefined_grad",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_reshape",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_trace_cpu",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_out_dims_edge_case",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_mul_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_threshold_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_unrelated_output_multiple_grad_cpu",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_nested_out_dims",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_functools_partial",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_reshape_as",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_non_zero_in_dims",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_to",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_non_default_in_dims_out_dims",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_unsupported_op_err_msg",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_slice",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_index_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_diagonal_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_inplace_on_view_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_expand_as",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_view",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_T_numpy",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_new_empty_strided",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_contiguous",  # test_legacy_vmap
+    "TestAOTAutograd.test_inference_mode",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_multi_output_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_noncontiguous",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_is_output",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_false_aliasing",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_some_output_requires_grad_input_doesnt",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_output_view_simple",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_all_alias_types",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_invalid_dupe",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_set__input_mutation",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_multiple",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_dict",  # functorch/test_aotdispatch
+    "TestPythonKeyCPU.test_make_fx_vjp_cpu",  # functorch/test_aotdispatch
+    "TestPartitioning.test_min_cut_partitioner_output_tensor_shape_tensor",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_output_view_mutate_multiple",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_view_and_inplace_view",  # functorch/test_aotdispatch
+    "TestPartitioning.test_default_partitioner_output_tensor_shape_tensor",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_some_outputs_dont_require_grad_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_returned_multiple_times",  # functorch/test_aotdispatch
+    "TestPartitioning.test_contiguous",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_op_depending_on_symint",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_invalid_dupe_fake",  # functorch/test_aotdispatch
+    "TestPartitioning.test_min_cut_partitioner_recomputable_ops",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_data_and_metadata_mutation_aliases_other_input",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_aliases_bases_out_of_order",  # functorch/test_aotdispatch
+    "TestAOTDispatch.test_aot_dispatch_input_mutation_and_output_alias",  # functorch/test_aotdispatch
+    "TestPythonKeyCPU.test_make_fx_jacrev_cpu",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_metadata_mutation_aliases",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_alias_everything",  # functorch/test_aotdispatch
+    "TestAOTDispatch.test_aot_dispatch_output_alias",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_dupe_arg_torture",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_aliases_other_input",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_aliases_other_input2",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_output_view_multiple",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_set__and_data_mutation_good",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_and_output_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_data_and_metadata_mutation",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_outputs_are_aliased",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_some_outputs_dont_require_grad_non_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_subclass_metadata_mutation_req_grad_True",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_input_multi_output_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_invalid_dupe_left_bias",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_view_detach",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_and_returned_different_grad",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_subclass_metadata_mutation_req_grad_False",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_metadata",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_output_view_metadata_mutate_multiple",  # functorch/test_aotdispatch
+    "TestAOTDispatch.test_aot_dispatch_input_mutation",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_new_inp_requires_grad_now",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_aliased_with_mutation_output_alias",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_and_returned_flipped",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_aliases_and_output_alias",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_default_partitioner_saves_symints_not_tensors_for_bw",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_and_returned",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_multiple_inputs_get_correct_one",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_multiple_mixed",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_aliases_and_none_require_gradients",  # functorch/test_aotdispatch
 }
 
 dynamo_skips = {

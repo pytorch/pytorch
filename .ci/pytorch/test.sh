@@ -283,11 +283,9 @@ test_dynamo_shard() {
       profiler/test_profiler \
       profiler/test_profiler_tree \
       test_python_dispatch \
-      test_legacy_vmap \
       test_custom_ops \
       export/test_db \
       functorch/test_dims \
-      functorch/test_aotdispatch \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
