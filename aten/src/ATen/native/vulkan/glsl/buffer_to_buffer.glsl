@@ -1,7 +1,7 @@
 #version 450 core
 
-#define PRECISION $precision
-#define FORMAT $format
+#define PRECISION ${PRECISION}
+#define FORMAT ${FORMAT}
 
 #include "indexing.h"
 

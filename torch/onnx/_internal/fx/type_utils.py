@@ -112,6 +112,7 @@ _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: Dict[
     int: {"tensor(int16)", "tensor(int32)", "tensor(int64)"},
     float: {"tensor(float16)", "tensor(float)", "tensor(double)"},
     bool: {"tensor(int32)", "tensor(int64)", "tensor(bool)"},
+    complex: {"tensor(float)", "tensor(double)"},
     torch.complex32: {"tensor(float16)"},
     torch.complex64: {"tensor(float)"},
     torch.complex128: {"tensor(double)"},
@@ -127,7 +128,7 @@ _PYTHON_TYPE_TO_TORCH_DTYPE = {
     bool: torch.bool,
     int: torch.int64,
     float: torch.float32,
-    complex: torch.complex32,
+    complex: torch.complex64,
 }
 
 _COMPLEX_TO_FLOAT: Dict[torch.dtype, torch.dtype] = {
@@ -192,7 +193,7 @@ _TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE = {
 }
 
 SYM_VALUE_TYPE = Union[torch.SymInt, torch.SymFloat, torch.SymBool]
-META_VALUE_TYPE = Union[fake_tensor.FakeTensor, SYM_VALUE_TYPE]
+META_VALUE_TYPE = Union[fake_tensor.FakeTensor, SYM_VALUE_TYPE, int, float, bool]
 # NOTE: Belows are from torch/fx/node.py
 BaseArgumentTypes = Union[
     str,

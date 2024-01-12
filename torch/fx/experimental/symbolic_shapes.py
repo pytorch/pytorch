@@ -15,7 +15,21 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
-from typing import Any, cast, Callable, Dict, List, Optional, Sequence, Set, Tuple, Type, Union, Iterable
+from typing import (
+    Any,
+    cast,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    Union,
+    TYPE_CHECKING
+)
 
 import torch
 import torch.fx
@@ -44,6 +58,9 @@ from torch._utils_internal import signpost_event
 
 from torch._logging import LazyString
 
+if TYPE_CHECKING:
+    from torch._dynamo.source import TensorPropertySource
+
 InputList = List
 DimList = List
 
@@ -62,8 +79,9 @@ __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "guard_int", "guard_float", "guard_scalar", "canonicalize_bool_expr",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
-    "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
-    "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext", "StatefulSymbolicContext"
+    "is_concrete_bool", "is_singleton", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
+    "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext",
+    "StatefulSymbolicContext", "SubclassSymbolicContext"
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -202,6 +220,21 @@ def is_concrete_bool(a: Union[bool, SymBool]):
         return True
 
     return False
+
+def is_singleton(s):
+    # check for SingletonSymNode
+    if not isinstance(s, torch.SymInt):
+        return False
+    if s.node.singleton_int() is not None:
+        return True
+
+    # check for symbolic variable wrapping a SingletonSymNode (fake-ifying causes this)
+    return (
+        s.node.is_symbolic()
+        and s.node.hint is not None
+        and isinstance(s.node.hint, torch.SymInt)
+        and s.node.hint.node.singleton_int() is not None
+    )
 
 def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
     if isinstance(val, SymTypes):
@@ -842,13 +875,36 @@ class StatefulSymbolicContext(StatelessSymbolicContext):
     w/r/t different shape_envs, clearing, etc.
     """
     tensor_source: Source = None
-    source_to_symint_node_cache : Dict["TensorPropertySource", SymInt] = None
+    # Why is this keyd on int first?
+    # That integer is actually the id of the shape_env. This cache short-circuits symbol
+    # creation, and we must store it per shape env. Now, while tracing invariants are a single
+    # shape env per tracing context, and every new frame gets a new shape_env. So where would we have
+    # multiple shape envs? The answer lies in recording. When we are replaying, replay_shape_env_events
+    # is invoked, and creates a new shape_env. Replaying events against this new shape_env will
+    # cause it to fail with unknown symbols, as the symbols cached here will skip creation, and never
+    # get recorded in var_to_val, etc.
+    # TODO(voz): consider a weakref to the shape_env here
+    shape_env_to_source_to_symbol_cache : Dict[int, Dict["TensorPropertySource", "sympy.Expr"]] = None
 
     def __post_init__(self):
         # The None default is annoying, but required because of dataclass limitations
         assert self.tensor_source is not None
-        if not self.source_to_symint_node_cache:
-            object.__setattr__(self, 'source_to_symint_node_cache', {})
+        if not self.shape_env_to_source_to_symbol_cache:
+            object.__setattr__(self, 'shape_env_to_source_to_symbol_cache', {})
+
+
+@dataclass(frozen=True)
+class SubclassSymbolicContext(StatefulSymbolicContext):
+    """
+    The correct symbolic context for a given inner tensor of a traceable tensor subclass
+    may differ from that of the outer symbolic context. This structure allows for this
+    flexibility, with inner symbolic contexts mapped via attr -> symbolic context.
+    """
+    inner_contexts: Dict[str, SymbolicContext] = None
+
+    def __post_init__(self):
+        if self.inner_contexts is None:
+            self.inner_contexts = {}
 
 
 def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
@@ -929,6 +985,8 @@ SYMPY_INTERP = {
     'floor': math.floor,
     'ceiling': math.ceil,
     'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
+    'Round': builtins.round,
+    'RoundDecimal': builtins.round,
 }
 
 
@@ -1301,7 +1359,7 @@ class DimConstraints:
         self.raise_inconsistencies()
         # as long as there are symbols with equalities, solve for them
         # NOTE(avik): this is guaranteed to terminate (#iterations <= #symbols)
-        while(self._symbols_with_equalities):
+        while self._symbols_with_equalities:
             s = self._symbols_with_equalities.pop()
             exprs = self._univariate_inequalities.pop(s)
             solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
@@ -1463,7 +1521,7 @@ class DimConstraints:
                 debug_names.update(k.split(" = ")[0] for k in forced_specializations.keys())
                 buf += (
                     f"Specializations unexpectedly required ({', '.join(debug_names)})! "
-                    "For more information, run with TORCH_LOGS=dynamic.\n"
+                    "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
                 )
                 for s, val in forced_specializations.items():
                     buf += f"  - {s} must be specialized to {val} because the guards generated for it are too complex.\n"
@@ -1864,7 +1922,7 @@ class ShapeEnv:
             # FakeTensorMeta for two reasons:
             #   1. this is all the information we need when recording ShapeEnvEvents.
             #   2. it works even if each TrackedFake changes its metadata.
-            return TrackedFake(inner_fake, fake.source, fake.constraint_dims)  # type: ignore[arg-type]
+            return TrackedFake(inner_fake, fake.source, fake.symbolic_context)  # type: ignore[arg-type]
 
         return [maybe_transform_fake(fake) for fake in self.tracked_fakes]
 
@@ -2025,7 +2083,7 @@ class ShapeEnv:
                            source: Source,
                            symbolic_context: SymbolicContext
                            ) -> List[sympy.Expr]:
-        return self._produce_dyn_sizes_from_int_tuple(tuple(ex.size()), source, symbolic_context)
+        return self._produce_dyn_sizes_from_int_tuple(tuple(ex_size), source, symbolic_context)
 
     def _produce_dyn_sizes_from_int_tuple(self,
                                           tensor_size: Tuple[int],
@@ -2040,7 +2098,11 @@ class ShapeEnv:
         size = []
         for i, val in enumerate(tensor_size):
             size.append(self.create_symbol(
-                val, TensorPropertySource(source, TensorProperty.SIZE, i), dynamic_dims[i], constraint_dims[i]
+                val,
+                TensorPropertySource(source, TensorProperty.SIZE, i),
+                dynamic_dims[i],
+                constraint_dims[i],
+                symbolic_context=symbolic_context
             ))
         return size
 
@@ -2091,8 +2153,6 @@ class ShapeEnv:
         # The order of checking the guards matters. In this specific example:
         # If True branch guard check precedes False branch and for True branch, y.size(0) check precedes x == True,
         # we may have an unnessary shape speciliazation for y.
-        assert not ex.is_nested
-
         def maybe_specialize_sym_int_with_hint(maybe_sym) -> int:
             assert isinstance(maybe_sym, (int, torch.SymInt))
             if is_symbolic(maybe_sym):
@@ -2174,7 +2234,13 @@ class ShapeEnv:
             }
             # iterate over unbound strides in sorted order
             val_list = sorted(
-                [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None]
+                [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
+                key=lambda tup: (
+                    # Order singletons by their coefficients.
+                    # 1 here to order singletons after non-singletons.
+                    (1, tup[0].node.singleton_coeff(), tup[1]) if is_singleton(tup[0])
+                    else (0, *tup)
+                )
             )
             for _, i in val_list:
                 if stride[i] is None and ex_stride[i] in candidates:
@@ -2195,6 +2261,7 @@ class ShapeEnv:
                     TensorPropertySource(source, TensorProperty.STRIDE, i),
                     dynamic_dim=dynamic_strides_offset,
                     constraint_dim=None,
+                    symbolic_context=symbolic_context,
                 )
         assert all(x is not None for x in stride)
 
@@ -2203,7 +2270,6 @@ class ShapeEnv:
                 sym,
                 hint=hint,
                 source=TensorPropertySource(source, TensorProperty.SIZE, i),
-                symbolic_context=symbolic_context
             )
             for i, (sym, hint) in enumerate(zip(size, ex_size))
         ]
@@ -2213,17 +2279,17 @@ class ShapeEnv:
             # we computed
             assert stride_expr is not None
             sym_stride.append(self.create_symintnode(
-                stride_expr, hint=ex_stride[i], source=TensorPropertySource(source, TensorProperty.STRIDE, i),
-                symbolic_context=symbolic_context))
+                stride_expr, hint=ex_stride[i], source=TensorPropertySource(source, TensorProperty.STRIDE, i)))
         sym_storage_offset = self.create_symintnode(
             self.create_symbol(
                 ex_storage_offset,
                 TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
                 dynamic_dim=dynamic_strides_offset,
                 constraint_dim=None,
+                symbolic_context=symbolic_context
             ),
             hint=ex_storage_offset,
-            source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), symbolic_context=symbolic_context)
+            source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
         return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
 
     # If you know what the current hint value of the SymInt to be created
@@ -2236,7 +2302,6 @@ class ShapeEnv:
             *,
             hint: Optional[int],
             source: Optional[Source] = None,
-            symbolic_context: Optional[SymbolicContext] = None,
     ):
         source_name = source.name() if source else None
 
@@ -2253,19 +2318,12 @@ class ShapeEnv:
         else:
             fx_node = None
 
-        # see note [Tensor Fakification and Symbol Caching]
-        if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
-            if source_name in symbolic_context.source_to_symint_node_cache:
-                return symbolic_context.source_to_symint_node_cache[source_name]
-
         if isinstance(sym, sympy.Integer):
             if hint is not None:
                 assert int(sym) == hint
             out = int(sym)
         else:
             out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
-        if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
-            symbolic_context.source_to_symint_node_cache[source_name] = out
         return out
 
     @record_shapeenv_event()
@@ -2341,7 +2399,14 @@ class ShapeEnv:
 
         # We don't want to specialize zero one val for unspecified symbol
         # so that we can always get a new symbol despite val.
-        return self.create_symbol(val, source, dynamic_dim, constraint_dim, positive=None, do_not_specialize_zero_one=True)
+        return self.create_symbol(
+            val,
+            source,
+            dynamic_dim,
+            constraint_dim,
+            positive=None,
+            do_not_specialize_zero_one=True,
+            symbolic_context=None)
 
     @record_shapeenv_event()
     def create_symbol(
@@ -2352,7 +2417,19 @@ class ShapeEnv:
         constraint_dim: DimConstraint = None,  # NB: includes None
         positive: Optional[bool] = True,
         do_not_specialize_zero_one: bool = False,
+        symbolic_context=None,
     ) -> "sympy.Expr":
+        # see note [Tensor Fakification and Symbol Caching]
+        source_name = source.name()
+        if (isinstance(symbolic_context, StatefulSymbolicContext)
+                and id(self) not in symbolic_context.shape_env_to_source_to_symbol_cache):
+            symbolic_context.shape_env_to_source_to_symbol_cache[id(self)] = {}
+
+        if (isinstance(symbolic_context, StatefulSymbolicContext)
+                and source_name
+                and (source_name in symbolic_context.shape_env_to_source_to_symbol_cache[id(self)])):
+            return symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name]
+
         if do_not_specialize_zero_one:
             specialize_zero_one = False
         else:
@@ -2367,10 +2444,10 @@ class ShapeEnv:
             dynamic_dim = DimDynamic.DYNAMIC
 
         if dynamic_dim is DimDynamic.STATIC:
-            # We don't expect to ever reach here even the user specifies
-            # dynamic=False, because automatic_dynamic skipped for
-            # nested tensors.
-            return sympy.Integer(val)
+            out = sympy.Integer(val)
+            if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
+                symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name] = out
+            return out
 
         elif dynamic_dim is DimDynamic.DUCK:
             # duck_shape can be used to globally turn off duck shaping, even
@@ -2447,6 +2524,8 @@ class ShapeEnv:
         if isinstance(r, sympy.Symbol):
             self.var_to_sources[r].append(source)
 
+        if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
+            symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name] = r
         return r
 
     def debug_name(self, source):
@@ -2492,11 +2571,7 @@ class ShapeEnv:
         sources,
         source_ref=lambda n: n.name(),
         *,
-        # An input is either a SymInt (in which case you directly have
-        # DimConstraint) or a Tensor (in which case you have a
-        # DimList[DimConstraint]).  Whenever Optional is accepted, that
-        # just means there are no constraints
-        constraint_inputs: Optional[InputList[Union[DimConstraint, Optional[DimList[DimConstraint]]]]] = None,
+        input_contexts: Optional[DimList[SymbolicContext]] = None,
         equalities_inputs: Optional[Set[Tuple[Source, Source]]] = None,
         _simplified=False,
         # Indicates if we should produce guards for known static values.
@@ -2521,22 +2596,28 @@ class ShapeEnv:
         assert len(placeholders) == len(sources)
         Tensorlike = (torch.Tensor, FakeTensorMeta)
 
+        def _create_no_constraints_context(t):
+            return StatelessSymbolicContext(
+                # Ignored; only the constraints part is relevant below.
+                dynamic_sizes=[DimDynamic.DYNAMIC] * t.dim(),
+                constraint_sizes=[None] * t.dim()
+            )
+
         # Expand optional inputs, or verify invariants are upheld
-        if constraint_inputs is None:
-            constraint_inputs = [
-                [None] * t.dim() if isinstance(t, Tensorlike) else None for t in placeholders
+        if input_contexts is None:
+            input_contexts = [
+                _create_no_constraints_context(t) if isinstance(t, Tensorlike)
+                else None for t in placeholders
             ]
         else:
-            assert len(constraint_inputs) == len(placeholders)
-            for i, (t, constraint) in enumerate(zip(placeholders, constraint_inputs)):
+            assert len(input_contexts) == len(placeholders)
+            for i, (t, context) in enumerate(zip(placeholders, input_contexts)):
                 if isinstance(t, Tensorlike):
-                    if constraint is None:
-                        constraint_inputs[i] = [None] * t.dim()
-                    else:
-                        assert len(constraint) == t.dim()
+                    if context is None:
+                        input_contexts[i] = _create_no_constraints_context(t)
                 else:
                     assert isinstance(t, (SymInt, int))
-                    assert not isinstance(constraint, list)
+                    assert not isinstance(context, list)
 
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
@@ -2682,10 +2763,6 @@ class ShapeEnv:
                             # expect to have to compile in this case anyway
                             if i not in (0, 1):
                                 constraint_violated = True
-                        else:
-                            # TODO: Maybe non-strict constraint shouldn't error
-                            # here?  Check what happens in practice
-                            constraint_violated = True
                     if constraint_violated:
                         def hint(s):
                             sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(s)
@@ -2723,7 +2800,7 @@ class ShapeEnv:
                     )
                     record_constraint_violation(constraint.warn_only, self.debug_name(source), msg)
 
-        for t, source, constraint in zip(placeholders, sources, constraint_inputs):
+        for t, source, context in zip(placeholders, sources, input_contexts):
             if isinstance(source, str):
                 from torch._dynamo.source import LocalSource
                 source = LocalSource(source)
@@ -2734,32 +2811,35 @@ class ShapeEnv:
                 track_symint(source, t)
                 continue
             assert isinstance(t, Tensorlike)
-            sources_and_tensors = [(source, t)]
             if is_traceable_wrapper_subclass(t):
-                # If our placeholder is a tensor subclass, then the "true" symints
-                # come from the subclass's inner tensors.
-                attrs, _ = t.__tensor_flatten__()
                 from torch._dynamo.source import AttrSource
-                inner_sources_and_tensors = [(AttrSource(source, attr), getattr(t, attr)) for attr in attrs]
-                if t.is_nested:
-                    # For NestedTensors we need to track BOTH symints on the outer
-                    # tensor and tensor because we'd like to guard on the ragged
-                    # size but the symint representing ragged size is not in terms
-                    # of the symints on the inner tensors.
-                    sources_and_tensors.extend(inner_sources_and_tensors)
-                else:
-                    # For other tensor subclasses, only track the symints from
-                    # the inner tensors
-                    sources_and_tensors = inner_sources_and_tensors
 
-            for src, curr_t in sources_and_tensors:
+                assert isinstance(context, SubclassSymbolicContext)
+
+                # For subclasses, we need to track symints on BOTH the outer
+                # and inner tensors.
+                sources_tensors_constraints = [
+                    (source, t, context.constraint_sizes)
+                ]
+                attrs, _ = t.__tensor_flatten__()
+                for attr in attrs:
+                    inner_t = getattr(t, attr)
+                    inner_context = context.inner_contexts[attr]
+                    sources_tensors_constraints.append((
+                        AttrSource(source, attr),
+                        inner_t,
+                        inner_context.constraint_sizes
+                    ))
+            else:
+                sources_tensors_constraints = [(source, t, context.constraint_sizes)]
+
+            for src, curr_t, constraint in sources_tensors_constraints:
                 for i, ss in enumerate(curr_t.size()):
                     property_source = TensorPropertySource(src, TensorProperty.SIZE, i)
                     track_symint(property_source, ss, constraint[i])
-                if not t.is_nested:
-                    for i, ss in enumerate(curr_t.stride()):
-                        track_symint(TensorPropertySource(src, TensorProperty.STRIDE, i), ss)
-                    track_symint(TensorPropertySource(src, TensorProperty.STORAGE_OFFSET), curr_t.storage_offset())
+                for i, ss in enumerate(curr_t.stride()):
+                    track_symint(TensorPropertySource(src, TensorProperty.STRIDE, i), ss)
+                track_symint(TensorPropertySource(src, TensorProperty.STORAGE_OFFSET), curr_t.storage_offset())
 
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
@@ -2938,7 +3018,7 @@ class ShapeEnv:
                 err = '\n'.join(error_msgs)
                 raise ConstraintViolationError(
                     f"Constraints violated ({debug_names})! "
-                    "For more information, run with TORCH_LOGS=dynamic.\n"
+                    "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
                     f"{err}"
                 )
             elif len(warn_msgs) > 0:
@@ -3246,6 +3326,11 @@ class ShapeEnv:
         """
         result_expr = safe_expand(expr).xreplace(self.var_to_val)
         if not result_expr.is_number:
+
+            from torch.utils._sympy.singleton_int import SingletonInt
+
+            if isinstance(result_expr, SingletonInt):
+                return None
             r = self._maybe_evaluate_static(result_expr, compute_hint=True)
             if r is not None:
                 return r
@@ -3270,7 +3355,7 @@ class ShapeEnv:
             "It appears that you're trying to get a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
             f"The expression we were trying to evaluate is {expr} (unhinted: {unhinted_expr}).  "
-            "Scroll up to see where each of these data-dependent accesses originally occurred."
+            "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )

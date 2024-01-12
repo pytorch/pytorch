@@ -10,6 +10,11 @@
 #include <mimalloc.h>
 #endif
 
+#ifdef __linux__
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
+
 // TODO: rename flags to C10
 C10_DEFINE_bool(
     caffe2_cpu_allocator_do_zero_fill,
@@ -45,6 +50,35 @@ void memset_junk(void* data, size_t num) {
   }
 }
 
+#if defined(__linux__) && !defined(__ANDROID__)
+static inline bool is_thp_alloc_enabled() {
+  static bool value = [&] {
+    const char* ptr = std::getenv("THP_MEM_ALLOC_ENABLE");
+    return ptr != nullptr ? std::atoi(ptr) : 0;
+  }();
+  return value;
+}
+
+inline size_t c10_compute_alignment(size_t nbytes) {
+  static const auto pagesize = sysconf(_SC_PAGESIZE);
+  // for kernels that don't provide page size, default it to 4K
+  const size_t thp_alignment = (pagesize < 0 ? gPagesize : pagesize);
+  return (is_thp_alloc_enabled() ? thp_alignment : gAlignment);
+}
+
+inline bool is_thp_alloc(size_t nbytes) {
+  // enable thp (transparent huge pages) for larger buffers
+  return (is_thp_alloc_enabled() && (nbytes >= gAlloc_threshold_thp));
+}
+#elif !defined(__ANDROID__) && !defined(_MSC_VER)
+constexpr size_t c10_compute_alignment(C10_UNUSED size_t nbytes) {
+  return gAlignment;
+}
+
+constexpr bool is_thp_alloc(C10_UNUSED size_t nbytes) {
+  return false;
+}
+#endif
 } // namespace
 
 void* alloc_cpu(size_t nbytes) {
@@ -79,7 +113,7 @@ void* alloc_cpu(size_t nbytes) {
       nbytes,
       " bytes.");
 #else
-  int err = posix_memalign(&data, gAlignment, nbytes);
+  int err = posix_memalign(&data, c10_compute_alignment(nbytes), nbytes);
   CAFFE_ENFORCE(
       err == 0,
       "DefaultCPUAllocator: can't allocate memory: you tried to allocate ",
@@ -89,6 +123,16 @@ void* alloc_cpu(size_t nbytes) {
       " (",
       strerror(err),
       ")");
+  if (is_thp_alloc(nbytes)) {
+#ifdef __linux__
+    // MADV_HUGEPAGE advise is available only for linux.
+    // general posix compliant systems can check POSIX_MADV_SEQUENTIAL advise.
+    int ret = madvise(data, nbytes, MADV_HUGEPAGE);
+    if (ret != 0) {
+      TORCH_WARN_ONCE("thp madvise for HUGEPAGE failed with ", strerror(errno));
+    }
+#endif
+  }
 #endif
 
   // move data to a thread's NUMA node

@@ -63,7 +63,7 @@ torch_function_passthrough = {
     torch.sym_int,
     torch.sym_max,
     torch.sym_min,
-    torch.sym_sqrt,
+    torch._sym_sqrt,  # type: ignore[attr-defined]
     torch.sym_ite,
     torch.Tensor.dim,
     torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
@@ -1303,7 +1303,7 @@ def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
         return type(x)
 
 
-def symbol_type(x: sympy.Symbol) -> Type:
+def expr_type(x: sympy.Expr) -> Type:
     if x.is_integer:  # type: ignore[attr-defined]
         return int
     else:
@@ -1411,14 +1411,14 @@ def elementwise_dtypes(
     import sympy
 
     for x in args:
-        if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
+        if not isinstance(x, (Number, TensorLike, sympy.Expr)):
             msg = f"Unexpected type {str(type(x))} when computing elementwise type promotion!"
             raise ValueError(msg)
 
         if isinstance(x, Number):
             highest_type = get_higher_type(highest_type, number_type(x))
-        elif isinstance(x, sympy.Symbol):
-            highest_type = get_higher_type(highest_type, symbol_type(x))
+        elif isinstance(x, sympy.Expr):
+            highest_type = get_higher_type(highest_type, expr_type(x))
         else:
             # x is a TensorLike
             highest_type = get_higher_type(highest_type, dtype_to_type(x.dtype))
@@ -1537,27 +1537,13 @@ def make_contiguous_strides_for(
     if not shape:
         return ()
 
-    # TODO: Move this somewhere central?
-    def _is_singleton(s):
-        # check for SingletonSymNode
-        if not isinstance(s, torch.SymInt):
-            return False
-        if s.node.singleton_int() is not None:
-            return True
-
-        # check for SymInt wrapping a SingletonSymNode (fake-ifying causes this)
-        return (
-            s.node.is_symbolic()
-            and s.node.hint is not None
-            and isinstance(s.node.hint, torch.SymInt)
-            and s.node.hint.node.singleton_int() is not None
-        )
+    from torch.fx.experimental.symbolic_shapes import is_singleton
 
     multiplier = 1
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= l if _is_singleton(l) else sym_max(l, 1)
+        multiplier *= l if is_singleton(l) else sym_max(l, 1)
 
     result = tuple(reversed(strides))
 

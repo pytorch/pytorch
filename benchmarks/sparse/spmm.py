@@ -2,7 +2,7 @@ import argparse
 import sys
 
 import torch
-from utils import Event, gen_sparse_coo, gen_sparse_csr
+from utils import Event, gen_sparse_coo, gen_sparse_coo_and_csr, gen_sparse_csr
 
 
 def test_sparse_csr(m, n, k, nnz, test_count):

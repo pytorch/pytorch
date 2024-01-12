@@ -21,11 +21,11 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._tensor import DTensor
-from torch.distributed.checkpoint._state_dict_utils import (
+from torch.distributed._state_dict_utils import (
     _gather_state_dict,
     _offload_state_dict_to_cpu,
 )
+from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp import (
     FullOptimStateDictConfig,
     FullStateDictConfig,
@@ -157,7 +157,7 @@ def _get_fqns(model: nn.Module, name: str, skip_ddp_prefix: bool = True) -> FQNS
             if not skip_ddp_prefix:
                 fqn_obj_names.append(curr_obj_name)
         elif isinstance(curr_obj, FSDP):
-            if obj_names[i + 1] == FLAT_PARAM:
+            if i < len(obj_names) - 1 and obj_names[i + 1] == FLAT_PARAM:
                 prefix = ".".join(fqn_obj_names)
                 flat_param = getattr(curr_obj, FLAT_PARAM)
                 if prefix:

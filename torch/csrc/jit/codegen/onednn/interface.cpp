@@ -74,6 +74,7 @@ void fuseGraph(std::shared_ptr<Graph>& g) {
     GRAPH_DUMP("After PrepareBinaryForLLGA. Before DeferSizeCheck", g);
     DeferSizeCheck(g);
     GRAPH_DUMP("After DeferSizeCheck. Before CreateLlgaSubgraphs", g);
+    dnnl::graph::set_constant_tensor_cache(true);
     CreateLlgaSubgraphs(g);
     GRAPH_DUMP("After CreateLlgaSubgraphs. Before PropagateLayout", g);
     PropagateLayout(g);

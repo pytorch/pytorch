@@ -2,6 +2,37 @@
 #include <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
 
 // TODO: Remove me when moved to MacOS 13
+#if !defined(__MAC_13_2) && \
+    (!defined(MAC_OS_X_VERSION_13_2) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_13_2))
+
+@interface FakeMPSGraphConvolution3DOpDescriptor : NSObject<NSCopying>
+
+@property (readwrite, nonatomic) NSUInteger strideInX;
+@property (readwrite, nonatomic) NSUInteger strideInY;
+@property (readwrite, nonatomic) NSUInteger strideInZ;
+@property (readwrite, nonatomic) NSUInteger dilationRateInX;
+@property (readwrite, nonatomic) NSUInteger dilationRateInY;
+@property (readwrite, nonatomic) NSUInteger dilationRateInZ;
+
+@property (readwrite, nonatomic) NSUInteger paddingLeft;
+@property (readwrite, nonatomic) NSUInteger paddingRight;
+@property (readwrite, nonatomic) NSUInteger paddingTop;
+@property (readwrite, nonatomic) NSUInteger paddingBottom;
+@property (readwrite, nonatomic) NSUInteger paddingFront;
+@property (readwrite, nonatomic) NSUInteger paddingBack;
+
+@property (readwrite, nonatomic) MPSGraphPaddingStyle paddingStyle;
+@property (readwrite, nonatomic) MPSGraphTensorNamedDataLayout dataLayout;
+@property (readwrite, nonatomic) MPSGraphTensorNamedDataLayout weightsLayout;
+
+@property (readwrite, nonatomic) NSUInteger groups;
+
+@end
+
+@compatibility_alias MPSGraphConvolution3DOpDescriptor FakeMPSGraphConvolution3DOpDescriptor;
+
+#endif
+
 @interface MPSGraph (VenturaOps)
 
 #if !defined(__MAC_13_0) && \
@@ -16,7 +47,29 @@ typedef NS_ENUM(NSUInteger, MPSGraphResizeNearestRoundingMode)
     MPSGraphResizeNearestRoundingModeRoundToEven       =  4L,
     MPSGraphResizeNearestRoundingModeRoundToOdd        =  5L,
 };
+
+// Define complex enums for MacOS 12
+#define MPSDataTypeComplexBit 0x01000000
+#define MPSDataTypeComplexFloat32 ((MPSDataType) (MPSDataTypeFloatBit | MPSDataTypeComplexBit | 64))
+#define MPSDataTypeComplexFloat16 ((MPSDataType) (MPSDataTypeFloatBit | MPSDataTypeComplexBit | 32))
 #endif
+
+- (MPSGraphTensor * _Nonnull) convolution3DWithSourceTensor:(MPSGraphTensor * _Nonnull) source
+                                            weightsTensor:(MPSGraphTensor * _Nonnull) weights
+                                               descriptor:(MPSGraphConvolution3DOpDescriptor * _Nonnull) descriptor
+                                                     name:(NSString * _Nullable) name;
+
+- (MPSGraphTensor * _Nonnull) convolution3DDataGradientWithIncomingGradientTensor:(MPSGraphTensor * _Nonnull) incomingGradient
+                                                                  weightsTensor:(MPSGraphTensor * _Nonnull) weights
+                                                                    outputShape:(MPSShape * _Nonnull) outputShape
+                                                   forwardConvolutionDescriptor:(MPSGraphConvolution3DOpDescriptor * _Nonnull) forwardConvolutionDescriptor
+                                                                           name:(NSString * _Nullable) name;
+
+- (MPSGraphTensor * _Nonnull) convolution3DWeightsGradientWithIncomingGradientTensor:(MPSGraphTensor * _Nonnull) incomingGradient
+                                                                      sourceTensor:(MPSGraphTensor * _Nonnull) source
+                                                                       outputShape:(MPSShape * _Nonnull) outputShape
+                                                      forwardConvolutionDescriptor:(MPSGraphConvolution3DOpDescriptor * _Nonnull) forwardConvolutionDescriptor
+                                                                              name:(NSString * _Nullable) name;
 
 - (MPSGraphTensor * _Nonnull)cumulativeSumWithTensor:(MPSGraphTensor * _Nonnull)tensor
                                                 axis:(NSInteger)axis
