@@ -15,12 +15,12 @@ namespace vulkan {
  */
 struct TensorRef final {
   std::vector<int64_t> sizes;
-  c10::ScalarType dtype;
+  api::ScalarType dtype;
   const void* data;
 
   explicit TensorRef(
-      const IntArrayRef t_sizes,
-      c10::ScalarType t_dtype,
+      const std::vector<int64_t>& t_sizes,
+      api::ScalarType t_dtype,
       const void* const t_data);
 
   TensorRef(const TensorRef&) = default;
