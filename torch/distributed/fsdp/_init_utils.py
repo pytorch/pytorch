@@ -1072,7 +1072,7 @@ def _sync_module_params_and_buffers(
             else:
                 module_states.append(detached_buffer)
 
-    for param in module.parameters():
+    for param in params:
         detached_param = param.detach()
         if is_traceable_wrapper_subclass(detached_param):
             attrs, _ = detached_param.__tensor_flatten__()  # type: ignore[attr-defined]
