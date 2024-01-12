@@ -5,8 +5,8 @@ namespace native {
 namespace vulkan {
 
 TensorRef::TensorRef(
-    const IntArrayRef t_sizes,
-    c10::ScalarType t_dtype,
+    const std::vector<int64_t>& t_sizes,
+    api::ScalarType t_dtype,
     const void* const t_data)
     : sizes{}, dtype{t_dtype}, data{t_data} {
   size_t ndim = t_sizes.size();

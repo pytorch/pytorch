@@ -520,8 +520,8 @@ def gen_cpp_files(
     h = "#pragma once\n"
     h += "#include <ATen/native/vulkan/api/Types.h>\n"
     h += "#include <ATen/native/vulkan/api/vk_api.h>\n"
-    h += "#include <c10/util/flat_hash_map.h>\n"
     h += "#include <string>\n"
+    h += "#include <unordered_map>\n"
 
     nsbegin = "namespace at {\nnamespace native {\nnamespace vulkan {\n"
     nsend = "} // namespace vulkan\n} // namespace native\n} // namespace at\n"
@@ -533,9 +533,9 @@ def gen_cpp_files(
 
     # Forward declaration of ShaderInfo
     h += "namespace api {\nstruct ShaderInfo;\n} // namespace api\n"
-    h += "typedef ska::flat_hash_map<std::string, api::ShaderInfo> ShaderListing;\n"
-    h += "typedef ska::flat_hash_map<std::string, std::string> RegistryKeyMap;\n"
-    h += "typedef ska::flat_hash_map<std::string, RegistryKeyMap> ShaderRegistry;\n"
+    h += "typedef std::unordered_map<std::string, api::ShaderInfo> ShaderListing;\n"
+    h += "typedef std::unordered_map<std::string, std::string> RegistryKeyMap;\n"
+    h += "typedef std::unordered_map<std::string, RegistryKeyMap> ShaderRegistry;\n"
     h += "extern const ShaderListing shader_infos;\n"
     h += "extern ShaderRegistry shader_registry;\n"
     h += "inline const ShaderListing& get_shader_infos() {\n  return shader_infos;\n}\n"
