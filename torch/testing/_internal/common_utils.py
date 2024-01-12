@@ -830,7 +830,7 @@ def wait_for_process(p, timeout=None):
         p.send_signal(signal.SIGINT)
         exit_status = None
         try:
-            exit_status = p.wait(timeout=30)
+            exit_status = p.wait(timeout=5)
         # try to handle the case where p.wait(timeout=5) times out as well as
         # otherwise the wait() call in the finally block can potentially hang
         except subprocess.TimeoutExpired:
