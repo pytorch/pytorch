@@ -11,6 +11,7 @@ from torch.distributed._tensor import (
     distribute_module,
     DTensor,
     init_device_mesh,
+    Replicate,
     Shard,
 )
 from torch.distributed._tensor.debug import CommDebugMode
@@ -377,6 +378,55 @@ class TestTPFSDPIntegration(FSDPTest):
 
         for grad in grads:
             self.assertFalse(grad.isnan().any().item())
+
+    @skip_if_lt_x_gpu(4)
+    def test_fsdp_tp_sync_module_state(self):
+        mesh_2d = init_device_mesh(
+            "cuda", (self.world_size // 2, 2), mesh_dim_names=["dp", "tp"]
+        )
+        tp_mesh = mesh_2d["tp"]
+        dp_mesh = mesh_2d["dp"]
+
+        # set random seed for each rank
+        torch.manual_seed(mesh_2d.get_rank())
+
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                replicated_dt = DTensor.from_local(
+                    torch.randn(8, 8), tp_mesh, [Replicate()], run_check=False
+                )
+                self.param = torch.nn.Parameter(replicated_dt)
+
+            def forward(self, x):
+                return self.param + 1
+
+        model = TestModel()
+
+        # check on dp mesh dim local tensor does not equal
+        dp_group = dp_mesh.get_group()
+        local_tensor = model.param.to_local()
+        gathered_tensors = [
+            torch.empty_like(local_tensor) for _ in range(dp_mesh.size())
+        ]
+        dist.all_gather(gathered_tensors, local_tensor, group=dp_group)
+        # on dp mesh dim local tensor does not equal
+        tensor_to_compare = gathered_tensors[0]
+        for tensor in gathered_tensors[1:]:
+            self.assertFalse(torch.equal(tensor, tensor_to_compare))
+
+        # wrap with fsdp sync param should sync dp mesh dim
+        fsdp_mod = FSDP(model, device_mesh=dp_mesh, sync_module_states=True)
+        with fsdp_mod.summon_full_params(fsdp_mod):
+            local_tensor = fsdp_mod.param.to_local()
+            gathered_tensors = [
+                torch.empty_like(local_tensor) for _ in range(dp_mesh.size())
+            ]
+            dist.all_gather(gathered_tensors, local_tensor, group=dp_group)
+            # on dp mesh dim local tensor does equal
+            tensor_to_compare = gathered_tensors[0]
+            for tensor in gathered_tensors[1:]:
+                self.assertTrue(torch.equal(tensor, tensor_to_compare))
 
 
 instantiate_parametrized_tests(TestTPFSDPIntegration)
