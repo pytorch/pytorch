@@ -2741,34 +2741,12 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 # TorchDynamo optimize annotation
                 super_run = torch._dynamo.optimize("eager", nopython=nopython)(super_run)
                 key = f"{self.__class__.__name__}.{self._testMethodName}"
-
-                def expect_failure(f):
-                    @wraps(f)
-                    def wrapper(*args, **kwargs):
-                        try:
-                            return f(*args, **kwargs)
-                        except Exception as e:
-                            self.skipTest(e)
-                        raise RuntimeError("Unexpected success, please remove test from dynamo_test_failures.py")
-                    return wrapper
-
                 if key in dynamo_expected_failures:
                     method = getattr(self, self._testMethodName)
-                    setattr(self, self._testMethodName, expect_failure(method))
-
-                def ignore_failure(f):
-                    @wraps(f)
-                    def wrapper(*args, **kwargs):
-                        try:
-                            return f(*args, **kwargs)
-                        except Exception as e:
-                            self.skipTest(e)
-                        self.skipTest("This test passed, maybe we can remove the skip from dynamo_test_failures.py")
-                    return wrapper
-
+                    unittest.expectedFailure(self)
                 if key in dynamo_skips:
                     method = getattr(self, self._testMethodName)
-                    setattr(self, self._testMethodName, ignore_failure(method))
+                    setattr(self, self._testMethodName, unittest.skip("marked skip in dynamo_test_failures.py")(method))
 
             super_run(result=result)
 
