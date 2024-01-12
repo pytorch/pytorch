@@ -23,14 +23,16 @@ from onnxscript.function_libs.torch_lib.ops import (  # type: ignore[import-not-
 
 import torch
 
+_NEW_OP_NAMESPACE: str = "onnx_export"
+"""The namespace for the custom operator."""
+
 
 class DecompSkip:
     op_callable: Callable
     """The original operator callable to skip decomposition."""
     onnxscript_function: Callable
     """The ONNXScript function to be registered for exporting the custom operator."""
-    new_op_namespace: str
-    """The namespace for the custom operator."""
+
     new_op_name: str
     """The name for the custom operator."""
     new_op_schema: str
@@ -38,7 +40,9 @@ class DecompSkip:
 
     @classmethod
     @abc.abstractmethod
-    def register(cls, export_options: torch.onnx.ExportOptions):
+    def register(
+        cls, export_options: torch.onnx.ExportOptions, lib: torch.library.Library
+    ):
         """Registers the custom operator and overrides the original operator.
 
         It should do the following steps in order:
@@ -62,12 +66,12 @@ class DecompSkip:
         ...
 
     @classmethod
-    def register_custom_op(cls):
+    def register_custom_op(cls, lib: torch.library.Library):
         """Registers the custom operator."""
-        new_op_qualname = f"{cls.new_op_namespace}::{cls.new_op_name}"
-        torch.library.define(new_op_qualname, cls.new_op_schema)
-        torch.library.impl(new_op_qualname, "default", cls.replacement)
-        torch.library.impl_abstract(new_op_qualname, cls.abstract)
+        new_op_qualname = f"{_NEW_OP_NAMESPACE}::{cls.new_op_name}"
+        torch.library.define(new_op_qualname, cls.new_op_schema, lib=lib)
+        torch.library.impl(new_op_qualname, "default", cls.replacement, lib=lib)
+        torch.library.impl_abstract(new_op_qualname, cls.abstract, lib=lib)
 
     @classmethod
     def replacement(cls, *args, **kwargs):
@@ -81,20 +85,21 @@ class DecompSkip:
 class UpsampleBilinear2DDecompSkip(DecompSkip):
     op_callable = torch._C._nn.upsample_bilinear2d  # type: ignore[attr-defined]
     onnxscript_function = torchlib_nn.aten_upsample_bilinear2d_vec  # type: ignore[attr-defined]
-    new_op_namespace = "onnx_export"
     new_op_name = "upsample_bilinear2d"
     new_op_schema = "(Tensor self, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> (Tensor)"
 
     @classmethod
-    def register(cls, export_options: torch.onnx.ExportOptions):
-        cls.register_custom_op()
+    def register(
+        cls, export_options: torch.onnx.ExportOptions, lib: torch.library.Library
+    ):
+        cls.register_custom_op(lib)
         torch._C._nn.upsample_bilinear2d = torch.ops.onnx_export.upsample_bilinear2d  # type: ignore[attr-defined]
         if export_options.onnx_registry is None:
             export_options.onnx_registry = torch.onnx.OnnxRegistry()
         registry = export_options.onnx_registry
         registry.register_op(
             function=cls.onnxscript_function,
-            namespace=cls.new_op_namespace,
+            namespace=_NEW_OP_NAMESPACE,
             op_name=cls.new_op_name,
         )
 
@@ -131,9 +136,11 @@ def enable_decomposition_skips(
     The original operator callables that are otherwise decomposed are replaced with custom operators.
     The ONNXScript functions for exporting the custom operators are added to the ONNX registry inside export_options.
     """
+    # Create a new library to tie the lifetime of the custom ops to the context manager.
+    lib = torch.library.Library(_NEW_OP_NAMESPACE, "FRAGMENT")
     try:
         for skip in skips:
-            skip.register(export_options)
+            skip.register(export_options, lib)
         yield
     finally:
         for skip in skips:
