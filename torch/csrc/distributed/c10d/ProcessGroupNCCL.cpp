@@ -346,6 +346,30 @@ c10::optional<std::function<std::string()>>& get_cpp_trace_dumper() {
   return dumper;
 }
 
+gil_checker_t& get_gil_checker() {
+  static gil_checker_t gil_checker = nullptr;
+  return gil_checker;
+}
+
+std::future<bool> launchAsyncGilCheck() {
+  std::promise<bool> resultPromise;
+  std::future<bool> resultFuture = resultPromise.get_future();
+  TORCH_CHECK(get_gil_checker(), "Can't check GIL with null GIL checker");
+  std::thread workerThread([promise = std::move(resultPromise)]() mutable {
+    try {
+      auto& gil_checker = get_gil_checker();
+      promise.set_value((*gil_checker)());
+    } catch (...) {
+      promise.set_exception(std::current_exception());
+    }
+  });
+
+  // Detach the thread to allow it to run independently
+  workerThread.detach();
+
+  return resultFuture;
+}
+
 // Return CUDA device with ordinal given by input rank.  If we aren't
 // bound to a specific device, there is no strict guarantee that this
 // heuristic is the correct assignment of ranks to GPUs that Python
@@ -744,6 +768,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 10 /*10 Mins*/);
+  waitTimeoutDumpInMilSec_ =
+      getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 2000);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
@@ -809,12 +835,13 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const std::string OFF = "OFF";
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
-  std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
             << "NCCL version: " << getNcclVersion() << ", size: " << size
             << ", global rank: " << globalRank()
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
+            << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: "
+            << waitTimeoutDumpInMilSec_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
             << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
             << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
@@ -832,7 +859,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << monitorThreadEnabled_.load()
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
-            << ", NCCL_DEBUG: " << nccl_debug << ", ID=" << this->getID();
+            << ", ID=" << this->getID();
 
   if (options_->global_ranks_in_group.empty()) {
     this->globalRankStart = 0;
@@ -1070,8 +1097,15 @@ std::future<bool> ProcessGroupNCCL::launchAsyncDebugDump() {
   return resultFuture;
 }
 
+std::chrono::time_point<std::chrono::steady_clock> getWakeupTime(
+    int intervalInMilSec) {
+  return std::chrono::steady_clock::now() +
+      std::chrono::milliseconds(intervalInMilSec);
+}
+
 void ProcessGroupNCCL::waitForDumpOrTimeout(
     std::future<bool>& fut,
+    const std::chrono::time_point<std::chrono::steady_clock>& wakeUpTime,
     size_t timeout_sec) {
   TORCH_CHECK(fut.valid(), "Expected a valid future");
 
@@ -1091,6 +1125,7 @@ void ProcessGroupNCCL::waitForDumpOrTimeout(
   // if dumping is not enabled)
   try {
     fut.get();
+    std::this_thread::sleep_until(wakeUpTime);
   } catch (const std::exception& e) {
     LOG(ERROR) << logPrefix() << "Caught exception during async debug dump: \""
                << e.what() << "\"\n";
@@ -1173,6 +1208,7 @@ void ProcessGroupNCCL::shutdown() {
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
   terminateProcessGroup_.store(true);
   workMetaListCV_.notify_one();
 
@@ -1180,6 +1216,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   if (ncclCommWatchdogThread_.joinable()) {
     ncclCommWatchdogThread_.join();
   }
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
 #endif
 
   if (onCompletionHookThread_.joinable())
@@ -1189,6 +1226,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   // threads dying due to aborted communicator and raising a SIGABRT
   std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
   abort(abortReason);
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL abort finished.";
 
   // We need to wait for abort to finish before we can safely shut down
   // heartbeat monitoring thread.
@@ -1264,9 +1302,27 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     LOG(INFO) << "Dumping c++ stacktraces: " << cpp_dumper.value()();
   }
 
+  auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)
   std::future<bool> asyncDebugDump = launchAsyncDebugDump();
+
+  if (get_gil_checker() != nullptr) {
+    auto fut = launchAsyncGilCheck();
+    auto kGilCheckTimeout = std::chrono::milliseconds(300);
+    auto futStatus = fut.wait_for(kGilCheckTimeout);
+    if (futStatus != std::future_status::ready) {
+      TORCH_CHECK(
+          futStatus != std::future_status::deferred,
+          "Expected the future to have been launched eagerly.");
+      LOG(ERROR)
+          << "Could not acquire GIL within 300 ms on exit, possible GIL induced hang";
+    }
+    LOG(INFO) << "Could acquire GIL on exit";
+  } else {
+    LOG(INFO)
+        << "GIL checker was not registered, perhaps this is a no-python build?";
+  }
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
@@ -1292,7 +1348,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // We already log completion inside the thread, so it may not be necessary to
   // check the return value here.  We mainly use a future so we can exit early
   // if done.
-  waitForDumpOrTimeout(asyncDebugDump);
+  waitForDumpOrTimeout(asyncDebugDump, wakeUpTime);
 
   if (!terminateHeartbeatMonitorThread_.load()) {
     // Create a error message reported from MonitorThread, so
@@ -1497,8 +1553,9 @@ void ProcessGroupNCCL::watchdogHandler() {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(TIMEOUT_DUMP)}) &&
             !optAsyncDebugDump) {
+          auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
           optAsyncDebugDump = launchAsyncDebugDump();
-          waitForDumpOrTimeout(*optAsyncDebugDump);
+          waitForDumpOrTimeout(*optAsyncDebugDump, wakeUpTime);
           const auto exitMsg = c10::str(
               logPrefix(),
               "Another rank reported a timeout and signaled a global abort.");
@@ -1535,6 +1592,7 @@ void ProcessGroupNCCL::watchdogHandler() {
               globalStore_->set(std::string(TIMEOUT_DUMP), vec);
             }
 
+            auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
             if (dumpOnTimeout_ && !optAsyncDebugDump) {
               // Store debug info to storage. (By default to local disk)
               optAsyncDebugDump = launchAsyncDebugDump();
@@ -1547,7 +1605,7 @@ void ProcessGroupNCCL::watchdogHandler() {
 
             if (dumpOnTimeout_) {
               // Store debug info to storage. (By default to local disk)
-              waitForDumpOrTimeout(*optAsyncDebugDump);
+              waitForDumpOrTimeout(*optAsyncDebugDump, wakeUpTime);
             }
 
           } catch (const std::exception& e) {
@@ -1974,10 +2032,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
-  if (getRank() == 0) {
-    LOG(INFO) << logPrefix()
-              << "NCCL_DEBUG: " << getCvarString({"NCCL_DEBUG"}, "N/A");
-  }
+  LOG(INFO) << logPrefix()
+            << "NCCL_DEBUG: " << getCvarString({"NCCL_DEBUG"}, "N/A");
 
   // See [Group Start/End Note]
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {

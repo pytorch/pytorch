@@ -1217,6 +1217,9 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             self.assertEqual(fx_quant_output, pt2_quant_output)
 
     def _quantize(self, m, quantizer, example_inputs):
+        # resetting dynamo cache
+        torch._dynamo.reset()
+
         m = capture_pre_autograd_graph(
             m,
             example_inputs,

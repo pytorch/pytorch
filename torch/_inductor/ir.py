@@ -10,7 +10,6 @@ import traceback
 from contextlib import nullcontext
 from enum import Enum
 from functools import partial
-from inspect import signature
 from typing import (
     Any,
     Callable,
@@ -127,7 +126,6 @@ def validate_ir(node_or_nodes):
                 (
                     torch._inductor.ir.ExpandView,
                     DynamicScalar,
-                    AssertScalar,
                     TensorBox,
                     sympy.Symbol,
                     sympy.logic.boolalg.Boolean,
@@ -3558,7 +3556,7 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def process_kernel(cls, kernel, *args, **kwargs):
-        binded_args = signature(kernel).bind(*args, **kwargs).arguments
+        binded_args = {"args": args, "kwargs": kwargs}
 
         args_flat, args_spec = pytree.tree_flatten(binded_args)
 
@@ -4392,45 +4390,6 @@ class DynamicScalar(ExternKernel):
         wrapper.codegen_dynamic_scalar(self)
 
 
-class AssertScalar(ExternKernel):
-    """
-    The result of a call to aten._assert_scalar
-    """
-
-    def get_reads(self):
-        return ()
-
-    def should_allocate(self):
-        return False
-
-    def __init__(self, scalar, msg):
-        super().__init__(
-            # Buffer(name, layotu)
-            None,
-            NoneLayout(torch.device("cpu")),  # type: ignore[arg-type]
-            # InputsKernel(inputs)
-            [],
-        )  # type: ignore[arg-type]
-        self.scalar = scalar
-        self.msg = msg
-
-    def has_side_effects(self):
-        return True
-
-    def get_unbacked_symbol_uses(self):
-        return free_unbacked_symbols(self.scalar)
-
-    def codegen(self, wrapper):
-        assert not V.graph.cpp_wrapper, "NYI"
-        wrapper.writeline(
-            f"if not {V.graph.wrapper_code.codegen_python_sizevar(self.scalar)}:"
-        )
-        wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
-        # No one should ever use this buffer, but for uniformity
-        # define the variable and assign it None
-        wrapper.writeline(f"{self.get_name()} = None")
-
-
 @dataclasses.dataclass
 class ExternKernelNode:
     name: str
@@ -4786,12 +4745,7 @@ class FallbackKernel(ExternKernelAlloc):
                 self.python_kernel_name = str(kernel)
 
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
-            if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
-                self.python_kernel_name = f"torch._prims.rng_prims.{kernel.__name__}"
-            else:
-                raise NotImplementedError(
-                    "Unable to find HigherOrderOperator kernel name"
-                )
+            self.python_kernel_name = f"torch.ops.higher_order.{kernel.__name__}"
         else:
             # For non-aten OpOverload, i.e. custom ops
             if V.graph.cpp_wrapper:
