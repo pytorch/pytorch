@@ -13,6 +13,7 @@ from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
+    IS_WINDOWS,
     TestCase,
     skipIfCrossRef,
     suppress_warnings,
@@ -26,6 +27,7 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     ops,
     instantiate_device_type_tests,
+    onlyCPU,
     onlyCUDA,
 )
 from torch.testing._internal.common_methods_invocations import op_db, skip, skipOps, xfail
@@ -914,7 +916,7 @@ class DecompOneOffTests(TestCase):
         self.assertTrue(torch.allclose(ref[1], res[1]))
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyNativeDeviceTypes
+    @onlyCPU
     @skipIfCrossRef
     def test_sdpa(self, device):
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -941,7 +943,7 @@ class DecompOneOffTests(TestCase):
             attention,
             decomposition_table=get_decompositions(
                 [
-                    torch.ops.aten._scaled_dot_product_flash_attention.default,
+                    torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default,
                 ]
             ),
         )(query_layer, key_layer, value_layer)
@@ -1028,6 +1030,14 @@ class HasDecompTest(TestCase):
         core_decomps = torch._decomp.core_aten_decompositions().keys()
         core_aten_ops = useful_decomps - core_decomps
         self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    def test_compile_rrelu(self):
+        def f(x):
+            return torch.rrelu(x)
+
+        inp = torch.rand(1, 2, 3)
+        self.assertEqual(f(inp), torch.compile(f)(inp))
 
 
 if __name__ == "__main__":

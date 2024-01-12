@@ -4411,6 +4411,20 @@ class TestLinalg(TestCase):
             y = make_arg(size_y, noncontiguous=nctg_y)
             self.check_single_matmul(x, y)
 
+    @dtypes(torch.float, torch.complex64)
+    def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
+        a = torch.empty((256, 512), device=device, dtype=dtype, requires_grad=True).unsqueeze(0)
+        b = torch.empty((4, 128, 512), device=device, dtype=dtype, requires_grad=True).transpose(-1, -2)
+        c = torch.empty((256, 4, 128), device=device, dtype=dtype).movedim(1, 0)
+
+        torch.matmul(a.detach(), b.detach(), out=c)
+
+        with self.assertRaisesRegex(RuntimeError, "functions with out=... arguments don't support automatic differentiation"):
+            torch.matmul(a, b, out=c)
+
+        with torch.no_grad():
+            torch.matmul(a, b, out=c)
+
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
     @largeTensorTest('16GB', device='cuda')
     def test_large_bmm_mm_backward(self, device):
