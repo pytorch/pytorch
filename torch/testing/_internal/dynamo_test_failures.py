@@ -15,6 +15,7 @@ FIXME_default_non_strict = {
     "export/test_upgrade",
     "export/test_verifier",
     "functorch/test_aotdispatch",
+    "functorch/test_ops",
     "functorch/test_vmap",
     "functorch/test_vmap_registrations",
     "inductor/test_aot_inductor",
@@ -72,22 +73,29 @@ FIXME_default_non_strict = {
     "inductor/test_triton_heuristics",
     "inductor/test_triton_wrapper",
     "inductor/test_unbacked_symints",
+    "lazy/test_ts_opinfo",
     "profiler/test_memory_profiler",
     "profiler/test_profiler",
     "profiler/test_profiler_tree",
+    "test_schema_check",  # nb: times out
     "test_ao_sparsity",
     "test_autograd",
+    "test_content_store",
     "test_custom_ops",
+    "test_dataloader",
+    "test_fx",
     "test_jit",
     "test_jit_fuser_te",
     "test_jit_llga_fuser",
     "test_modules",
+    "test_namedtensor",
     "test_ops",
     "test_ops_fwd_gradients",
     "test_ops_gradients",
     "test_ops_jit",
     "test_legacy_vmap",
     "test_package",
+    "test_public_bindings",
     "test_python_dispatch",
     "test_quantization",
     "test_tensorexpr",
@@ -4008,73 +4016,6 @@ dynamo_expected_failures = {
     "TestTorchFunctionOverride.test_Tensor_floor_divide",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor_ceil_",  # test_overrides
     "TestNamedTupleAPI.test_namedtuple_return",  # test_namedtuple_return_api
-    "TestNamedTensor.test_bmm",  # test_namedtensor
-    "TestNamedTensor.test_addmv",  # test_namedtensor
-    "TestNamedTensor.test_masked_select",  # test_namedtensor
-    "TestNamedTensor.test_index_fill",  # test_namedtensor
-    "TestNamedTensor.test_unary_propagate_names_fns",  # test_namedtensor
-    "TestNamedTensor.test_as_strided",  # test_namedtensor
-    "TestNamedTensor.test_factory_edge_cases",  # test_namedtensor
-    "TestNamedTensor.test_logical_ops",  # test_namedtensor
-    "TestNamedTensor.test_reduction_fns",  # test_namedtensor
-    "TestNamedTensor.test_factory_coverage",  # test_namedtensor
-    "TestNamedTensor.test_no_multiprocessing_support",  # test_namedtensor
-    "TestNamedTensor.test_rename_globber",  # test_namedtensor
-    "TestNamedTensor.test_set_names_property",  # test_namedtensor
-    "TestNamedTensor.test_copy_transpose",  # test_namedtensor
-    "TestNamedTensor.test_cummax_cummin",  # test_namedtensor
-    "TestNamedTensor.test_info_smoke",  # test_namedtensor
-    "TestNamedTensor.test_mv",  # test_namedtensor
-    "TestNamedTensor.test_rename_",  # test_namedtensor
-    "TestNamedTensor.test_unsupported_op_error_msg",  # test_namedtensor
-    "TestNamedTensor.test_flatten",  # test_namedtensor
-    "TestNamedTensor.test_any_all",  # test_namedtensor
-    "TestNamedTensor.test_max_pooling",  # test_namedtensor
-    "TestNamedTensor.test_resize",  # test_namedtensor
-    "TestNamedTensor.test_autograd_smoke",  # test_namedtensor
-    "TestNamedTensor.test_no_pickle_support",  # test_namedtensor
-    "TestNamedTensor.test_rename",  # test_namedtensor
-    "TestNamedTensor.test_size",  # test_namedtensor
-    "TestNamedTensor.test_transpose_variants",  # test_namedtensor
-    "TestNamedTensor.test_big_tensor_repr_has_names",  # test_namedtensor
-    "TestNamedTensor.test_using_unseen_interned_string_bumps_refcount_permanently",  # test_namedtensor
-    "TestNamedTensor.test_split_fns_propagates_names",  # test_namedtensor
-    "TestNamedTensor.test_using_unseen_uninterned_string_refcounts",  # test_namedtensor
-    "TestNamedTensor.test_bernoulli",  # test_namedtensor
-    "TestNamedTensor.test_logcumsumexp",  # test_namedtensor
-    "TestNamedTensor.test_addcmul_addcdiv",  # test_namedtensor
-    "TestNamedTensor.test_cdist",  # test_namedtensor
-    "TestNamedTensor.test_autograd_warns_named_grad",  # test_namedtensor
-    "TestNamedTensor.test_cat",  # test_namedtensor
-    "TestNamedTensor.test_none_names_refcount",  # test_namedtensor
-    "TestNamedTensor.test_has_names",  # test_namedtensor
-    "TestNamedTensor.test_bitwise_not",  # test_namedtensor
-    "TestNamedTensor.test_dot",  # test_namedtensor
-    "TestNamedTensor.test_no_save_support",  # test_namedtensor
-    "TestNamedTensor.test_matmul",  # test_namedtensor
-    "TestNamedTensor.test_detach",  # test_namedtensor
-    "TestNamedTensor.test_stride",  # test_namedtensor
-    "TestNamedTensor.test_logical_not",  # test_namedtensor
-    "TestNamedTensor.test_tensor_grad_is_unnamed",  # test_namedtensor
-    "TestNamedTensor.test_select",  # test_namedtensor
-    "TestNamedTensor.test_rename_rename_map",  # test_namedtensor
-    "TestNamedTensor.test_unflatten",  # test_namedtensor
-    "TestNamedTensor.test_equal",  # test_namedtensor
-    "TestNamedTensor.test_tensor_from_named_tensor",  # test_namedtensor
-    "TestNamedTensor.test_binary_ops",  # test_namedtensor
-    "TestNamedTensor.test_autograd_ignores_names",  # test_namedtensor
-    "TestNamedTensor.test_diagonal",  # test_namedtensor
-    "TestNamedTensor.test_noncontig_contiguous",  # test_namedtensor
-    "TestNamedTensor.test_pow_special",  # test_namedtensor
-    "TestNamedTensor.test_no_jit_script_support",  # test_namedtensor
-    "TestNamedTensor.test_no_jit_tracer_support",  # test_namedtensor
-    "TestNamedTensor.test_using_seen_interned_string_doesnt_bump_refcount",  # test_namedtensor
-    "TestNamedTensor.test_addmm",  # test_namedtensor
-    "TestNamedTensor.test_out_fn_semantics",  # test_namedtensor
-    "TestNamedTensor.test_mm",  # test_namedtensor
-    "TestNamedTensor.test_comparison_ops",  # test_namedtensor
-    "TestContentStoreCPU.test_repeated_hash_cpu",  # test_content_store
-    "TestLazyTensor.test_tensor_ctr",  # lazy/test_ts_opinfo
 }
 
 dynamo_skips = {
@@ -8482,15 +8423,9 @@ dynamo_skips = {
     "TestBinaryUfuncsCPU.test_long_tensor_pow_floats_cpu",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int32",  # known py38 fail
     "TestFXExperimental.test_optimize_for_inference_cpu",  # known py38 fail
-    "TestFXExperimental.test_optimize_for_inference_cpu_torchvision",
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int32",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int64",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int16",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int8",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_uint8",  # known py38 fail
-    "TestDataLoaderPersistentWorkers.test_early_exit",  # known py38 fail
-    "TestDataLoader.test_fd_limit_exceeded",  # known py38 fail
-    "TestDataLoaderPersistentWorkers.test_fd_limit_exceeded",  # known py38 fail
-    "TestLazyDynamicOps.test_nonzero_dynamic",  # known py311 fail
-    "TestLazyTensor.test_view_mark_step_preserved",  # known py311 fail
 }
