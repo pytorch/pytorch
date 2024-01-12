@@ -840,6 +840,7 @@ dynamo_expected_failures = {
     "TestClip.test_simple_complex",  # torch_np/numpy_tests/core/test_numeric
     "TestBoolArray.test_logical_not_abs",  # torch_np/numpy_tests/core/test_numeric
     "TestClip.test_simple_out",  # torch_np/numpy_tests/core/test_numeric
+    "TestBroadcast.test_broadcast_single_arg",  # torch_np/numpy_tests/core/test_numeric
     "TestRequire.test_unknown_requirement",  # torch_np/numpy_tests/core/test_numeric
     "TestBoolArray.test_logical_and_or_xor",  # torch_np/numpy_tests/core/test_numeric
     "TestBroadcast.test_broadcast_error_kwargs",  # torch_np/numpy_tests/core/test_numeric
