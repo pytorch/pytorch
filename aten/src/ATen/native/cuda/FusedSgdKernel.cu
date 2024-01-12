@@ -87,8 +87,12 @@ struct FusedSgdMathFunctor {
         init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)};
     n -= chunk_idx * chunk_size;
 
+#ifndef USE_ROCM
     const auto use_faster_load_store =
         (n % kILP == 0) && (chunk_size % kILP == 0) && all_aligned;
+#else
+    const auto use_faster_load_store{false};
+#endif
     if (use_faster_load_store) {
       for (auto i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
