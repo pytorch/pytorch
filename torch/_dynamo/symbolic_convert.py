@@ -1143,9 +1143,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     if isinstance(loc, torch.fx.Proxy):
                         del loc.node.meta["example_value"]
                 val = [
-                    wrap_fx_proxy(self, loc)
-                    if not isinstance(loc, VariableTracker)
-                    else loc
+                    wrap_fx_proxy(self, loc) if isinstance(loc, torch.fx.Proxy) else loc
                     for loc in new_locals
                 ]
                 for name, v in zip(self.f_code.co_varnames, val):

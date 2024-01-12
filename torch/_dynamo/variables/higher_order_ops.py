@@ -219,6 +219,7 @@ def speculate_subgraph(
     tracer=None,
     # Allow ConstantVariable return values in the output. Default only allows Tensors.
     allow_constant_outputs=False,
+    log_error_on_graph_break=True,
 ):
     if sub_kwargs is None:
         sub_kwargs = {}
@@ -333,8 +334,9 @@ def speculate_subgraph(
             f"that Dynamo was unable to prove safety for this API and will "
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
-        log.warning(msg)
-        log.exception(ex)
+        if log_error_on_graph_break:
+            log.warning(msg)
+            log.exception(ex)
         raise Unsupported(
             f"{msg} Scroll up for the stack trace "
             f"of the initial exception. The reason was: {ex.msg}"
@@ -1349,27 +1351,28 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from .builder import wrap_fx_proxy
 
         val_range = self.value.unpack_var_sequence(tx)
-        # import dis
-        # print(dis.dis(self.func))
-        # print(self.args)
         # Assign the for loop value
         args = list(self.args)
         assert self.store_target >= 0
         args[self.store_target] = val_range[0]
-        # TODO: Support kwargs
-        (
-            (body_r, body_spec),
-            body_graph,
-            body_lifted_freevars,
-        ) = speculate_subgraph(
-            tx,
-            UserFunctionVariable(self.func),
-            args,
-            {},
-            "torch.ops.higher_order.for_loop",
-            source_target=self.func,
-            allow_constant_outputs=True,
-        )
+
+        try:
+            (
+                (body_r, body_spec),
+                body_graph,
+                body_lifted_freevars,
+            ) = speculate_subgraph(
+                tx,
+                UserFunctionVariable(self.func),
+                args,
+                {},
+                "torch.ops.higher_order.for_loop",
+                source_target=self.func,
+                allow_constant_outputs=True,
+                log_error_on_graph_break=False,
+            )
+        except Unsupported:
+            raise CannotConvertRangeToHigherOrder("graph break in function")
 
         body_nn_modules = dict(tx.output.nn_modules)
 
@@ -1382,7 +1385,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_node = make_attr(tx, body_name)
 
-        previous_locals = [arg.as_proxy() for arg in args]
+        previous_locals = args
 
         example_value = pytree.tree_map_only(
             torch.fx.Proxy,
@@ -1400,18 +1403,19 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         for i in val_range:
             previous_locals = list(previous_locals)
-            previous_locals[self.store_target] = i.as_proxy()
-            previous_locals = [body_node] + list(previous_locals)
-            previous_locals = wrap_fx_proxy(
+            previous_locals[self.store_target] = i
+            args_tmp = [body_node] + [a.as_proxy() for a in previous_locals]
+            result_tuple = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
                     for_loop_wrapper,
-                    args=tuple(previous_locals),
+                    args=tuple(args_tmp),
                     kwargs={},
                 ),
                 example_value=example_value,
-            ).as_proxy()
+            )
+            previous_locals = result_tuple.items
 
         previous_locals = list(previous_locals)
         previous_locals[self.store_target] = i
