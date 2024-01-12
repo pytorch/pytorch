@@ -8382,12 +8382,8 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
                          error_type=error_type, error_regex=error_regex)
 
 def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
-    if torch.version.cuda is not None:
-        make_mat_e4m3 = partial(make_tensor, device=device, dtype=torch.float8_e4m3fn, requires_grad=requires_grad)
-        make_mat_e5m2 = partial(make_tensor, device=device, dtype=torch.float8_e5m2, requires_grad=requires_grad)
-    else:
-        make_mat_e4m3 = partial(make_tensor, device=device, dtype=torch.float8_e4m3fnuz, requires_grad=requires_grad)
-        make_mat_e5m2 = partial(make_tensor, device=device, dtype=torch.float8_e5m2fnuz, requires_grad=requires_grad)
+    make_mat_e4m3 = partial(make_tensor, device=device, dtype=torch.float8_e4m3fn, requires_grad=requires_grad)
+    make_mat_e5m2 = partial(make_tensor, device=device, dtype=torch.float8_e5m2, requires_grad=requires_grad)
     M, N, K = 15, 32, 16
     samples = []
     # two e4m3
