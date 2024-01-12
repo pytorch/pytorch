@@ -289,16 +289,16 @@ Failure occurred while running node:
     %split : [num_users=3] = call_method[target=split](args = (%l_x_, (%l_shape_0_, %l_shape_1_, %l_shape_2_)), kwargs = {})
 
 Model:
-  ==> L['shape'][0]: -9223372036854775807
-  ==> L['shape'][1]: -9223372036854775807
-  ==> L['shape'][2]: -9223372036854775807
+  ==> L['shape'][0]: 1
+  ==> L['shape'][1]: 1
+  ==> L['shape'][2]: 2
   ==> L['x'].size()[0]: 3
   ==> L['x'].storage_offset(): 0
   ==> L['x'].stride()[0]: 1
   ==> s0: 3
-  ==> s1: -9223372036854775807
-  ==> s2: -9223372036854775807
-  ==> s3: -9223372036854775807
+  ==> s1: 1
+  ==> s2: 1
+  ==> s3: 2
 
 Assertions:
   ==> (== 0 L['x'].storage_offset())
@@ -311,9 +311,9 @@ Assertions:
 
 Target Expressions:
   ==> (!= (+ s1 s2 s3) s0)
-  ==> (<= -9223372036854775808 s1)
-  ==> (<= -9223372036854775808 s2)
-  ==> (<= -9223372036854775808 s3)
+  ==> (<= 0 s1)
+  ==> (<= 0 s2)
+  ==> (<= 0 s3)
   ==> (<= 2 s0)
   ==> (== 0 L['x'].storage_offset())
   ==> (== 1 L['x'].stride()[0])
