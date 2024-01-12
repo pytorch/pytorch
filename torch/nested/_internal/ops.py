@@ -126,8 +126,43 @@ def raggedness_matches(nt, size):
     end = nt._ragged_idx + 1
     nt_ragged = nt._size[:end]
     size_ragged = size[:end]
+
+    def are_equal(a, b):
+        a_is_sym = isinstance(a, torch.SymInt)
+        b_is_sym = isinstance(b, torch.SymInt)
+        if not a_is_sym and not b_is_sym:
+            return a == b or a == -1 or b == -1
+
+        # one is a SymInt
+        if a_is_sym != b_is_sym:
+            # assume this is fine
+            return True
+
+        # at this point, both are SymInts
+        from torch.fx.experimental.symbolic_shapes import is_singleton
+
+        # no singletons
+        a_is_singleton = is_singleton(a)
+        b_is_singleton = is_singleton(b)
+        if not a_is_singleton and not b_is_singleton:
+            return a == b
+
+        # one is a singleton
+        if a_is_singleton != b_is_singleton:
+            return False
+
+        def get_singleton_int(x):
+            # assumes we're given a symbolic or non-symbolic singleton
+            return (
+                x.node.hint.node.singleton_int()
+                if x.node.is_symbolic()
+                else x.node.singleton_int()
+            )
+
+        return get_singleton_int(a) == get_singleton_int(b)
+
     return len(nt_ragged) == len(size_ragged) and (
-        all(ns == s or s == -1 for ns, s in zip(nt_ragged, size_ragged))
+        all(are_equal(ns, s) for ns, s in zip(nt_ragged, size_ragged))
     )
 
 
@@ -889,18 +924,6 @@ def slice_tensor(func, *args, **kwargs):
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
 
-@register_jagged_func(torch.ops.aten.squeeze.dim, "self: jt, dim: any")
-def squeeze_dim(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    inp = new_kwargs.pop("input")
-    new_kwargs["dim"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "squeeze")
-
-    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
-
-
 @register_jagged_func(
     torch.ops.aten.convolution.default,
     "input: jt, weight: t, bias: t?, stride: any, padding: any, "
@@ -980,6 +1003,55 @@ def embedding_default(func, *args, **kwargs):
     )
 
 
+@register_jagged_func(
+    torch.ops.aten.select_inverse.default,
+    "self: jt, src: jt, dim: any, index: any",
+)
+def select_inverse_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    src = new_kwargs.pop("src")
+    new_kwargs["dim"] = _wrap_jagged_dim(src.dim(), new_kwargs["dim"], "select_inverse")
+
+    return NestedTensor(
+        func(inp._values, src._values, **new_kwargs), **extract_kwargs(inp)
+    )
+
+
+@register_jagged_func(
+    torch.ops.aten.slice_inverse.default,
+    "self: jt, src: jt, dim: any?, start: any?, end: any?, step: any?",
+)
+def slice_inverse_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    src = new_kwargs.pop("src")
+    new_kwargs["dim"] = _wrap_jagged_dim(src.dim(), new_kwargs["dim"], "slice_inverse")
+    dim = new_kwargs["dim"]
+
+    # NB: Prefer inp values because they may be symbolic
+    # inp and src should have shapes that differ only at the slice dim
+    out_values_shape = list(inp._values.shape)
+    out_values_shape[dim] = src._values.shape[dim]
+
+    # inp and src should have the same stride()
+    out_values_stride = list(inp._values.stride())
+
+    # storage_offset() only changes if you slice the first dim and we don't support that
+    out_storage_offset = inp._values.storage_offset()
+
+    out_values = inp._values.as_strided(
+        out_values_shape, out_values_stride, out_storage_offset
+    )
+    return NestedTensor(out_values, **extract_kwargs(inp))
+
+
 @register_jagged_func(torch.ops.aten.values.default, "self: jt")
 def values_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -995,7 +1067,7 @@ def values_default(func, *args, **kwargs):
 
 @register_jagged_func(
     torch.ops.aten._nested_view_from_values_offsets.default,
-    "values: t, offsets: t, dummy: jt",
+    "values: t, offsets: t, dummy: jt_all",
 )
 def _nested_view_from_values_offsets_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -1009,7 +1081,7 @@ def _nested_view_from_values_offsets_default(func, *args, **kwargs):
 
 @register_jagged_func(
     torch.ops.aten._nested_view_from_values_offsets_lengths.default,
-    "values: t, offsets: t, lengths: t, dummy: jt",
+    "values: t, offsets: t, lengths: t, dummy: jt_all",
 )
 def _nested_view_from_values_offsets_lengths_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -1032,10 +1104,10 @@ def _nested_get_values(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
-    return inp._values
+    return inp._values.detach()
 
 
-@register_jagged_func(torch.ops.aten._nested_get_offsets.default, "self: jt")
+@register_jagged_func(torch.ops.aten._nested_get_offsets.default, "self: jt_all")
 def _nested_get_offsets(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
