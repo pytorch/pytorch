@@ -1066,6 +1066,8 @@ def _sync_module_params_and_buffers(
             setattr(buffer, FSDP_SYNCED, True)
             detached_buffer = buffer.detach()
             if is_traceable_wrapper_subclass(detached_buffer):
+                # NOTE: Here we assume no nested subclasses, at most one level of subclass
+                # in both model's buffers and params
                 attrs, _ = detached_buffer.__tensor_flatten__()  # type: ignore[attr-defined]
                 inner_buffers = [getattr(detached_buffer, attr) for attr in attrs]
                 module_states.extend(inner_buffers)
