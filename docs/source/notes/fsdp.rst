@@ -50,12 +50,12 @@ Communication buffer size
 
 In FSDP the communications are:
 
-1. all-gather on weights in ``forward``
-2. all-gather on weights in ``backward``
+1. all-gather on parameters in ``forward``
+2. all-gather on parameters in ``backward``
 3. reduce-scatter on gradients in ``backward``
 
 If activation checkpointing (:func:`~torch.utils.checkpoint.checkpoint`) is used there is no
-additional communication since the weights are prefetched anyway during ``backward``.
+additional communication since the parameters are prefetched anyway during ``backward``.
 
 In the FSDP design, the communication buffer size is determined as follows: Each call to
 :class:`FullyShardedDataParallel` creates one communication group consisting of the parameters in
