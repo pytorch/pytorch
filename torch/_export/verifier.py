@@ -130,21 +130,7 @@ class Verifier(metaclass=_VerifierMeta):
             # TODO Enforce type checking in the constructor.
             return
         self._check_graph_module(ep.graph_module)
-        try:
-            _verify_exported_program_signature(ep)
-        except SpecViolationError as e:
-            # TODO This hack is necessary until executorch can update their pin in pytorch CI.
-            if ep.dialect == "EDGE":  # !!! Don't change this allowlist. !!!
-                import os
-                if (
-                    os.environ.get("CI", None) == "true"
-                    and os.environ.get("GITHUB_ACTIONS", None) == "true"
-                ):
-                    pass
-                else:
-                    raise e
-            else:
-                raise e
+        _verify_exported_program_signature(ep)
 
     @final
     def _check_graph_module(self, gm: torch.fx.GraphModule) -> None:
