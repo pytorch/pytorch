@@ -240,6 +240,83 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 ),
             )
+        elif self.value is contextlib.nullcontext:
+            return NullContextVariable()
+        elif self.value is collections.OrderedDict:
+            return BuiltinVariable.call_custom_dict(
+                tx, collections.OrderedDict, *args, **kwargs
+            )
+        elif (
+            self.value is collections.defaultdict
+            and len(args) <= 1
+            and DefaultDictVariable.is_supported_arg(args[0])
+        ):
+            return DefaultDictVariable(
+                {},
+                collections.defaultdict,
+                args[0],
+                mutable_local=MutableLocal(),
+            )
+        elif self.value is collections.deque and not kwargs:
+            if len(args) == 0:
+                items = []
+            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
+                items = args[0].unpack_var_sequence(tx)
+            else:
+                unimplemented("deque() with more than 1 arg not supported")
+            return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
+        elif self.value is functools.partial:
+            if not args:
+                unimplemented("functools.partial malformed")
+            # The first arg, a callable (the ctor below will assert on types)
+            fn = args[0]
+            rest_args = args[1:]
+            # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
+            # args and keywords
+            return variables.functions.FunctoolsPartialVariable(
+                fn, args=rest_args, keywords=kwargs
+            )
+        elif is_namedtuple_cls(self.value):
+            fields = namedtuple_fields(self.value)
+            field_defaults = self.value._field_defaults
+
+            items = list(args)
+            items.extend([None] * (len(fields) - len(items)))
+
+            var_tracker_kwargs = {}
+            for field_name, var_tracker in zip(fields, items):
+                if var_tracker is None:
+                    if field_name in kwargs:
+                        field_var = kwargs[field_name]
+                    else:
+                        assert field_name in field_defaults
+                        field_var = SourcelessBuilder()(tx, field_defaults[field_name])
+                    var_tracker_kwargs[field_name] = field_var
+
+            for name, value in var_tracker_kwargs.items():
+                assert name in fields
+                items[fields.index(name)] = value
+
+            assert all(x is not None for x in items)
+            return variables.NamedTupleVariable(items, self.value)
+        elif variables.CustomizedDictVariable.is_matching_cls(self.value):
+            options = {"mutable_local": MutableLocal()}
+            return variables.CustomizedDictVariable.create(
+                self.value, args, kwargs, options
+            )
+        elif variables.DataClassVariable.is_matching_cls(self.value):
+            options = {"mutable_local": MutableLocal()}
+            return variables.DataClassVariable.create(self.value, args, kwargs, options)
+        elif (
+            variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
+            and self.source
+        ):
+            return variables.RestrictedListSubclassVariable(
+                variables.BuiltinVariable(list).call_function(tx, args, kwargs).items,
+                user_cls=self.value,
+                user_cls_source=self.source,
+                mutable_local=MutableLocal(),
+            )
         elif self.value is torch.nn.CrossEntropyLoss:
             return self._call_cross_entropy_loss(tx, args, kwargs)
         elif (
@@ -300,42 +377,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
 
             return tensor_variable
-        elif self.value is contextlib.nullcontext:
-            return NullContextVariable()
-        elif self.value is collections.OrderedDict:
-            return BuiltinVariable.call_custom_dict(
-                tx, collections.OrderedDict, *args, **kwargs
-            )
-        elif (
-            self.value is collections.defaultdict
-            and len(args) <= 1
-            and DefaultDictVariable.is_supported_arg(args[0])
-        ):
-            return DefaultDictVariable(
-                {},
-                collections.defaultdict,
-                args[0],
-                mutable_local=MutableLocal(),
-            )
-        elif self.value is collections.deque and not kwargs:
-            if len(args) == 0:
-                items = []
-            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
-                items = args[0].unpack_var_sequence(tx)
-            else:
-                unimplemented("deque() with more than 1 arg not supported")
-            return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
-        elif self.value is functools.partial:
-            if not args:
-                unimplemented("functools.partial malformed")
-            # The first arg, a callable (the ctor below will assert on types)
-            fn = args[0]
-            rest_args = args[1:]
-            # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
-            # args and keywords
-            return variables.functions.FunctoolsPartialVariable(
-                fn, args=rest_args, keywords=kwargs
-            )
         elif (
             issubclass(type(self.value), type)
             and hasattr(self.value, "__enter__")
@@ -347,47 +388,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return GenericContextWrappingVariable(
                 unwrapped_args,
                 cm_obj=self.value(*unwrapped_args),
-            )
-        elif is_namedtuple_cls(self.value):
-            fields = namedtuple_fields(self.value)
-            field_defaults = self.value._field_defaults
-
-            items = list(args)
-            items.extend([None] * (len(fields) - len(items)))
-
-            var_tracker_kwargs = {}
-            for field_name, var_tracker in zip(fields, items):
-                if var_tracker is None:
-                    if field_name in kwargs:
-                        field_var = kwargs[field_name]
-                    else:
-                        assert field_name in field_defaults
-                        field_var = SourcelessBuilder()(tx, field_defaults[field_name])
-                    var_tracker_kwargs[field_name] = field_var
-
-            for name, value in var_tracker_kwargs.items():
-                assert name in fields
-                items[fields.index(name)] = value
-
-            assert all(x is not None for x in items)
-            return variables.NamedTupleVariable(items, self.value)
-        elif variables.CustomizedDictVariable.is_matching_cls(self.value):
-            options = {"mutable_local": MutableLocal()}
-            return variables.CustomizedDictVariable.create(
-                self.value, args, kwargs, options
-            )
-        elif variables.DataClassVariable.is_matching_cls(self.value):
-            options = {"mutable_local": MutableLocal()}
-            return variables.DataClassVariable.create(self.value, args, kwargs, options)
-        elif (
-            variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
-            and self.source
-        ):
-            return variables.RestrictedListSubclassVariable(
-                variables.BuiltinVariable(list).call_function(tx, args, kwargs).items,
-                user_cls=self.value,
-                user_cls_source=self.source,
-                mutable_local=MutableLocal(),
             )
 
         return super().call_function(tx, args, kwargs)
