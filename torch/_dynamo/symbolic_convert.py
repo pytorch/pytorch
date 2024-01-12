@@ -1126,6 +1126,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             try:
                 # Converts a loop to a function body, to benefit
                 # from function compilation caching.
+                assert inst.target is not None
                 op = RangeHigherOrderVariable.make_self(
                     self,
                     it,

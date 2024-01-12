@@ -1233,8 +1233,6 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         source: Optional[Source] = None,
         **kwargs,
     ):
-        from . import ConstantVariable
-
         if len(value.unpack_var_sequence(tx)) < 100:
             raise CannotConvertRangeToHigherOrder(
                 "Loop too small to consider optimizing"
@@ -1341,7 +1339,6 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         """Converts a for loop into a function call. Returns the modified
         locals as a tuple of Proxies and VariableTrackers.
         """
-        from . import ConstantVariable
         from .builder import wrap_fx_proxy
 
         val_range = self.value.unpack_var_sequence(tx)
