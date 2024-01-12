@@ -842,6 +842,7 @@ dynamo_expected_failures = {
     "TestClip.test_simple_out",  # torch_np/numpy_tests/core/test_numeric
     "TestRequire.test_unknown_requirement",  # torch_np/numpy_tests/core/test_numeric
     "TestBoolArray.test_logical_and_or_xor",  # torch_np/numpy_tests/core/test_numeric
+    "TestBroadcast.test_broadcast_error_kwargs", # torch_np/numpy_tests/core/test_numeric
     "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-9",  # torch_np/numpy_tests/core/test_numeric
     "TestNonarrayArgs.test_dunder_round_edgecases_val_2147483647_ndigits_-10",  # torch_np/numpy_tests/core/test_numeric
     "TestClip.test_type_cast_10",  # torch_np/numpy_tests/core/test_numeric
@@ -2384,13 +2385,6 @@ dynamo_expected_failures = {
     "TestDistributionShapes.test_mixture_same_family_shape",  # distributions/test_distributions
     "TestFunctors.test_cat_transform",  # distributions/test_distributions
     "TestFunctors.test_cat_transform_non_uniform",  # distributions/test_distributions
-    "TestRearrange.test_ellipsis_ops",  # functorch/test_rearrange
-    "TestRearrange.test_concatenations_and_stacking",  # functorch/test_rearrange
-    "TestRearrange.test_rearrange_permutations",  # functorch/test_rearrange
-    "TestRearrange.test_collapsed_ellipsis_errors_out",  # functorch/test_rearrange
-    "TestRearrange.test_rearrange_consistency",  # functorch/test_rearrange
-    "TestRearrange.test_unsqueeze",  # functorch/test_rearrange
-    "TestRearrange.test_squeeze",  # functorch/test_rearrange
     "TestMin.test_manual_stuff",  # functorch/test_dims
     "TestMin.test_dim_args",  # functorch/test_dims
     "TestMin.test_dims_with_size",  # functorch/test_dims
