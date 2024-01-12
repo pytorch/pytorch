@@ -857,7 +857,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
   at::native::resize_output(amax, {});
 
-#if !defined(USE_ROCM) && !defined(_MSC_VER) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
+#if !defined(USE_ROCM) && !defined(_MSC_VER)
   cublasCommonArgs args(mat1, mat2, out);
   const auto out_dtype_ = args.result->scalar_type();
   TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
