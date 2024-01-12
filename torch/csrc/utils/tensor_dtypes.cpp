@@ -13,7 +13,7 @@ namespace utils {
 std::pair<std::string, std::string> getDtypeNames(at::ScalarType scalarType) {
   switch (scalarType) {
     case at::ScalarType::UInt1:
-      return std::make_pair("uint1", "");
+      return std::make_pair("uint1", "bit");
     case at::ScalarType::UInt2:
       return std::make_pair("uint2", "");
     case at::ScalarType::UInt3:
