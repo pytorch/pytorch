@@ -273,26 +273,6 @@ test_dynamo_shard() {
   time python test/run_test.py --dynamo \
     --exclude-jit-executor \
     --exclude-distributed-tests \
-    --exclude \
-      test_ao_sparsity \
-      test_autograd \
-      test_jit \
-      test_quantization \
-      test_public_bindings \
-      test_dataloader \
-      test_reductions \
-      test_namedtensor \
-      profiler/test_profiler \
-      profiler/test_profiler_tree \
-      test_python_dispatch \
-      test_fx \
-      test_package \
-      test_legacy_vmap \
-      test_custom_ops \
-      test_content_store \
-      export/test_db \
-      functorch/test_dims \
-      functorch/test_aotdispatch \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
