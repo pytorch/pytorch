@@ -1180,7 +1180,8 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
             **kwargs,
         )
     # addmm of empty matrices
-    yield SampleInput(make_arg(S, M), make_arg(S, 0), make_arg(0, M), **kwargs)
+    if dtype.is_floating_point:
+        yield SampleInput(make_arg(S, M), make_arg(S, 0), make_arg(0, M), **kwargs)
 
 def sample_inputs_sparse_sampled_addmm(op_info, device, dtype, requires_grad, **kwargs):
     alpha = 2 + 3j if dtype.is_complex else 0.6
