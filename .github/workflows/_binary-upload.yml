@@ -66,10 +66,6 @@ on:
         required: true
         description: Conda PyTorchBot token
 
-permissions:
-  id-token: write
-  contents: read
-
 jobs:
   upload:
     runs-on: ubuntu-22.04
@@ -103,14 +99,14 @@ jobs:
         with:
           no-sudo: true
 
-      - name: Configure aws credentials for nightly (pytorch account)
+      - name: Configure AWS credentials(PyTorch account) for nightly
         if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' }}
         uses: aws-actions/configure-aws-credentials@v3
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_nightly_build_wheels
           aws-region: us-east-1
 
-      - name: Configure aws credentials for test (pytorch account)
+      - name: Configure AWS credentials(PyTorch account) for RC builds
         if: ${{ github.event_name == 'push' &&  (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/')) }}
         uses: aws-actions/configure-aws-credentials@v3
         with:
