@@ -644,13 +644,7 @@ dynamo_expected_failures = {
     "TestMatmul.test_exceptions",
     "TestFlag.test_writeable_from_readonly",
     "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmax_np_method0",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmin",
-    "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmax_np_method0",
-    "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmin_np_method1",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmax",
     "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmin_np_method1",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmax",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmin",
     "TestConvertDType.test_convert_np_dtypes_'int64'",
     "TestConvertDType.test_convert_np_dtypes_'uint8'",
     "TestConvertDType.test_convert_np_dtypes_bool",
@@ -2571,7 +2565,6 @@ dynamo_expected_failures = {
     "TestMkldnnCPU.test_tanh_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_conv2d_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_batch_norm_3d_cpu",  # test_mkldnn
-    "TestFunctionalAutogradBenchmark.test_fast_tasks",  # test_functional_autograd_benchmark
     "TestFunctionSchema.test_serialize_and_deserialize",  # test_function_schema
     "FakeTensorOperatorInvariants.test_like_ops",  # test_fake_tensor
     "FakeTensorConverterTest.test_memoized_conversion_from_meta",  # test_fake_tensor
@@ -4423,9 +4416,9 @@ dynamo_skips = {
     "ExportTests.test_predispatch_with_for_out_dtype",  # weird
     "ExportTests.test_predispatch_with_for_out_dtype_nested",  # weird
     "MiscTests.test_auto_functionalize_on_view",  # weird
-    "MiscTests::test_auto_functionalize_optional",  # weird
-    "MiscTests::test_auto_functionalize_with_returns",  # weird
-    "MiscTests::test_generate_trivial_abstract_impl",  # weird
+    "MiscTests.test_auto_functionalize_optional",  # weird
+    "MiscTests.test_auto_functionalize_with_returns",  # weird
+    "MiscTests.test_generate_trivial_abstract_impl",  # weird
     "RecompileUxTests.test_drop_cache_on_skip",  # weird
     "ReproTests.test_optim_state_references_cleared",  # weird
     "ReproTests.test_reformer_train",  # weird
@@ -8429,3 +8422,16 @@ dynamo_skips = {
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int8",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_uint8",  # known py38 fail
 }
+
+
+# verify some invariants
+for test in dynamo_expected_failures.union(dynamo_skips):
+    if len(test.split(".")) != 2:
+        raise AssertionError('Invalid test name: "{test}"')
+
+intersection = dynamo_expected_failures.intersection(dynamo_skips)
+if len(intersection) > 0:
+    raise AssertionError(
+        "there should be no overlap between dynamo_expected_failures "
+        "and dynamo_skips, got " + str(intersection)
+    )
