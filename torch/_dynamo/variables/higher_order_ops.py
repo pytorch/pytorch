@@ -1214,7 +1214,10 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         "SEND",
         "MAKE_FUNCTION",
         "LOAD_DEREF",  # This could be supported in the future.
+        # Exceptions
         "RAISE_VARARGS",
+        "SETUP_FINALLY",
+        "POP_EXCEPT",
         # These two are fine for the end of the loop body but not within.
         "JUMP_BACKWARD",
         "JUMP_ABSOLUTE",
