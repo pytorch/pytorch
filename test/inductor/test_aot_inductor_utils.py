@@ -32,19 +32,23 @@ class AOTIRunnerUtil:
         return so_path
 
     @classmethod
-    def load(cls, device, so_path):
+    def load_runner(cls, device, so_path):
         if IS_FBCODE:
             from .fb import test_aot_inductor_model_runner_pybind
 
-            runner = test_aot_inductor_model_runner_pybind.Runner(
+            return test_aot_inductor_model_runner_pybind.Runner(
                 so_path, device == "cpu"
             )
         else:
-            runner = (
+            return (
                 torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
                 if device == "cpu"
                 else torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1)
             )
+
+    @classmethod
+    def load(cls, device, so_path):
+        runner = AOTIRunnerUtil.load_runner(device, so_path)
 
         def optimized(*args):
             call_spec = runner.get_call_spec()

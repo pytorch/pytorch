@@ -64,21 +64,17 @@ static Backend default_backend = Backend::CPU;
 static void py_bind_tensor_types(
     const std::vector<PyTensorType*>& tensor_types);
 
-static TypeError unavailable_type(const PyTensorType& type) {
-  return TypeError(
-      "type %s not available. Torch not compiled with CUDA enabled.",
-      type.name);
-}
-
 static PyObject* Tensor_new(
     PyTypeObject* type,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   auto& tensor_type = *((PyTensorType*)type);
-  if (tensor_type.is_cuda && !torch::utils::cuda_enabled()) {
-    throw unavailable_type(tensor_type);
-  }
+  TORCH_CHECK_TYPE(
+      !tensor_type.is_cuda || torch::utils::cuda_enabled(),
+      "type ",
+      tensor_type.name,
+      " not available. Torch not compiled with CUDA enabled.")
   if (tensor_type.is_cuda) {
     TORCH_WARN_ONCE(
         "The torch.cuda.*DtypeTensor constructors are no longer recommended. "
@@ -249,9 +245,8 @@ static THPObjectPtr get_storage_obj(Backend backend, ScalarType dtype) {
   auto storage_name = std::string(toString(dtype)) + "Storage";
   THPObjectPtr storage(
       PyObject_GetAttrString(module_obj.get(), storage_name.c_str()));
-  if (!storage.get()) {
-    throw TypeError("couldn't find storage object %s", storage_name.c_str());
-  }
+  TORCH_CHECK_TYPE(
+      storage.get(), "couldn't find storage object ", storage_name);
   return storage;
 }
 
@@ -455,9 +450,11 @@ void py_set_default_tensor_type(PyObject* obj) {
       PyTensorType_Check(obj),
       "invalid type object: only floating-point types are supported as the default type");
   PyTensorType* type = (PyTensorType*)obj;
-  if (type->is_cuda && !torch::utils::cuda_enabled()) {
-    throw unavailable_type(*type);
-  }
+  TORCH_CHECK_TYPE(
+      !type->is_cuda || torch::utils::cuda_enabled(),
+      "type ",
+      type->name,
+      " not available. Torch not compiled with CUDA enabled.")
   set_default_tensor_type(type->get_backend(), type->get_scalar_type());
 }
 
