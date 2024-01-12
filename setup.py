@@ -160,6 +160,9 @@
 #   USE_ZSTD
 #     Enables use of ZSTD, if the libraries are found
 #
+#   USE_ROCM_KERNEL_ASSERT=1
+#     Enable kernel assert in ROCm platform
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
@@ -189,6 +192,8 @@
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
 #
+#   NVTOOLSEXT_PATH (Windows only)
+#     specify where nvtoolsext is installed
 #
 #   ACL_ROOT_DIR
 #     specify where Compute Library is installed
@@ -1172,7 +1177,6 @@ def main():
         "include/ATen/core/dispatch/*.h",
         "include/ATen/core/op_registration/*.h",
         "include/c10/core/impl/*.h",
-        "include/c10/core/impl/cow/*.h",
         "include/c10/util/*.h",
         "include/c10/cuda/*.h",
         "include/c10/cuda/impl/*.h",
@@ -1212,6 +1216,7 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
         "include/torch/csrc/inductor/aoti_torch/*.h",
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
