@@ -38,7 +38,7 @@ from torch.nested._internal.nested_tensor import NestedTensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef
 from .. import config, mutation_guard, replay_record, skipfiles, trace_rules
-from ..allowed_functions import is_builtin_callable, is_numpy, is_user_defined_allowed
+from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy, is_user_defined_allowed
 
 from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, unimplemented
@@ -467,7 +467,7 @@ class VariableBuilder:
         elif ConstantVariable.is_literal(value):  # non-atomic literals
             return self.wrap_literal(value)
         elif istype(value, frozenset) and (
-            ConstantVariable.is_literal(x) for x in value
+            all(is_allowed(x) or ConstantVariable.is_literal(x) for x in value)
         ):
             # For frozenset, we can guard by object ID instead of value
             # equality, this allows us to handle non-literal values

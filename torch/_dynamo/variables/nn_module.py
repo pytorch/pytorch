@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 import torch.nn
 
 from .. import skipfiles, variables
+from ..allowed_functions import is_allowed
 from ..exc import unimplemented, UnspecializeRestartAnalysis, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
@@ -291,7 +292,7 @@ class NNModuleVariable(VariableTracker):
             # If we are tracing the higher order op, we want Dynamo to step
             # inside the module call so that Dynamo can see the underlying
             # parameters and buffers and raise them as inputs to the graph.
-            if tx.output.is_root_tracer() and mod.__module__.startswith("torch.nn."):
+            if tx.output.is_root_tracer() and is_allowed(mod.__class__):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
