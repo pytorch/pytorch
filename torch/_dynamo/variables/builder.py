@@ -705,7 +705,13 @@ class VariableBuilder:
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
-        elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
+        elif (
+            istype(value, (types.ModuleType, replay_record.DummyModule))
+            # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
+            # type(torch.ops) -> <class 'torch._ops._Ops'>
+            or value in [torch.backends.cudnn, torch.ops]
+            or isinstance(value, torch._ops._OpNamespace)
+        ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonModuleVariable(
                 value,
