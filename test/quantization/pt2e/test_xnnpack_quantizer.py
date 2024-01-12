@@ -30,15 +30,15 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
 )
+
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
+    PT2EQuantizationTestCase,
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
     TestHelperModules,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-
-from .test_quantize_pt2e import PT2EQuantizationTestCase
 
 
 @skipIfNoQNNPACK
@@ -150,6 +150,39 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
                 node_occurrence,
                 [],
                 True,
+                qconfig_mapping,
+            )
+
+    def test_linear_relu(self):
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
+        m_eager = TestHelperModules.LinearReluModel().eval()
+
+        # Test with 2d inputs
+        example_inputs_2d = (torch.randn(1, 5),)
+        example_inputs_3d = (torch.randn(1, 2, 5),)
+        example_inputs_4d = (torch.randn(1, 2, 3, 5),)
+
+        node_occurrence = {
+            # input and output are using quantize_per_tensor and weight is using quantize_per_channel
+            # There should not be extra quantize_per_tensor or dequantize_per_tensors for relu
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+            # quantize_per_channel for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+        }
+        qconfig = default_per_channel_symmetric_qnnpack_qconfig
+        qconfig_mapping = QConfigMapping().set_global(qconfig)
+        for example_inputs in [example_inputs_2d, example_inputs_3d, example_inputs_4d]:
+            self._test_quantizer(
+                m_eager,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                [],  # node_list
+                False,  # executorch_backend_config() does not fuse linear-relu
                 qconfig_mapping,
             )
 

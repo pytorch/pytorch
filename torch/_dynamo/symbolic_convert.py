@@ -461,14 +461,6 @@ def break_graph_if_unsupported(*, push):
                 )
                 return inner_fn(self, inst)
             except Unsupported as excp:
-                if self.should_compile_partial_graph() and self.has_backedge():
-                    msg = (
-                        "Skipping frame because there is a graph break in a for/while loop\n"
-                        f"{self.frame_summary()}"
-                    )
-                    log.info(msg)
-                    raise exc.SkipFrame(msg) from excp
-
                 if self.generic_context_manager_depth > 0:
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
@@ -499,6 +491,14 @@ def break_graph_if_unsupported(*, push):
                         excp,
                         user_stack_formatted,
                     )
+
+                if self.has_backedge():
+                    msg = (
+                        "Skipping frame because there is a graph break in a for/while loop\n"
+                        f"{self.frame_summary()}"
+                    )
+                    log.info(msg)
+                    raise exc.SkipFrame(msg) from excp
 
                 excp.remove_from_stats()
                 excp.add_to_stats("graph_break")
