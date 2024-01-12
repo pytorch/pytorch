@@ -432,7 +432,7 @@ class TestOptimRenewed(TestCase):
             optimizer_c.load_state_dict(deepcopy(optimizer.state_dict()))
 
             # Run both optimizers in parallel
-            for i in range(10):
+            for _ in range(10):
                 optimizer.step(closure)
                 optimizer_c.step(closure_c)
                 self.assertEqual(weight, weight_c)
@@ -494,6 +494,94 @@ class TestOptimRenewed(TestCase):
             else:
                 fwd_bwd(optimizer, model, input)
                 optimizer.step()
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_load_nontensor_step(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
+        params = [Parameter(torch.randn(2, 3, device=device, dtype=dtype)) for _ in range(2)]
+        for p in params:
+            p.grad = torch.rand_like(p)
+            # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
+            # which we know does NOT represent the expected use case!
+            if optim_cls.__name__ == "SparseAdam":
+                p.grad = p.grad.to_sparse()
+
+        # Needed for LBFGS
+        lbfgs_loss = torch.rand(1, device=device, dtype=dtype)
+
+        def closure():
+            return lbfgs_loss if optim_cls.__name__ == "LBFGS" else None
+
+        for optim_input in all_optim_inputs:
+            optimizer = optim_cls(params, **optim_input.kwargs)
+            for _ in range(3):
+                optimizer.step(closure)
+            state_dict = deepcopy(optimizer.state_dict())
+            for p_state in state_dict["state"].values():
+                if "step" in p_state and torch.is_tensor(p_state["step"]):
+                    p_state["step"] = p_state["step"].item()
+            optimizer.load_state_dict(state_dict)
+            optimizer.step(closure)
+
+
+    @onlyCUDA
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_state_dict_with_cuda_params(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        # We limit our configs to CPU only, because we will be moving them to CUDA later
+        cpu_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs("cpu", dtype, optim_info, skip=("differentiable",))
+
+        # Needed for LBFGS
+        lbfgs_loss = torch.rand(1, device=device, dtype=dtype)
+
+        def closure():
+            return lbfgs_loss if optim_cls.__name__ == "LBFGS" else None
+
+        for optim_input in cpu_optim_inputs:
+            params = [Parameter(torch.randn(2, 3, device="cpu", dtype=dtype)) for _ in range(2)]
+            for p in params:
+                p.grad = torch.randn_like(p)
+                # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
+                # which we know does NOT represent the expected use case!
+                if optim_cls.__name__ == "SparseAdam":
+                    p.grad = p.grad.to_sparse()
+
+            optimizer = optim_cls(params, **optim_input.kwargs)
+
+            for _ in range(3):
+                optimizer.step(closure)
+
+            with torch.no_grad():
+                params_cuda = [p.to(device="cuda") for p in params]
+                for (i, p) in enumerate(params_cuda):
+                    p.grad = params[i].grad.to(device="cuda")
+            optimizer_cuda = optim_cls(params_cuda, **optim_input.kwargs)
+
+            state_dict_cpu = deepcopy(optimizer.state_dict())
+            state_dict_cuda = deepcopy(optimizer.state_dict())
+            optimizer_cuda.load_state_dict(state_dict_cuda)
+
+            # Make sure state_dict_cuda isn't modified by merely calling load_state_dict
+            self.assertEqual(state_dict_cpu, state_dict_cuda)
+
+            # Make sure that device of state['step'] is still CPU _unless_ torch.compile() added a capturable!
+            capturable = state_dict_cpu["param_groups"][0].get("capturable", False)
+            new_state_dict = optimizer_cuda.state_dict()
+            for state_cpu, state_cuda in zip(state_dict_cpu["state"].values(), new_state_dict["state"].values()):
+                if "step" in state_cpu and torch.is_tensor(state_cpu["step"]):
+                    self.assertEqual(state_cuda["step"].device.type, "cuda" if capturable else "cpu")
+
+            for _ in range(5):
+                optimizer.step(closure)
+                optimizer_cuda.step(closure)
+                self.assertEqual(params, params_cuda)
+                self.assertEqual(optimizer.state_dict(), optimizer_cuda.state_dict())
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
