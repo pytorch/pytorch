@@ -1329,12 +1329,25 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 freevars,
                 cellvars,
             )
-        elif sys.version_info >= (3, 10):
-            pass
-        elif sys.version_info >= (3, 9):
-            pass
-        elif sys.version_info >= (3, 8):
-            pass
+        elif sys.version_info >= (3, 8):  # noqa: UP036
+            code_object = types.CodeType(
+                argcount,
+                posonlyargcount,
+                kwonlyargouncount,
+                nlocals,
+                stacksize,
+                flags,
+                codestring,
+                constants,
+                names,
+                varnames,
+                filename,
+                name,
+                firstlineno,
+                linetable,
+                freevars,
+                cellvars,
+            )
         else:
             raise CannotConvertRangeToHigherOrder("Unsupported Python version")
 
@@ -1378,8 +1391,8 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 allow_constant_outputs=True,
                 log_error_on_graph_break=False,
             )
-        except Unsupported:
-            raise CannotConvertRangeToHigherOrder("graph break in function")
+        except Unsupported as e:
+            raise CannotConvertRangeToHigherOrder("graph break in function") from e
 
         body_nn_modules = dict(tx.output.nn_modules)
 
