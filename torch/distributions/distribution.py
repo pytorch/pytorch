@@ -330,7 +330,7 @@ class Distribution:
         args_string = ", ".join(
             [
                 f"{p}: {self.__dict__[p] if self.__dict__[p].numel() == 1 else self.__dict__[p].size()}"
-                for p in param_names
+                for p in param_names if self.__dict__[p] is not None
             ]
         )
         return self.__class__.__name__ + "(" + args_string + ")"
