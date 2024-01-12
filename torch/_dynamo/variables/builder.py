@@ -713,6 +713,14 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
+        elif is_allowed(value) and issubclass(type(value), type):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return UserDefinedClassVariable(
+                value,
+                source=self.source,
+            )
+        elif is_allowed(value):
+            unimplemented("ybliang: _wrap")
         elif (
             is_function(value)
             and skipfiles.check(value, is_inlined_call=True)
@@ -1875,10 +1883,14 @@ class SourcelessBuilder:
             return SourcelessBuilder.wrap_constant_literal(value)
         elif is_builtin_callable(value):
             return BuiltinVariable(value)
-        elif trace_rules.lookup(value) is not None:
+        elif is_allowed(value) and trace_rules.lookup(value) is not None:
             if is_user_defined_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup(value)(value)
+        elif is_allowed(value) and isinstance(value, types.ModuleType):
+            return PythonModuleVariable(value)
+        elif is_allowed(value) and isinstance(value, (type, abc.ABCMeta)):
+            return UserDefinedClassVariable(value)
         elif isinstance(value, types.FunctionType):
             return UserFunctionVariable(value)
         elif isinstance(value, enum.Enum):

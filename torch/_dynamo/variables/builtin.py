@@ -13,6 +13,7 @@ import torch
 from torch import sym_float, sym_int
 
 from .. import config, polyfill, variables
+from ..allowed_functions import is_allowed
 from ..exc import (
     AttributeMutationError,
     unimplemented,
@@ -1234,6 +1235,25 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
             ),
         ):
+            if isinstance(
+                obj,
+                (
+                    variables.UserDefinedClassVariable,
+                    variables.UserDefinedObjectVariable
+                )
+            ) and is_allowed(obj.value):
+                member = getattr(obj.value, name)
+
+                if is_utils_checkpoint(member):
+                    options["source"] = source
+                    return build_checkpoint_variable(**options)
+                elif trace_rules.lookup(member) is not None:
+                    return trace_rules.lookup(member)(member, **options)
+                elif source is not None:
+                    return VariableBuilder(tx, source)(member)
+                else:
+                    return SourcelessBuilder()(tx, member)
+
             try:
                 return obj.var_getattr(tx, name)
             except NotImplementedError:

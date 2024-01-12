@@ -21,6 +21,7 @@ import torch.nn
 from torch._guards import TracingContext
 
 from .. import variables
+from ..allowed_functions import is_allowed
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
@@ -625,8 +626,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).call_function(tx, [var], kwargs)
         elif (
             istype(self.value, functools.partial)
-            and trace_rules.lookup(self.value.func)
-            == variables.TorchInGraphFunctionVariable
+            and is_allowed(self.value.func)
             and all(
                 variables.ConstantVariable.is_literal(v)
                 for v in itertools.chain(self.value.args, self.value.keywords.values())
@@ -753,10 +753,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
                     return build_checkpoint_variable(source=source)
-                elif trace_rules.lookup(func) is not None:
-                    return trace_rules.lookup(func).create_with_source(
-                        func, source=source
-                    )
+                # elif trace_rules.lookup(func) is not None:
+                #     return trace_rules.lookup(func).create_with_source(
+                #         func, source=source
+                #     )
+                elif is_allowed(func):
+                    return variables.TorchInGraphFunctionVariable(func, source=source)
                 else:
                     return variables.UserFunctionVariable(func, source=source)
 
