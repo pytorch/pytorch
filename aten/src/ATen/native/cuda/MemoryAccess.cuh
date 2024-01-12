@@ -7,9 +7,9 @@
 #include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
 #include <ATen/core/Array.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/detail/MemoryAccessUtils.h>
-#include <ATen/detail/OffsetCalculator.h>
 #include <ATen/native/cuda/thread_constants.h>
 
 #include <thrust/tuple.h>

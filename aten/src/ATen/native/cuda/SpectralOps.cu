@@ -3,7 +3,7 @@
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <ATen/detail/OffsetCalculator.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/SpectralOpsUtils.h>
 

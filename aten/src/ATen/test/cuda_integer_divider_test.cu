@@ -9,7 +9,7 @@
 #include <vector>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/detail/IntegerDivider.h>
+#include <ATen/cuda/detail/IntegerDivider.cuh>
 
 using std::vector;
 using at::detail::IntDivider;

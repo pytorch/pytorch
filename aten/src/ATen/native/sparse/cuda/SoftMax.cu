@@ -41,7 +41,7 @@
 
 #include <c10/cuda/CUDAMathCompat.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/detail/OffsetCalculator.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 
 #include <c10/macros/Macros.h>

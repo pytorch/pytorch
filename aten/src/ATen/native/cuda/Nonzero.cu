@@ -5,7 +5,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/EmptyTensor.h>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <ATen/detail/OffsetCalculator.h> //for MAX_DIMS
+#include <ATen/cuda/detail/OffsetCalculator.cuh> //for MAX_DIMS
 #include <ATen/cuda/cub.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS

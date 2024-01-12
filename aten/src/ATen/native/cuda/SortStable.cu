@@ -8,7 +8,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/cub.cuh>
-#include <ATen/detail/OffsetCalculator.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/SortUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 

@@ -3,7 +3,7 @@
 
 #include <ATen/Dispatch.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/detail/OffsetCalculator.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/CUDAContext.h>
 
 #include <vector>

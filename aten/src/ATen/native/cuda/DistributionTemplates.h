@@ -10,7 +10,7 @@
 #include <c10/util/Half.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/detail/OffsetCalculator.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/core/DistributionsHelper.h>

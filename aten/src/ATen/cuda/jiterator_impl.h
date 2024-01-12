@@ -4,7 +4,7 @@
 #if AT_USE_JITERATOR()
 
 #include <ATen/native/TensorIterator.h>
-#include <ATen/detail/OffsetCalculator.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/jit_utils.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/JitLoops.cuh>

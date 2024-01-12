@@ -9,7 +9,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/detail/OffsetCalculator.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/native/quantized/IndexKernel.h>

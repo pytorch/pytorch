@@ -5,7 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
-#include <ATen/detail/OffsetCalculator.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/ScanUtils.cuh>
 #include <ATen/cuda/AsmUtils.cuh>
 #include <ATen/cuda/DeviceUtils.cuh>

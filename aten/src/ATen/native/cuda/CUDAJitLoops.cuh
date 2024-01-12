@@ -8,7 +8,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/detail/OffsetCalculator.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/jit_utils.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/thread_constants.h>

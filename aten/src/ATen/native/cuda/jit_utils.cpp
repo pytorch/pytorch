@@ -5,7 +5,7 @@
 #include <c10/util/Optional.h>
 #include <ATen/jit_macros.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/detail/OffsetCalculator.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/code_template.h>
 #include <ATen/OpMathType.h>
@@ -171,7 +171,7 @@ const std::string jit_common_types = R"ESCAPE(
   #define ERROR_UNSUPPORTED_CAST ;
   // corresponds to aten/src/ATen/native/cuda/thread_constants.h
   #define CUDA_OR_ROCM_NUM_THREADS 256
-  // corresponds to aten/src/ATen/detail/OffsetCalculator.h
+  // corresponds to aten/src/ATen/cuda/detail/OffsetCalculator.cuh
   #define MAX_DIMS 16
   #ifndef __forceinline__
   #define __forceinline__ inline __attribute__((always_inline))

@@ -1,9 +1,9 @@
 #pragma once
 
 #include <ATen/detail/FunctionTraits.h>
-#include <ATen/detail/OffsetCalculator.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorIteratorDynamicCasting.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/OpMathType.h>
 #include <ATen/native/cuda/thread_constants.h>
 
