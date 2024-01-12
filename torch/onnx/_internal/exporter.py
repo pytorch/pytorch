@@ -967,14 +967,12 @@ class ONNXProgram:
         Args:
             destination: The destination to save the ONNX model. It can be either a string or a file-like object.
                 When used with ``model_state_dict``, it must be a string with a full path to the destination.
-                In that case, besides saving the ONNX model, a folder with "_initializers" suffix (without extension)
-                will be created to store the each initializer of the ONNX model in a separate file. For example, if the
-                destination is "/path/model.onnx", the initializers will be saved in "/path/model_initializers/" folder.
+                In that case, besides saving the ONNX model into a file, each initializer of the ONNX model is stored
+                in a separate file in the same directory as the model. For example, if the
+                destination is "/path/model.onnx", the initializers will be saved in "/path/" folder.
             model_state_dict: The state_dict of the PyTorch model containing all weights on it.
-                It can be either a dict as returned by :meth:`model.state_dict`, or a string with a file name.
-                Required when :func:`enable_fake_mode` is used but real initializers are needed on the ONNX graph.
                 It can be either a string with the path to a checkpoint or a dictionary with the actual model state.
-
+                Required when :func:`enable_fake_mode` is used but real initializers are needed on the ONNX graph.
             serializer: The serializer to use. If not specified, the model will be serialized as Protobuf.
         """
 
@@ -1004,7 +1002,10 @@ class ONNXProgram:
                     # ignore duplicate
                     continue
                 try:
-                    extra_state_dict = torch.load(path)
+                    # Loads checkpoint using memory-map on CPU to succeed with large models
+                    extra_state_dict = torch.load(
+                        path, map_location="cpu", mmap=True, weights_only=True
+                    )
                     extra_state_dict_file = io.BytesIO()
                     torch.save(extra_state_dict, extra_state_dict_file)
                     extra_state_dict_file.seek(0)
@@ -1019,15 +1020,14 @@ class ONNXProgram:
                     "`destination` must be a string with a path when `model_state_dict` is specified."
                 )
             destination_path, destination_filename = os.path.split(destination)
+            destination_path = destination_path or os.getcwd()
             onnx_model_location = destination_filename
-            onnx_initializer_location = (
-                destination_filename.split(".")[0] + "_initializers"
-            )
+
             # TODO: Should this be part of the serializer?
             fx_serialization.save_model_with_external_data(
                 destination_path,
                 onnx_model_location,
-                onnx_initializer_location,
+                "",  # When initializers >2GB, must be in the same folder as the model
                 tuple(_model_state_dict_files),
                 self.model_proto,
             )
