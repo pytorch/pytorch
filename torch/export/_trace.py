@@ -1,6 +1,7 @@
 import copy
 import dataclasses
 import functools
+import logging
 import re
 from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -45,6 +46,9 @@ from .graph_signature import (
     SymIntArgument,
     TensorArgument,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -790,6 +794,7 @@ def _export(
         example_inputs=(args, kwargs),
         tensor_constants=tensor_constants,
     )
+    log.debug("Exported program from AOTAutograd:\n%s", exported_program)
 
     if len(range_constraints) > 0:
         exported_program = exported_program._transform_do_not_use(
