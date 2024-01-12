@@ -16,7 +16,7 @@ from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.sym_node import to_node, sym_sqrt, SymNode, method_to_operator
+from torch.fx.experimental.sym_node import to_node, SymNode, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraints,
     DimDynamic,
@@ -394,7 +394,7 @@ class TestPySymInt(TestCase):
     def test_sym_sqrt(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 4)
-        r = sym_sqrt(a0)
+        r = torch._sym_sqrt(a0)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(sqrt(s0), 2)""")
@@ -764,7 +764,7 @@ class TestSymNumberMagicMethods(TestCase):
         values = (
             0.0,
             1.0,
-            2.5,
+            0.5 if fn in ("sym_acos", "sym_asin") else 2.5  # avoid math domain error
         )
 
         neg_values = tuple(-x for x in values)
@@ -1122,6 +1122,36 @@ class TestDimConstraints(TestCase):
         exprs.add(Eq(s / 2, 4))
         solution = reduce_inequalities(exprs, s).as_set()
         self.assertEqual(solution, {8})
+
+    def test_dim_constraints_reduce_inequalities_error(self):
+        from collections import defaultdict
+
+        from sympy import Symbol
+        from sympy.solvers.inequalities import reduce_inequalities
+        from torch._dynamo.source import LocalSource, TensorProperty, TensorPropertySource
+        from torch.fx.experimental.symbolic_shapes import DynamicDimConstraintPrinter
+
+        s0 = Symbol("s0", positive=True, integer=True)
+        exprs = {
+            4 * s0**3 - 4 * s0**2 + s0 <= 2147483647,
+            s0 >= 2,
+            s0**3 <= 2147483647,
+            s0 <= 2147483647,
+        }
+        answer = reduce_inequalities(exprs, s0)
+
+        symbol_to_source = defaultdict(list)
+        symbol_to_source[s0].append(
+            TensorPropertySource(
+                base=LocalSource(local_name="a"), prop=TensorProperty.SIZE, idx=0
+            )
+        )
+        dcp = DynamicDimConstraintPrinter(symbol_to_source, {})
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Unknown symbol.*created by constraints solver",
+        ):
+            dcp.doprint(answer)
 
     def test_dim_constraints_solve_full(self):
         from sympy import Eq, Integer, Ne, Symbol
