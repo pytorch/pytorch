@@ -1144,6 +1144,7 @@ aten::segment_reduce.out
 aten::select.int
 aten::select_copy.int
 aten::select_copy.int_out
+aten::select_inverse
 aten::select_scatter
 aten::select_scatter.out
 aten::set

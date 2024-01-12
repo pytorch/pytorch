@@ -966,3 +966,39 @@ def embedding_default(func, *args, **kwargs):
     return NestedTensor(
         func(weight, indices._values, **new_kwargs), **extract_kwargs(indices)
     )
+
+
+@register_jagged_func(
+    torch.ops.aten.select_inverse.default,
+    "self: jt, src: jt, dim: any, index: any",
+)
+def select_inverse_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    src = new_kwargs.pop("src")
+    new_kwargs["dim"] = _wrap_jagged_dim(src.dim(), new_kwargs["dim"], "select_inverse")
+
+    return NestedTensor(
+        func(inp._values, src._values, **new_kwargs), **extract_kwargs(inp)
+    )
+
+
+@register_jagged_func(
+    torch.ops.aten.slice_inverse.default,
+    "self: jt, src: jt, dim: any?, start: any?, end: any?, step: any?",
+)
+def slice_inverse_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    src = new_kwargs.pop("src")
+    new_kwargs["dim"] = _wrap_jagged_dim(src.dim(), new_kwargs["dim"], "slice_inverse")
+
+    return NestedTensor(
+        func(inp._values, src._values, **new_kwargs), **extract_kwargs(inp)
+    )
