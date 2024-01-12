@@ -1,8 +1,8 @@
 import logging
 import types
-from typing import Tuple
 import weakref
 from dataclasses import dataclass
+from typing import Tuple
 
 from . import config
 
