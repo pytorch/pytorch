@@ -1123,6 +1123,36 @@ class TestDimConstraints(TestCase):
         solution = reduce_inequalities(exprs, s).as_set()
         self.assertEqual(solution, {8})
 
+    def test_dim_constraints_reduce_inequalities_error(self):
+        from collections import defaultdict
+
+        from sympy import Symbol
+        from sympy.solvers.inequalities import reduce_inequalities
+        from torch._dynamo.source import LocalSource, TensorProperty, TensorPropertySource
+        from torch.fx.experimental.symbolic_shapes import DynamicDimConstraintPrinter
+
+        s0 = Symbol("s0", positive=True, integer=True)
+        exprs = {
+            4 * s0**3 - 4 * s0**2 + s0 <= 2147483647,
+            s0 >= 2,
+            s0**3 <= 2147483647,
+            s0 <= 2147483647,
+        }
+        answer = reduce_inequalities(exprs, s0)
+
+        symbol_to_source = defaultdict(list)
+        symbol_to_source[s0].append(
+            TensorPropertySource(
+                base=LocalSource(local_name="a"), prop=TensorProperty.SIZE, idx=0
+            )
+        )
+        dcp = DynamicDimConstraintPrinter(symbol_to_source, {})
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Unknown symbol.*created by constraints solver",
+        ):
+            dcp.doprint(answer)
+
     def test_dim_constraints_solve_full(self):
         from sympy import Eq, Integer, Ne, Symbol
         from torch._dynamo.source import LocalSource, TensorProperty, TensorPropertySource
