@@ -1,7 +1,7 @@
 import torch
 from torch._C import _disabled_torch_function_impl
 from collections import OrderedDict
-from copy import deepcopy
+import copy
 
 # Metaclass to combine _TensorMeta and the instance check override for Parameter.
 class _ParameterMeta(torch._C._TensorMeta):
@@ -59,7 +59,7 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
         else:
             result = type(self)(self.data.clone(memory_format=torch.preserve_format), self.requires_grad)
             if not isinstance(result.data, torch._subclasses.FakeTensor):
-                result.__dict__ = deepcopy(self.__dict__, memo)
+                result.__dict__ = copy.deepcopy(self.__dict__, memo)
             memo[id(self)] = result
             return result
 
@@ -198,7 +198,7 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
             return memo[id(self)]
         else:
             result = type(self)(self.requires_grad, self.data.device, self.data.dtype)
-            result.__dict__ = deepcopy(self.__dict__, memo)
+            result.__dict__ = copy.deepcopy(self.__dict__, memo)
             memo[id(self)] = result
             return result
 
