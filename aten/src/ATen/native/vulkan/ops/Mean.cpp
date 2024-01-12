@@ -38,7 +38,7 @@ Tensor mean_dim(
   dim = utils::normalize(dim, self.dim());
 
   // Create the output texture
-  std::vector<int64_t> output_size = self.sizes().vec();
+  std::vector<int64_t> output_size = v_input.sizes();
   uint32_t dim_size = output_size[dim];
   if (keepdim) {
     output_size[dim] = 1;
@@ -54,7 +54,7 @@ Tensor mean_dim(
   vTensor v_output{
       context,
       output_size,
-      type,
+      convert_dtype(type),
   };
 
   // Required to determine how to insert memory barriers in the command buffer
