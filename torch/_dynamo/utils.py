@@ -906,6 +906,7 @@ common_constant_types = {
     torch.dtype,
     torch.memory_format,
     torch.layout,
+    torch.torch_version.TorchVersion,
 }
 
 

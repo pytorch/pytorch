@@ -28,6 +28,7 @@ from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
     check_unspec_python_args,
+    common_constant_types,
     extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
@@ -1255,6 +1256,10 @@ class BuiltinVariable(VariableTracker):
             if is_utils_checkpoint(member):
                 options["source"] = source
                 return build_checkpoint_variable(**options)
+            elif istype(member, common_constant_types):
+                vt = ConstantVariable(member, **options)
+                install_guard(vt.source.make_guard(GuardBuilder.CONSTANT_MATCH))
+                return vt
             elif trace_rules.lookup(member) is not None:
                 return trace_rules.lookup(member)(member, **options)
             elif source is not None:
