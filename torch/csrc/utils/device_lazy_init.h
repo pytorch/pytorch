@@ -40,7 +40,8 @@ static inline void maybe_initialize_device(c10::optional<at::Device>& device) {
 }
 
 static inline void maybe_initialize_device(const at::TensorOptions& options) {
-  maybe_initialize_device(options.device());
+  auto device = options.device();
+  maybe_initialize_device(device);
 }
 
 } // namespace utils
