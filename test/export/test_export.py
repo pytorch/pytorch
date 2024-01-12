@@ -36,6 +36,13 @@ from torch._subclasses import FakeTensorMode
 from torch.export import Constraint, Dim
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+)
+from torch.testing._internal.common_device_type import (
+    onlyCPU,
+    onlyCUDA,
+)
 from torch.testing._internal.common_utils import run_tests
 from torch._dynamo.test_case import TestCase
 from torch.utils._pytree import (
@@ -2531,8 +2538,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
-
-    def test_scaled_dot_product_attention(self):
+    def test_scaled_dot_product_attention_cpu(self):
         """
         This test makes sure we are always getting the same decomposition result for SDPA.
         As of now _scaled_dot_product_flash_attention_for_cpu is expected to show up in
@@ -2555,9 +2561,9 @@ class TestOneOffModelExportResult(TestCase):
                     q, k, v, None, dropout_p=0.0, is_causal=True
                 )
                 return attn_output
-        q = torch.randn(1, 1, 8, 8)
-        k = torch.randn(1, 1, 8, 8)
-        v = torch.randn(1, 1, 8, 8)
+        q = torch.randn(1, 1, 8, 8, device="cpu")
+        k = torch.randn(1, 1, 8, 8, device="cpu")
+        v = torch.randn(1, 1, 8, 8, device="cpu")
 
         ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
         self.assertExpectedInline(ep.graph_module.code.strip(), """\
@@ -2565,5 +2571,39 @@ def forward(self, l_q_, l_k_, l_v_):
     _scaled_dot_product_flash_attention_for_cpu = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(l_q_, l_k_, l_v_, 0.0, True);  l_q_ = l_k_ = l_v_ = None
     getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
     return (getitem,)""")
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Can't run fused SDPA on this platform",
+    )
+    def test_scaled_dot_product_attention_cuda(self):
+        """
+        This test makes sure we are always getting the same decomposition result for SDPA.
+        As of now _scaled_dot_product_flash_attention is expected to show up in
+        export() result (GPU tensors are given). Currently there's no downstream
+        backend relies on this export result so if this test fails, feel free to
+        change it to the latest export() result.
+        """
+        class ScaledDotProductAttention(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, q, k, v):
+                attn_output = F.scaled_dot_product_attention(
+                    q, k, v, None, dropout_p=0.0, is_causal=True
+                )
+                return attn_output
+        q = torch.randn(1, 16, 16, 64, dtype = torch.bfloat16, device="cuda")
+        k = torch.randn(1, 16, 16, 64, dtype = torch.bfloat16, device="cuda")
+        v = torch.randn(1, 16, 16, 64, dtype = torch.bfloat16, device="cuda")
+
+        ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
+        self.assertExpectedInline(ep.graph_module.code.strip(), """\
+def forward(self, l_q_, l_k_, l_v_):
+    _scaled_dot_product_flash_attention = torch.ops.aten._scaled_dot_product_flash_attention.default(l_q_, l_k_, l_v_, 0.0, True, scale = 0.125);  l_q_ = l_k_ = l_v_ = None
+    getitem = _scaled_dot_product_flash_attention[0];  _scaled_dot_product_flash_attention = None
+    return (getitem,)""")
+
+
 if __name__ == '__main__':
     run_tests()
