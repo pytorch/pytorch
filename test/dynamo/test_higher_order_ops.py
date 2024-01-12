@@ -1102,7 +1102,6 @@ class GraphModule(torch.nn.Module):
         xs = torch.randn(2, 3, 3)
         y = torch.randn(3)
 
-        @torch.compile(backend=cnt, fullgraph=True)
         def map_f(xs, y):
             def inner(x, y):
                 def inner2(x, y):
@@ -1112,26 +1111,60 @@ class GraphModule(torch.nn.Module):
 
             return control_flow.map(inner, xs, y)
 
-        result = map_f(xs, y)
-        self.assertEqual(result, xs + y)
-
-        map_gm = backend.graphs[0]
-        name_set = set()
-        for name, _ in map_gm.named_modules():
-            name_set.add(name)
-        self.assertEqual(name_set, {"", "map_body_1.map_body_0", "map_body_1"})
+        graphs = self._check_map_graph_and_extract(map_f, (xs, y))
+        if graphs:
+            graph, body_graph = graphs
+            self.assertExpectedInline(
+                graph,
+                """\
+def forward(self, L_xs_ : torch.Tensor, L_y_ : torch.Tensor):
+    l_xs_ = L_xs_
+    l_y_ = L_y_
+    map_body_1 = self.map_body_1
+    map_impl = torch.ops.higher_order.map_impl(map_body_1, 1, l_xs_, l_y_);  map_body_1 = l_xs_ = l_y_ = None
+    getitem_1 = map_impl[0];  map_impl = None
+    return (getitem_1,)""",
+            )
+            self.assertExpectedInline(
+                body_graph,
+                """\
+def forward(self, getitem, l_y_):
+    getitem_1 = getitem[0]
+    map_body_0 = self.map_body_0
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, getitem, l_y_);  map_body_0 = getitem = l_y_ = None
+    getitem_2 = map_impl[0];  map_impl = None
+    return (getitem_2,)""",
+            )
 
     def test_map_multi_return(self):
         cnt = CompileCounter()
 
-        @torch.compile(backend=cnt)
         def f(x):
             return control_flow.map(lambda x: (x.sin(), x.sin()), x)
 
         x = torch.randn(3)
-        result = f(x)
-        self.assertEqual(result, (x.sin(), x.sin()))
-        self.assertEqual(cnt.frame_count, 1)
+        graphs = self._check_map_graph_and_extract(f, (x,))
+        if graphs:
+            graph, body_graph = graphs
+            self.assertExpectedInline(
+                graph,
+                """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    map_body_0 = self.map_body_0
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_);  map_body_0 = l_x_ = None
+    getitem_1 = map_impl[0]
+    getitem_2 = map_impl[1];  map_impl = None
+    return (getitem_1, getitem_2)""",
+            )
+            self.assertExpectedInline(
+                body_graph,
+                """\
+def forward(self, getitem):
+    sin = getitem.sin()
+    sin_1 = getitem.sin();  getitem = None
+    return (sin, sin_1)""",
+            )
 
     def test_map_pytree_return(self):
         cnt = CompileCounter()
@@ -1139,7 +1172,6 @@ class GraphModule(torch.nn.Module):
         def _construct_pytree(a):
             return (a, [[[a]]], a, (a, (a,), a), {"a": a})
 
-        @torch.compile(backend=cnt)
         def f(x):
             def inner_f(xs):
                 return _construct_pytree(xs)
@@ -1147,9 +1179,31 @@ class GraphModule(torch.nn.Module):
             return control_flow.map(inner_f, x)
 
         x = torch.randn(3)
-        result = f(x)
-        self.assertEqual(result, _construct_pytree(x))
-        self.assertEqual(cnt.frame_count, 1)
+        graphs = self._check_map_graph_and_extract(f, (x,))
+        if graphs:
+            graph, body_graph = graphs
+            self.assertExpectedInline(
+                graph,
+                """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    map_body_0 = self.map_body_0
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_);  map_body_0 = l_x_ = None
+    getitem_1 = map_impl[0]
+    getitem_2 = map_impl[1]
+    getitem_3 = map_impl[2]
+    getitem_4 = map_impl[3]
+    getitem_5 = map_impl[4]
+    getitem_6 = map_impl[5]
+    getitem_7 = map_impl[6];  map_impl = None
+    return (getitem_1, getitem_2, getitem_3, getitem_4, getitem_5, getitem_6, getitem_7)""",
+            )
+            self.assertExpectedInline(
+                body_graph,
+                """\
+def forward(self, getitem):
+    return (getitem, getitem, getitem, getitem, getitem, getitem, getitem)""",
+            )
 
     def test_map_kwargs(self):
         cnt = CompileCounter()
@@ -1174,17 +1228,27 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 1)
         y = torch.randn(3, 1)
-        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True)
-
-        ref = fn(x, y)
-        res = compiled_fn(x, y)
-
-        self.assertEqual(ref, res)
-        self.assertEqual(cnt.frame_count, 1)
-
-        # We increase the number of ops to 2 and 3 for top-level graph because of an additional
-        # get_item call created by the flatten/unflatten logic in HOP speculation.
-        self.assertEqual(cnt.op_count, ifdynstaticdefault(2, 3))
+        graphs = self._check_map_graph_and_extract(fn, (x, y))
+        if graphs:
+            graph, body_graph = graphs
+            self.assertExpectedInline(
+                graph,
+                """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    map_body_0 = self.map_body_0
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_, 3);  map_body_0 = l_x_ = None
+    getitem_1 = map_impl[0];  map_impl = None
+    return (getitem_1,)""",
+            )
+            self.assertExpectedInline(
+                body_graph,
+                """\
+def forward(self, getitem, const):
+    add = getitem + 3;  getitem = None
+    sin = torch.sin(add);  add = None
+    return (sin,)""",
+            )
 
     def test_map_lowers_to_graph(self):
         backend = EagerAndRecordGraphs()
@@ -1198,23 +1262,27 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 1)
         y = torch.randn(3, 1)
-        compiled_fn = torch.compile(fn, backend=backend)(x, y)
-        self.assertEqual(len(backend.graphs), 1)
-        graph = backend.graphs[0]
-        # Dynamic shapes produce a slightly different graph.
-        if check_dynamic_shape_capture():
-            return
-
-        self.assertExpectedInline(
-            graph.code.strip(),
-            """\
+        graphs = self._check_map_graph_and_extract(fn, (x, y))
+        if graphs:
+            graph, body_graph = graphs
+            self.assertExpectedInline(
+                graph,
+                """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     map_body_0 = self.map_body_0
     map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_, 3);  map_body_0 = l_x_ = None
     getitem_1 = map_impl[0];  map_impl = None
     return (getitem_1,)""",
-        )
+            )
+            self.assertExpectedInline(
+                body_graph,
+                """\
+def forward(self, getitem, const):
+    add = getitem + 3;  getitem = None
+    sin = torch.sin(add);  add = None
+    return (sin,)""",
+            )
 
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
@@ -1365,6 +1433,25 @@ def forward(self, L_x_ : torch.Tensor):
         true_graph = gm.cond_true_0.code.strip()
         false_graph = gm.cond_false_0.code.strip()
         return (graph, true_graph, false_graph)
+
+    def _check_map_graph_and_extract(self, fn, args):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+        out = torch.compile(fn, backend=cnt, fullgraph=True)(*args)
+        self.assertEqual(out, fn(*args))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(backend.graphs), 1)
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        gm = backend.graphs[0]
+        graph = gm.code.strip()
+        subgraphs = []
+        for module_name in gm._modules.keys():
+            subgraphs.append(getattr(gm, module_name).code.strip())
+        return (graph, *subgraphs)
 
     def test_cond_branches_no_arguments(self):
         def fn(x):

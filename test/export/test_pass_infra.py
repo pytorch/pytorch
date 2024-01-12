@@ -6,7 +6,7 @@ import torch
 from functorch.experimental import control_flow
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch.export import export
-from torch._export.pass_base import _ExportPassBase
+from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -17,13 +17,13 @@ class TestPassInfra(TestCase):
             y = torch.cat([x, x])
             return torch.ops.aten.tensor_split.sections(y, 2)
 
-        class NullPass(_ExportPassBase):
+        class NullPass(_ExportPassBaseDeprecatedDoNotUse):
             pass
 
         ep = export(f, (torch.ones(3, 2),))
         old_nodes = ep.graph.nodes
 
-        ep = ep._transform(NullPass())
+        ep = ep._transform_do_not_use(NullPass())
         new_nodes = ep.graph.nodes
 
         for node in new_nodes:
@@ -59,7 +59,7 @@ class TestPassInfra(TestCase):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        _ = export(mod, (torch.tensor(True), x, y))._transform(_ExportPassBase())
+        _ = export(mod, (torch.tensor(True), x, y))._transform_do_not_use(_ExportPassBaseDeprecatedDoNotUse())
 
     def test_node_name_stability(self) -> None:
         # Tests that graph nodes stay the same for nodes that are not touched
@@ -90,7 +90,7 @@ class TestPassInfra(TestCase):
         ep_before = export(m, inps)
 
         # No op transformation that doesn't perform any meaningful changes to node
-        ep_after = ep_before._transform(_ExportPassBase())
+        ep_after = ep_before._transform_do_not_use(_ExportPassBaseDeprecatedDoNotUse())
 
         for before_node, after_node in zip(ep_before.graph.nodes, ep_after.graph.nodes):
             self.assertEqual(before_node.name, after_node.name)
@@ -130,7 +130,7 @@ class TestPassInfra(TestCase):
             gm.recompile()
             return PassResult(gm, True)
 
-        ep_after = ep_before._transform(modify_input_output_pass)
+        ep_after = ep_before._transform_do_not_use(modify_input_output_pass)
         new_signature = ep_after.graph_signature
 
         for node_name in new_signature.user_outputs:
