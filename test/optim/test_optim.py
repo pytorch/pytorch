@@ -27,7 +27,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo
 )
 
-from torch._dynamo import disable as disable_dynamo
 
 from torch.testing._internal.common_cuda import TEST_CUDA
 from typing import Dict, Any, Tuple
@@ -216,41 +215,6 @@ class TestOptim(TestCase):
             else:
                 self.assertLess(fn().item(), initial_value)
 
-    # Note: disable dynamo on this function
-    # This allows us to continue running actual logic of the optimizer
-    # tests in dynamo without tracing this test code which has a lot of unsupported
-    # behavior
-    @disable_dynamo(recursive=False)
-    def _test_state_dict(self, weight, bias, input, constructor, atol=None, rtol=None):
-        weight = Parameter(weight)
-        bias = Parameter(bias)
-        with torch.no_grad():
-            input = input.clone().detach().requires_grad_()
-
-        # Note: Disable dynamo on this function
-        # This avoids a bug where input_cuda is not detected in the environment
-        # because it currently is not defined in the local environmet. Unable to repro
-        # anywhere else however and this is test code that we don't need to spend
-        # time getting dynamo to trace unless the issue repros in real models.
-        @disable_dynamo(recursive=False)
-        def fn_base(optimizer, weight, bias):
-            optimizer.zero_grad()
-            loss = (weight.mv(input) + bias).pow(2).sum()
-            loss.backward()
-            return loss
-
-        optimizer = constructor(weight, bias)
-        fn = functools.partial(fn_base, optimizer, weight, bias)
-
-        # Prime the optimizer
-        for _i in range(20):
-            optimizer.step(fn)
-
-        # validate deepcopy() copies all public attributes
-        def getPublicAttr(obj):
-            return {k for k in obj.__dict__ if not k.startswith("_")}
-
-        self.assertEqual(getPublicAttr(optimizer), getPublicAttr(deepcopy(optimizer)))
 
     def _test_basic_cases(
         self,
@@ -276,18 +240,6 @@ class TestOptim(TestCase):
                 return lambda weight, bias: constructor(weight, bias, foreach)
             return constructor
 
-        for maximize, foreach in itertools.product(
-            {False, constructor_accepts_maximize},
-            {False, constructor_accepts_foreach},
-        ):
-            self._test_state_dict(
-                torch.randn(10, 5),
-                torch.randn(10),
-                torch.randn(5),
-                make_two_arg_constructor(constructor, maximize, foreach),
-                atol=atol,
-                rtol=rtol,
-            )
         self._test_basic_cases_template(
             torch.randn(10, 5),
             torch.randn(10),

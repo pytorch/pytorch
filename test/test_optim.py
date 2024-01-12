@@ -584,6 +584,38 @@ class TestOptimRenewed(TestCase):
                 self.assertEqual(optimizer.state_dict(), optimizer_cuda.state_dict())
 
 
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_deepcopy_copies_all_public_attrs(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
+
+        params = [Parameter(torch.randn(2, 3, device=device, dtype=dtype)) for _ in range(2)]
+        for p in params:
+            p.grad = torch.rand_like(p)
+            if optim_cls.__name__ == "SparseAdam":
+                # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
+                # which we know does NOT represent the expected use case!
+                p.grad = p.grad.to_sparse()
+
+        # Needed for LBFGS
+        def closure():
+            return 1 if optim_cls.__name__ == "LBFGS" else None
+
+        def getPublicAttrs(obj):
+            return {k for k in obj.__dict__ if not k.startswith("_")}
+
+        for optim_input in all_optim_inputs:
+            optimizer = optim_cls(params, **optim_input.kwargs)
+
+            # Make some state
+            for _ in range(3):
+                optimizer.step(closure)
+
+            self.assertEqual(getPublicAttrs(optimizer), getPublicAttrs(deepcopy(optimizer)))
+
+
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 
 
