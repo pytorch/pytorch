@@ -858,8 +858,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Extra time of sleep when waiting for timeout dump to finish.
   int waitTimeoutDumpInMilSec_;
 
-  // Interval of check in ProcessGroupNCCL watchdog for timeout dump.
-  int timeoutCheckIntervalMilSec_;
+  // Interval of check ProcessGroupNCCL watchdog for timeout so that other ranks
+  // can start coordinated dump of the debugging info.
+  int coordDumpCheckIntervalMilSec_;
 
   // Size of ring buffer where we store NCCL Traces for debugging.
   int ncclTraceBufferSize_;
