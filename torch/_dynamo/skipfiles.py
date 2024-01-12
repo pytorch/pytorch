@@ -204,6 +204,7 @@ MOD_INLINELIST = {
     "torch._inductor.test_operators",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
+    "torch.ao.quantization.quantizer.utils",
     "torch.autograd.function",
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
