@@ -210,7 +210,7 @@ struct TORCH_API OperandInfo {
  private:
   c10::MaybeOwned<TensorBase> tensor_base_;
   c10::MaybeOwned<TensorBase> original_tensor_base_ =
-      c10::MaybeOwned<TensorBase>::owned(c10::in_place);
+      c10::MaybeOwned<TensorBase>::owned(std::in_place);
 
   // We store TensorBase visibly in the header to allow inline access.
   // However, we sometimes need a genuine `const Tensor &` for the

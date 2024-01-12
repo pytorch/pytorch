@@ -10,9 +10,7 @@
 #include <atomic>
 #include <vector>
 
-namespace c10 {
-namespace cuda {
-namespace CUDACachingAllocator {
+namespace c10::cuda::CUDACachingAllocator {
 
 // Environment config parser
 class C10_CUDA_API CUDAAllocatorConfig {
@@ -111,6 +109,4 @@ class C10_CUDA_API CUDAAllocatorConfig {
 // General caching allocator utilities
 C10_CUDA_API void setAllocatorSettings(const std::string& env);
 
-} // namespace CUDACachingAllocator
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda::CUDACachingAllocator

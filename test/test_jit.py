@@ -1875,8 +1875,8 @@ graph(%Ra, %Rb):
                         o_ref = t(x_ref, p, train)
                         o.sum().backward()
                         o_ref.sum().backward()
-                        assert(o.equal(o_ref))
-                        assert(x.grad.equal(x_ref.grad))
+                        assert o.equal(o_ref)
+                        assert x.grad.equal(x_ref.grad)
 
     @slowTest
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, 'Testing differentiable graph')
@@ -1979,7 +1979,7 @@ graph(%Ra, %Rb):
             self.assertEqual(_zero_rate(grad[0]), _zero_rate(grad_ref[0]), rtol=1e-3, atol=1e-4)
 
     def test_torch_ops_overloaded(self):
-        with self.assertRaisesRegex(RuntimeError, "failed to many any schema"):
+        with self.assertRaisesRegex(RuntimeError, "failed to match any schema"):
             torch.ops.aten.add("a", 1)
         self.assertEqual("ab", torch.ops.aten.add("a", "b"))
         a, b = torch.rand(3, 4), torch.rand(3, 4)
@@ -5746,7 +5746,7 @@ a")
         x = torch.zeros(3, 4, dtype=torch.long)
         graph = _propagate_shapes(fn.graph, (x,), False)
         default = torch.get_default_dtype()
-        if(default == torch.float):
+        if default == torch.float:
             FileCheck().check('Float(*, *, requires_grad=0, device=cpu) = aten::add').run(graph)
         else:
             FileCheck().check('Double(*, *, requires_grad=0, device=cpu) = aten::add').run(graph)
@@ -6169,7 +6169,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[Tensor, Tensor\]"):  # noqa: W605
             @torch.jit.script
             def test_mult(x, y):
-                return not(x, y)
+                return not (x, y)
 
         def test_cast_int(x):
             # type: (int) -> int
@@ -8163,7 +8163,7 @@ dedent """
 
             @torch.jit.script
             def foo(a):
-                return pyfunc2(a) + pyfunc(a)
+                return pyfunc2(a) + pyfunc(a)  # noqa: F821
 
             inputs = self._make_scalar_vars([1], torch.float)
             outputs = self._make_scalar_vars([6], torch.float)
@@ -8557,15 +8557,15 @@ dedent """
                 fb.run("22 1 22")
 
     def _dtype_to_jit_name(self, dtype):
-        if(dtype == torch.float32):
+        if dtype == torch.float32:
             return "Float"
-        if(dtype == torch.float64):
+        if dtype == torch.float64:
             return "Double"
-        if(dtype == torch.int64):
+        if dtype == torch.int64:
             return "Long"
-        if(dtype == torch.int32):
+        if dtype == torch.int32:
             return "Int"
-        if(dtype == torch.bool):
+        if dtype == torch.bool:
             return "Bool"
         raise RuntimeError('dtype not handled')
 
@@ -8595,7 +8595,7 @@ dedent """
             for dtype in (dtypes + [None]):
                 for tensor_type in dtypes:
                     # a couple of ops aren't implemented for non-floating types
-                    if(not tensor_type.is_floating_point or (dtype is not None and not dtype.is_floating_point)):
+                    if not tensor_type.is_floating_point or (dtype is not None and not dtype.is_floating_point):
                         if op in ['mean', 'softmax', 'log_softmax']:
                             continue
                     return_line = f"torch.tensor({tensor_data}, dtype={tensor_type}).{op}({str_args}dtype={dtype})"
@@ -12837,7 +12837,7 @@ dedent """
 
         for i, offset in enumerate(parsed_serialized_offsets):
             data = reader.get_record(str(offset))
-            assert(data == buffers[i])
+            assert data == buffers[i]
 
     def test_file_reader_no_memory_leak(self):
         num_iters = 10000
@@ -15775,7 +15775,7 @@ dedent """
             # type: (Dict[str, int]) -> List[int]
             out = [1]
             for i in range(d["hi"] if "hi" in d else 6):
-                out.append(i)
+                out.append(i)  # noqa: PERF402
             return out
 
         self.checkScript(fn, ({'hi': 2, 'bye': 3},))

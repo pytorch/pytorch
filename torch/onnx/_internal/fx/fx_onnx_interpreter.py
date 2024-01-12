@@ -179,7 +179,6 @@ def _retrieve_or_adapt_input_to_graph_set(
         # torch.device is not supported by onnxscript (no op). We turn it into
         # a string.
         return str(onnx_tensor)
-
     # all other cases, we do nothing.
     return onnx_tensor
 
@@ -248,6 +247,22 @@ def _fill_tensor_shape_type(
                 expected_value
             )
             onnxscript_value.shape = torch.Size([1])
+        elif isinstance(expected_value, (int, float, bool)):
+            onnxscript_value.dtype = fx_type_utils.from_scalar_type_to_torch_dtype(
+                type(expected_value)
+            )
+            onnxscript_value.shape = torch.Size([])
+        elif isinstance(expected_value, complex):
+            # From complex scalar to real representation
+            onnxscript_value_to_torch_dtype = (
+                fx_type_utils.from_scalar_type_to_torch_dtype(type(expected_value))
+            )
+            onnxscript_value.dtype = (
+                fx_type_utils.from_complex_to_float(onnxscript_value_to_torch_dtype)
+                if onnxscript_value_to_torch_dtype is not None
+                else None
+            )
+            onnxscript_value.shape = torch.Size([2])
         elif fx_type_utils.is_torch_complex_dtype(expected_value.dtype):
             # Like torch.view_as_real, we flatten complex tensors to real tensors with
             # additional last dimension of 2
@@ -328,6 +343,7 @@ def _wrap_fx_args_as_onnxscript_args(
                 float,
                 bool,
                 list,
+                complex,
             ]
         ]
     ],
@@ -568,7 +584,7 @@ class FxOnnxInterpreter:
         # or nodes with node.meta['val'] being a builtin value (ExportedProgram to dynamo_export).
         # Nonethless, the nodes are not consumed by others, so we don't need to
         # create a TorchScriptTensor for them.
-        if fake_tensor is None or isinstance(fake_tensor, (int, float, bool)):
+        if fake_tensor is None or isinstance(fake_tensor, (int, float, bool, str)):
             output = onnxscript_graph.add_input(
                 input_name=None,
             )
@@ -576,7 +592,7 @@ class FxOnnxInterpreter:
             # NOTE: ONNX doesn't support tensor of complex64/complex128, so we
             # convert them to float32/float64 with real representation.
             if fx_type_utils.is_torch_complex_dtype(fake_tensor.dtype):
-                fake_tensor = torch.view_as_real(fake_tensor)
+                fake_tensor = torch.view_as_real(fake_tensor.resolve_conj())
             output = onnxscript_graph.add_input(
                 input_name=node.name,
                 shape=fake_tensor.shape,
@@ -638,13 +654,13 @@ class FxOnnxInterpreter:
         # Map FX inputs to ONNX inputs and fill optional inputs with default values.
         # torch_args and torch_kwargs are for op-level validation
         fx_args, fx_kwargs = _fill_in_default_kwargs(node)
+
         onnx_args, onnx_kwargs = _wrap_fx_args_as_onnxscript_args(
             fx_args,
             fx_kwargs,
             fx_name_to_onnxscript_value,
             onnxscript_tracer,
         )
-
         # Dispatch to ONNX op through OpShema. The input argument dtypes are compared to
         # function signature in OpSchema, and find the best matched overload.
         symbolic_fn = onnxfunction_dispatcher.dispatch(

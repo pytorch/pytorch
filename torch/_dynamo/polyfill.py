@@ -11,6 +11,13 @@ def all(iterator):
     return True
 
 
+def any(iterator):
+    for elem in iterator:
+        if elem:
+            return True
+    return False
+
+
 def index(iterator, item, start=0, end=-1):
     for i, elem in enumerate(list(iterator))[start:end]:
         if item == elem:

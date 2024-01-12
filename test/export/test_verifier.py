@@ -5,7 +5,7 @@ import torch
 from functorch.experimental import control_flow
 from torch import Tensor
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import export
+from torch.export import export
 
 from torch._export.verifier import SpecViolationError, Verifier
 from torch.export.exported_program import InputKind, InputSpec, TensorArgument
@@ -196,7 +196,7 @@ class TestVerifier(TestCase):
         output_node.args = (
             (
                 output_node.args[0][0],
-                list(ep.graph.nodes)[0],
+                next(iter(ep.graph.nodes)),
                 output_node.args[0][1],
             ),
         )

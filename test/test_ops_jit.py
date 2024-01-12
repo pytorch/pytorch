@@ -13,7 +13,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, check_alias_annotation
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining, is_lambda
-
+from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
@@ -27,6 +27,7 @@ _variant_ops = partial(ops, dtypes=OpDTypes.supported,
 #   autodifferentiation behavior.
 # Inherits from JitCommonTestCase instead of TestCase directly to share
 #   functionality with original test_jit.py method operator tests
+@unMarkDynamoStrictTest
 class TestJit(JitCommonTestCase):
     exact_dtype = True
 

@@ -11,6 +11,7 @@ import weakref
 
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import \
     TestCase, run_tests, TEST_WITH_ROCM, skipIfTorchDynamo, parametrize, gradcheck
 from torch.testing._internal.common_device_type import \
@@ -71,7 +72,7 @@ class ForeachFuncWrapper:
 
 class InplaceForeachVersionBumpCheck:
 
-    def __init__(self, testcase: TestCase, tensorlist: "List[torch.Tensor]") -> None:
+    def __init__(self, testcase: TestCase, tensorlist: "List[torch.Tensor]") -> None:  # noqa: F821
         self._testcase = testcase
         self._tensorlist = tensorlist
         self._orig_version_counts = [t._version for t in tensorlist]
@@ -349,12 +350,16 @@ class TestForeach(TestCase):
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):
         # TODO: enable empty list case
-        for tensors in [[torch.randn([0], device=device, dtype=dtype)]]:
+        for tensors in [[torch.randn([0], device=device, dtype=dtype)],
+                        [torch.empty_strided((0, 1), (0, 0), dtype=dtype, device=device)]]:
             res = torch._foreach_add(tensors, 1)
             self.assertEqual(res, tensors)
 
             torch._foreach_add_(tensors, 1)
             self.assertEqual(res, tensors)
+
+            # Regression test for https://github.com/pytorch/pytorch/issues/113156
+            torch._foreach_mul_(tensors, 1)
 
     @ops(
         filter(lambda op: op.supports_out, foreach_binary_op_db),
@@ -543,7 +548,7 @@ class TestForeach(TestCase):
     def test_unary_op_tensors_on_different_devices(self, device, dtype, op):
         method, ref, inplace_method, ref_inplace = self._get_funcs(op)
         # tensors: ['cuda', 'cpu]
-        tensors = list(op.sample_inputs(device, dtype, num_input_tensors=[2]))[0].input
+        tensors = next(iter(op.sample_inputs(device, dtype, num_input_tensors=[2]))).input
         tensors[1] = tensors[1].to("cpu")
         if not op.supports_out:
             try:
@@ -571,8 +576,8 @@ class TestForeach(TestCase):
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
         # `tensors1`: ['cuda', 'cpu']
         # `tensors2`: ['cuda', 'cpu']
-        _cuda_tensors = list(op.sample_inputs(device, dtype, num_input_tensors=[2], same_size=True))[0].input
-        _cpu_tensors = list(op.sample_inputs("cpu", dtype, num_input_tensors=[2], same_size=True))[0].input
+        _cuda_tensors = next(iter(op.sample_inputs(device, dtype, num_input_tensors=[2], same_size=True))).input
+        _cpu_tensors = next(iter(op.sample_inputs("cpu", dtype, num_input_tensors=[2], same_size=True))).input
         tensors1, tensors2 = list(zip(_cuda_tensors, _cpu_tensors))
 
         foreach_op, foreach_op_ = op.method_variant, op.inplace_variant
@@ -603,7 +608,7 @@ class TestForeach(TestCase):
         _cuda_tensors = list(
             op.sample_inputs(device, dtype, num_input_tensors=[3], same_size=True)
         )[int(dtype == torch.float32)].input
-        _cpu_tensors = list(op.sample_inputs("cpu", dtype, num_input_tensors=[3], same_size=True))[0].input
+        _cpu_tensors = next(iter(op.sample_inputs("cpu", dtype, num_input_tensors=[3], same_size=True))).input
         tensors1, tensors2, tensors3 = list(zip(_cuda_tensors, _cpu_tensors))
 
         foreach_op, foreach_op_, native_op = op.method_variant, op.inplace_variant, op.ref
@@ -624,9 +629,7 @@ class TestForeach(TestCase):
         max_value = torch.finfo(dtype).max
         scaler = torch.tensor([max_value]).sqrt().to(device=device, dtype=dtype)
         inputs = ([
-            t * scaler for t in list(
-                op.sample_inputs(device, dtype, requries_grad=True, num_input_tensors=[N], low=1)
-            )[0].input
+            t * scaler for t in next(iter(op.sample_inputs(device, dtype, requries_grad=True, num_input_tensors=[N], low=1))).input
         ],)
         # make sure that the min. of squared L2 norm value per tensor is greater than the max value of `dtype`.
         self.assertTrue(scaler * scaler * N > max_value)
@@ -668,7 +671,7 @@ class TestForeach(TestCase):
         if inplace_op is None:
             self.skipTest("no in-place op available")
 
-        sample = list(op.sample_inputs(dtype=dtype, device=device, num_input_tensors=[2], same_size=True))[0]
+        sample = next(iter(op.sample_inputs(dtype=dtype, device=device, num_input_tensors=[2], same_size=True)))
         sample.input[0].requires_grad_(True)
         with self.assertRaisesRegex(RuntimeError, "a leaf Variable that requires grad"):
             inplace_op(sample.input, *sample.args)
@@ -692,7 +695,7 @@ class TestForeach(TestCase):
     )
     def test_outplace_with_invalid_grads(self, device, dtype, op):
         func, *_ = self._get_funcs(op)
-        sample = list(op.sample_inputs(dtype=dtype, device=device, requires_grad=True, num_input_tensors=[2], same_size=True))[0]
+        sample = next(iter(op.sample_inputs(dtype=dtype, device=device, requires_grad=True, num_input_tensors=[2], same_size=True)))
         self.assertTrue(all(t.requires_grad for t in sample.input))
         (out1, out2) = func([sample.input, *sample.args], is_cuda=False, expect_fastpath=False, **sample.kwargs)
         out1.backward(torch.ones_like(out1))
@@ -744,7 +747,7 @@ class TestForeach(TestCase):
                     sample.args = new_args
             _test(func, sample)
 
-    @unittest.skipIf(not (torch.cuda.is_available() and torch.cuda.device_count() > 1), "requires multiple GPUs")
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_tensors_grouping(self):
         num_tensors_per_list = 10
         num_devices = torch.cuda.device_count()

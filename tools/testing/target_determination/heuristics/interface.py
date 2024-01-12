@@ -1,3 +1,4 @@
+import operator
 import sys
 from abc import abstractmethod
 from copy import copy
@@ -62,7 +63,7 @@ class TestPrioritizations:
     Describes the results of whether heuristics consider a test relevant or not.
 
     All the different ranks of tests are disjoint, meaning a test can only be in one category, and they are only
-    declared at initization time.
+    declared at initialization time.
 
     A list can be empty if a heuristic doesn't consider any tests to be in that category.
 
@@ -179,14 +180,10 @@ class TestPrioritizations:
             self._test_priorities[new_relevance.value].append(upgraded_tests)
 
     def set_test_relevance(self, test_run: TestRun, new_relevance: Relevance) -> None:
-        return self._update_test_relevance(
-            test_run, new_relevance, lambda curr, new: curr == new
-        )
+        return self._update_test_relevance(test_run, new_relevance, operator.eq)
 
     def raise_test_relevance(self, test_run: TestRun, new_relevance: Relevance) -> None:
-        return self._update_test_relevance(
-            test_run, new_relevance, lambda curr, new: curr >= new
-        )
+        return self._update_test_relevance(test_run, new_relevance, operator.ge)
 
     def validate_test_priorities(self) -> None:
         # Union all TestRuns that contain include/exclude pairs
@@ -249,18 +246,30 @@ class TestPrioritizations:
     def get_none_relevance_tests(self) -> TestRuns:
         return tuple(test for test in self._test_priorities[Relevance.NONE.value])
 
-    def print_info(self) -> None:
-        def _print_tests(label: str, tests: List[TestRun]) -> None:
-            if not tests:
-                return
+    def get_info_str(self) -> str:
+        info = ""
 
-            print(f"{label} tests ({len(tests)}):")
+        def _test_info(label: str, tests: List[TestRun]) -> str:
+            if not tests:
+                return ""
+
+            s = f"{label} tests ({len(tests)}):\n"
             for test in tests:
                 if test in tests:
-                    print(f"  {test}")
+                    s += f"  {test}\n"
+            return s
 
         for relevance_group, tests in self._traverse_priorities():
-            _print_tests(f"{Relevance(relevance_group).name.title()} Relevance", tests)
+            if relevance_group == Relevance.UNRANKED:
+                continue
+            info += _test_info(
+                f"{Relevance(relevance_group).name.title()} Relevance", tests
+            )
+
+        return info.strip()
+
+    def print_info(self) -> None:
+        print(self.get_info_str())
 
     def _get_test_relevance_group(self, test_run: TestRun) -> Relevance:
         """

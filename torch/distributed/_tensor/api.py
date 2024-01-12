@@ -10,7 +10,6 @@ import torch.distributed._tensor.random as random
 import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
-from torch.distributed._tensor.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed._tensor.placement_types import (
     DTensorSpec,
     Placement,
@@ -26,6 +25,7 @@ from torch.distributed._tensor.redistribute import (
     Redistribute,
     redistribute_local_tensor,
 )
+from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 
 
 __all__ = ["DTensor", "distribute_tensor", "distribute_module"]
@@ -176,10 +176,19 @@ class _FromTorchTensor(torch.autograd.Function):
         # so that the gradient layout matches, and we could return
         # local gradients directly
         if grad_output.placements != previous_placement:
-            # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
-            grad_output = Redistribute.apply(
-                grad_output, previous_device_mesh, previous_placement
+            current_spec = grad_output._spec
+            target_spec = DTensorSpec(
+                previous_device_mesh,
+                previous_placement,
+                tensor_meta=grad_output._spec.tensor_meta,
             )
+            local_tensor = grad_output._local_tensor
+            output = redistribute_local_tensor(
+                local_tensor, current_spec, target_spec, is_backward=True
+            )
+            # TODO: return the redistributed local tensor directly without
+            # differentiable backward. see if this make sense for all cases.
+            return output, None, None, None, None, None
 
         # TODO: backward is also differentiable now, add a test
         # to test higher level gradients.
@@ -255,7 +264,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         return ["_local_tensor"], (self._spec, self.requires_grad)
 
     @staticmethod
-    def __tensor_unflatten__(inner_tensors, flatten_spec):
+    def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
         assert (
             flatten_spec is not None
         ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
@@ -265,10 +274,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             local_tensor,
             spec.mesh,
             spec.placements,
-            shape=spec.tensor_meta.shape,
+            shape=outer_size,
             dtype=spec.tensor_meta.dtype,
             requires_grad=requires_grad,
-            stride=spec.tensor_meta.stride,
+            stride=outer_stride,
         )
 
     __torch_function__ = torch._C._disabled_torch_function_impl
@@ -473,6 +482,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
         .. note:: `full_tensor` is differentiable.
         """
+
+        # TODO: fix issue with full_tensor() for uneven-sharded tensor
+        # https://github.com/pytorch/pytorch/issues/115310
         redist_res = self.redistribute(placements=[Replicate()] * self.device_mesh.ndim)
         return _ToTorchTensor.apply(redist_res, grad_placements, False)
 
