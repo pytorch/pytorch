@@ -14,7 +14,7 @@ namespace api {
 //
 
 CommandBuffer::CommandBuffer(
-    const VkCommandBuffer handle,
+    VkCommandBuffer handle,
     const VkCommandBufferUsageFlags flags)
     : handle_(handle),
       flags_(flags),
@@ -24,11 +24,10 @@ CommandBuffer::CommandBuffer(
 CommandBuffer::CommandBuffer(CommandBuffer&& other) noexcept
     : handle_(other.handle_),
       flags_(other.flags_),
-      state_(other.state_),
+      state_(CommandBuffer::State::INVALID),
       bound_(other.bound_) {
   other.handle_ = VK_NULL_HANDLE;
   other.bound_.reset();
-  state_ = CommandBuffer::State::INVALID;
 }
 
 CommandBuffer& CommandBuffer::operator=(CommandBuffer&& other) noexcept {
@@ -75,8 +74,8 @@ void CommandBuffer::end() {
 }
 
 void CommandBuffer::bind_pipeline(
-    const VkPipeline pipeline,
-    const VkPipelineLayout pipeline_layout,
+    VkPipeline pipeline,
+    VkPipelineLayout pipeline_layout,
     const utils::uvec3 local_workgroup_size) {
   TORCH_CHECK(
       state_ == CommandBuffer::State::RECORDING,
@@ -95,7 +94,7 @@ void CommandBuffer::bind_pipeline(
   state_ = CommandBuffer::State::PIPELINE_BOUND;
 }
 
-void CommandBuffer::bind_descriptors(const VkDescriptorSet descriptors) {
+void CommandBuffer::bind_descriptors(VkDescriptorSet descriptors) {
   TORCH_CHECK(
       state_ == CommandBuffer::State::PIPELINE_BOUND,
       "Vulkan CommandBuffer: called bind_descriptors() on a command buffer whose state "
@@ -317,9 +316,8 @@ void CommandBuffer::copy_buffer_to_texture(
   state_ = CommandBuffer::State::RECORDING;
 }
 
-void CommandBuffer::write_timestamp(
-    const VkQueryPool querypool,
-    const uint32_t idx) const {
+void CommandBuffer::write_timestamp(VkQueryPool querypool, const uint32_t idx)
+    const {
   TORCH_CHECK(
       state_ == CommandBuffer::State::RECORDING,
       "Vulkan CommandBuffer: called write_timestamp() on a command buffer whose state "
@@ -330,7 +328,7 @@ void CommandBuffer::write_timestamp(
 }
 
 void CommandBuffer::reset_querypool(
-    const VkQueryPool querypool,
+    VkQueryPool querypool,
     const uint32_t first_idx,
     const uint32_t count) const {
   TORCH_CHECK(
@@ -347,7 +345,7 @@ VkCommandBuffer CommandBuffer::get_submit_handle(const bool final_use) {
       "Vulkan CommandBuffer: called begin() on a command buffer whose state "
       "is not READY.");
 
-  const VkCommandBuffer handle = handle_;
+  VkCommandBuffer handle = handle_;
 
   if (!is_reusable() || final_use) {
     invalidate();
@@ -362,7 +360,7 @@ VkCommandBuffer CommandBuffer::get_submit_handle(const bool final_use) {
 //
 
 CommandPool::CommandPool(
-    const VkDevice device,
+    VkDevice device,
     const uint32_t queue_family_idx,
     const CommandPoolConfig& config)
     : device_(device),
@@ -398,7 +396,7 @@ CommandBuffer CommandPool::get_new_cmd(bool reusable) {
   // No-ops if there are command buffers available
   allocate_new_batch(config_.cmdPoolBatchSize);
 
-  const VkCommandBuffer handle = buffers_[in_use_];
+  VkCommandBuffer handle = buffers_[in_use_];
 
   VkCommandBufferUsageFlags cmd_flags = 0u;
   if (!reusable) {

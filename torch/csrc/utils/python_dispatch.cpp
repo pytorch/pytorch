@@ -20,7 +20,6 @@
 #include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
 
@@ -172,7 +171,14 @@ class PythonKernelHolder : public c10::OperatorKernel {
 
     auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
     py::gil_scoped_acquire g;
+    // Jan 2024: We're slated to get rid of multipy, so stop forcing hermetic
+    // mode unconditionally in all situations when you're using multipy.
+    // Eventually just delete this entirely.  (Note that you may break multipy
+    // anyway this way with dispatcher registered functions that require
+    // hermetic to be off.)
+#if defined(USE_DEPLOY)
     EnableHermeticPyObject g2;
+#endif
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
     auto obj = py::reinterpret_steal<py::object>(PyObject_Call(
         func_.ptr(getPyInterpreter()),

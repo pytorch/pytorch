@@ -269,12 +269,6 @@ inline std::string retrieveDesyncReport(
 
 #ifdef USE_C10D_NCCL
 
-DebugInfoWriter::DebugInfoWriter(int rank) {
-  std::string fileName = getCvarString(
-      {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
-  filename_ = c10::str(fileName, rank);
-}
-
 DebugInfoWriter::~DebugInfoWriter() = default;
 
 void DebugInfoWriter::write(const std::string& ncclTrace) {
@@ -292,6 +286,31 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
   file.write(ncclTrace.data(), ncclTrace.size());
   LOG(INFO) << "Finished writing NCCLPG debug info to " << filename_;
 }
+
+DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
+  if (writer_ == nullptr) {
+    std::string fileNamePrefix = getCvarString(
+        {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
+    // Using std::unique_ptr here to auto-delete the writer object
+    // when the pointer itself is destroyed.
+    std::unique_ptr<DebugInfoWriter> writerPtr(
+        new DebugInfoWriter(fileNamePrefix, rank));
+    DebugInfoWriter::registerWriter(std::move(writerPtr));
+  }
+  return *writer_;
+}
+
+void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      hasWriterRegistered_.load() == false,
+      "debugInfoWriter already registered");
+  hasWriterRegistered_.store(true);
+  writer_ = std::move(writer);
+}
+
+std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
+std::atomic<bool> DebugInfoWriter::hasWriterRegistered_(false);
 
 inline std::string pickle_str(const c10::IValue& v) {
   std::vector<char> result;
@@ -472,19 +491,19 @@ struct NCCLTraceBuffer {
   std::string dump() {
     auto result = dump_entries();
     auto entries = new_list();
-    c10::IValue pg_id_s = "pg_id";
-    c10::IValue seq_id_s = "seq_id";
-    c10::IValue profiling_name_s = "profiling_name";
-    c10::IValue input_sizes_s = "input_sizes";
-    c10::IValue output_sizes_s = "output_sizes";
-    c10::IValue time_created_s = "time_created_us";
+    c10::IValue pg_id_key = "pg_id";
+    c10::IValue seq_id_key = "seq_id";
+    c10::IValue profiling_name_key = "profiling_name";
+    c10::IValue input_sizes_key = "input_sizes";
+    c10::IValue output_sizes_key = "output_sizes";
+    c10::IValue time_created_key = "time_created_us";
 
-    c10::IValue frames_s = "frames";
-    c10::IValue state_s = "state";
-    c10::IValue line_s = "line";
-    c10::IValue name_s = "name";
-    c10::IValue filename_s = "filename";
-    c10::IValue retired_s = "retired";
+    c10::IValue frames_key = "frames";
+    c10::IValue state_key = "state";
+    c10::IValue line_key = "line";
+    c10::IValue name_key = "name";
+    c10::IValue filename_key = "filename";
+    c10::IValue retired_key = "retired";
 
     std::vector<torch::CapturedTraceback*> tracebacks;
     for (auto& e : result) {
@@ -494,9 +513,9 @@ struct NCCLTraceBuffer {
     std::vector<c10::IValue> all_frames;
     for (const auto& f : stracebacks.all_frames) {
       auto d = new_dict();
-      d.insert(name_s, f.funcname);
-      d.insert(filename_s, f.filename);
-      d.insert(line_s, int64_t(f.lineno));
+      d.insert(name_key, f.funcname);
+      d.insert(filename_key, f.filename);
+      d.insert(line_key, int64_t(f.lineno));
       all_frames.emplace_back(std::move(d));
     }
 
@@ -504,10 +523,10 @@ struct NCCLTraceBuffer {
       auto& e = result.at(i);
       auto& tb = stracebacks.tracebacks.at(i);
       auto dict = new_dict();
-      dict.insert(pg_id_s, int64_t(e.pg_id_));
-      dict.insert(seq_id_s, int64_t(e.seq_id_));
-      dict.insert(profiling_name_s, e.profiling_name_);
-      dict.insert(time_created_s, int64_t(e.time_created_ / 1000));
+      dict.insert(pg_id_key, int64_t(e.pg_id_));
+      dict.insert(seq_id_key, int64_t(e.seq_id_));
+      dict.insert(profiling_name_key, e.profiling_name_);
+      dict.insert(time_created_key, int64_t(e.time_created_ / 1000));
 
       auto it = e.sizes_.begin();
       auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
@@ -523,16 +542,16 @@ struct NCCLTraceBuffer {
         return sizes;
       };
 
-      dict.insert(input_sizes_s, read_sizes(e.input_dims_));
-      dict.insert(output_sizes_s, read_sizes(e.output_dims_));
-      dict.insert(state_s, e.state_);
-      dict.insert(retired_s, e.retired_);
+      dict.insert(input_sizes_key, read_sizes(e.input_dims_));
+      dict.insert(output_sizes_key, read_sizes(e.output_dims_));
+      dict.insert(state_key, e.state_);
+      dict.insert(retired_key, e.retired_);
 
       auto frames = new_list();
       for (int64_t frame : tb) {
         frames.push_back(all_frames.at(frame));
       }
-      dict.insert(frames_s, frames);
+      dict.insert(frames_key, frames);
       entries.push_back(dict);
     }
     return pickle_str(entries);

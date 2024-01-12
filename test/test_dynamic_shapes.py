@@ -751,7 +751,7 @@ class TestSymNumberMagicMethods(TestCase):
         if (first_type == "int" or second_type == "int") and fn in sym_node.only_float_magic_methods:
             self.skipTest(f"{fn} is not an int method")
 
-        is_unary_fn = fn in sym_node.unary_methods
+        is_unary_fn = fn in sym_node.unary_methods or fn == "round"
         # Second argument is ignored for unary function. So only run for one type
         if is_unary_fn and second_type == "float":
             self.skipTest(f"{fn} is unary and already tested")

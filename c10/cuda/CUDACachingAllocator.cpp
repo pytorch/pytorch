@@ -1796,10 +1796,10 @@ class DeviceCachingAllocator {
       TORCH_INTERNAL_ASSERT(it->second->use_count > 0);
       it->second->use_count++;
     }
-    for (auto it = captures_underway.begin(); it != captures_underway.end();
-         ++it) {
+    for (auto it2 = captures_underway.begin(); it2 != captures_underway.end();
+         ++it2) {
       TORCH_CHECK(
-          it->first != mempool_id,
+          it2->first != mempool_id,
           "beginAllocateToPool: already recording to mempool_id");
     }
     captures_underway.emplace_back(mempool_id, std::move(filter));
@@ -3242,6 +3242,10 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
   std::string name() override {
     return "native";
+  }
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    C10_CUDA_CHECK(
+        cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
   }
 };
 

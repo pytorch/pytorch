@@ -155,18 +155,20 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
         storage was already allocated.
     """
     with torch.no_grad():
-        already_allocated = tensor._typed_storage()._size() == size.numel()
-        if not already_allocated:
-            tensor_storage_size = tensor._typed_storage()._size()
-            _p_assert(
-                tensor_storage_size == 0,
-                f"Tensor storage should have been resized to be 0 but got {tensor_storage_size}",
-            )
-            tensor._typed_storage()._resize_(size.numel())
+        if (
+            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
+        ):
+            already_allocated = tensor._typed_storage()._size() == size.numel()
+            if not already_allocated:
+                tensor_storage_size = tensor._typed_storage()._size()
+                _p_assert(
+                    tensor_storage_size == 0,
+                    "Tensor storage should have been resized to be 0 but got PLACEHOLDEr",
+                )
+                tensor._typed_storage()._resize_(size.numel())
 
 
-
-def _free_storage(tensor: torch.Tensor) -> None:
+def _free_storage(tensor: torch.Tensor):
     """
     Frees the underlying storage of ``tensor``.
 
@@ -175,16 +177,20 @@ def _free_storage(tensor: torch.Tensor) -> None:
         storage was already freed.
     """
     with torch.no_grad():
-        already_freed = tensor._typed_storage()._size() == 0
-        if not already_freed:
-            _p_assert(
-                tensor.storage_offset() == 0,
-                "Freeing a tensor's storage is unsafe when it is not the sole occupant\n"
-                f"storage offset: {tensor.storage_offset()}\n"
-                f"storage size: {tensor._typed_storage()._size()}\n"
-                f"tensor shape: {tensor.shape}",
-            )
-            tensor._typed_storage()._resize_(0)
+        if (
+            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
+        ):
+            already_freed = tensor._typed_storage()._size() == 0
+            if not already_freed:
+                _p_assert(
+                    tensor.storage_offset() == 0,
+                    "Freeing a tensor's storage is unsafe when it is not the sole occupant\n"
+                    f"storage offset: {tensor.storage_offset()}\n"
+                    f"storage size: {tensor._typed_storage()._size()}\n"
+                    f"tensor shape: {tensor.shape}",
+                )
+                tensor._typed_storage()._resize_(0)
+
 
 
 Q = TypeVar("Q")
@@ -327,3 +333,7 @@ def _replace_by_prefix(
         new_key = new_prefix + key[len(old_prefix) :]
         state_dict[new_key] = state_dict[key]
         del state_dict[key]
+
+
+def _data_ptr_allocated(tensor: torch.Tensor) -> bool:
+    return tensor.untyped_storage().data_ptr() > 0
