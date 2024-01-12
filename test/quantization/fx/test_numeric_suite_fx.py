@@ -36,6 +36,7 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     TwoLayerLinearModel
 )
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.ao.quantization.quantization_mappings import (
     get_default_static_quant_module_mappings,
     get_default_dynamic_quant_module_mappings,
@@ -792,6 +793,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
 class TestFXGraphMatcherModels(QuantizationTestCase):
 
+    @skipIfTorchDynamo("too slow")
     @skipIfNoFBGEMM
     @skip_if_no_torchvision
     def test_mobilenet_v2(self):
@@ -2736,6 +2738,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         ):
             self._test_add_loggers_impl(m, example_input, qconfig_mapping)
 
+    @skipIfTorchDynamo("too slow")
     @skip_if_no_torchvision
     @withQNNPACKBackend
     def test_add_loggers_mobilenet_v2(self):
