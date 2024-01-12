@@ -3,7 +3,7 @@ from typing import Any, Callable, DefaultDict, Dict, Optional, Tuple, Type
 
 import torch
 import torch.fx
-from torch.fx.experimental.symbollic_shapes import statically_known_true, sym_eq
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
 from .virtualized import V

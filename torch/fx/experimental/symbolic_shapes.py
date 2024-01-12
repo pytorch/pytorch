@@ -372,7 +372,7 @@ def parallel_and(*args):
     Evaluate the logical FALSE of several arguments, avoiding guarding on
     unbacked SymInts if another argument is definitely False.
     """
-    if any(statically_known_true(sym_not(a)) for a in args):
+    if any(statically_known_true(torch.sym_not(a)) for a in args):
         return False
     if any(definitely_false(a) for a in args):
         return False

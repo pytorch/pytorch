@@ -636,13 +636,13 @@ class f(torch.nn.Module):
 
     def test_statically_known_true(self):
         shape_env = ShapeEnv()
-        s2, s3, s4 = [create_symint(shape_env, i) for i in range(2, 5)]
+        s2, s3, s4 = (create_symint(shape_env, i) for i in range(2, 5))
 
         # Statically known true
         self.assertTrue(statically_known_true(True))
         self.assertTrue(statically_known_true(s2 == s2))
         self.assertTrue(statically_known_true(s2 * s3 > s3))
-        self.assertTrue(statically_known_true(s3  * s4 > s4))
+        self.assertTrue(statically_known_true(s3 * s4 > s4))
         self.assertTrue(statically_known_true((s3 + s3) % 2 == 0))
 
         # Statically known false
