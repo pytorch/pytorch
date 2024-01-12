@@ -326,14 +326,14 @@ class GetItemSource(ChainedSource):
 
     def name(self):
         # Index can be of following types
-        # 1) GlobalWeakRefSource - for parameters
+        # 1) ConstDictKeySource
         # 2) enum.Enum
         # 3) index is a slice - example 1:4
         # 4) index is a constant - example string, integer
         if isinstance(self.index, Source):
-            if not isinstance(self.index, GlobalWeakRefSource):
+            if not isinstance(self.index, ConstDictKeySource):
                 raise ValueError(
-                    "GetItemSource index must be a constant,enum or a GlobalWeakRefSource"
+                    "GetItemSource index must be a constant, enum or ConstDictKeySource"
                 )
             return f"{self.base.name()}[{self.index.name()}]"
         elif self.index_is_slice:
@@ -342,6 +342,20 @@ class GetItemSource(ChainedSource):
             return f"{self.base.name()}[{enum_repr(self.index, self.guard_source().is_local())}]"
         else:
             return f"{self.base.name()}[{self.index!r}]"
+
+
+@dataclasses.dataclass(frozen=True)
+class ConstDictKeySource(GetItemSource):
+    def reconstruct(self, codegen):
+        return [
+            *codegen.create_load_import_from(utils.__name__, "dict_keys_getitem"),
+            *self.base.reconstruct(codegen),
+            codegen.create_load_const(self.index),
+            *create_call_function(2, True),
+        ]
+
+    def name(self):
+        return f"___dict_keys_getitem({self.base.name()}, {self.index!r})"
 
 
 @dataclasses.dataclass(frozen=True)
