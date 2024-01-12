@@ -558,9 +558,9 @@ class TestOptimRenewed(TestCase):
                 optimizer.step(closure)
 
             with torch.no_grad():
-                params_cuda = [p.to(device="cuda", copy=True) for p in params]
+                params_cuda = [p.to(device="cuda") for p in params]
                 for (i, p) in enumerate(params_cuda):
-                    p.grad = params[i].to(device="cuda", copy=True)
+                    p.grad = params[i].grad.to(device="cuda")
             optimizer_cuda = optim_cls(params_cuda, **optim_input.kwargs)
 
             state_dict_cpu = deepcopy(optimizer.state_dict())
