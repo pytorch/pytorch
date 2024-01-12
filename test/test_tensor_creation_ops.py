@@ -543,10 +543,11 @@ class TestTensorCreation(TestCase):
             self.assertEqual(y, expected_y)
             self.assertEqual(x, expected_x)
 
-    @dtypes(*all_types_and_complex())
+    @dtypes(*all_types_and_complex(), torch.uint16, torch.uint32, torch.uint64)
     def test_cat_out_fast_path_dim0_dim1(self, device, dtype):
+        int_types = integral_types_and(torch.uint16, torch.uint32, torch.uint64)
         x = torch.zeros((0), device=device, dtype=dtype)
-        if dtype in integral_types():
+        if dtype in int_types:
             y = torch.randint(low=0, high=100, size=(4, 6), device=device, dtype=dtype)
         else:
             y = torch.randn((4, 6), device=device, dtype=dtype)
@@ -575,7 +576,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(b_fastcat, expected_b)
         # Finally, we need to make sure backward is not broken
         # Integral types will not have grad
-        if dtype not in integral_types():
+        if dtype not in int_types:
             a = torch.randn((4, 3), device=device, dtype=dtype, requires_grad=True)
             b = torch.randn((2, 3), device=device, dtype=dtype, requires_grad=True)
             c = torch.randn((5, 3), device=device, dtype=dtype, requires_grad=True)
@@ -1046,6 +1047,8 @@ class TestTensorCreation(TestCase):
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
 
     # Note: CUDA will fail this test on most dtypes, often dramatically.
+    # NB: torch.uint16, torch.uint32, torch.uint64 excluded as this
+    # nondeterministically fails, warning "invalid value encountered in cast"
     @onlyCPU
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
@@ -2759,6 +2762,41 @@ class TestTensorCreation(TestCase):
         for num_test in range(50):
             self._test_signal_window_functions('kaiser', dtype, device, beta=random.random() * 30)
 
+    def _test_signal_windows_functions(self, name, dtype, device, **kwargs):
+        import scipy.signal as signal
+
+        torch_method = getattr(torch.signal.windows, name)
+        if not dtype.is_floating_point:
+            with self.assertRaisesRegex(RuntimeError, r'floating point'):
+                torch_method(3, dtype=dtype)
+            return
+        for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
+            for periodic in [True, False]:
+                res = torch_method(size, sym=not periodic, **kwargs, device=device, dtype=dtype)
+                # NB: scipy always returns a float64 result
+                ref = torch.from_numpy(signal.get_window((name, *(kwargs.values())), size, fftbins=periodic))
+                self.assertEqual(res, ref, exact_dtype=False)
+        self.assertTrue(torch_method(3, requires_grad=True).requires_grad)
+        self.assertFalse(torch_method(3).requires_grad)
+
+    # torch.signal.windows functions (except any with extra parameters)
+    @onlyNativeDeviceTypes
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    @dtypes(torch.float, torch.double)
+    @parametrize("window", ['bartlett', 'blackman', 'cosine', 'hamming', 'hann', 'nuttall'])
+    def test_signal_windows_functions(self, device, dtype, window):
+        self._test_signal_windows_functions(window, dtype, device)
+
+    # torch.signal.windows.kaiser
+    @onlyNativeDeviceTypes
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
+    @dtypes(torch.float, torch.double)
+    def test_kaiser(self, device, dtype):
+        for num_test in range(50):
+            self._test_signal_windows_functions('kaiser', dtype, device, beta=random.random() * 30)
+
     def test_tensor_factories_empty(self, device):
         # ensure we can create empty tensors from each factory function
         shapes = [(5, 0, 1), (0,), (0, 0, 1, 0, 2, 0, 0)]
@@ -4016,7 +4054,7 @@ class TestAsArray(TestCase):
             t = torch.asarray(e)
             self.assertEqual(t, original)
 
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     @onlyCPU
     def test_numpy_scalars(self, device):
         scalar = np.float64(0.5)
