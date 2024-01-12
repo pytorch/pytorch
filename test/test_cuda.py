@@ -1283,7 +1283,7 @@ torch.cuda.synchronize()
             self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
 
     def test_grad_scaling_autocast_fused(self):
-        for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
+        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
             self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
 
     # Compare non-fused optimizer vs fused one as the fused one unscales gradients
