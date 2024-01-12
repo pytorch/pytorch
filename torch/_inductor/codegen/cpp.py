@@ -321,6 +321,12 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
     where `b` ranges from 0 to `vec_length - 1`. The function reduces occurrences
     of `FloorDiv` and `ModularIndexing` in the `index` with best-effort optimizations.
 
+    NOTE:
+    The simplified index expression is intended for analysis purposes only, not
+    for code generation. It replaces `FloorDiv` and `ModularIndexing` with free variables
+    which are not dependent on the loop variable `var` in the vectorized range. Check
+    https://github.com/pytorch/pytorch/pull/117221#discussion_r1449746217 for more details.
+
     Examples:
     1. If `var` is `x3` and `vec_length` is 16, and `x3 = 16*a + b`, then
        `FloorDiv(x3, div)` or `ModularIndexing(x3, div, mod)` becomes a free variable
@@ -354,10 +360,12 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
     original_index = index
 
     div = sympy.Wild("divisor")
-    index = index.replace(FloorDiv(var, div), visit_indexing_div)
+    if index.has(FloorDiv):
+        index = index.replace(FloorDiv(var, div), visit_indexing_div)
 
     mod = sympy.Wild("modulus")
-    index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
+    if index.has(ModularIndexing):
+        index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
     index = sympy.simplify(index)
     if index != original_index:
@@ -369,7 +377,7 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
 @functools.lru_cache
 def stride_at_in_vec_range(index: sympy.Expr, var: sympy.Symbol, vec_length: int):
     index_vec_simplified = simplify_index_in_vec_range(index, var, vec_length)
-    return stride_at(var, index_vec_simplified)
+    return stride_at(index_vec_simplified, var)
 
 
 class CppPrinter(ExprPrinter):
