@@ -342,7 +342,7 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
 
     def visit_modular_indexing(divisor, modulus):
         nonlocal mod_freevar_id
-        result = ModularIndexing(var, modulus, mod)
+        result = ModularIndexing(var, divisor, modulus)
         if sympy.gcd(divisor, vec_length) == vec_length:
             result = sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
             mod_freevar_id += 1
