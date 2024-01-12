@@ -536,6 +536,13 @@ def _register_quantized_conv_binary_lowering(
         o_inv_scale = kwargs["o_inv_scale"] if output_dtype is None else 1.0
         o_zero_point = kwargs["o_zp"] if output_dtype is None else 0
 
+        accum.realize()
+        from .mkldnn_fusion import _can_be_inplace
+
+        assert _can_be_inplace(
+            accum
+        ), "QConv Binary Inplace Fusion requires accum is not an alias or mutation."
+
         computation_args = (
             x,
             x_scale,
