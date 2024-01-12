@@ -8012,46 +8012,6 @@ class CommonTemplate:
             # But because our custom op needs fixed layout, the assertions in the custom op will pass
             self.common(fn, (inp,), check_lowp=False)
 
-    @requires_cuda()
-    @torch._inductor.config.patch("layout_optimization", True)
-    @torch._inductor.config.patch("keep_output_stride", False)
-    @config.patch(implicit_fallbacks=True)
-    def test_custom_op_no_fixed_layout(self):
-        import torch.library
-
-        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).cuda()
-        inp = torch.rand(2, 3, 128, 128, device="cuda")
-        expected_stride = mod(inp).stride()
-
-        def foo_cpu(x):
-            self.assertEqual(x.stride(), expected_stride)
-            return x.clone()
-
-        def foo_cuda(x):
-            self.assertEqual(x.stride(), expected_stride)
-            return x.clone()
-
-        def foo_meta(x):
-            return torch.empty_like(x)
-
-        global libbaz
-        if libbaz is None:
-            libbaz = torch.library.Library("baz", "DEF")
-            libbaz.define("custom(Tensor self) -> Tensor", tags=[])
-            libbaz.impl("custom", foo_cpu, "CPU")
-            libbaz.impl("custom", foo_cuda, "CUDA")
-            libbaz.impl("custom", foo_meta, "Meta")
-
-        def fn(x):
-            z = mod(x)
-            output = torch.ops.baz.custom(z)
-            return output
-
-        with torch.no_grad():
-            self.assertRaises(
-                AssertionError, lambda: self.common(fn, (inp,), check_lowp=False)
-            )
-
     def test_buffer_use_after_remove(self):
         # https://github.com/pytorch/pytorch/issues/102857
 
@@ -8978,6 +8938,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
             ref = f(x)
             actual, (code,) = run_and_get_code(torch.compile(f), x)
             self.assertTrue(torch.allclose(ref, actual))
+            self.assertTrue("# make sure graph inputs are not nan/inf" in code)
             self.assertTrue(
                 re.search(r"assert not .*\.isnan\(\)\.any\(\).item\(\)", code)
                 is not None

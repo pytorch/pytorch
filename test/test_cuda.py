@@ -28,7 +28,7 @@ from torch.utils.checkpoint import checkpoint_sequential
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_CUDA, TEST_CUDA_GRAPH, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX, IS_ARM64
 from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, \
     _create_scaling_case, _create_scaling_models_optimizers, _get_torch_cuda_version
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
@@ -3486,7 +3486,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-    @unittest.skipIf(not IS_LINUX, "linux only cpp unwinding")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
     def test_direct_traceback(self):
         from torch._C._profiler import gather_traceback, symbolize_tracebacks
         c = gather_traceback(True, True, True)
@@ -3496,7 +3496,7 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue("unwind" in r)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
     def test_memory_snapshot_with_cpp(self):
         try:
             torch.cuda.memory.empty_cache()
@@ -3532,7 +3532,7 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue('category' in plot)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
     def test_cycles(self):
         fired = False
 
@@ -3569,7 +3569,7 @@ class TestCudaMallocAsync(TestCase):
             disarm()
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
     def test_memory_plots(self):
         for context, stacks in (("all", "all" if IS_LINUX else "python"), ("all", "python"), (None, "python")):
             try:
@@ -3597,7 +3597,7 @@ class TestCudaMallocAsync(TestCase):
                 torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
     def test_memory_plots_free_stack(self):
         for context in ["alloc", "all", "state"]:
             try:

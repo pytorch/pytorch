@@ -346,6 +346,30 @@ c10::optional<std::function<std::string()>>& get_cpp_trace_dumper() {
   return dumper;
 }
 
+gil_checker_t& get_gil_checker() {
+  static gil_checker_t gil_checker = nullptr;
+  return gil_checker;
+}
+
+std::future<bool> launchAsyncGilCheck() {
+  std::promise<bool> resultPromise;
+  std::future<bool> resultFuture = resultPromise.get_future();
+  TORCH_CHECK(get_gil_checker(), "Can't check GIL with null GIL checker");
+  std::thread workerThread([promise = std::move(resultPromise)]() mutable {
+    try {
+      auto& gil_checker = get_gil_checker();
+      promise.set_value((*gil_checker)());
+    } catch (...) {
+      promise.set_exception(std::current_exception());
+    }
+  });
+
+  // Detach the thread to allow it to run independently
+  workerThread.detach();
+
+  return resultFuture;
+}
+
 // Return CUDA device with ordinal given by input rank.  If we aren't
 // bound to a specific device, there is no strict guarantee that this
 // heuristic is the correct assignment of ranks to GPUs that Python
@@ -811,7 +835,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const std::string OFF = "OFF";
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
-  std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
             << "NCCL version: " << getNcclVersion() << ", size: " << size
             << ", global rank: " << globalRank()
@@ -836,7 +859,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << monitorThreadEnabled_.load()
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
-            << ", NCCL_DEBUG: " << nccl_debug << ", ID=" << this->getID();
+            << ", ID=" << this->getID();
 
   if (options_->global_ranks_in_group.empty()) {
     this->globalRankStart = 0;
@@ -1185,6 +1208,7 @@ void ProcessGroupNCCL::shutdown() {
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
   terminateProcessGroup_.store(true);
   workMetaListCV_.notify_one();
 
@@ -1192,6 +1216,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   if (ncclCommWatchdogThread_.joinable()) {
     ncclCommWatchdogThread_.join();
   }
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
 #endif
 
   if (onCompletionHookThread_.joinable())
@@ -1201,6 +1226,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   // threads dying due to aborted communicator and raising a SIGABRT
   std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
   abort(abortReason);
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL abort finished.";
 
   // We need to wait for abort to finish before we can safely shut down
   // heartbeat monitoring thread.
@@ -1280,6 +1306,23 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)
   std::future<bool> asyncDebugDump = launchAsyncDebugDump();
+
+  if (get_gil_checker() != nullptr) {
+    auto fut = launchAsyncGilCheck();
+    auto kGilCheckTimeout = std::chrono::milliseconds(300);
+    auto futStatus = fut.wait_for(kGilCheckTimeout);
+    if (futStatus != std::future_status::ready) {
+      TORCH_CHECK(
+          futStatus != std::future_status::deferred,
+          "Expected the future to have been launched eagerly.");
+      LOG(ERROR)
+          << "Could not acquire GIL within 300 ms on exit, possible GIL induced hang";
+    }
+    LOG(INFO) << "Could acquire GIL on exit";
+  } else {
+    LOG(INFO)
+        << "GIL checker was not registered, perhaps this is a no-python build?";
+  }
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
@@ -1989,10 +2032,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
-  if (getRank() == 0) {
-    LOG(INFO) << logPrefix()
-              << "NCCL_DEBUG: " << getCvarString({"NCCL_DEBUG"}, "N/A");
-  }
+  LOG(INFO) << logPrefix()
+            << "NCCL_DEBUG: " << getCvarString({"NCCL_DEBUG"}, "N/A");
 
   // See [Group Start/End Note]
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {

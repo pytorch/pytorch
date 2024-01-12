@@ -879,7 +879,9 @@ class GraphLowering(torch.fx.Interpreter):
 
             def has_fixed_layout_tag(user):
                 t = user.target
-                return isinstance(t, torch._ops.OpOverload) and (
+                return \
+                    isinstance(result, TensorBox) and \
+                    isinstance(t, torch._ops.OpOverload) and (
                     torch._C.Tag.needs_fixed_layout in t.tags
                 )
 

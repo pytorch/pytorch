@@ -1012,6 +1012,12 @@ TORCH_API std::string dump_nccl_trace();
 // tracing
 TORCH_API c10::optional<std::function<std::string()>>& get_cpp_trace_dumper();
 
+// Similar to get_cpp_trace_dumper, this stores a function defined in
+// torch-python layer that lets us check whether the GIL can be acquired,
+// helpful for instrumenting in cases where a hang was observed.
+typedef bool (*gil_checker_t)();
+
+TORCH_API gil_checker_t& get_gil_checker();
 } // namespace c10d
 
 #endif // USE_C10D_NCCL
