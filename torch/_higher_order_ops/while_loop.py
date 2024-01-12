@@ -1,3 +1,4 @@
+import torch
 import torch.utils._pytree as pytree
 
 from torch._C import DispatchKey
@@ -19,12 +20,84 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 
+class WhileLoopOp(HigherOrderOperator):
+    def __call__(self, cond_fn, body_fn, operands):
+        if not isinstance(cond_fn, torch.fx.GraphModule) or not isinstance(
+            body_fn, torch.fx.GraphModule
+        ):
+            raise RuntimeError(
+                "cond_fn and body_fn must be torch.fx.GraphModule, got "
+                f"{type(cond_fn)} and {type(body_fn)}"
+            )
+        if not isinstance(operands, tuple):
+            raise RuntimeError("operands must be a tuple, got " f"{type(operands)}")
+        if not all(isinstance(t, (torch.Tensor, int, float, bool)) for t in operands):
+            raise RuntimeError(
+                "operands must be a tuple of tensors, ints, floats, or bools, got "
+                f"{operands}"
+            )
+        return super().__call__(cond_fn, body_fn, operands)
+
+
 while_loop_op = HigherOrderOperator("while_loop")
 
 
+# TODO(yidi): turn on dynamo in eager-mode
 def while_loop(cond_fn, body_fn, operands):
-    # TODO(yidi): turn on dynamo in eager-mode
-    assert isinstance(operands, (tuple, list))
+    r"""
+    Run body_fn(*operands) while cond_fn(*operands) returns a True scalar tensor. Returns the output of body_fn or
+    initial operands.
+
+    .. warning::
+        `torch.while_loop` is a prototype feature in PyTorch. It has limited support for input and output types and
+        doesn't support training currently. Please look forward to a more stable implementation in a future version of PyTorch.
+        Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
+
+    `while_loop` is a structured control flow operator. It preserves the loop semantic across the torch.compile and torch.export.
+
+    `while_loop` is equivalent to the following:
+
+        def while_loop(cond_fn, body_fn, operands):
+            val = operands
+            while cond_fn(*val):
+                val = body_fn(*val)
+            return val
+
+    Args:
+        cond_fn (Callable): A callable function that returns a boolean Scalar tensor.
+
+        body_fn (Callable): A callable function that takes the same inputs as `cond_fn` and returns a tuple or list of tensors
+
+        operands (Tuple of possibly nested dict/list/tuple of tensors): A tuple of inputs to cond_fn and body_fn. It's also
+            the initial value of states that are carried across iterations.
+
+    Example:
+
+        def cond_fn(iter, x):
+            return iter.sum() < 10
+
+        def body_fn(iter, x):
+            return iter + 1, x.sin()
+
+        while_loop(cond_fn, body_fn, (torch.zeros(1), torch.randn(3, 4)))
+
+    Restrictions:
+
+        - body_fn must return tensors with the same metadata (e.g.shape, dtype) as inputs.
+
+        - body_fn and cond_fn must not in-place mutate the operands. A clone before the mutation is required.
+
+        - body_fn and cond_fn must not mutate python varialbles (e.g. list/dict) created outside of the body_fn.
+
+        - body_fn and cond_fn's output cannot aliase any of the inputs. A clone is required.
+
+    .. warning::
+        Temporal Limitations:
+
+        - 'while_loop' only supports **inference** right now. Autograd will be supported in the future.
+
+    """
+    assert isinstance(operands, tuple)
     return while_loop_op(cond_fn, body_fn, operands)
 
 
