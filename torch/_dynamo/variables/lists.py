@@ -703,7 +703,6 @@ class RangeIteratorVariable(ListIteratorVariable):
         self.cannot_convert_to_higher_order = cannot_convert_to_higher_order
 
     def next_variables(self, tx):
-        assert self.mutable_local
         if self.index >= len(self.items):
             raise StopIteration()
         next_iter = RangeIteratorVariable(

@@ -217,6 +217,8 @@ def speculate_subgraph(
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer=None,
+    # Allow ConstantVariable return values in the output. Default only allows Tensors.
+    allow_constant_outputs=False,
 ):
     if sub_kwargs is None:
         sub_kwargs = {}
@@ -287,7 +289,12 @@ def speculate_subgraph(
             else:
                 from . import ConstantVariable, TensorVariable
 
-                if not only_consist_of(output, (TensorVariable, ConstantVariable)):
+                if not only_consist_of(
+                    output,
+                    (TensorVariable, ConstantVariable)
+                    if allow_constant_outputs
+                    else TensorVariable,
+                ):
                     unimplemented(
                         "HigherOrderOperator body's output must consist of tensors only"
                     )
@@ -1361,6 +1368,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             {},
             "torch.ops.higher_order.for_loop",
             source_target=self.func,
+            allow_constant_outputs=True,
         )
 
         body_nn_modules = dict(tx.output.nn_modules)
