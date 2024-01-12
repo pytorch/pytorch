@@ -710,8 +710,8 @@ class RangeIteratorVariable(ListIteratorVariable):
             range_object=self.range_object,
             mutable_local=MutableLocal(),
         )
-        tx.replace_all(self, next_iter)
         return self.items[self.index], next_iter
+
 
 class RestrictedListSubclassVariable(ListVariable):
     """

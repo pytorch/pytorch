@@ -42,7 +42,6 @@ from .bytecode_transformation import (
 )
 from .code_context import code_context
 from .codegen import PyCodegen
-from .convert_loops import CannotConvertLoop, functionalize_loop_body
 from .current_scope_id import current_scope_id
 from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
 from .funcname_cache import get_funcname
@@ -89,6 +88,11 @@ from .variables.functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
+)
+
+from .variables.higher_order_ops import (
+    CannotConvertRangeToHigherOrder,
+    RangeHigherOrderVariable,
 )
 from .variables.lists import (
     BaseListVariable,
@@ -1121,33 +1125,23 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             try:
                 # Converts a loop to a function body, to benefit
                 # from function compilation caching.
-                nested_name = f"__loop_functionalized__{self.lineno}"
-                co, parameters = functionalize_loop_body(
-                    self.f_code, nested_name, it.range_object, inst.starts_line
-                )
-                args = [self.symbolic_locals[k] for k in parameters]
-                result_args = NestedUserFunctionVariable(
-                    ConstantVariable.create(value=nested_name),
-                    ConstantVariable.create(value=co),
+                op = RangeHigherOrderVariable.make_self(
+                    self,
+                    it,
                     self.f_globals,
-                    None,
-                    None,
-                    None,
-                    None,
-                    closure_scope=self,
-                ).call_function(self, args, {})
+                    self.f_code,
+                    self.instructions[
+                        self.instruction_pointer : self.indexof[inst.target]
+                    ],
+                    self.symbolic_locals,
+                )
 
-                for name, loaded_vt in zip(parameters, result_args.items):
-                    # Only rename at the top-level scope, this is to avoid the confusion between
-                    # mutating a variable vs renaming it (e.g. a = b) during speculating a higher order op,
-                    # where mutation is prohibited and it's difficult to differentiate it with renaming.
-                    if _is_top_level_scope(current_scope_id()):
-                        loaded_vt = loaded_vt.rename(self, name)
-                    self.symbolic_locals[name] = loaded_vt
+                new_locals = op.functionalize(self)
+
                 # Skip the rest of the loop completely, now that we transformed it.
                 # Also pop off the iterator.
                 self.jump(inst)
-            except CannotConvertLoop:
+            except CannotConvertRangeToHigherOrder:
                 pass
 
         if isinstance(it, (variables.ListIteratorVariable, variables.IteratorVariable)):

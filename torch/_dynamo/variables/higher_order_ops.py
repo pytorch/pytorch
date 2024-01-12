@@ -2,14 +2,22 @@ import contextlib
 import functools
 import itertools
 import logging
+import opcode
+import sys
+import types
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from torch._dynamo.variables.lists import RangeIteratorVariable
+    from ..bytecode_transformation import Instruction
 
 import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.exc import TorchDynamoException
 from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.builtin import BuiltinVariable
@@ -277,9 +285,9 @@ def speculate_subgraph(
                 # Nothing left to do here
                 return (output, treespec), tx.output.graph, subtracer.lifted_freevars
             else:
-                from . import TensorVariable
+                from . import ConstantVariable, TensorVariable
 
-                if not only_consist_of(output, TensorVariable):
+                if not only_consist_of(output, (TensorVariable, ConstantVariable)):
                     unimplemented(
                         "HigherOrderOperator body's output must consist of tensors only"
                     )
@@ -1150,6 +1158,226 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             proxy=proxy,
             example_value=example_value,
         )
+
+
+class CannotConvertRangeToHigherOrder(TorchDynamoException):
+    pass
+
+
+class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    # Any of these nested means the control flow is too complex to be
+    # represented by a higher order op.
+    FORBIDDEN_OPCODES = {
+        "RETURN_VALUE",
+        "YIELD_VALUE",
+        "YIELD_FROM",
+        "GET_YIELD_FROM_ITER",
+        "SEND",
+        "MAKE_FUNCTION",
+        "LOAD_DEREF",  # This could be supported in the future.
+        "RAISE_VARARGS",
+        # These two are fine for the end of the loop body but not within.
+        "JUMP_BACKWARD",
+        "JUMP_ABSOLUTE",
+    }
+
+    store_target: int
+
+    def __init__(
+        self, value: "RangeIteratorVariable", source: Optional[Source] = None, **kwargs
+    ):
+        from ..source import GlobalSource
+
+        super().__init__(value, source, **kwargs)
+        self.store_target = -1
+        self.source = GlobalSource("range")
+
+    @staticmethod
+    def make_self(
+        tx,
+        value: "RangeIteratorVariable",
+        real_globals: dict,
+        host_code_object: types.CodeType,
+        loop_body_instructions: List["Instruction"],
+        symbolic_locals: Dict[str, VariableTracker],
+        source: Optional[Source] = None,
+        **kwargs,
+    ):
+        from . import ConstantVariable
+
+        if len(value.unpack_var_sequence(tx)) < 100:
+            raise CannotConvertRangeToHigherOrder(
+                "Loop too small to consider optimizing"
+            )
+        assert loop_body_instructions[-1].opname in {"JUMP_BACKWARD", "JUMP_ABSOLUTE"}
+        if loop_body_instructions[0].opname == "UNPACK_SEQUENCE":
+            raise CannotConvertRangeToHigherOrder(
+                "Unpacking a range iterator, seems wrong."
+            )
+        if any(
+            op.opname in RangeHigherOrderVariable.FORBIDDEN_OPCODES
+            for op in loop_body_instructions[:-1]
+        ):
+            raise CannotConvertRangeToHigherOrder(
+                "Control flow too complex for loop higher order op."
+            )
+        assert loop_body_instructions[0].opname == "STORE_FAST"
+        co_code: List[int] = []
+        # We skip the first instruction as it's a STORE_FAST, while we skip the lsat as it's the JUMP_BACKWARD.
+        for inst in loop_body_instructions[1:-1]:
+            co_code.extend((inst.opcode, inst.arg or 0))
+            # 3.11 has inline cache entries too.
+            if sys.version_info >= (3, 11):
+                for _ in range(opcode._inline_cache_entries[inst.opcode]):
+                    co_code.extend((opcode.opmap["CACHE"], 0))
+        # We need to replace the last `JUMP_BACKWARD` with a RETURN_VALUE of all
+        # the locals.
+        for i in range(host_code_object.co_nlocals):
+            co_code.extend((opcode.opmap["LOAD_FAST"], i))
+        co_code.extend(
+            (
+                opcode.opmap["BUILD_TUPLE"],
+                host_code_object.co_nlocals,
+                opcode.opmap["RETURN_VALUE"],
+                0,
+            )
+        )
+        co_code = bytes(co_code)
+        argcount = host_code_object.co_nlocals
+        posonlyargcount = kwonlyargouncount = 0
+        # Add number of locals that the for loop introduces.
+        nlocals = argcount
+        stacksize = host_code_object.co_stacksize
+        flags = host_code_object.co_flags
+        codestring = co_code
+        constants = host_code_object.co_consts
+        names = host_code_object.co_names
+        varnames = host_code_object.co_varnames
+        filename = "<dynamo memory>"
+        name = "for_loop_body"
+        qualname = "for_loop_body"
+        firstlineno = 0
+        linetable = b""
+        exceptiontable = b""
+        freevars = ()
+        cellvars = ()
+
+        code_object = None
+        # Translate instructions back to code object.
+        if sys.version_info >= (3, 12):
+            raise CannotConvertRangeToHigherOrder("Unsupported Python version")
+        elif sys.version_info >= (3, 11):
+            code_object = types.CodeType(
+                argcount,
+                posonlyargcount,
+                kwonlyargouncount,
+                nlocals,
+                stacksize,
+                flags,
+                codestring,
+                constants,
+                names,
+                varnames,
+                filename,
+                name,
+                qualname,
+                firstlineno,
+                linetable,
+                exceptiontable,
+                freevars,
+                cellvars,
+            )
+        elif sys.version_info >= (3, 10):
+            pass
+        elif sys.version_info >= (3, 9):
+            pass
+        elif sys.version_info >= (3, 8):
+            pass
+        else:
+            raise CannotConvertRangeToHigherOrder("Unsupported Python version")
+
+        if code_object is None:
+            raise CannotConvertRangeToHigherOrder("Could not construct code object")
+
+        obj = RangeHigherOrderVariable(value, source)
+        obj.func = types.FunctionType(code_object, real_globals)
+        obj.args = [symbolic_locals.get(k) for k in varnames]
+        store_target = loop_body_instructions[0].arg
+        assert store_target >= 0
+        obj.store_target = store_target
+        return obj
+
+    def functionalize(self, tx) -> VariableTracker:
+        """Converts a for loop into a function call. Returns the modified
+        locals as a tuple of VariableTrackers.
+        """
+        from . import ConstantVariable
+        from .builder import wrap_fx_proxy
+
+        val_range = self.value.unpack_var_sequence(tx)
+        # import dis
+        # print(dis.dis(self.func))
+        # print(self.args)
+        # Assign the for loop value
+        args = list(self.args)
+        assert self.store_target >= 0
+        args[self.store_target] = val_range[0]
+        # TODO: Support kwargs
+        (
+            (body_r, body_spec),
+            body_graph,
+            body_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            UserFunctionVariable(self.func),
+            args,
+            {},
+            "torch.ops.higher_order.for_loop",
+            source_target=self.func,
+        )
+
+        body_nn_modules = dict(tx.output.nn_modules)
+
+        body_name = add_subgraph(
+            tx,
+            self.source,
+            "for_loop_body",
+            torch.fx.GraphModule(body_nn_modules, body_graph),
+        )
+
+        body_node = make_attr(tx, body_name)
+
+        previous_locals = [arg.as_proxy() for arg in args]
+
+        example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
+        # TODO: once we get a higher order op representing for loops,
+        # we can compile it down to that and it will compile a lot faster
+        # and perhaps even perform better.
+        # For now, just compile it down to a bunch of proxied calls.
+        # This should be replaced with something better in the future!
+        def for_loop_wrapper(fn, *args):
+            return fn(*args)
+
+        for i in val_range:
+            previous_locals = [body_node] + list(previous_locals)
+            previous_locals[self.store_target] = i.as_proxy()
+            previous_locals = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    for_loop_wrapper,
+                    args=tuple(previous_locals),
+                    kwargs={},
+                ),
+                example_value=example_value,
+            ).as_proxy()
+
+        return previous_locals
 
 
 class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable):

@@ -23,7 +23,10 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .higher_order_ops import TorchHigherOrderOperatorVariable
+from .higher_order_ops import (
+    CannotConvertRangeToHigherOrder,
+    TorchHigherOrderOperatorVariable,
+)
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
@@ -83,6 +86,7 @@ __all__ = [
     "ContextWrappingVariable",
     "CountIteratorVariable",
     "CustomizedDictVariable",
+    "CannotConvertLoop",
     "CycleIteratorVariable",
     "DataClassVariable",
     "DefaultDictVariable",
@@ -107,7 +111,7 @@ __all__ = [
     "NumpyNdarrayVariable",
     "NumpyVariable",
     "PythonModuleVariable",
-    "RangeIteratorVariable",
+    "CannotConvertRangeToHigherOrder",
     "RangeVariable",
     "RepeatIteratorVariable",
     "RestrictedListSubclassVariable",
