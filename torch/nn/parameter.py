@@ -198,7 +198,7 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
             return memo[id(self)]
         else:
             result = type(self)(self.requires_grad, self.data.device, self.data.dtype)
-            # result.__dict__ = deepcopy(self.__dict__, memo)
+            result.__dict__ = deepcopy(self.__dict__, memo)
             memo[id(self)] = result
             return result
 
