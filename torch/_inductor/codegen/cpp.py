@@ -375,7 +375,7 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
 
 
 @functools.lru_cache
-def stride_at_in_vec_range(index: sympy.Expr, var: sympy.Symbol, vec_length: int):
+def stride_at_vec_range(index: sympy.Expr, var: sympy.Symbol, vec_length: int):
     index_vec_simplified = simplify_index_in_vec_range(index, var, vec_length)
     return stride_at(index_vec_simplified, var)
 
@@ -1424,7 +1424,7 @@ class CppVecOverrides(CppOverrides):
         assert isinstance(V.kernel, CppVecKernel)
         index = V.kernel.rename_indexing(expr)
         tiling_var = V.kernel.itervars[V.kernel.tiling_idx]
-        stride = stride_at_in_vec_range(index, tiling_var, V.kernel.tiling_factor)
+        stride = stride_at_vec_range(index, tiling_var, V.kernel.tiling_factor)
         if stride.is_number and not V.kernel.index_indirect_depends_on(
             index, tiling_var
         ):
@@ -1940,7 +1940,7 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         dtype = V.graph.get_dtype(name)
         tiling_var = self.itervars[self.tiling_idx]
-        stride = stride_at_in_vec_range(index, tiling_var, self.tiling_factor)
+        stride = stride_at_vec_range(index, tiling_var, self.tiling_factor)
         if stride == 0:
             # load scalar and lazily broadcast it on demand
             return super().load(name, index)
@@ -1978,7 +1978,7 @@ class CppVecKernel(CppKernel):
         tiling_var = self.itervars[self.tiling_idx]
         assert index.has(tiling_var)
         var_expr = f"{var} + {cexpr_index(index)}"
-        stride = stride_at_in_vec_range(index, tiling_var, self.tiling_factor)
+        stride = stride_at_vec_range(index, tiling_var, self.tiling_factor)
         non_contiguous = stride != 1 or self.index_indirect_depends_on(
             index, tiling_var
         )
@@ -2231,8 +2231,8 @@ class CppTile2DKernel(CppVecKernel):
     def need_vec_transpose(self, index):
         outer_var = self.itervars[self.outer_idx]
         inner_var = self.itervars[self.tiling_idx]
-        outer_stride = stride_at_in_vec_range(index, outer_var, self.tiling_factor)
-        inner_stride = stride_at_in_vec_range(index, inner_var, self.tiling_factor)
+        outer_stride = stride_at_vec_range(index, outer_var, self.tiling_factor)
+        inner_stride = stride_at_vec_range(index, inner_var, self.tiling_factor)
         return (
             self._load_mask is None  # TODO: support transposition with mask
             and outer_stride == 1
@@ -2247,7 +2247,7 @@ class CppTile2DKernel(CppVecKernel):
         factor = self.tiling_factor
         src = f"{var} + {cexpr_index(index)}"
         dst = "__place_holder__"
-        ld_src = f"{cexpr_index(stride_at_in_vec_range(index, self.itervars[self.tiling_idx], self.tiling_factor))}"
+        ld_src = f"{cexpr_index(stride_at_vec_range(index, self.itervars[self.tiling_idx], self.tiling_factor))}"
         ld_dst = f"{factor}"
         if is_store:
             src, dst = dst, src
@@ -3149,7 +3149,7 @@ class CppKernelProxy(CppKernel):
                 for var in index.free_symbols:
                     if not re.search(r"^d\d+$", var.name):
                         continue
-                    stride = stride_at_in_vec_range(index, var, tiling_factor)
+                    stride = stride_at_vec_range(index, var, tiling_factor)
                     if stride == 0:
                         continue
                     elif stride == 1:
