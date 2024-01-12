@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
     markDynamoStrictTest,
+    decorateIf,
     skipIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import \
@@ -456,6 +457,7 @@ class TestVmapAPI(TestCase):
         with self.assertRaisesRegex(ValueError, msg):
             vmap(lambda x: (x, x, x), out_dims=(0, 0))(x)
 
+    @xfailIfTorchDynamo
     def test_out_dim_out_of_bounds_err_msg(self):
         # TODO(rzou): This error message isn't that great. It comes straight
         # from maybe_wrap_dim. Consider doing a try-catch-(add some context) to
@@ -658,6 +660,7 @@ class TestVmapAPI(TestCase):
         vmap(foo, in_dims=(0,))(torch.randn(2, 3))
         vmap(foo, in_dims=(1,))(torch.randn(2, 3))
 
+    @xfailIfTorchDynamo
     def test_fallback_does_not_warn_by_default(self):
         op = torch._test_functorch_fallback
         x = torch.randn(11)
@@ -668,6 +671,7 @@ class TestVmapAPI(TestCase):
             # warning, not a warning from the vmap fallback path.
             self.assertEqual(len(wa), 1)
 
+    @skipIfTorchDynamo(msg="Test pass but perhaps for the wrong reason")
     @unittest.expectedFailure
     def test_fallback_warns_when_warnings_are_enabled(self):
         # NB: One day we will implement a batching rule for torch.atan2.
@@ -1785,6 +1789,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op, in_dims=(0, None)),
              (torch.rand(B1, 2, 3, 5), torch.rand(B0, 2, 5, 3)), in_dims=(None, 0))
 
+    @xfailIfTorchDynamo
     def test_cat(self):
         test = self._vmap_test
         B0, B1 = 5, 7
@@ -1891,6 +1896,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
         vmap(bar)(x)
 
+    @xfailIfTorchDynamo
     def test_chunk(self):
         test = self._vmap_view_test
         op = torch.chunk
@@ -2077,6 +2083,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
     def test_view_as_real(self):
         self._test_complex_views(torch.view_as_real, dtypes=[torch.cfloat, torch.cdouble])
 
+    @xfailIfTorchDynamo
     def test_view_as_complex(self):
         def run_test(dtype):
             def get(shape):
@@ -2367,6 +2374,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         result = vmap(vmap(lambda x: op(x, [2, 3])))(torch.randn(B0, B1))
         self.assertEqual(result.shape, [B0, B1, 2, 3])
 
+    @xfailIfTorchDynamo
     def test_new_empty_strided(self):
         # Empty is non-deterministic so we just check that the size and shape
         # of the output are what we expect and that the vmap fallback isn't used
@@ -2426,6 +2434,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(lambda t: op(t, 1, 1)), (torch.rand(B1, 2, B0, 5),), in_dims=2)
         test(vmap(vmap(lambda t: op(t, 1, 1), in_dims=1)), (torch.rand(B1, 2, B0, B2, 5),), in_dims=2)
 
+    @xfailIfTorchDynamo
     def test_roll_no_dims(self):
         op = torch.roll
         test = self._vmap_test
@@ -2435,6 +2444,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(lambda t: op(t, 3)), (torch.rand(B1, 2, B0, 5),), in_dims=2)
         test(vmap(vmap(lambda t: op(t, 3), in_dims=1)), (torch.rand(B1, 2, B0, B2, 5),), in_dims=2)
 
+    @xfailIfTorchDynamo
     def test_stack(self):
         test = self._vmap_test
         B0, B1 = 5, 7
@@ -2658,6 +2668,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(lambda t: op(t, [4, 8, 9, 34, 29], 1), in_dims=2)),
              (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
 
+    @xfailIfTorchDynamo
     def test_split(self):
         test = self._vmap_view_test
         op = torch.split
@@ -2758,6 +2769,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(op, in_dims=(2, None, None, None)), in_dims=(0, None, None, None)),
              (torch.rand(B1, 7, B0, 11, B2), -1, 2, 4), in_dims=(2, None, None, None))
 
+    @xfailIfTorchDynamo
     def test_unbind(self):
         test = self._vmap_view_test
         op = torch.unbind
@@ -2834,6 +2846,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values):
                 self.assertEqual(loop_out, batched_out)
 
+    @xfailIfTorchDynamo
     def test_one_hot(self):
         sample_inputs = [
             (torch.randint(0, 3, []), 3),
@@ -2996,6 +3009,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
                 f, in_dims=in_dim, out_dims=(out_dim, out_dim), randomness=randomness, chunk_size=2
             )(x)
 
+    @decorateIf(xfailIfTorchDynamo, lambda params: params["randomness"] == 'error')
     @parametrize('in_dim', [0, 1])
     @parametrize('out_dim', [0, 1])
     @parametrize('randomness', ['error', 'same'])
