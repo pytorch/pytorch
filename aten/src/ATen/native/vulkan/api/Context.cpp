@@ -1,5 +1,7 @@
 #include <ATen/native/vulkan/api/Context.h>
 
+#include <cstring>
+#include <memory>
 #include <sstream>
 
 namespace at {
@@ -38,7 +40,6 @@ Context::~Context() {
     // Let the device know the context is done with the queue
     adapter_p_->return_queue(queue_);
   } catch (...) {
-    TORCH_WARN("Exception thrown when destroying the Vulkan Context!");
   }
 }
 
@@ -132,27 +133,11 @@ Context* context() {
       };
 
       return new Context(runtime()->default_adapter_i(), config);
-    } catch (const c10::Error& e) {
-      TORCH_WARN(
-          "Pytorch Vulkan Context: Failed to initialize global vulkan context: ",
-          e.what());
-    } catch (const std::exception& e) {
-      TORCH_WARN(
-          "Pytorch Vulkan Context: Failed to initialize global vulkan context: ",
-          e.what());
     } catch (...) {
-      TORCH_WARN(
-          "Pytorch Vulkan Context: Failed to initialize global vulkan context!");
     }
 
     return nullptr;
   }());
-
-  if (!context) {
-    TORCH_WARN(
-        "Pytorch Vulkan Context: The global context could not be retrieved "
-        "because it failed to initialize.");
-  }
 
   return context.get();
 }
