@@ -1242,6 +1242,8 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         source: Optional[Source] = None,
         **kwargs,
     ):
+        from . import ConstantVariable
+
         if len(value.unpack_var_sequence(tx)) < 100:
             raise CannotConvertRangeToHigherOrder(
                 "Loop too small to consider optimizing"
@@ -1338,7 +1340,9 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         obj = RangeHigherOrderVariable(value, source)
         obj.func = types.FunctionType(code_object, real_globals)
-        obj.args = [symbolic_locals.get(k) for k in varnames]
+        obj.args = [
+            symbolic_locals.get(k) or ConstantVariable.create(None) for k in varnames
+        ]
         store_target = loop_body_instructions[0].arg
         assert store_target >= 0
         obj.store_target = store_target
