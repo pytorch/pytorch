@@ -1,6 +1,6 @@
 #version 450 core
-#define PRECISION $precision
-#define FORMAT $format
+#define PRECISION ${PRECISION}
+#define FORMAT ${FORMAT}
 
 // To convince the SPIR-V compiler to unroll the loops optimally, need this
 // macro

@@ -311,7 +311,7 @@ try:
 
         negation_transformed_condition_constraint = z3.Not(transformed_condition_constraint)
 
-        return z3.And([transformed, transformed_condition_constraint]),\
+        return z3.And([transformed, transformed_condition_constraint]), \
             z3.And([transformed, negation_transformed_condition_constraint])
 
 

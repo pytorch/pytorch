@@ -16,14 +16,14 @@ from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
 )
+from torch.distributed._state_dict_utils import (
+    _all_gather_sharded_tensor,
+    _gather_state_dict,
+)
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
     checkpoint_wrapper,
     CheckpointImpl,
-)
-from torch.distributed.checkpoint._state_dict_utils import (
-    _all_gather_sharded_tensor,
-    _gather_state_dict,
 )
 from torch.distributed.fsdp import (
     CPUOffload,

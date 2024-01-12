@@ -131,8 +131,6 @@ jobs:
           JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          PYTORCH_RETRY_TEST_CASES: 1
-          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
@@ -172,6 +170,7 @@ jobs:
             -e GITHUB_RUN_NUMBER \
             -e GITHUB_RUN_ATTEMPT \
             -e JOB_ID \
+            -e JOB_NAME \
             -e BRANCH \
             -e SHA1 \
             -e AWS_DEFAULT_REGION \
@@ -180,8 +179,6 @@ jobs:
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
             -e REENABLED_ISSUES \
-            -e PYTORCH_RETRY_TEST_CASES \
-            -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             -e CONTINUE_THROUGH_ERROR \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \

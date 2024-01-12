@@ -37,7 +37,7 @@
 
 namespace c10 {
 
-// in c++17 std::result_of has been superceded by std::invoke_result.  Since
+// in c++17 std::result_of has been superseded by std::invoke_result.  Since
 // c++20, std::result_of is removed.
 template <typename F, typename... args>
 #if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
@@ -65,10 +65,10 @@ constexpr bool is_pod_v = is_pod<T>::value;
 namespace guts {
 
 template <typename Base, typename Child, typename... Args>
-typename std::enable_if<
-    !std::is_array<Base>::value && !std::is_array<Child>::value &&
-        std::is_base_of<Base, Child>::value,
-    std::unique_ptr<Base>>::type
+std::enable_if_t<
+    !std::is_array_v<Base> && !std::is_array_v<Child> &&
+        std::is_base_of_v<Base, Child>,
+    std::unique_ptr<Base>>
 make_unique_base(Args&&... args) {
   return std::unique_ptr<Base>(new Child(std::forward<Args>(args)...));
 }
@@ -188,17 +188,17 @@ CUDA_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
 #undef CUDA_HOST_DEVICE
 
 template <typename Functor, typename... Args>
-typename std::enable_if<
-    std::is_member_pointer<typename std::decay<Functor>::type>::value,
-    typename c10::invoke_result_t<Functor, Args...>>::type
+std::enable_if_t<
+    std::is_member_pointer_v<std::decay_t<Functor>>,
+    typename c10::invoke_result_t<Functor, Args...>>
 invoke(Functor&& f, Args&&... args) {
   return std::mem_fn(std::forward<Functor>(f))(std::forward<Args>(args)...);
 }
 
 template <typename Functor, typename... Args>
-typename std::enable_if<
-    !std::is_member_pointer<typename std::decay<Functor>::type>::value,
-    typename c10::invoke_result_t<Functor, Args...>>::type
+std::enable_if_t<
+    !std::is_member_pointer_v<std::decay_t<Functor>>,
+    typename c10::invoke_result_t<Functor, Args...>>
 invoke(Functor&& f, Args&&... args) {
   return std::forward<Functor>(f)(std::forward<Args>(args)...);
 }

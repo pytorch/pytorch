@@ -214,8 +214,11 @@ class KeyErrorMsg:
 def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -> None:
     import traceback
 
+    exc.innermost_user_frame_summary = None  # type: ignore[attr-defined]
+
     real_stack = get_real_stack(exc)
-    if real_stack is not None:
+    if real_stack is not None and len(real_stack) > 0:
+        exc.innermost_user_frame_summary = real_stack[-1]  # type: ignore[attr-defined]
         msg += f"\nfrom user code:\n {''.join(traceback.format_list(real_stack))}"
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):

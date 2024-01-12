@@ -468,6 +468,7 @@ class ChunkedStream {
         }
       }
     }
+    read_offset += size;
     return true;
   }
 

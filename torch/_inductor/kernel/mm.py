@@ -130,7 +130,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 choices,
                 input_nodes=(mat1, mat2),
                 layout=layout,
-                **mm_options(config, k, layout),
+                **mm_options(config, m, n, k, layout),
             )
 
     if m * n != 0 and use_cutlass_template(layout):
@@ -171,7 +171,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
                 choices,
                 input_nodes=(mat1, mat2),
                 layout=layout,
-                **mm_options(config, k, layout),
+                **mm_options(config, m, n, k, layout),
             )
     return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
 
@@ -231,7 +231,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 choices,
                 input_nodes=(inp_expanded, mat1, mat2),
                 layout=layout,
-                **mm_options(config, k, layout),
+                **mm_options(config, m, n, k, layout),
                 prefix_args=1,
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
             )
@@ -274,7 +274,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
             choices,
             input_nodes=(mat1, mat2),
             layout=layout,
-            **mm_options(config, k, layout, b_prologue_cast_type),
+            **mm_options(config, m, n, k, layout, b_prologue_cast_type),
         )
     return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
 
@@ -298,7 +298,7 @@ def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
             choices,
             input_nodes=(mat1, mat2, mat3),
             layout=layout,
-            **dict(mm_options(config, k, layout), ACC_TYPE="tl.int32"),
+            **dict(mm_options(config, m, n, k, layout), ACC_TYPE="tl.int32"),
             suffix_args=1,
             epilogue_fn=V.ops.mul,
         )

@@ -541,6 +541,15 @@ using LPPool1dOptions = LPPoolOptions<1>;
 /// ```
 using LPPool2dOptions = LPPoolOptions<2>;
 
+/// `LPPoolOptions` specialized for the `LPPool3d` module.
+///
+/// Example:
+/// ```
+/// LPPool3d model(LPPool3dOptions(1, std::vector<int64_t>({3, 4, 5})).stride(
+/// {5, 6, 7}).ceil_mode(true));
+/// ```
+using LPPool3dOptions = LPPoolOptions<3>;
+
 namespace functional {
 /// Options for `torch::nn::functional::lp_pool1d`.
 ///
@@ -567,6 +576,20 @@ namespace functional {
 /// F::lp_pool2d(x, F::LPPool2dFuncOptions(2, {2, 3}).stride(2));
 /// ```
 using LPPool2dFuncOptions = LPPool2dOptions;
+} // namespace functional
+
+namespace functional {
+/// Options for `torch::nn::functional::lp_pool3d`.
+///
+/// See the documentation for `torch::nn::LPPool3dOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::lp_pool3d(x, F::LPPool3dFuncOptions(2, {2, 3, 4}).stride(2));
+/// ```
+using LPPool3dFuncOptions = LPPool3dOptions;
 } // namespace functional
 
 } // namespace nn
