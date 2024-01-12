@@ -8,6 +8,8 @@ on:
     - cron: 37 7 * * 1
   workflow_dispatch:
 
+permissions: read-all
+
 jobs:
   update-commit-hash:
     runs-on: ubuntu-latest

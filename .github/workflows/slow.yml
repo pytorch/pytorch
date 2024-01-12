@@ -18,6 +18,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
   cancel-in-progress: true
 
+permissions: read-all
+
 jobs:
   linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build:
     name: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
