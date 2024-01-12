@@ -112,8 +112,6 @@ if has_triton():
 # Tracing is done by replacing the input pointers with Proxy objects that
 # track mutation. Each triton language function is monkey patched to
 # either detect the mutation or return a fresh scalar object.
-# This tracing takes advantage of store operation being the only operation
-# that can mutate a tensor pointer.
 def identify_mutated_tensors(kernel, kwargs):
     from triton import language as tl
     from triton.runtime.autotuner import Autotuner
@@ -133,13 +131,20 @@ def identify_mutated_tensors(kernel, kwargs):
         kernel = kernel.fn
 
     default_impls: Dict[str, FunctionType] = {}
+    mutation_ops = {
+        "store",
+        "atomic_add",
+        "atomic_cas",
+        "atomic_max",
+        "atomic_min",
+        "atomic_xchg",
+    }
     try:
         # Monkey patch all triton language functions
         for name, impl in inspect.getmembers(tl, inspect.isfunction):
             default_impls[name] = impl
 
-            if name == "store":
-                # Store is the only operation that mutates a kernel pointer
+            if name in mutation_ops:
 
                 def fn(*args, **kwargs):
                     # mypy does not like it when conditional variants have
