@@ -435,15 +435,19 @@ if torch._C._has_mkldnn:
                 _compute_index = 1 if (_other_index == 0) else 0
                 return _binary_node.args[_compute_index]
 
-            if any(
-                len(
-                    _get_remaining_users(
-                        n.args[other_index], _get_compute_node(n, other_index)
+            def _other_input_not_inplaceable(_binary_node, _other_index):
+                _compute_node = _get_compute_node(_binary_node, _other_index)
+                return (
+                    len(
+                        _get_remaining_users(
+                            _binary_node.args[_other_index], _compute_node
+                        )
                     )
+                    > 1
+                    or _binary_node.args[_other_index] == _compute_node.args[0]
                 )
-                > 1
-                for n in binary_nodes
-            ):
+
+            if any(_other_input_not_inplaceable(n, other_index) for n in binary_nodes):
                 return False
             if any(
                 n.args[other_index].op in ["placeholder", "output"]

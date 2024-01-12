@@ -494,6 +494,7 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
                 )
             )
             > 1
+            or extra_input_of_pattern == compute_node.args[0]
         ):
             return False
         return True
