@@ -3,7 +3,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict, namedtuple
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from sympy import Expr
 
@@ -83,14 +83,16 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     if config.pattern_matcher:
         lazy_init()
 
+        print_graph(gm.graph, "Before group batch fusion in post grad pass.")
         group_batch_fusion_passes(gm.graph, pre_grad=False)
+        print_graph(gm.graph, "After group batch fusion in post grad pass.")
         remove_noop_ops(gm.graph)
         print_graph(gm.graph, "Before split cat in post grad pass.")
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
             print_graph(
                 gm.graph,
-                f"Apply split cat pattern matcher {patterns.__class__.__name__} in post grad.",
+                "Apply split cat pattern matcher PatternMatcherPass in post grad.",
             )
         if is_inference:
             inference_patterns.apply(gm.graph)
@@ -110,7 +112,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     gm.recompile()
     gm.graph.lint()
 
-    print_graph(gm.graph, "Aftre recompile in post grad pass.")
+    print_graph(gm.graph, "After recompile in post grad pass.")
 
 
 @init_once_fakemode
@@ -379,7 +381,8 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
 
     assert new_size is not None
     dtype = functools.reduce(
-        torch.promote_types, [x.get_dtype() for x in itertools.chain(*inputs)]
+        torch.promote_types,
+        [x.get_dtype() for x in itertools.chain.from_iterable(inputs)],
     )
     device = inputs[0][0].get_device()
     kernel = ir.ConcatKernel(
@@ -679,14 +682,13 @@ def reinplace_inplaceable_ops(graph):
     """
 
     copy_args_to_copy_nodes = {}
-    foreach_node_to_copy_nodes = defaultdict(list)
     mutated_inputs = set()
     storage_to_nodes = defaultdict(list)
     node_order: Dict[Any, int] = {}
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
-        if node.target == aten.copy_.default:
+        if node.target == aten.copy_.default and node.args[0].op == "placeholder":
             dst = node.args[0]
             src = node.args[1]
             # If the target is a getitem and it indexes a possible clone,
@@ -702,7 +704,6 @@ def reinplace_inplaceable_ops(graph):
 
             copy_args_to_copy_nodes[(dst, src)] = node
 
-            assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
 
     def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
@@ -747,6 +748,7 @@ def reinplace_inplaceable_ops(graph):
                 node, shared_view_nodes, copy_node=None
             )
 
+    replace_list: List[Tuple[Any, Any]] = []
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
             mutated_arg = node.args[inplaceable_op.mutated_arg]
@@ -771,6 +773,9 @@ def reinplace_inplaceable_ops(graph):
                     copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                     if copy_node is not None:
                         graph.erase_node(copy_node)
+                    for user in node.users:
+                        if user.target == operator.getitem and user.args[1] == arg:
+                            replace_list.append((user, mutated_arg))
                 else:
                     tensors_to_clone.append(arg)
             kwargs = dict(node.kwargs)
@@ -790,6 +795,9 @@ def reinplace_inplaceable_ops(graph):
                     graph.erase_node(copy_node)
 
                 node.target = inplaceable_op.inplace_op
+    for node, replacement in replace_list:
+        node.replace_all_uses_with(replacement)
+        graph.erase_node(node)
 
 
 @register_lowering_pattern(

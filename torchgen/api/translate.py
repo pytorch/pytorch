@@ -294,7 +294,7 @@ Check this module for more information.
         elif goal == NamedCType("dtype", OptionalCType(BaseCType(scalarTypeT))):
             try:
                 options = direct_solve(options_ctype)
-                return f"optTypeMetaToScalarType({options}.dtype_opt())"
+                return f"c10::optTypeMetaToScalarType({options}.dtype_opt())"
             except UnsatError:
                 out_tensor = direct_solve(out_tensor_ctype)
                 return f"{out_tensor}.scalar_type()"

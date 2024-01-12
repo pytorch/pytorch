@@ -1,8 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
 import torch
-
-from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import OpSchema, OpStrategy, OutputSharding
 from torch.distributed._tensor.ops.basic_strategy import gen_einsum_strategies
 from torch.distributed._tensor.ops.common_rules import einop_rule
@@ -15,6 +13,8 @@ from torch.distributed._tensor.ops.utils import (
     register_prop_rule,
 )
 from torch.distributed._tensor.placement_types import DTensorSpec
+
+from torch.distributed.device_mesh import DeviceMesh
 
 aten = torch.ops.aten
 
@@ -80,7 +80,7 @@ def _addmm_like_strategy(
         assert strtg.input_specs is not None
         mat1_spec = strtg.input_specs[0]
         mat2_spec = strtg.input_specs[1]
-        out_spec = strtg.output_spec
+        out_spec = strtg.out_spec
 
         # self arg's spec should follow the output of mm, but need
         # to consider broadcast for the self arg

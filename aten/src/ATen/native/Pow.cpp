@@ -14,8 +14,7 @@
 #include <ATen/ops/result_type.h>
 #endif
 
-namespace at {
-namespace meta {
+namespace at::meta {
 
 TORCH_META_FUNC2(pow, Tensor_Tensor) (const Tensor& base, const Tensor& exp) {
   build_borrowing_binary_op(maybe_get_output(), base, exp);
@@ -38,9 +37,9 @@ TORCH_META_FUNC2(pow, Scalar) (const Scalar& base, const Tensor& exp) {
     set_output_raw_strided(0, exp.sizes(), {}, exp.options().dtype(dtype), exp.has_names() ? exp.names() : ArrayRef<Dimname>());
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(pow_tensor_tensor_stub);
 DEFINE_DISPATCH(pow_tensor_scalar_stub);
@@ -136,6 +135,4 @@ Tensor& float_power_(Tensor& base, const Scalar& exp) {
   return base.pow_(casted_exp);
 }
 
-} // namespace native
-
-} // namespace at
+} // namespace at::native

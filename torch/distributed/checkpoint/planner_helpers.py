@@ -1,7 +1,6 @@
 from typing import Any, List
 
 import torch
-
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
@@ -16,7 +15,6 @@ from .metadata import (
     STORAGE_TYPES,
     TensorStorageMetadata,
 )
-
 from .planner import (
     LoadItemType,
     ReadItem,
@@ -25,7 +23,6 @@ from .planner import (
     WriteItem,
     WriteItemType,
 )
-
 from .resharding import (
     _check_shard_metadata_pair_overlap,
     _shards_get_overlap_region_wrt_saved_tensor,

@@ -354,6 +354,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         def f3(v):
             return torch.tensor(v.item())
 
+        def f4(v):
+            return torch.tensor((v.item(),))
+
         optimize = torch.compile(backend="aot_eager", fullgraph=True)
 
         r = torch.randn(1)
@@ -361,6 +364,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f1(r), optimize(f1)(r))
         self.assertEqual(f2(r), optimize(f2)(r))
         self.assertEqual(f3(r), optimize(f3)(r))
+        self.assertEqual(f4(r), optimize(f4)(r))
 
     def test_sym_int_conversion(self):
         def f(x):

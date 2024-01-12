@@ -133,7 +133,6 @@
 #include <c10/util/bits.h>
 #include <c10/util/complex.h>
 #include <c10/util/floating_point_utils.h>
-#include <c10/util/in_place.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>

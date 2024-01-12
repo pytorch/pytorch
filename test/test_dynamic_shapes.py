@@ -16,7 +16,7 @@ from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.sym_node import to_node, sym_sqrt, SymNode, method_to_operator
+from torch.fx.experimental.sym_node import to_node, SymNode, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraints,
     DimDynamic,
@@ -394,7 +394,7 @@ class TestPySymInt(TestCase):
     def test_sym_sqrt(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 4)
-        r = sym_sqrt(a0)
+        r = torch._sym_sqrt(a0)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(sqrt(s0), 2)""")
@@ -735,7 +735,7 @@ class TestSymNumberMagicMethods(TestCase):
         if fn not in sym_node.bool_magic_methods or fn == "sym_ite":
             self.skipTest(f"{fn} is non-bool")
 
-        is_unary_fn = fn in sym_node.unary_magic_methods
+        is_unary_fn = fn in sym_node.unary_methods
         shape_env = ShapeEnv()
         self._do_test(fn, True, False, shape_env, is_unary_fn)
 
@@ -748,7 +748,10 @@ class TestSymNumberMagicMethods(TestCase):
             # TODO: Hmm, this looks like we skip all floats
             self.skipTest(f"{fn} is not a float magic method")
 
-        is_unary_fn = fn in sym_node.unary_magic_methods
+        if (first_type == "int" or second_type == "int") and fn in sym_node.only_float_magic_methods:
+            self.skipTest(f"{fn} is not an int method")
+
+        is_unary_fn = fn in sym_node.unary_methods or fn == "round"
         # Second argument is ignored for unary function. So only run for one type
         if is_unary_fn and second_type == "float":
             self.skipTest(f"{fn} is unary and already tested")
@@ -761,7 +764,7 @@ class TestSymNumberMagicMethods(TestCase):
         values = (
             0.0,
             1.0,
-            2.5,
+            0.5 if fn in ("sym_acos", "sym_asin") else 2.5  # avoid math domain error
         )
 
         neg_values = tuple(-x for x in values)

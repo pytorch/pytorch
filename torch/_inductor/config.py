@@ -4,6 +4,11 @@ from typing import Any, Dict, TYPE_CHECKING
 
 import torch
 
+
+def is_fbcode():
+    return not hasattr(torch.version, "git_version")
+
+
 # add some debug printouts
 debug = False
 
@@ -20,7 +25,7 @@ verbose_progress = False
 fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
 # use cpp wrapper instead of python wrapper
-cpp_wrapper = False
+cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
 # dead code elimination
 dce = False
@@ -89,6 +94,9 @@ split_cat_fx_passes = True
 
 # Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
 efficient_conv_bn_eval_fx_passes = False
+
+# Enable predispatch aten IR for export
+is_predispatch = False
 
 # Deprecated
 group_fusion = False
@@ -164,6 +172,13 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
+# force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
+# when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
+# for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure
+# that triton does not use TF32 wherever cublas would not use TF32
+force_same_precision = (
+    True if is_fbcode() else os.environ.get("TORCHINDUCTOR_FORCE_SAME_PRECISION") == "1"
+)
 # Specify candidate backends for gemm autotune.
 # Possible choices are combinations of: ATen, Triton, CUTLASS.
 # ATen: default Pytorch ATen kernels.
@@ -198,8 +213,11 @@ coordinate_descent_search_radius = int(
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
 )
 
-layout_optimization = os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", "1") == "1"
-
+# Disabled by default on ROCm, opt-in if model utilises NHWC convolutions
+layout_opt_default = "1" if not torch.version.hip else "0"
+layout_optimization = (
+    os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", layout_opt_default) == "1"
+)
 
 force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
 
@@ -267,11 +285,6 @@ always_keep_tensor_constants = False
 
 # assert that indirect indexing does not read / write out of bounds
 assert_indirect_indexing = True
-
-
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
-
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -373,6 +386,21 @@ freezing: bool = os.environ.get("TORCHINDUCTOR_FREEZING", "0") == "1"
 # Make freezing invalidate the eager Parameters of nn modules, to avoid memory overhead
 # of potentially keeping multiple copies of weights.
 freezing_discard_parameters: bool = False
+
+# Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
+# should be run with this flag both on and off to make sure we have coverage.
+allow_stack_allocation: bool = True
+
+# Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
+# to maximize performance for use cases that it can accommodate at the expense of
+# generality. In brief:
+# - inputs and outputs are ArrayRefTensor<T> (note that strides are required, but the
+#   tensor must be contiguous)
+# - constant handling is unchanged because it is not a per-inference-iteration bottleneck
+#
+# When the DSO is generated in this mode, the usual interface will also be supported,
+# but performance for that interface may be degraded.
+use_minimal_arrayref_interface: bool = False
 
 
 # config specific to codegen/cpp.py
@@ -497,7 +525,7 @@ class triton:
 
     # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
-    max_block = {"X": 2048, "Y": 1024, "Z": 1024}
+    max_block = {"X": 2048, "Y": 1024, "Z": 1024, "R": 4096}
 
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False
@@ -514,6 +542,9 @@ class triton:
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 16
+
+    # Generate code containing the newer tl.make_block_ptr() API for loads/store
+    use_block_ptr = False
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.

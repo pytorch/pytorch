@@ -113,6 +113,12 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_storage_size(AtenTensorHandle tensor, int64_t* ret_size);
 
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_dim(AtenTensorHandle tensor, int64_t* ret_dim);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_numel(AtenTensorHandle tensor, int64_t* ret_numel);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_sizes(
     AtenTensorHandle tensor,
     int64_t** ret_sizes // returns borrowed reference
@@ -128,6 +134,15 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_strides(
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_stride(AtenTensorHandle tensor, int64_t d, int64_t* ret_stride);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_dtype(AtenTensorHandle tensor, int32_t* ret_dtype);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_device_type(AtenTensorHandle tensor, int32_t* ret_device_type);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_device_index(AtenTensorHandle tensor, int32_t* ret_device_index);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
@@ -237,14 +252,14 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
     AtenTensorHandle input,
     AtenTensorHandle weight,
     AtenTensorHandle bias, // optional argument
-    int64_t* stride_ptr,
+    const int64_t* stride_ptr,
     int64_t stride_size,
-    int64_t* padding_ptr,
+    const int64_t* padding_ptr,
     int64_t padding_size,
-    int64_t* dilation_ptr,
+    const int64_t* dilation_ptr,
     int64_t dilation_size,
     int transposed,
-    int64_t* output_padding_ptr,
+    const int64_t* output_padding_ptr,
     int64_t output_padding_size,
     int64_t groups,
     AtenTensorHandle* ret // returns new reference
@@ -307,6 +322,15 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scatter_out(
     AtenTensorHandle index,
     AtenTensorHandle src);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scatter_reduce_out(
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    int64_t dim,
+    AtenTensorHandle index,
+    AtenTensorHandle src,
+    const char* reduce,
+    int32_t include_self);
+
 #ifdef USE_CUDA
 
 struct CUDAStreamGuardOpaque;
@@ -333,6 +357,29 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
 
 #ifdef __cplusplus
 } // extern "C"
+
+template <typename T>
+int32_t aoti_torch_dtype();
+
+#define DEFINE_DTYPE_SPECIALIZATION(ctype, typename) \
+  template <>                                        \
+  inline int32_t aoti_torch_dtype<ctype>() {         \
+    return aoti_torch_dtype_##typename();            \
+  }
+
+// REVIEW: bfloat16 and half don't seem to actually build? Do I have
+// the wrong types?
+//  DEFINE_DTYPE_SPECIALIZATION(__bfloat16, bfloat16)
+//  DEFINE_DTYPE_SPECIALIZATION(half, float16)
+DEFINE_DTYPE_SPECIALIZATION(float, float32)
+DEFINE_DTYPE_SPECIALIZATION(double, float64)
+DEFINE_DTYPE_SPECIALIZATION(uint8_t, uint8)
+DEFINE_DTYPE_SPECIALIZATION(int8_t, int8)
+DEFINE_DTYPE_SPECIALIZATION(int16_t, int16)
+DEFINE_DTYPE_SPECIALIZATION(int32_t, int32)
+DEFINE_DTYPE_SPECIALIZATION(int64_t, int64)
+DEFINE_DTYPE_SPECIALIZATION(bool, bool)
+
 #endif
 
 #endif // AOTI_TORCH_SHIM

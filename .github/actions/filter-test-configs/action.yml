@@ -46,7 +46,8 @@ runs:
         retry_wait_seconds: 30
         command: |
           set -eux
-          python3 -m pip install requests==2.26.0 pyyaml==6.0
+          # PyYAML 6.0 doesn't work with MacOS x86 anymore
+          python3 -m pip install requests==2.26.0 pyyaml==6.0.1
 
     - name: Parse ref
       id: parse-ref

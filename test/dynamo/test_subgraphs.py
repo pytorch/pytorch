@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import unittest
 from unittest.mock import patch
 
 import torch
@@ -565,7 +564,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 6)
 
-    @unittest.skip("not working yet")
     def test_tuple_iterator_mutate(self):
         def fn(x, it):
             x = x + next(it)

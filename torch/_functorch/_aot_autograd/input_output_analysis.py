@@ -206,21 +206,33 @@ def create_synthetic_base_metadata(
         )
         for outer_idx in outer_aliased_arg_idx_with_metadata_mutations
     ]
-    existing_output_infos = [
-        OutputAliasInfo(
-            output_type=o.output_type,
-            raw_type=o.raw_type,
-            dynamic_dims=o.dynamic_dims,
-            # Map the input idx pre-synthetic-bases to the new idx post-synthetic-bases
-            base_idx=None  # type: ignore[arg-type]
+    existing_output_infos = []
+    for o in m.output_info:
+        new_base_idx = (
+            None
             if o.base_idx is None
-            else synthetic_base_info[o.base_idx]
-            if isinstance(synthetic_base_info[o.base_idx], int)
-            else synthetic_base_info[o.base_idx][0],  # type: ignore[index]
-            requires_grad=o.requires_grad,
+            else (
+                synthetic_base_info[o.base_idx]
+                if isinstance(synthetic_base_info[o.base_idx], int)
+                else synthetic_base_info[o.base_idx][0]  # type: ignore[index]
+            )
         )
-        for o in m.output_info
-    ]
+        # If base_idx is changed for OutputType.is_input, we need to update the output type to reflect the change
+        new_output_type = (
+            OutputType.alias_of_input
+            if o.output_type == OutputType.is_input and o.base_idx != new_base_idx
+            else o.output_type
+        )
+        existing_output_infos.append(
+            OutputAliasInfo(
+                output_type=new_output_type,
+                raw_type=o.raw_type,
+                dynamic_dims=o.dynamic_dims,
+                # Map the input idx pre-synthetic-bases to the new idx post-synthetic-bases
+                base_idx=new_base_idx,  # type: ignore[arg-type]
+                requires_grad=o.requires_grad,
+            )
+        )
 
     inner_mutated_tangents = [
         x
