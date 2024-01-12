@@ -30,7 +30,7 @@ def find(testcase, condition):
 def skipped_test(testcase):
     def condition(children):
         tags = [child.tag for child in children]
-        if 'skipped' in tags:
+        if "skipped" in tags:
             return True
         return False
 
@@ -42,9 +42,9 @@ def passed_test(testcase):
         if len(children) == 0:
             return True
         tags = [child.tag for child in children]
-        if 'skipped' in tags:
+        if "skipped" in tags:
             return False
-        if 'failed' in tags:
+        if "failed" in tags:
             return False
         return True
 
@@ -53,8 +53,8 @@ def passed_test(testcase):
 
 def key(testcase):
     file = testcase.attrib.get("file", "UNKNOWN")
-    classname = testcase.attrib['classname']
-    name = testcase.attrib['name']
+    classname = testcase.attrib["classname"]
+    name = testcase.attrib["name"]
     return "::".join([file, classname, name])
 
 
@@ -74,7 +74,7 @@ def excluded_testcase(testcase):
     def condition(children):
         for child in children:
             if child.tag == "skipped":
-                if "Policy: we don't run" in child.attrib['message']:
+                if "Policy: we don't run" in child.attrib["message"]:
                     return True
         return False
 
@@ -87,7 +87,7 @@ def is_unexpected_success(testcase):
             if child.tag != "failure":
                 continue
             is_unexpected_success = (
-                "unexpected success" in child.attrib['message'].lower()
+                "unexpected success" in child.attrib["message"].lower()
             )
             if is_unexpected_success:
                 return True
@@ -103,7 +103,7 @@ def is_failure(testcase):
             if child.tag != "failure":
                 continue
             is_unexpected_success = (
-                "unexpected success" in child.attrib['message'].lower()
+                "unexpected success" in child.attrib["message"].lower()
             )
             if not is_unexpected_success:
                 return True
