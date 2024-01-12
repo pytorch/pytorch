@@ -7,41 +7,47 @@
 namespace at {
 
 Tensor TensorMaker::make_tensor() {
-   AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
-   tracer::impl::NoTracerDispatchMode tracer_guard{};
+  AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
+  tracer::impl::NoTracerDispatchMode tracer_guard{};
 
-   check_size_nonnegative(sizes_);
+  check_size_nonnegative(sizes_);
 
-   TORCH_CHECK_VALUE(
-       !deleter_ || !ctx_,
-       "The deleter and context arguments are mutually exclusive.");
+  TORCH_CHECK_VALUE(
+      !deleter_ || !ctx_,
+      "The deleter and context arguments are mutually exclusive.");
 
-   if (device_ == nullopt) {
-     device_ = globalContext().getDeviceFromPtr(data_, opts_.device().type());
-   }
+  if (device_ == nullopt) {
+    device_ = globalContext().getDeviceFromPtr(data_, opts_.device().type());
+  }
 
-   if (opts_.device().has_index()) {
-     // clang-format off
-     TORCH_CHECK_VALUE(
-         opts_.device() == *device_,
-         "Specified device ", opts_.device(), " does not match device of data ", *device_);
-     // clang-format on
-   }
+  if (opts_.device().has_index()) {
+    // clang-format off
+    TORCH_CHECK_VALUE(
+        opts_.device() == *device_,
+        "Specified device ", opts_.device(), " does not match device of data ", *device_);
+    // clang-format on
+  }
 
-   std::size_t size_bytes = computeStorageSize();
+  std::size_t size_bytes = computeStorageSize();
 
-   DataPtr data_ptr{};
-   if (deleter_) {
-     data_ptr = makeDataPtrFromDeleter();
-   } else {
-     data_ptr = makeDataPtrFromContext();
-   }
+  if (data_ == nullptr) {
+    // We need to ensure that there's always a valid pointer or the underlying
+    // std::unique_ptr<> won't call the deleter (custom or context).
+    data_ = malloc(0);
+  }
 
-   TORCH_CHECK(!resizeable_ || allocator_ != nullptr, "Must specify an allocator with allocator() if you want to use resizeable_storage()");
-   Storage storage{Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr), /*allocator=*/allocator_, /*resizeable=*/resizeable_};
+  DataPtr data_ptr{};
+  if (deleter_) {
+    data_ptr = makeDataPtrFromDeleter();
+  } else {
+    data_ptr = makeDataPtrFromContext();
+  }
 
-   Tensor tensor = detail::make_tensor<TensorImpl>(
-       std::move(storage), opts_.computeDispatchKey(), opts_.dtype());
+  TORCH_CHECK(!resizeable_ || allocator_ != nullptr, "Must specify an allocator with allocator() if you want to use resizeable_storage()");
+  Storage storage{Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr), /*allocator=*/allocator_, /*resizeable=*/resizeable_};
+
+  Tensor tensor = detail::make_tensor<TensorImpl>(
+      std::move(storage), opts_.computeDispatchKey(), opts_.dtype());
 
   TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
   if (strides_) {
