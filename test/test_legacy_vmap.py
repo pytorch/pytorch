@@ -1,6 +1,6 @@
 # Owner(s): ["module: vmap"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
 import torch
 import torch.nn.functional as F
 from torch import Tensor
@@ -1953,6 +1953,7 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         test(op, (torch.randn(B0, 2), torch.randint(10, [B0], dtype=torch.int64)),
              check_propagates_grad=False)
 
+    @skipIfTorchDynamo("too slow")
     def test_tensor_split(self):
         test = self._vmap_view_test
         op = torch.tensor_split
