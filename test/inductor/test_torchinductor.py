@@ -115,7 +115,8 @@ skip_if_x86_mac = functools.partial(
 vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libfoo = None
-
+libbar = None
+libbaz = None
 f32 = torch.float32
 
 
@@ -780,29 +781,6 @@ class CommonTemplate:
 
         a = torch.tensor([3])
         self.common(fn, (a,))
-
-    def test_custom_func(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("Non-deterministic CPU results")
-
-        @torch._custom_ops.custom_op("mynamespace::mm")
-        def mm(x: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
-
-        @torch._custom_ops.impl("mynamespace::mm")
-        def mm_impl(x):
-            return x.sum()
-
-        @torch._custom_ops.impl_abstract("mynamespace::mm")
-        def mm_abstract(x):
-            return torch.empty_like(x)
-
-        def fn(a, b):
-            z = torch.ops.mynamespace.mm(a)
-            w = torch.ops.mynamespace.mm(b)
-            return z + w
-
-        self.common(fn, (torch.randn(2, 2, 2), torch.randn(2, 2, 2)))
 
     def test_horizonal_fusion1(self):
         def fn(a, b, c):
@@ -7991,6 +7969,87 @@ class CommonTemplate:
             return c
 
         self.common(fn, (torch.randn((16, 32)),), check_lowp=False)
+
+    @requires_cuda()
+    @torch._inductor.config.patch("layout_optimization", True)
+    @torch._inductor.config.patch("keep_output_stride", False)
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_fixed_layout(self):
+        import torch.library
+        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).cuda()
+        inp = torch.rand(2, 3, 128, 128, device="cuda")
+        expected_stride = mod(inp).stride()
+
+        def foo_cpu(x):
+            self.assertEqual(x.stride(), expected_stride)
+            return x.clone()
+
+        def foo_cuda(x):
+            self.assertEqual(x.stride(), expected_stride)
+            return x.clone()
+
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        global libbar
+        if libbar is None:
+            libbar = torch.library.Library("bar", "DEF")
+            libbar.define("custom(Tensor self) -> Tensor", tags=[torch._C.Tag.needs_fixed_layout])
+            libbar.impl("custom", foo_cpu, "CPU")
+            libbar.impl("custom", foo_cuda, "CUDA")
+            libbar.impl("custom", foo_meta, "Meta")
+
+        def fn(x):
+            z = mod(x)
+            output = torch.ops.bar.custom(z)
+            return output
+
+        with torch.no_grad():
+            # With keep_output_stride False, inductor would normally have different layout from eager execution
+            # But because our custom op needs fixed layout, the assertions in the custom op will pass
+            self.common(fn, (inp,), check_lowp=False)
+
+
+    @requires_cuda()
+    @torch._inductor.config.patch("layout_optimization", True)
+    @torch._inductor.config.patch("keep_output_stride", False)
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_no_fixed_layout(self):
+        import torch.library
+        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).cuda()
+        inp = torch.rand(2, 3, 128, 128, device="cuda")
+        expected_stride = mod(inp).stride()
+
+        def foo_cpu(x):
+            self.assertEqual(x.stride(), expected_stride)
+            return x.clone()
+
+        def foo_cuda(x):
+            self.assertEqual(x.stride(), expected_stride)
+            return x.clone()
+
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        global libbaz
+        if libbaz is None:
+            libbaz = torch.library.Library("baz", "DEF")
+            libbaz.define("custom(Tensor self) -> Tensor", tags=[])
+            libbaz.impl("custom", foo_cpu, "CPU")
+            libbaz.impl("custom", foo_cuda, "CUDA")
+            libbaz.impl("custom", foo_meta, "Meta")
+
+        def fn(x):
+            z = mod(x)
+            output = torch.ops.baz.custom(z)
+            return output
+
+        with torch.no_grad():
+            self.assertRaises(AssertionError, lambda: self.common(fn, (inp,), check_lowp=False))
+
+
+
+
 
     def test_buffer_use_after_remove(self):
         # https://github.com/pytorch/pytorch/issues/102857
