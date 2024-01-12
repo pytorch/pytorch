@@ -1,5 +1,6 @@
+""" This module contains functions and classes that alter the behavior of torch.nn.functional.scaled_dot_product_attention """
 import contextlib
-from typing import List, Optional, Union
+from typing import List, Union
 from warnings import warn
 
 from torch.backends.cuda import (
@@ -44,7 +45,9 @@ def _raise_kernel_warnings(params: SDPAParams) -> None:
 @contextlib.contextmanager
 def sdpa_kernel(backend: Union[List[SDPBackend], SDPBackend]):
     r"""
-    .. warning:: This flag is beta and subject to change.
+    Context manager to select which backend to use for scaled dot product attention.
+
+    .. warning:: This function is beta and subject to change.
 
     Args:
         backend (Union[List[SDPBackend], SDPBackend]): A backend or list of backends for scaled dot product attention.
