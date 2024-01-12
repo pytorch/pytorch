@@ -89,7 +89,6 @@ from .variables.functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
