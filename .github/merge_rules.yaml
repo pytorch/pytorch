@@ -286,6 +286,7 @@
   - kiukchung
   - d4l3k
   - shuqiangzhang
+  - weifengpy
   mandatory_checks_name:
   - EasyCLA
   - Lint
