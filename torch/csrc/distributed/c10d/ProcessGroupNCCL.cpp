@@ -746,8 +746,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 10 /*10 Mins*/);
   waitTimeoutDumpInMilSec_ =
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 2000);
-  timeoutCheckIntervalMilSec_ =
-      getCvarInt(TORCH_NCCL_TIMEOUT_CHECK_MILSEC, 1000);
+  coordDumpCheckIntervalMilSec_ =
+      getCvarInt(TORCH_NCCL_COORD_DUMP_CHECK_MS, 1000);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
@@ -836,7 +836,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       << ", TORCH_NCCL_ENABLE_MONITORING: " << monitorThreadEnabled_.load()
       << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
       << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
-      << ", TORCH_NCCL_TIMEOUT_CHECK_MILSEC: " << timeoutCheckIntervalMilSec_
+      << ", TORCH_NCCL_COORD_DUMP_CHECK_MS: " << coordDumpCheckIntervalMilSec_
       << ", NCCL_DEBUG: " << nccl_debug << ", ID=" << this->getID();
 
   if (options_->global_ranks_in_group.empty()) {
@@ -1249,8 +1249,8 @@ int computeDeltaMS(
 void ProcessGroupNCCL::heartbeatMonitor() {
   uint64_t heartBeatCounter = 0ULL;
   bool checkTimeoutSignal = (dumpOnTimeout_ && uid_ == 0);
-  int heartBeatTimeout = checkTimeoutSignal ? timeoutCheckIntervalMilSec_
-                                          : heartbeatTimeoutInSec_ * 1000;
+  int heartBeatTimeout = checkTimeoutSignal ? coordDumpCheckIntervalMilSec_
+                                            : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
   std::future<bool> asyncDebugDump;
@@ -1283,10 +1283,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       if (computeDeltaMS(lastWorkListUpdateTime_, currentTime) >=
               kWatchdogThreadSleepMillis &&
           computeDeltaMS(lastTimePollStore, currentTime) >=
-              timeoutCheckIntervalMilSec_) {
+              coordDumpCheckIntervalMilSec_) {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(TIMEOUT_DUMP)})) {
-          LOG(ERROR) << "HHH-------H\n\n\n\n";
           auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
           asyncDebugDump = launchAsyncDebugDump();
           waitForDumpOrTimeout(asyncDebugDump, wakeUpTime);
@@ -1299,7 +1298,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       }
     }
 
-    LOG(ERROR) << checkTimeoutSignal << " DHDHDHDHDH " << computeDeltaMS(lastTimeHeartBeatCheck, currentTime) << "\n\n\n";
     if (!checkTimeoutSignal ||
         computeDeltaMS(lastTimeHeartBeatCheck, currentTime) >=
             heartbeatTimeoutInSec_ * 1000) {
@@ -1562,11 +1560,9 @@ void ProcessGroupNCCL::watchdogHandler() {
             if (desyncDebug_ || dumpOnTimeout_) {
               // Set shutdown mode, so the heartbeat monitor thread will not
               // abort process immediately.
-              LOG(ERROR) << "Before HHHH\n\n\n\n";
               collectiveDebugInfoMode_.store(true);
               std::vector<uint8_t> vec(1);
               globalStore_->set(std::string(TIMEOUT_DUMP), vec);
-              LOG(ERROR) << "Set HHHH\n\n\n\n";
             }
 
             auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
