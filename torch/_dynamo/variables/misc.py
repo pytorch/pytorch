@@ -148,18 +148,14 @@ class SuperVariable(VariableTracker):
             return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
                 collections.OrderedDict.__getitem__(self.objvar.value, key)
             )
-        elif (
-            inner_fn in (collections.OrderedDict.__setitem__, object.__setattr__)
-            and isinstance(self.objvar, variables.CustomizedDictVariable)
-            and args
-            and variables.ConstDictVariable.is_valid_key(args[0])
-            and self.objvar.mutable_local
-        ):
+        elif inner_fn in (
+            collections.OrderedDict.__setitem__,
+            object.__setattr__,
+        ) and isinstance(self.objvar, variables.CustomizedDictVariable):
             assert not kwargs and len(args) == 2
-            k = variables.ConstDictVariable.get_key(args[0])
-            tx.output.side_effects.mutation(self)
-            self.objvar.items[k] = args[1]
-            return variables.ConstantVariable.create(None)
+            return super(variables.CustomizedDictVariable, self.objvar).call_method(
+                tx, "__setitem__", args, kwargs
+            )
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
 
@@ -279,7 +275,7 @@ class InspectSignatureVariable(VariableTracker):
         if name == "parameters":
             return variables.ConstDictVariable(
                 {
-                    name: InspectParameterVariable()
+                    variables.ConstantVariable.create(name): InspectParameterVariable()
                     for name in self.inspected.inspect_parameter_names()
                 },
                 user_cls=dict,
@@ -425,7 +421,7 @@ class AutogradFunctionVariable(VariableTracker):
             ).call_function(tx, args, kwargs)
 
         if self.source:
-            source = AttrSource(AttrSource(self.source, "__class__"), "forward")
+            source = AttrSource(self.source, "forward")
         else:
             source = None
         fn = self.fn_cls.forward
@@ -981,10 +977,9 @@ class StringFormatVariable(VariableTracker):
         codegen.extend_output(
             variables.TupleVariable(self.sym_args).reconstruct(codegen)
         )
-        codegen.extend_output(
-            variables.ConstDictVariable(self.sym_kwargs, user_cls=dict).reconstruct(
-                codegen
-            )
-        )
+        kwargs = {
+            variables.ConstantVariable.create(k): v for k, v in self.sym_kwargs.items()
+        }
+        codegen.extend_output(variables.ConstDictVariable(kwargs).reconstruct(codegen))
         codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=1))
         return []
