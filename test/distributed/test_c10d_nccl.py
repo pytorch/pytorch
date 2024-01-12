@@ -3958,7 +3958,7 @@ class NCCLTraceTestTimeoutDumpOnIdleRanks(NCCLTraceTestDumpOnTimeoutBase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_timeout_dumps_on_idle_ranks(self):
+    def test_timeout_dumps_on_stuck_ranks(self):
 
         if self.rank == self.MAIN_PROCESS_RANK:
             # wait for both rank0 and 1 to crash before looking for both ranks' output
@@ -3977,10 +3977,10 @@ class NCCLTraceTestTimeoutDumpOnIdleRanks(NCCLTraceTestDumpOnTimeoutBase):
                 self.assertEqual(t[0]['state'], 'completed')
             return
 
-        # Set heartbeat timeout to a shorter one (default timeout is 2 min).
-        os.environ[
-            "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"
-        ] = f"{NCCLTraceTestDumpOnTimeoutBase.timeout_sec * 2}"
+        # # Set heartbeat timeout to a shorter one (default timeout is 10 mins).
+        # os.environ[
+        #     "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"
+        # ] = f"{NCCLTraceTestDumpOnTimeoutBase.timeout_sec * 2}"
         pg = self._create_process_group_nccl()
 
         device = self.local_device
@@ -3991,12 +3991,14 @@ class NCCLTraceTestTimeoutDumpOnIdleRanks(NCCLTraceTestDumpOnTimeoutBase):
             if self.rank == 0:
                 pg.allreduce(a).wait()
 
-            # rank 0 will crash before it passes the sync, but rank1 will exit quickly and cleanly
+            # rank 0 will get stuck, timeout and then signal a timeout to all ranks.
             torch.cuda.synchronize()
 
-            # Force rank 1 to idle so that it also gets debug info dump triggered.
             if self.rank == 1:
-                time.sleep(8)
+                # Force rank 1 to idle so that it will eventually timeout as well after
+                # getting the global signal to dump the debugging info.
+                time.sleep(20)
+
 
 if __name__ == "__main__":
     assert (

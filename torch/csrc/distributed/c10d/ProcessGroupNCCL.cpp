@@ -1248,10 +1248,11 @@ int computeDeltaMS(
 
 void ProcessGroupNCCL::heartbeatMonitor() {
   uint64_t heartBeatCounter = 0ULL;
-  int heartBeatTimeout = (dumpOnTimeout_ && uid_ == 0)
-      ? timeoutCheckIntervalMilSec_
-      : heartbeatTimeoutInSec_ * 1000;
+  bool checkTimeoutSignal = (dumpOnTimeout_ && uid_ == 0);
+  int heartBeatTimeout = checkTimeoutSignal ? timeoutCheckIntervalMilSec_
+                                          : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
+  auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
   std::future<bool> asyncDebugDump;
   while (true) {
     // This won't have any lock since this lock is only used here.
@@ -1266,6 +1267,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       // will get notified, we early return and exit heartbeatMonitor.
       return;
     }
+    auto currentTime = std::chrono::steady_clock::now();
 
     // We put extra functionality in the thread for the default PG (aka, uid_=0)
     // because the signal is same across different PGs. We only need to run
@@ -1274,8 +1276,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // to see if any PG on any rank observed a timeout and signaled peers to
     // dump debugging info, and we avoid hammering the TCPStore from all PGs on
     // the same rank.
-    if (dumpOnTimeout_ && uid_ == 0) {
-      auto currentTime = std::chrono::steady_clock::now();
+    if (checkTimeoutSignal) {
       // We poll store to see if some ranks have flagged a timeout when
       // we haven't polled for `heartbeat_timeout` seconds and there haven't
       // any work added or removed for `watchdog_timeout` seconds.
@@ -1285,6 +1286,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
               timeoutCheckIntervalMilSec_) {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(TIMEOUT_DUMP)})) {
+          LOG(ERROR) << "HHH-------H\n\n\n\n";
           auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
           asyncDebugDump = launchAsyncDebugDump();
           waitForDumpOrTimeout(asyncDebugDump, wakeUpTime);
@@ -1297,13 +1299,19 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       }
     }
 
-    // Check the heart beat of watchdog thread.
-    auto heartbeat = heartbeat_.load();
-    if (heartbeat != heartBeatCounter) {
-      heartBeatCounter = heartbeat;
-    } else {
-      // No heartbeat increase detected and timeout.
-      break;
+    LOG(ERROR) << checkTimeoutSignal << " DHDHDHDHDH " << computeDeltaMS(lastTimeHeartBeatCheck, currentTime) << "\n\n\n";
+    if (!checkTimeoutSignal ||
+        computeDeltaMS(lastTimeHeartBeatCheck, currentTime) >=
+            heartbeatTimeoutInSec_ * 1000) {
+      // Check the heart beat of watchdog thread.
+      lastTimeHeartBeatCheck = currentTime;
+      auto heartbeat = heartbeat_.load();
+      if (heartbeat != heartBeatCounter) {
+        heartBeatCounter = heartbeat;
+      } else {
+        // No heartbeat increase detected and timeout.
+        break;
+      }
     }
   }
 
@@ -1355,14 +1363,11 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // we throw exception and make the whole process to be killed.
     // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
     // url here.
-    const auto timeOutPeriod = heartBeatTimeout != heartbeatTimeoutInSec_ * 1000
-        ? c10::str(heartBeatTimeout, " milliseconds ")
-        : c10::str(heartbeatTimeoutInSec_, " seconds ");
     const auto exitMsg = c10::str(
         logPrefix(),
         "ProcessGroupNCCL's watchdog got stuck for ",
-        timeOutPeriod,
-        "without making progress in monitoring enqueued collectives. ",
+        heartbeatTimeoutInSec_,
+        " seconds without making progress in monitoring enqueued collectives. ",
         "This typically indicates a NCCL/CUDA API hang blocking the watchdog, ",
         "and could be triggered by another thread holding the GIL inside a ",
         "CUDA api, or other deadlock-prone behaviors.",
@@ -1557,9 +1562,11 @@ void ProcessGroupNCCL::watchdogHandler() {
             if (desyncDebug_ || dumpOnTimeout_) {
               // Set shutdown mode, so the heartbeat monitor thread will not
               // abort process immediately.
+              LOG(ERROR) << "Before HHHH\n\n\n\n";
               collectiveDebugInfoMode_.store(true);
               std::vector<uint8_t> vec(1);
               globalStore_->set(std::string(TIMEOUT_DUMP), vec);
+              LOG(ERROR) << "Set HHHH\n\n\n\n";
             }
 
             auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
