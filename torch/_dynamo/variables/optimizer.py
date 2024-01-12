@@ -5,7 +5,7 @@ import torch
 from ..decorators import mark_static_address
 
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GetItemSource, GlobalWeakRefSource
+from ..source import AttrSource, ConstDictKeySource, GetItemSource, GlobalWeakRefSource
 from ..utils import global_key_name
 
 from .base import VariableTracker
@@ -128,9 +128,11 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # so we manually generate them here
         state_source = AttrSource(self.source, "state")
         install_guard(state_source.make_guard(GuardBuilder.DICT_KEYS))
-        for p, value in self.value.state.items():
+        for idx, (p, value) in enumerate(self.value.state.items()):
             tx.store_global_weakref(global_key_name(p), p)
-            p_state_source = GetItemSource(state_source, self.tensor_to_source[p])
+            p_state_source = GetItemSource(
+                state_source, ConstDictKeySource(state_source, idx)
+            )
             install_guard(p_state_source.make_guard(GuardBuilder.DICT_KEYS))
             for k, v in value.items():
                 if (
