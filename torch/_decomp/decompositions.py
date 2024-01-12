@@ -1226,6 +1226,13 @@ def prod(x: List[int]):
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
+    # NB: Perform the check_is_size tests first so that the
+    # sum test does not try to do a replacement
+    for i in range(len(split_sizes)):
+        torch._check_is_size(
+            split_sizes[i],
+            lambda: "split_with_sizes expects split_sizes have only non-negative entries",
+        )
     torch._check_with(
         ValueError,
         sum(split_sizes) == self.shape[dim],
@@ -1240,10 +1247,6 @@ def split_with_sizes(
 
     for i in range(num_splits):
         length = split_sizes[i]
-        torch._check_is_size(
-            length,
-            lambda: "split_with_sizes expects split_sizes have only non-negative entries",
-        )
         # We know this is true thanks to the sum, but this assertion helps
         # out our internal reasoning
         expect_true(start_idx + length <= self.shape[dim])

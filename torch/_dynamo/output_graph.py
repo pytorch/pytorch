@@ -1330,6 +1330,58 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
                 for i0 in defs:
                     ras = ras_by_symbol.pop(i0, [])
+                    # Before we perform any asserts, first apply range
+                    # refinement.  This is important, because if we are going
+                    # to retrace the graph (and we typically are if we send
+                    # the graph to AOTAutograd), we need to make sure we apply
+                    # range refinement (ala _check_is_size) first, BEFORE we
+                    # run any of the asserts.  Otherwise, we may decide to
+                    # perform substitutions based on the asserts which we then
+                    # can't back out, because value ranges can only be applied
+                    # to asserts.)
+                    #
+                    # A perhaps better long term plan is to avoid this order
+                    # dependence by making it possible to refine ranges on
+                    # arbitrary expressions, not just symbols.  But it is not
+                    # so easy to make use of this information, see
+                    # https://twitter.com/ezyang/status/1745801370299482492
+                    #
+                    # TODO: Actually do the rest of the range, but it might be
+                    # better to just make constrain_symbol_range insert RAs
+                    #
+                    # Logic here tests specifically for constrain_range_for_size
+                    runtime_vr = self.shape_env.runtime_var_to_range[i0]
+                    if (
+                        self.shape_env.var_to_range[i0].lower >= 2
+                        and runtime_vr.lower < 2
+                    ):
+                        self.graph.call_function(
+                            torch._check_is_size, (symbol_to_proxy[i0].node,)
+                        )
+
+                    if not self.shape_env._default_unspecified_value_range().issubset(
+                        runtime_vr
+                    ):
+                        # The runtime range is constrained, so add a runtime
+                        # assert and also explicitly refine the range
+                        # (refinement should not be necessary once runtime
+                        # asserts cause refinement, but that's NYI)
+                        def convert(s):
+                            try:
+                                return int(s)
+                            except TypeError:
+                                return None
+
+                        self.graph.call_function(
+                            torch._constrain_as_value,
+                            # TODO: this could choke if it's sympy.oo
+                            (
+                                symbol_to_proxy[i0].node,
+                                convert(runtime_vr.lower),
+                                convert(runtime_vr.upper),
+                            ),
+                        )
+
                     for ra in ras:
                         log.debug("inserting runtime assert %s", ra.expr)
                         # Need to process ALL free symbols, not just unbacked ones

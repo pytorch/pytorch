@@ -28,6 +28,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
     is_symbolic,
     StatelessSymbolicContext,
+    _constrain_range_for_size,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -524,13 +525,26 @@ def forward(self, x_1):
         shape_env = ShapeEnv()
         i0 = shape_env.create_unbacked_symint()
         i1 = shape_env.create_unbacked_symint()
+        _constrain_range_for_size(i0)
+        _constrain_range_for_size(i1)
         self.assertTrue(expect_true(i0 == i1 * 4))
         self.assertExpectedInline(str(i0), """4*i1""")
 
         i2 = shape_env.create_unbacked_symint()
         i3 = shape_env.create_unbacked_symint()
+        _constrain_range_for_size(i2)
+        _constrain_range_for_size(i3)
         self.assertTrue(expect_true(i2 * 4 == i3))
         self.assertExpectedInline(str(i3), """4*i2""")
+
+    def test_avoid_unbacked_substitution(self):
+        shape_env = ShapeEnv()
+        i0 = shape_env.create_unbacked_symint()
+        _constrain_range_for_size(i0)
+        i1 = shape_env.create_unbacked_symint()
+        _constrain_range_for_size(i1)
+        self.assertTrue(expect_true(i0 == 10 - i1))
+        self.assertExpectedInline(str(i0), """i0""")
 
     def test_expect_true_double_digits(self):
         shape_env = ShapeEnv()

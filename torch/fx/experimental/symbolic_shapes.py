@@ -3360,11 +3360,40 @@ class ShapeEnv:
             # problem
         )
 
-    def _set_replacement(self, a: "sympy.Symbol", expr: "sympy.Expr") -> None:
+    def _set_replacement(self, a: "sympy.Symbol", expr: "sympy.Expr", msg: str) -> None:
         """
         Adds or updates a replacement for a symbol.
         Use this instead of `self.replacements[a] = expr`.
         """
+
+        # With unbacked symbols, it is not necessarily always profitable to do
+        # a replacement.  We may end up with a worse value range if we do the
+        # substitution, especially if the unbacked symbol to be replaced was
+        # marked as size like.
+        #
+        # For example let's suppose that 'a' in [2, inf].  If we replace 'a'
+        # with '10 - y', where y in [2, inf], we get a much worse bound.  This
+        # is bad, don't do the replacement!
+        new_bound = None
+        old_bound = None
+        if self.is_unbacked_symint(a):
+            env = {x: self.var_to_range.get(x, None) for x in expr.free_symbols}
+
+            # If you have x in [2, maxint], then 2*x in [4, 2*maxint].
+            # But we don't really care that the max bound says we can
+            # go beyond the maximum integer size, because we aren't
+            # using bigints anyway.  Arguably, ValueRanges should know
+            # to do this truncation automaticaly (to avoid doing
+            # bigint compute in range analysis), but right now it doesn't
+            # so we need to get rid of some unnecessary precision.
+            int_range = ValueRanges(-sys.maxsize - 1, sys.maxsize - 1)
+
+            new_bound = bound_sympy(expr, env) & int_range
+            old_bound = self.var_to_range[a] & int_range
+            if not new_bound.issubset(old_bound):
+                self.log.debug("skipped set_replacement %s = %s (%s) [%s not subset of %s]", a, expr, msg, new_bound, old_bound)
+                return
+
         if config.print_specializations and isinstance(expr, (sympy.Integer, sympy.Float)):
             # specializing to a constant, which is likely unexpected
 
@@ -3375,7 +3404,7 @@ class ShapeEnv:
             if a not in self.replacements or expr != self.replacements[a]:
                 self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), expr)
                 self.log.debug("SPECIALIZATION", stack_info=True)
-        log.info("set_replacement %s = %s", a, expr)
+        log.info("set_replacement %s = %s (%s) [%s subset of %s]", a, expr, msg, new_bound, old_bound)
         self.replacements[a] = expr
         self._update_version_counter()
 
@@ -3401,7 +3430,7 @@ class ShapeEnv:
             return a
         res = self.replacements[a]
         cur_replace = {s: self._find(s) for s in res.free_symbols}
-        self._set_replacement(a, self.replacements[a].xreplace(cur_replace))
+        self._set_replacement(a, self.replacements[a].xreplace(cur_replace), "find")
         return self.replacements[a]
 
     @lru_cache(256)
@@ -3437,10 +3466,11 @@ class ShapeEnv:
                 if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
                 # short-circuit when no solving is needed
+
                 if isinstance(lhs, sympy.Symbol) and free_unbacked_symbols(lhs):
-                    self._set_replacement(lhs, self._find(rhs))
+                    self._set_replacement(lhs, self._find(rhs), "trivial_lhs")
                 elif isinstance(rhs, sympy.Symbol) and free_unbacked_symbols(rhs):
-                    self._set_replacement(rhs, self._find(lhs))
+                    self._set_replacement(rhs, self._find(lhs), "trivial_rhs")
                 else:
                     r = try_solve(expr, free[0], floordiv_inequality=False)
                     if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
@@ -3453,11 +3483,13 @@ class ShapeEnv:
                             # so this causes things to fail e.g.,
                             # test_split_unbacked_sizes
                             ok = len(free_unbacked_symbols(new_var)) <= 1
+                            msg = "solve_unbacked"
                         else:
                             # Never substitute backed with unbacked
                             ok = len(free_unbacked_symbols(new_var)) == 0
+                            msg = "solve_backed"
                         if ok:
-                            self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
+                            self._set_replacement(cast(sympy.Symbol, free[0]), new_var, msg)
             except NotImplementedError:
                 pass
         if expr.has(Mod):
@@ -3490,7 +3522,7 @@ class ShapeEnv:
                             self.runtime_var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
                                 self.runtime_var_to_range[i0], ValueRanges.wrap(d)
                             )
-                            self._set_replacement(i0, d * i1)
+                            self._set_replacement(i0, d * i1, "divisibility")
 
             except NotImplementedError:
                 pass

@@ -91,6 +91,9 @@ class ValueRanges:
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
 
+    def issubset(self, other):
+        return sympy_generic_le(other.lower, self.lower) and sympy_generic_le(self.upper, other.upper)
+
     def tighten(self, other) -> "ValueRanges":
         """Given two ValueRanges, returns their intersection"""
         return self & other
