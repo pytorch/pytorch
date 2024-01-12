@@ -242,6 +242,32 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif self.value is torch.nn.CrossEntropyLoss:
             return self._call_cross_entropy_loss(tx, args, kwargs)
+        elif (
+            inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
+            and SideEffects.cls_supports_mutation_side_effects(self.value)
+            and self.source
+        ):
+            var = tx.output.side_effects.track_object_new(
+                self.source,
+                self.value,
+                variables.UnspecializedNNModuleVariable
+                if issubclass(self.value, torch.nn.Module)
+                else UserDefinedObjectVariable,
+                {},
+            )
+            if (
+                inspect.getattr_static(self.value, "__init__", None)
+                is torch.nn.Module.__init__
+            ):
+                tx.output.side_effects.store_attr(
+                    var,
+                    "__call_nn_module_init",
+                    variables.ConstantVariable.create(True),
+                )
+                return var
+            else:
+                var.call_method(tx, "__init__", args, kwargs)
+                return var
         elif self.value in self._in_graph_classes() or is_allowed(self.value):
             # torch.LongTensor cannot accept a list of FakeTensors.
             # So we stack the list of FakeTensors instead.
@@ -345,32 +371,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             assert all(x is not None for x in items)
             return variables.NamedTupleVariable(items, self.value)
-        elif (
-            inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
-            and SideEffects.cls_supports_mutation_side_effects(self.value)
-            and self.source
-        ):
-            var = tx.output.side_effects.track_object_new(
-                self.source,
-                self.value,
-                variables.UnspecializedNNModuleVariable
-                if issubclass(self.value, torch.nn.Module)
-                else UserDefinedObjectVariable,
-                {},
-            )
-            if (
-                inspect.getattr_static(self.value, "__init__", None)
-                is torch.nn.Module.__init__
-            ):
-                tx.output.side_effects.store_attr(
-                    var,
-                    "__call_nn_module_init",
-                    variables.ConstantVariable.create(True),
-                )
-                return var
-            else:
-                var.call_method(tx, "__init__", args, kwargs)
-                return var
         elif variables.CustomizedDictVariable.is_matching_cls(self.value):
             options = {"mutable_local": MutableLocal()}
             return variables.CustomizedDictVariable.create(
