@@ -56,6 +56,74 @@ class TestOptimRenewed(TestCase):
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
 
+    @parametrize("on", ["contiguous_params", "noncontiguous_params"])
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_forloop_goes_right_direction(self, device, dtype, optim_info, on):
+        optim_cls = optim_info.optim_cls
+        optim_inputs = optim_info.optim_inputs_func(device=device)
+        for optim_input in optim_inputs:
+            if on == "contiguous_params":
+                weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
+                bias = Parameter(torch.randn((10), device=device, dtype=dtype))
+            else:
+                weight = Parameter(torch.randn((10, 5, 2), device=device, dtype=dtype)[..., 0])
+                bias = Parameter(torch.randn((10, 2), device=device, dtype=dtype)[..., 0])
+            input = torch.randn(5, device=device, dtype=dtype)
+            optimizer = optim_cls([weight, bias], **optim_input.kwargs)
+
+            def closure():
+                optimizer.zero_grad()
+                loss = (weight.mv(input) + bias).pow(2).sum()
+                loss.backward()
+                if optim_cls.__name__ == "SparseAdam":
+                    # No, this is not how people should use SparseAdam, but it suffices
+                    # for this test case. We should have other test cases for sparse grads.
+                    weight.grad = weight.grad.to_sparse()
+                    bias.grad = bias.grad.to_sparse()
+                return loss
+
+            initial_value = closure().item()
+            for _ in range(200):
+                optimizer.step(closure)
+
+            if optim_input.kwargs.get("maximize", False):
+                self.assertGreater(closure().item(), initial_value)
+            else:
+                self.assertLess(closure().item(), initial_value)
+
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_forloop_goes_right_direction_multigpu(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        optim_inputs = optim_info.optim_inputs_func(device="cuda")
+        for optim_input in optim_inputs:
+            weight = Parameter(torch.randn((10, 5), device="cuda:0", dtype=dtype))
+            bias = Parameter(torch.randn((10), device="cuda:1", dtype=dtype))
+            input = torch.randn(5, device="cuda:0", dtype=dtype)
+            optimizer = optim_cls([weight, bias], **optim_input.kwargs)
+
+            def closure():
+                optimizer.zero_grad()
+                loss = (weight.mv(input).cuda(1) + bias).pow(2).sum()
+                loss.backward()
+                if optim_cls.__name__ == "SparseAdam":
+                    # No, this is not how people should use SparseAdam, but it suffices
+                    # for this test case. We should have other test cases for sparse grads.
+                    weight.grad = weight.grad.to_sparse()
+                    bias.grad = bias.grad.to_sparse()
+                return loss
+
+            initial_value = closure().item()
+            for _ in range(200):
+                optimizer.step(closure)
+
+            if optim_input.kwargs.get("maximize", False):
+                self.assertGreater(closure().item(), initial_value)
+            else:
+                self.assertLess(closure().item(), initial_value)
+
+
     def _test_derived_optimizers(self, device, dtype, optim_info, flag, reduced_precision=False, assert_step_dtype=None):
         """
         Given a flag 'fused' or 'foreach', test for parity of optimizer state
