@@ -3392,6 +3392,7 @@ dynamo_expected_failures = {
     "TestTorchFunctionOverride.test_Tensor_index_add_",  # test_overrides
     "TestBroadcastAllOverride.test_broadcast_all",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor_div",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_slice_inverse",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor_slice_scatter",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor_remainder_",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor_baddbmm_",  # test_overrides
@@ -3820,6 +3821,7 @@ dynamo_expected_failures = {
     "TestTorchFunctionOverride.test_Tensor__is_view",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor___rmod__",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor_amin",  # test_overrides
+    "TestTorchFunctionOverride.test_Tensor_select_inverse",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor_select_scatter",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor_index_fill",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor_square_",  # test_overrides
