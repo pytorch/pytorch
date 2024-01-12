@@ -258,6 +258,8 @@ exclude_patterns = [
     '**/*pb.h',
     '**/*CUDA*',
     '**/cuda/*pp',
+    '**/*XPU*',
+    '**/xpu/*pp',
     'c10/util/complex_math.h',
     'c10/util/complex_utils.h',
     'c10/util/flat_hash_map.h',

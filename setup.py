@@ -579,6 +579,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report("-- Detected CUDA at " + cmake_cache_vars["CUDA_TOOLKIT_ROOT_DIR"])
         else:
             report("-- Not using CUDA")
+        if cmake_cache_vars["USE_XPU"]:
+            report("-- Detected XPU runtime at " + cmake_cache_vars["SYCL_LIBRARY_DIR"])
+        else:
+            report("-- Not using XPU")
         if cmake_cache_vars["USE_MKLDNN"]:
             report("-- Using MKLDNN")
             if cmake_cache_vars["USE_MKLDNN_ACL"]:
@@ -1182,6 +1186,7 @@ def main():
         "include/c10/cuda/impl/*.h",
         "include/c10/hip/*.h",
         "include/c10/hip/impl/*.h",
+        "include/c10/xpu/*.h",
         "include/torch/*.h",
         "include/torch/csrc/*.h",
         "include/torch/csrc/api/include/torch/*.h",

@@ -155,6 +155,7 @@
 namespace c10 {}
 namespace c10::cuda {}
 namespace c10::hip {}
+namespace c10::xpu {}
 
 // Since C10 is the core library for caffe2 (and aten), we will simply reroute
 // all abstractions defined in c10 to be available in caffe2 as well.
