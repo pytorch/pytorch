@@ -6989,6 +6989,7 @@ class TestQuantizedConv(TestCase):
         use_channelwise_list = [False, True]
         output_dtype_list = [None, torch.float32, torch.bfloat16]
         options = itertools.product(groups_list, use_bias_list, use_channelwise_list, output_dtype_list)
+
         for groups, use_bias, use_channelwise, output_dtype in options:
             qconv = torch.ops.onednn.qconv2d_pointwise
             qconv_prepack = torch.ops.onednn.qconv_prepack
