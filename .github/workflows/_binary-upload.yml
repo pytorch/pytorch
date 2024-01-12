@@ -71,6 +71,11 @@ on:
       conda-pytorchbot-token-test:
         required: true
         description: Conda PyTorchBot token
+
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   upload:
     runs-on: ubuntu-22.04
@@ -135,8 +140,6 @@ jobs:
           PKG_DIR: "${{ runner.temp }}/artifacts"
           UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
           # When running these on pull_request events these should be blank
-          AWS_ACCESS_KEY_ID: ${{ secrets.aws-pytorch-uploader-access-key-id }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.aws-pytorch-uploader-secret-access-key }}
           CONDA_PYTORCHBOT_TOKEN: ${{ secrets.conda-pytorchbot-token }}
           CONDA_PYTORCHBOT_TOKEN_TEST: ${{ secrets.conda-pytorchbot-token-test }}
           BUILD_NAME: ${{ inputs.build_name }}
