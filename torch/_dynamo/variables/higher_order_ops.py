@@ -1287,7 +1287,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Add number of locals that the for loop introduces.
         nlocals = argcount
         stacksize = host_code_object.co_stacksize
-        flags = host_code_object.co_flags
+        flags = 1
         codestring = co_code
         constants = host_code_object.co_consts
         names = host_code_object.co_names
