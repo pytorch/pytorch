@@ -1130,6 +1130,7 @@ class BuiltinVariable(VariableTracker):
             TorchInGraphFunctionVariable,
             UserFunctionVariable,
         )
+        from ..allowed_functions import is_allowed
         from .builder import SourcelessBuilder, VariableBuilder
 
         name = name_var.as_python_constant()
@@ -1225,6 +1226,17 @@ class BuiltinVariable(VariableTracker):
                 if example_value.grad is not None:
                     unimplemented("getattr on non-None grad - NYI")
                 return ConstantVariable(None)
+        elif isinstance(obj, (variables.UserDefinedClassVariable, variables.UserDefinedObjectVariable)) and is_allowed(obj.value):
+            member = getattr(obj.value, name)
+            if is_utils_checkpoint(member):
+                options["source"] = source
+                return build_checkpoint_variable(**options)
+            elif trace_rules.lookup(member) is not None:
+                return trace_rules.lookup(member)(member, **options)
+            elif source is not None:
+                return VariableBuilder(tx, source)(member)
+            else:
+                return SourcelessBuilder()(tx, member)
         elif isinstance(
             obj,
             (
@@ -1235,55 +1247,32 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
             ),
         ):
-            if isinstance(
-                obj,
-                (
-                    variables.UserDefinedClassVariable,
-                    variables.UserDefinedObjectVariable
-                )
-            ) and is_allowed(obj.value):
-                member = getattr(obj.value, name)
-
-                if is_utils_checkpoint(member):
-                    options["source"] = source
-                    return build_checkpoint_variable(**options)
-                elif trace_rules.lookup(member) is not None:
-                    return trace_rules.lookup(member)(member, **options)
-                elif source is not None:
-                    return VariableBuilder(tx, source)(member)
-                else:
-                    return SourcelessBuilder()(tx, member)
-
             try:
                 return obj.var_getattr(tx, name)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchInGraphFunctionVariable):
-            # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
             member = getattr(obj.value, name)
-            if trace_rules.is_aten_op_or_tensor_method(member):
-                return TorchInGraphFunctionVariable(member, **options)
-        elif isinstance(obj, (PythonModuleVariable, DummyModule)):
-            if is_allowed(obj.value):
-                member = getattr(obj.value, name)
+            if trace_rules.lookup(member) is not None:
+                return trace_rules.lookup(member)(member, **options)
+        elif isinstance(obj, PythonModuleVariable) and is_allowed(obj.value):
+            member = getattr(obj.value, name)
+            if is_utils_checkpoint(member):
+                options["source"] = source
+                return build_checkpoint_variable(**options)
+            elif trace_rules.lookup(member) is not None:
+                return trace_rules.lookup(member)(member, **options)
+            elif source is not None:
+                return VariableBuilder(tx, source)(member)
             else:
-                member = obj.value.__dict__[name]
+                return SourcelessBuilder()(tx, member)
+        elif isinstance(obj, (PythonModuleVariable, DummyModule)):
+            member = obj.value.__dict__[name]
 
             if config.replay_record_enabled:
                 tx.exec_recorder.record_module_access(obj.value, name, member)
 
-            if is_allowed(obj.value):
-                if is_utils_checkpoint(member):
-                    options["source"] = source
-                    return build_checkpoint_variable(**options)
-                elif trace_rules.lookup(member) is not None:
-                    return trace_rules.lookup(member)(member, **options)
-                elif source is not None:
-                    return VariableBuilder(tx, source)(member)
-                else:
-                    return SourcelessBuilder()(tx, member)
-            else:
-                return VariableBuilder(tx, source)(member)
+            return VariableBuilder(tx, source)(member)
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
