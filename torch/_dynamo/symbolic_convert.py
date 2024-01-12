@@ -815,7 +815,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def LOAD_FAST(self, inst):
         name = inst.argval
-
         if name in self.f_locals and config.replay_record_enabled:
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
