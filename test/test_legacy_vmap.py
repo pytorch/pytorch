@@ -2487,7 +2487,7 @@ class TestVmapBatchedGradientLegacy(Namespace.TestVmapBaseLegacy):
         self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
 
 instantiate_device_type_tests(
-    TestVmapBatchedGradient,
+    TestVmapBatchedGradientLegacy,
     globals(),
     None,
 )
