@@ -1,9 +1,22 @@
-from typing import List
+import functools
+from typing import Any, Callable, List, Optional
 
-from torch.ao.quantization.pt2e.utils import _is_sym_size_node
+import torch
+import torch.nn.functional as F
 
+from torch.ao.quantization.pt2e.utils import (
+    _conv2d_example_inputs,
+    _is_sym_size_node,
+    get_aten_graph_module,
+)
 from torch.ao.quantization.quantizer.quantizer import QuantizationAnnotation
 from torch.fx import Node
+from torch.fx.passes.utils.matcher_with_name_node_map_utils import (
+    SubgraphMatcherWithNameNodeMap,
+)
+
+
+__all__ = []  # type: ignore[var-annotated]
 
 
 def _annotate_input_qspec_map(node: Node, input_node: Node, qspec):
@@ -46,4 +59,60 @@ def _node_only_used_for_sym_size(node: Node, partition_nodes: List[Node]):
     return all(
         ((user not in partition_nodes) or _is_sym_size_node(user))
         for user in node.users
+    )
+
+
+def _get_conv_unary_pattern(
+    conv_fn: Callable,
+    has_bn: bool = False,  # Usually need for QAT pattern
+    unary_fn: Optional[Callable[[Any], Any]] = None,
+) -> Callable:
+    # A helper function to generate a Conv Unary pattern,
+    # which serves as an input to create a SubgraphMatcherWithNameNodeMap.
+    def _conv_unary(
+        x,
+        conv_weight,
+        conv_bias,
+        bn_weight=None,
+        bn_bias=None,
+        bn_rm=None,
+        bn_rv=None,
+    ):
+        conv = conv_fn(x, conv_weight, conv_bias)
+        if has_bn:
+            bn = F.batch_norm(conv, bn_rm, bn_rv, bn_weight, bn_bias, training=True)
+        else:
+            bn = conv
+        if unary_fn is not None:
+            output = unary_fn(bn)
+        else:
+            output = bn
+        return output, {
+            "input": x,
+            "conv": conv,
+            "conv_weight": conv_weight,
+            "conv_bias": conv_bias,
+            "output": output,
+        }
+
+    return _conv_unary
+
+
+def _generate_pattern_matcher_helper(
+    pattern, example_inputs
+) -> SubgraphMatcherWithNameNodeMap:
+    pattern = get_aten_graph_module(pattern, example_inputs)
+    pattern.graph.eliminate_dead_code()
+    pattern.recompile()
+    return SubgraphMatcherWithNameNodeMap(pattern, ignore_literals=True)
+
+
+@functools.lru_cache(None)
+def _generate_conv2d_pattern_matcher() -> SubgraphMatcherWithNameNodeMap:
+    # Ensure it's only be invoked once, due to the cache size limitation in
+    # https://github.com/pytorch/pytorch/blob/
+    # 4c6e842496da636123f83ef868ca1974631f1f1e/torch/_dynamo/config.py#L35-L39
+    return _generate_pattern_matcher_helper(
+        _get_conv_unary_pattern(torch.nn.functional.conv2d),
+        _conv2d_example_inputs,
     )

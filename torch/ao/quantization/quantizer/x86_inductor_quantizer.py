@@ -41,6 +41,7 @@ from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
     SourcePartition,
 )
+from .utils import _generate_conv2d_pattern_matcher
 
 __all__ = [
     "X86InductorQuantizer",
@@ -780,14 +781,11 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_conv2d(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        conv_partitions = get_source_partitions(
-            gm.graph, [torch.nn.Conv2d, torch.nn.functional.conv2d]
-        )
-        conv_partitions = list(itertools.chain.from_iterable(conv_partitions.values()))
-        for conv_partition in conv_partitions:
-            if len(conv_partition.output_nodes) > 1:
-                raise ValueError("conv partition has more than one output node")
-            conv_node = conv_partition.output_nodes[0]
+        matches = _generate_conv2d_pattern_matcher().match(gm.graph)
+
+        for match in matches:
+            name_node_map = match.name_node_map
+            conv_node = name_node_map["conv"]
             if (
                 conv_node.op != "call_function"
                 or conv_node.target != torch.ops.aten.conv2d.default
