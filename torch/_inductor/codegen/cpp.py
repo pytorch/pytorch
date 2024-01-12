@@ -311,7 +311,7 @@ def parallel_num_threads():
 
 
 @functools.lru_cache
-def stride_at(var: sympy.Symbol, index: sympy.Expr):
+def stride_at(index: sympy.Expr, var: sympy.Symbol):
     replacement = {var: var + 1}
     new_index = sympy_subs(index, replacement)
     return sympy.simplify(new_index - index)
@@ -378,6 +378,12 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
         return simplify_index_in_vec_range(index, var, vec_length)
 
     return index
+
+
+@functools.lru_cache
+def stride_at_vec_range(index: sympy.Expr, var: sympy.Symbol, vec_length: int):
+    index_vec_simplified = simplify_index_in_vec_range(index, var, vec_length)
+    return stride_at(index_vec_simplified, var)
 
 
 class CppPrinter(ExprPrinter):
@@ -1424,10 +1430,7 @@ class CppVecOverrides(CppOverrides):
         assert isinstance(V.kernel, CppVecKernel)
         index = V.kernel.rename_indexing(expr)
         tiling_var = V.kernel.itervars[V.kernel.tiling_idx]
-        index_vec_simplified = simplify_index_in_vec_range(
-            index, tiling_var, V.kernel.tiling_factor
-        )
-        stride = stride_at(tiling_var, index_vec_simplified)
+        stride = stride_at_vec_range(index, tiling_var, V.kernel.tiling_factor)
         if stride.is_number and not V.kernel.index_indirect_depends_on(
             index, tiling_var
         ):
@@ -1943,10 +1946,7 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         dtype = V.graph.get_dtype(name)
         tiling_var = self.itervars[self.tiling_idx]
-        index_vec_simplified = simplify_index_in_vec_range(
-            index, tiling_var, self.tiling_factor
-        )
-        stride = stride_at(tiling_var, index_vec_simplified)
+        stride = stride_at_vec_range(index, tiling_var, self.tiling_factor)
         if stride == 0:
             # load scalar and lazily broadcast it on demand
             return super().load(name, index)
@@ -1984,7 +1984,10 @@ class CppVecKernel(CppKernel):
         tiling_var = self.itervars[self.tiling_idx]
         assert index.has(tiling_var)
         var_expr = f"{var} + {cexpr_index(index)}"
-        non_contiguous = stride_at(tiling_var, index) != 1 or "tmp" in f"{index}"
+        stride = stride_at_vec_range(index, tiling_var, self.tiling_factor)
+        non_contiguous = stride != 1 or self.index_indirect_depends_on(
+            index, tiling_var
+        )
         if non_contiguous:
             var_expr = "tmpbuf"
         if dtype == torch.float:
@@ -2232,16 +2235,16 @@ class CppTile2DKernel(CppVecKernel):
         return sympy_symbol(f"{self.itervars[self.outer_idx]}_inner")
 
     def need_vec_transpose(self, index):
+        outer_var = self.itervars[self.outer_idx]
+        inner_var = self.itervars[self.tiling_idx]
+        outer_stride = stride_at_vec_range(index, outer_var, self.tiling_factor)
+        inner_stride = stride_at_vec_range(index, inner_var, self.tiling_factor)
         return (
             self._load_mask is None  # TODO: support transposition with mask
-            and stride_at(self.itervars[self.outer_idx], index) == 1
-            and index.has(self.itervars[self.tiling_idx])
-            and not stride_at(self.itervars[self.tiling_idx], index).has(
-                self.itervars[self.tiling_idx]
-            )
-            and not stride_at(self.itervars[self.tiling_idx], index).has(
-                self.itervars[self.outer_idx]
-            )
+            and outer_stride == 1
+            and index.has(inner_var)
+            and not inner_stride.has(inner_var)
+            and not inner_stride.has(outer_var)
         )
 
     def gen_transposed_tile_load_store(self, name, var, index, is_store):
@@ -2250,7 +2253,7 @@ class CppTile2DKernel(CppVecKernel):
         factor = self.tiling_factor
         src = f"{var} + {cexpr_index(index)}"
         dst = "__place_holder__"
-        ld_src = f"{cexpr_index(stride_at(self.itervars[self.tiling_idx], index))}"
+        ld_src = f"{cexpr_index(stride_at_vec_range(index, self.itervars[self.tiling_idx], self.tiling_factor))}"
         ld_dst = f"{factor}"
         if is_store:
             src, dst = dst, src
@@ -3152,10 +3155,7 @@ class CppKernelProxy(CppKernel):
                 for var in index.free_symbols:
                     if not re.search(r"^d\d+$", var.name):
                         continue
-                    index_vec_simplified = simplify_index_in_vec_range(
-                        index, var, tiling_factor
-                    )
-                    stride = stride_at(var, index_vec_simplified)
+                    stride = stride_at_vec_range(index, var, tiling_factor)
                     if stride == 0:
                         continue
                     elif stride == 1:
