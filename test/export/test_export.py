@@ -23,7 +23,7 @@ from torch.export._trace import (
     DEFAULT_EXPORT_DYNAMO_CONFIG,
 )
 from torch._export import capture_pre_autograd_graph
-from torch._export.pass_base import _ExportPassBase
+from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.utils import (
     get_buffer,
     get_param,
@@ -2204,7 +2204,7 @@ def forward(self, l_x_):
     def test__scaled_dot_product_flash_attention(self):
         class Module(torch.nn.Module):
             def forward(self, q, k, v):
-                res = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v)
+                res = torch.nn.functional.scaled_dot_product_attention(q, k, v)
                 return res[0]
 
         m = Module()
@@ -2221,9 +2221,9 @@ def forward(self, l_x_):
                 return x / torch.sym_sqrt(x.shape[0])
 
         ep = export(M(), (torch.ones(16, 4),), dynamic_shapes={'x': {0: Dim("dim")}})
-        _ExportPassBase()(ep.graph_module)
+        _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
         FileCheck().check_count(
-            "torch.sym_sqrt", 1, exactly=True
+            "torch._sym_sqrt", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_check_specialized_int(self):

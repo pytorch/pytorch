@@ -1837,8 +1837,7 @@ torch.cuda.synchronize()
                     ('TORCH_CUDNN_V8_API_DISABLED' in os.environ and
                      int(os.environ['TORCH_CUDNN_V8_API_DISABLED']) or
                      torch.cuda.get_device_capability() < (8, 0))
-                should_error_from_not_implemented = should_error_from_cudnn or 'thnn' in op \
-                    or 'fused' in op or 'gru' in op or op == '_thnn_fused_lstm_cell' or op == 'lstm_cell'
+                should_error_from_not_implemented = should_error_from_cudnn
                 if not skip_test:
                     if should_error_from_not_implemented:
                         with self.assertRaises(RuntimeError, msg=str(op) + ' should not be supported for bfloat16!'):
@@ -3419,11 +3418,23 @@ exit(2)
     @unittest.skipIf(TEST_MULTIGPU, "Testing on one GPU is sufficient")
     def test_lazy_init(self):
         """ Validate that no CUDA calls are made during `import torch` call"""
-        from subprocess import check_output
+        def check_output(script: str) -> str:
+            return subprocess.check_output([sys.executable, "-c", script]).decode("ascii").strip()
+
         VISIBLE_DEVICES = "HIP_VISIBLE_DEVICES" if TEST_WITH_ROCM else "CUDA_VISIBLE_DEVICES"
         test_script = f"import os; import torch;os.environ['{VISIBLE_DEVICES}']='32';print(torch.cuda.device_count())"
-        rc = check_output([sys.executable, '-c', test_script]).decode("ascii").strip()
+        rc = check_output(test_script)
         self.assertEqual(rc, "0")
+        if not TEST_WITH_ROCM:
+            # Check that `cuInit` was not called during the import
+            # By using ctypes and calling cuDeviceCountGet() and expect CUDA_ERROR_NOT_INITIALIZED == 3
+            # See https://github.com/pytorch/pytorch/issues/116276 for more details
+            libcuda_name = "libcuda.so.1" if not IS_WINDOWS else "nvcuda.dll"
+            cuda_driver_api_call = f"ctypes.CDLL('{libcuda_name}').cuDeviceGetCount(ctypes.byref(x))"
+            rc = check_output(f"import torch; import ctypes;x=ctypes.c_int(-1);print({cuda_driver_api_call})")
+            self.assertEqual(rc, "3")
+
+
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -3737,7 +3748,16 @@ class TestCudaMallocAsync(TestCase):
             torch.cuda.memory._set_allocator_settings("pinned_num_register_threads:1024")
 
 
-    def test_raises_oom(self):
+    @parametrize(
+        "max_split_size_mb_setting", [False, True]
+    )
+    def test_raises_oom(self, max_split_size_mb_setting):
+        if max_split_size_mb_setting:
+            # CudaCachingAllocator does early return when searching available blocks
+            # if max_split_size_mb is not set
+            # Setting this triggers more parts of the code
+            torch.cuda.memory._set_allocator_settings("max_split_size_mb:1024")
+            torch.cuda.memory.empty_cache()
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
 
@@ -4255,6 +4275,7 @@ class TestBlockStateAbsorption(TestCase):
 
 
 instantiate_parametrized_tests(TestCuda)
+instantiate_parametrized_tests(TestCudaMallocAsync)
 
 if __name__ == '__main__':
     run_tests()

@@ -10,6 +10,7 @@ from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
 
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
 class CutomizedCtxManager:
@@ -378,7 +379,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION or TEST_WITH_ROCM,
         "Can't run fused SDPA on this platform",
     )
     def test_autocast_sdpa(self):
