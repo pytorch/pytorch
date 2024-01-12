@@ -91,8 +91,8 @@ static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC = {
 
 // Control the interval inside the watchdog thread to check the signal
 // from other timeout ranks to dump the debugging information.
-static std::vector<std::string> TORCH_NCCL_TIMEOUT_CHECK_MILSEC = {
-    "TORCH_NCCL_TIMEOUT_CHECK_MILSEC"};
+static std::vector<std::string> TORCH_NCCL_COORD_DUMP_CHECK_MS = {
+    "TORCH_NCCL_COORD_DUMP_CHECK_MS"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 

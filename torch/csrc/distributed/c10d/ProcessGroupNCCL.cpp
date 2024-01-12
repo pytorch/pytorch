@@ -747,7 +747,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   waitTimeoutDumpInMilSec_ =
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 2000);
   timeoutCheckIntervalMilSec_ =
-      getCvarInt(TORCH_NCCL_TIMEOUT_CHECK_MILSEC, 1000);
+      getCvarInt(TORCH_NCCL_COORD_DUMP_CHECK_MS, 1000);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
@@ -836,7 +836,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       << ", TORCH_NCCL_ENABLE_MONITORING: " << monitorThreadEnabled_.load()
       << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
       << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
-      << ", TORCH_NCCL_TIMEOUT_CHECK_MILSEC: " << timeoutCheckIntervalMilSec_
+      << ", TORCH_NCCL_COORD_DUMP_CHECK_MS: " << timeoutCheckIntervalMilSec_
       << ", NCCL_DEBUG: " << nccl_debug << ", ID=" << this->getID();
 
   if (options_->global_ranks_in_group.empty()) {
