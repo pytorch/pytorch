@@ -108,6 +108,8 @@ def get_with_pytest_shard(
 
         if duration and duration > THRESHOLD:
             num_shards = math.ceil(duration / THRESHOLD)
+            if test == "onnx/test_fx_op_consistency":
+                num_shards = 6
             for i in range(num_shards):
                 sharded_tests.append(
                     ShardedTest(test, i + 1, num_shards, duration / num_shards)

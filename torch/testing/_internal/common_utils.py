@@ -823,6 +823,7 @@ def wait_for_process(p, timeout=None):
         if exit_status is not None:
             return exit_status
         else:
+            print("Timed out waiting for process to exit after KeyboardInterrupt, killing and reraising.", flush=True)
             p.kill()
             raise
     except subprocess.TimeoutExpired:
@@ -837,9 +838,8 @@ def wait_for_process(p, timeout=None):
             pass
         if exit_status is not None:
             return exit_status
-        else:
-            p.kill()
-        print("waiting for process after keyboard interrupt took too long, killing")
+        print("Timed out waiting for process to exit after SIGINT, killing and reraising.", flush=True)
+        p.kill()
         raise
     except:  # noqa: B001,E722, copied from python core library
         p.kill()
