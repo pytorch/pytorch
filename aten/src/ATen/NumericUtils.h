@@ -45,18 +45,7 @@ inline C10_HOST_DEVICE bool _isnan(T val) {
   return std::isnan(val.real()) || std::isnan(val.imag());
 }
 
-template <
-    typename T,
-    typename std::enable_if<std::is_same<T, at::Half>::value, int>::type = 0>
-inline C10_HOST_DEVICE bool _isnan(T val) {
-  return at::_isnan(static_cast<float>(val));
-}
-
-template <
-    typename T,
-    typename std::enable_if<std::is_same<T, at::BFloat16>::value, int>::type =
-        0>
-inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {
+inline C10_HOST_DEVICE bool _isnan(at::Half val) {
   return at::_isnan(static_cast<float>(val));
 }
 
@@ -64,19 +53,11 @@ inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {
   return at::_isnan(static_cast<float>(val));
 }
 
-template <
-    typename T,
-    typename std::enable_if<std::is_same<T, at::Float8_e5m2>::value, int>::
-        type = 0>
-inline C10_HOST_DEVICE bool _isnan(T val) {
+inline C10_HOST_DEVICE bool _isnan(at::Float8_e5m2 val) {
   return val.isnan();
 }
 
-template <
-    typename T,
-    typename std::enable_if<std::is_same<T, at::Float8_e4m3fn>::value, int>::
-        type = 0>
-inline C10_HOST_DEVICE bool _isnan(T val) {
+inline C10_HOST_DEVICE bool _isnan(at::Float8_e4m3fn val) {
   return val.isnan();
 }
 
