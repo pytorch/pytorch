@@ -179,12 +179,12 @@ float randn_cpu(uint32_t seed, uint32_t offset) {
   return engine.randn(10);
 }
 
-uint64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high) {
+int64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high) {
   auto gen = at::Philox4_32(seed, 0, offset);
   uint64_t r0 = gen();
   uint64_t r1 = gen();
-  uint64_t result = r0 | (r1 << 32);
-  return (result % static_cast<uint64_t>(high - low)) + low;
+  int64_t result = static_cast<int64_t>(r0 | (r1 << 32));
+  return (result % (high - low)) + low;
 }
 
 template <typename T> struct AsIntegerType { typedef T type; };

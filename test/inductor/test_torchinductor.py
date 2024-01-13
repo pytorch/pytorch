@@ -8213,6 +8213,15 @@ class CommonTemplate:
         actual = torch.compile(fn)(a, b)
         self.assertEqual(ref, actual)
 
+    def test_randint_int64_mod(self):
+        # This used to not compile due to a wrong return type of randint64_cpu
+        # See https://github.com/pytorch/pytorch/issues/117435
+        def fn(n):
+            return torch.randint(low=-5, high=5, size=(n,), dtype=torch.int64) % 10
+
+        res = torch.compile(fn)(20)
+        self.assertTrue(torch.all((0 <= res) & (res < 10)).item())
+
 
 @dataclasses.dataclass
 class TestFailure:
