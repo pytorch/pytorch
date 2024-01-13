@@ -308,7 +308,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail_dynamic_fx_test(
-        error_message="Got invalid dimensions for input: arg0 for the following indices index: 0 Got: 3 Expected: 1"
+        error_message="[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input"
     )
     @skip_if_no_torchvision
     def test_shufflenet_v2(self):
