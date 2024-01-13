@@ -9,6 +9,13 @@ runs:
       shell: bash
       run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
 
+    - name: Start Docker daemon
+      shell: bash
+      continue-on-error: true
+      run: |
+        set -ex
+        sudo systemctl start docker
+
     - name: Stop all running docker containers
       if: always()
       shell: bash
@@ -78,13 +85,3 @@ runs:
       run: |
         # All GPUs are visible to the runner; visibility, if needed, will be set by run_test.py.
         echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-
-    - name: Clean up any existing AWS credentials on the runner
-      shell: bash
-      continue-on-error: true
-      run: |
-        set -ex
-
-        rm -f ~/.aws/credentials
-        # Debug Docker configs
-        cat ~/.config/docker/*
