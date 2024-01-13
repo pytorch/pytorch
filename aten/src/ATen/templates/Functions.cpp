@@ -30,12 +30,6 @@ Tensor TensorMaker::make_tensor() {
 
   std::size_t size_bytes = computeStorageSize();
 
-  if (data_ == nullptr) {
-    // We need to ensure that there's always a valid pointer or the underlying
-    // std::unique_ptr<> won't call the deleter (custom or context).
-    data_ = malloc(0);
-  }
-
   DataPtr data_ptr{};
   if (deleter_) {
     data_ptr = makeDataPtrFromDeleter();
@@ -85,7 +79,7 @@ Tensor TensorMaker::make_tensor() {
  }
 
  inline DataPtr TensorMaker::makeDataPtrFromDeleter() const {
-   return InefficientStdFunctionContext::makeDataPtr(data_, deleter_, *device_);
+   return InefficientStdFunctionContext::makeDataPtr(data_, std::move(deleter_), *device_);
  }
 
  inline DataPtr TensorMaker::makeDataPtrFromContext() noexcept {

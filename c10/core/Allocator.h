@@ -223,13 +223,20 @@ struct C10_API Allocator {
 // allocation InefficientStdFunctionContext, on top of the dynamic
 // allocation which is implied by std::function itself.
 struct C10_API InefficientStdFunctionContext {
-  std::unique_ptr<void, std::function<void(void*)>> ptr_;
+  void* ptr_;
+  std::function<void(void*)> deleter_;
   InefficientStdFunctionContext(
-      std::unique_ptr<void, std::function<void(void*)>>&& ptr)
-      : ptr_(std::move(ptr)) {}
+    void* ptr,
+    std::function<void(void*)> deleter)
+  : ptr_(ptr), deleter_(std::move(deleter)) {}
+  ~InefficientStdFunctionContext() {
+    if (deleter_) {
+      deleter_(ptr_);
+    }
+  }
   static DataPtr makeDataPtr(
       void* ptr,
-      const std::function<void(void*)>& deleter,
+      std::function<void(void*)> deleter,
       Device device);
 };
 
