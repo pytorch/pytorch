@@ -147,8 +147,9 @@ THIRDPARTY_SKIPLIST = (
 
 def _strip_init_py(s):
     # TODO: Once we require py3.9 use removesuffix instead.
-    if s.endswith("__init__.py"):
-        return s[:-11]
+    suffix = "__init__.py"
+    if s.endswith(suffix):
+        return s[:-len(suffix)]
     else:
         return s
 
