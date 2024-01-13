@@ -38,7 +38,6 @@ as optimization options for this group.
     only want to vary a single option, while keeping all others consistent
     between parameter groups.
 
-
 For example, this is very useful when one wants to specify per-layer learning rates::
 
     optim.SGD([
@@ -49,6 +48,24 @@ For example, this is very useful when one wants to specify per-layer learning ra
 This means that ``model.base``'s parameters will use the default learning rate of ``1e-2``,
 ``model.classifier``'s parameters will use a learning rate of ``1e-3``, and a momentum of
 ``0.9`` will be used for all parameters.
+
+Consider the following example related to the distinct penalization of parameters.
+Remember that :func:`~torch.nn.Module.parameters` returns an iterable that 
+contains all learnable parameters, including biases and other 
+parameters that may need distinct penalization. To address this, one can specify
+individual penalization weights for each parameter group::
+
+    bias_params = [p for name,p in self.named_parameters() if 'bias' in name]
+    others = [p for name,p in self.named_parameters() if 'bias' not in name]
+
+    optim.SGD([
+                    {'params': others },
+                    {'params': bias_params, 'weight_decay': 0}
+                ], weight_decay=1e-3, lr=1e-2)
+
+In this manner, bias terms are isolated from non-bias terms, and a ``weigth_decay``
+of ``0`` is set specifically for the bias terms, as to avoid any penalization for
+this group.
 
 Taking an optimization step
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
