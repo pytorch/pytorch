@@ -465,8 +465,8 @@ def forward(self, x_1):
         # TODO actually not decompose
         self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
-    mm = torch.ops.aten.mm.default(x_1, x_1)
-    add = torch.ops.aten.add.Tensor(mm, x_1);  mm = x_1 = None
+    matmul = torch.ops.aten.matmul.default(x_1, x_1)
+    add = torch.ops.aten.add.Tensor(matmul, x_1);  matmul = x_1 = None
     mul = torch.ops.aten.mul.Tensor(add, 5);  add = None
     return mul""")
 
@@ -491,9 +491,9 @@ def forward(self, x_1):
         # TODO actually not decompose
         self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
-    mm = torch.ops.aten.mm.default(x_1, x_1)
+    matmul = torch.ops.aten.matmul.default(x_1, x_1)
     transpose = torch.ops.aten.transpose.int(x_1, 1, 0);  x_1 = None
-    add = torch.ops.aten.add.Tensor(mm, transpose);  mm = transpose = None
+    add = torch.ops.aten.add.Tensor(matmul, transpose);  matmul = transpose = None
     view = torch.ops.aten.view.default(add, [2, 8]);  add = None
     return view""")
 
@@ -1018,6 +1018,25 @@ def forward(self, x_1, y_1):
     sym_size_int = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0);  y_1 = None
     return (sym_size_int, sym_size_int_1)""")
+
+    def test_deduped_shape(self):
+        def f(s0, s1, x, y):
+            return torch.functional.broadcast_shapes(x.size(), y.size()[0]), torch.empty(x.shape[0])
+
+        x = torch.empty(3, 1)
+        y = torch.empty(5)
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        shape_env = ShapeEnv()
+
+        with FakeTensorMode(shape_env=shape_env, static_shapes=False) as fake_mode:
+            x = fake_mode.from_tensor(x)
+            y = fake_mode.from_tensor(y)
+            r = str(make_fx(f, tracing_mode="real")(x.shape[0], y.shape[0], x, y).code).strip()
+            self.assertExpectedInline(r, """\
+def forward(self, s0_1, s1_1, x_1, y_1):
+    empty = torch.ops.aten.empty.memory_format([s0_1], device = device(type='cpu'), pin_memory = False)
+    return ((s0_1, s1_1), empty)""")
+
 
     def test_unary(self):
         def f(x):

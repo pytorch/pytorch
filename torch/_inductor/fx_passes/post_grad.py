@@ -3,7 +3,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict, namedtuple
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from sympy import Expr
 
@@ -381,7 +381,8 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
 
     assert new_size is not None
     dtype = functools.reduce(
-        torch.promote_types, [x.get_dtype() for x in itertools.chain(*inputs)]
+        torch.promote_types,
+        [x.get_dtype() for x in itertools.chain.from_iterable(inputs)],
     )
     device = inputs[0][0].get_device()
     kernel = ir.ConcatKernel(
@@ -747,6 +748,7 @@ def reinplace_inplaceable_ops(graph):
                 node, shared_view_nodes, copy_node=None
             )
 
+    replace_list: List[Tuple[Any, Any]] = []
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
             mutated_arg = node.args[inplaceable_op.mutated_arg]
@@ -771,6 +773,9 @@ def reinplace_inplaceable_ops(graph):
                     copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                     if copy_node is not None:
                         graph.erase_node(copy_node)
+                    for user in node.users:
+                        if user.target == operator.getitem and user.args[1] == arg:
+                            replace_list.append((user, mutated_arg))
                 else:
                     tensors_to_clone.append(arg)
             kwargs = dict(node.kwargs)
@@ -790,6 +795,9 @@ def reinplace_inplaceable_ops(graph):
                     graph.erase_node(copy_node)
 
                 node.target = inplaceable_op.inplace_op
+    for node, replacement in replace_list:
+        node.replace_all_uses_with(replacement)
+        graph.erase_node(node)
 
 
 @register_lowering_pattern(
