@@ -375,7 +375,7 @@ def create_submodule_from_subgraph(
             # TODO(future PR): this is ignoring kwargs, will need to support kwargs
             # for any fusion pattern which has them for a node that is not the
             # first node.
-            cur_args_copy = [cur_node_copy]  # type: ignore[has-type]
+            cur_args_copy = [cur_node_copy]  # type: ignore[has-type]  # noqa: F821
 
             if len(cur_node_orig.args) > 1:
                 for arg in cur_node_orig.args[1:]:

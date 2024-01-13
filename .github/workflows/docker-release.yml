@@ -11,8 +11,8 @@ on:
     branches:
       - nightly
     tags:
-      # Release candidate tags look like: v1.11.0-rc1
-      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      # We want to run this build on final release tag
+      - v[0-9]+.[0-9]+.[0-9]+
       - ciflow/nightly/*
 
 concurrency:
@@ -27,6 +27,8 @@ env:
   NO_BUILD_SUFFIX: true
   USE_BUILDX: 1
   WITH_PUSH: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
+
+permissions: read-all
 
 jobs:
   generate-matrix:
