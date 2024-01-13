@@ -225,10 +225,8 @@ struct C10_API Allocator {
 struct C10_API InefficientStdFunctionContext {
   void* ptr_;
   std::function<void(void*)> deleter_;
-  InefficientStdFunctionContext(
-    void* ptr,
-    std::function<void(void*)> deleter)
-  : ptr_(ptr), deleter_(std::move(deleter)) {}
+  InefficientStdFunctionContext(void* ptr, std::function<void(void*)> deleter)
+      : ptr_(ptr), deleter_(std::move(deleter)) {}
   ~InefficientStdFunctionContext() {
     if (deleter_) {
       deleter_(ptr_);
