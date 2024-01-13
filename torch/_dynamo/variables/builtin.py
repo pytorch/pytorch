@@ -484,6 +484,13 @@ class BuiltinVariable(VariableTracker):
             k: v.as_python_constant() for k, v in kwargs.items()
         }
 
+    def get_constant_handler(self, args, kwargs):
+        constant_args = check_constant_args(args, kwargs)
+        unspec_python_args = self.unspec_python_args(*args, **kwargs)
+        return self.can_constant_fold_through() and (
+            constant_args or unspec_python_args
+        )
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -492,14 +499,9 @@ class BuiltinVariable(VariableTracker):
 
         args = [v.realize() for v in args]
         kwargs = {k: v.realize() for k, v in kwargs.items()}
-        constant_args = check_constant_args(args, kwargs)
-        tensor_args = self.tensor_args(*args, **kwargs)
-        unspec_python_args = self.unspec_python_args(*args, **kwargs)
-        has_constant_handler = self.can_constant_fold_through() and (
-            constant_args or unspec_python_args
-        )
         assert isinstance(args, (list, tuple))
         assert isinstance(kwargs, dict)
+        tensor_args = self.tensor_args(*args, **kwargs)
 
         # args[0] is list and args[1] is unspec
         if self.fn is operator.getitem and not isinstance(
@@ -637,6 +639,7 @@ class BuiltinVariable(VariableTracker):
             try:
                 inspect.signature(handler).bind(tx, *args, **kwargs)
             except TypeError as exc:
+                has_constant_handler = self.get_constant_handler(args, kwargs)
                 if not has_constant_handler:
                     log.warning(
                         "incorrect arg count %s %s and no constant handler",
@@ -651,11 +654,17 @@ class BuiltinVariable(VariableTracker):
                 if result is not None:
                     return result
             except Unsupported as exc:
+                has_constant_handler = self.get_constant_handler(args, kwargs)
                 if not has_constant_handler:
                     raise
                 # Actually, we will handle this just fine
                 exc.remove_from_stats()
 
+        # NB: call to get_constant_handler is deliberately delayed post generic
+        # handler because get_constant_handler calls as_python_constant
+        # internally which realizes LazyVariableTracker for ConstantVariables,
+        # unnecessarily putting guards on objects which might not actually be used.
+        has_constant_handler = self.get_constant_handler(args, kwargs)
         if has_constant_handler:
             # constant fold
             return variables.ConstantVariable.create(

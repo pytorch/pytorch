@@ -769,6 +769,21 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref[1]["e"], res[1]["e"]))
         self.assertTrue(same(ref[1][param], res[1][param]))
 
+    def test_dict_tuple_lazy_guard(self):
+        @torch.compile(backend="eager")
+        def fn(x, y):
+            return torch.sin(x) * y[1]
+
+        fn(torch.randn(3), {1: 1, 2: 2})
+        # Changing the value of other key should not causing recompilation
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(3), {1: 1, 2: 3})
+
+        fn(torch.randn(3), (1, 2, 3))
+        # Changing the value of index 0, 2 (not 1) should not cause recompilation
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(3), (11, 2, 13))
+
     @make_test
     def test_call_dict1(x):
         d1 = dict()
