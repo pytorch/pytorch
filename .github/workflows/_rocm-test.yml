@@ -72,9 +72,21 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+    - name: Log in to Amazon ECR
+      uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+      env:
+        AWS_RETRY_MODE: standard
+        AWS_MAX_ATTEMPTS: "5"
+        AWS_DEFAULT_REGION: us-east-1
+      with:
+        shell: bash
+        timeout_minutes: 5
+        max_attempts: 3
+        retry_wait_seconds: 30
+        command: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity | grep Account |cut -f4 -d\")
+          aws ecr get-login-password --region "${AWS_DEFAULT_REGION}" | docker login --username AWS \
+              --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
 
       - name: Calculate docker image
         id: calculate-docker-image
