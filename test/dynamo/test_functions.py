@@ -2136,6 +2136,17 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 x = torch.randn(10)
                 self.assertEqual(opt_fn(x), fn(x))
 
+    def test_unary_fold_op(self):
+        for op in (operator.abs, abs, operator.pos, operator.neg):
+            with self.subTest(op=op):
+
+                def fn():
+                    a = range(-10, 10)
+                    return list(map(op, a))
+
+                opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+                self.assertEqual(opt_fn(), fn())
+
 
 instantiate_parametrized_tests(FunctionTests)
 
