@@ -458,6 +458,9 @@ class cpp:
     # Use funsafe-math-optimizations when compiling
     enable_unsafe_math_opt_flag = False
 
+    # Use ffp-contract when compiling
+    enable_floating_point_contract_flag = False
+
 
 # config specific to codegen/triton.py
 class triton:
