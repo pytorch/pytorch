@@ -112,6 +112,7 @@ class BuiltinVariable(VariableTracker):
             str.format,
             sum,
             type,
+            operator.abs,
             operator.pos,
             operator.neg,
             operator.not_,
@@ -155,6 +156,7 @@ class BuiltinVariable(VariableTracker):
     @functools.lru_cache(None)
     def _fx_graph_functions():
         fns = {
+            operator.abs,
             operator.pos,
             operator.neg,
             operator.not_,
