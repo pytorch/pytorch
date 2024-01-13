@@ -1190,9 +1190,9 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         local_1 = local_1 + 1
         return (local_0, local_1, local_...)
 
-    (x, i) = loop_body(x, i)
-    (x, i) = loop_body(x, i)
-    (x, i) = loop_body(x, i)
+    (i, x) = loop_body(0, x)
+    (i, x) = loop_body(1, x)
+    (i, x) = loop_body(2, x)
     # ... 7 more times
     ```
 
@@ -1213,7 +1213,8 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         "GET_YIELD_FROM_ITER",
         "SEND",
         "MAKE_FUNCTION",
-        "LOAD_DEREF",  # This could be supported in the future.
+        # This could be supported in the future.
+        "LOAD_DEREF",
         # Exceptions
         "RAISE_VARARGS",
         "SETUP_FINALLY",
@@ -1221,8 +1222,17 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # TODO: Nested loops are not supported for now.
         # We can support them by recursively calling this translation every time
         # for each nested loop, from the innermost loop to the outermost.
+        #
+        # E.g.
+        # loop1:
+        #   loop2:
+        #     loop3:
+        #
+        # Compile loop3, then loop2, then loop1
         "FOR_ITER",
         # These two are fine for the end of the loop body but not within.
+        # TODO: we can support these too. They just need to be transformed to the
+        # right RETURN_VALUEs (see code below for how to do that).
         "JUMP_BACKWARD",
         "JUMP_ABSOLUTE",
     }
@@ -1412,7 +1422,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_node = make_attr(tx, body_name)
 
-        previous_locals = args
+        previous_locals = list(args)
 
         example_value = pytree.tree_map_only(
             torch.fx.Proxy,
@@ -1429,7 +1439,6 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             return fn(*args)
 
         for i in val_range:
-            previous_locals = list(previous_locals)
             previous_locals[self.store_target] = i
             args_tmp = [body_node] + [a.as_proxy() for a in previous_locals]
             result_tuple = wrap_fx_proxy(
@@ -1442,7 +1451,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 ),
                 example_value=example_value,
             )
-            previous_locals = result_tuple.items
+            previous_locals = list(result_tuple.items)
 
         previous_locals = list(previous_locals)
         previous_locals[self.store_target] = i

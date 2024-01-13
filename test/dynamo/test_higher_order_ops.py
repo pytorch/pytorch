@@ -125,6 +125,9 @@ def default_args_generator(seed_value):
         yield new_args
 
 
+NUM_LOOPS = torch._dynamo.config.for_loop_medium_size_boundary
+
+
 class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def _assert_wrap_fallback(self, func, args, setup=lambda: None):
         counters.clear()
@@ -3728,6 +3731,58 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             AssertionError, "inputs to function body cannot alias outputs"
         ):
             _assert_tensors_nonaliasing(a, a)
+
+    def test_loop_to_higher_order_simple(self):
+        counters.clear()
+        cnt = CompileCounter()
+
+        @torch.compile()
+        def f(x):
+            res = x
+            for i in range(NUM_LOOPS):
+                res = res + i + x
+            return res
+
+        def eager(x):
+            res = x
+            for i in range(NUM_LOOPS):
+                res = res + i + x
+            return res
+
+        x = torch.tensor(1)
+        result = f(x)
+        print(result, eager(x))
+        self.assertEqual(result, eager(x))
+        assert False
+        # self.assertEqual(cnt.frame_count, 0)
+        print(cnt)
+        # raise Exception(f"{cnt}")
+
+    def test_loop_to_higher_order_namespace_consistent(self):
+        counters.clear()
+        cnt = CompileCounter()
+
+        @torch.compile()
+        def f(x):
+            res = x
+            for i in range(NUM_LOOPS):
+                res = res + i + x
+            return i
+
+        def eager(x):
+            res = x
+            for i in range(NUM_LOOPS):
+                res = res + i + x
+            return i
+
+        x = torch.randn(3)
+        result = f(x)
+        print(result, eager(x))
+        self.assertIsInstance(result, int)
+        self.assertEqual(result, eager(x))
+        # self.assertEqual(cnt.frame_count, 0)
+        print(cnt)
+        # raise Exception(f"{cnt}")
 
 
 if __name__ == "__main__":
