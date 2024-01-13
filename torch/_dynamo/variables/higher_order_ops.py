@@ -1218,6 +1218,10 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         "RAISE_VARARGS",
         "SETUP_FINALLY",
         "POP_EXCEPT",
+        # TODO: Nested loops are not supported for now.
+        # We can support them by recursively calling this translation every time
+        # for each nested loop, from the innermost loop to the outermost.
+        "FOR_ITER",
         # These two are fine for the end of the loop body but not within.
         "JUMP_BACKWARD",
         "JUMP_ABSOLUTE",
@@ -1225,14 +1229,11 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
     store_target: int
 
-    def __init__(
-        self, value: "RangeIteratorVariable", source: Optional[Source] = None, **kwargs
-    ):
+    def __init__(self, value: "RangeIteratorVariable", **kwargs):
         from ..source import GlobalSource
 
-        super().__init__(value, source, **kwargs)
+        super().__init__(value, source=GlobalSource("__builtins__.range"), **kwargs)
         self.store_target = -1
-        self.source = GlobalSource("range")
 
     @staticmethod
     def make_self(
@@ -1242,12 +1243,13 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         host_code_object: types.CodeType,
         loop_body_instructions: List["Instruction"],
         symbolic_locals: Dict[str, VariableTracker],
-        source: Optional[Source] = None,
-        **kwargs,
     ):
         from . import ConstantVariable
 
-        if len(value.unpack_var_sequence(tx)) < 100:
+        if (
+            len(value.unpack_var_sequence(tx))
+            < torch._dynamo.config.for_loop_medium_size_boundary
+        ):
             raise CannotConvertRangeToHigherOrder(
                 "Loop too small to consider optimizing"
             )
@@ -1263,10 +1265,15 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             raise CannotConvertRangeToHigherOrder(
                 "Control flow too complex for loop higher order op."
             )
+        # STORE_FAST always follows a FOR_ITER as CPython needs to store the next(iter) into the local
+        # E.g. in `for i in range(10)`, there is a `STORE_FAST i``
         assert loop_body_instructions[0].opname == "STORE_FAST"
         co_code: List[int] = []
+        loop_body = loop_body_instructions[1:-1]
+        if not loop_body:
+            raise CannotConvertRangeToHigherOrder("Empty loop body.")
         # We skip the first instruction as it's a STORE_FAST, while we skip the last as it's the JUMP_BACKWARD.
-        for inst in loop_body_instructions[1:-1]:
+        for inst in loop_body:
             co_code.extend((inst.opcode, inst.arg or 0))
             # 3.11 has inline cache entries too.
             if sys.version_info >= (3, 11):
@@ -1287,7 +1294,6 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         co_code = bytes(co_code)
         argcount = host_code_object.co_nlocals
         posonlyargcount = kwonlyargouncount = 0
-        # Add number of locals that the for loop introduces.
         nlocals = argcount
         stacksize = host_code_object.co_stacksize
         flags = 1
@@ -1354,7 +1360,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if code_object is None:
             raise CannotConvertRangeToHigherOrder("Could not construct code object")
 
-        obj = RangeHigherOrderVariable(value, source)
+        obj = RangeHigherOrderVariable(value)
         obj.func = types.FunctionType(code_object, real_globals)
         obj.args = [
             symbolic_locals.get(k) or ConstantVariable.create(None) for k in varnames
@@ -1365,7 +1371,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         return obj
 
     def functionalize(self, tx) -> VariableTracker:
-        """Converts a for loop into a function call. Returns the modified
+        """Converts a for loop into a series of function calls. Returns the modified
         locals as a tuple of Proxies and VariableTrackers.
         """
         from .builder import wrap_fx_proxy
@@ -1377,6 +1383,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args[self.store_target] = val_range[0]
 
         try:
+            # Convert the entire loop body to a subgraph.
             (
                 (body_r, body_spec),
                 body_graph,
