@@ -78,8 +78,8 @@ jobs:
   libtorch-cpu-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: libtorch-cpu-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -142,8 +142,8 @@ jobs:
   libtorch-cuda11_8-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: libtorch-cuda11_8-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -207,8 +207,8 @@ jobs:
   libtorch-cuda12_1-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: libtorch-cuda12_1-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -313,8 +313,8 @@ jobs:
   libtorch-rocm5_7-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: libtorch-rocm5_7-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -419,8 +419,8 @@ jobs:
   libtorch-rocm6_0-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: libtorch-rocm6_0-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch

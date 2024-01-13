@@ -80,8 +80,8 @@ jobs:
   manywheel-py3_8-cpu-aarch64-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: manywheel-py3_8-cpu-aarch64-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -143,8 +143,8 @@ jobs:
   manywheel-py3_9-cpu-aarch64-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: manywheel-py3_9-cpu-aarch64-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -206,8 +206,8 @@ jobs:
   manywheel-py3_10-cpu-aarch64-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: manywheel-py3_10-cpu-aarch64-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -269,8 +269,8 @@ jobs:
   manywheel-py3_11-cpu-aarch64-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: manywheel-py3_11-cpu-aarch64-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -332,8 +332,8 @@ jobs:
   manywheel-py3_12-cpu-aarch64-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: manywheel-py3_12-cpu-aarch64-test
     with:
       PYTORCH_ROOT: /pytorch

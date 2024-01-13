@@ -256,8 +256,8 @@ jobs:
   conda-py3_8-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: conda-py3_8-cpu-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -500,8 +500,8 @@ jobs:
   conda-py3_8-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: conda-py3_8-cuda11_8-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -745,8 +745,8 @@ jobs:
   conda-py3_8-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: conda-py3_8-cuda12_1-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -988,8 +988,8 @@ jobs:
   conda-py3_9-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: conda-py3_9-cpu-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1232,8 +1232,8 @@ jobs:
   conda-py3_9-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: conda-py3_9-cuda11_8-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1477,8 +1477,8 @@ jobs:
   conda-py3_9-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: conda-py3_9-cuda12_1-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1720,8 +1720,8 @@ jobs:
   conda-py3_10-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: conda-py3_10-cpu-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1964,8 +1964,8 @@ jobs:
   conda-py3_10-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: conda-py3_10-cuda11_8-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2209,8 +2209,8 @@ jobs:
   conda-py3_10-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: conda-py3_10-cuda12_1-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2452,8 +2452,8 @@ jobs:
   conda-py3_11-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: conda-py3_11-cpu-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2696,8 +2696,8 @@ jobs:
   conda-py3_11-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: conda-py3_11-cuda11_8-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2941,8 +2941,8 @@ jobs:
   conda-py3_11-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: conda-py3_11-cuda12_1-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3184,8 +3184,8 @@ jobs:
   conda-py3_12-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: conda-py3_12-cpu-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3428,8 +3428,8 @@ jobs:
   conda-py3_12-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: conda-py3_12-cuda11_8-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3673,8 +3673,8 @@ jobs:
   conda-py3_12-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: conda-py3_12-cuda12_1-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch

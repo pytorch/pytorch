@@ -134,8 +134,8 @@ jobs:
   libtorch-cpu-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
     with:
       PYTORCH_ROOT: /pytorch

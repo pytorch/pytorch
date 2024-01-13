@@ -54,8 +54,8 @@
 !{{ config["build_name"] }}-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
 {%- if has_test %}
     needs: !{{ config["build_name"] }}-test
 {%- else %}

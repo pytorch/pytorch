@@ -131,8 +131,8 @@ jobs:
   wheel-py3_8-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: wheel-py3_8-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
@@ -250,8 +250,8 @@ jobs:
   wheel-py3_9-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: wheel-py3_9-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
@@ -369,8 +369,8 @@ jobs:
   wheel-py3_10-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: wheel-py3_10-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
@@ -488,8 +488,8 @@ jobs:
   wheel-py3_11-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: wheel-py3_11-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
@@ -607,8 +607,8 @@ jobs:
   wheel-py3_12-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
-        id-token: write
-        contents: read
+      id-token: write
+      contents: read
     needs: wheel-py3_12-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
