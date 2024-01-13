@@ -17,9 +17,6 @@ on:
       - 'ciflow/binaries/*'
       - 'ciflow/binaries_libtorch/*'
   workflow_dispatch:
-permissions:
-  id-token: write
-  contents: read
 
 env:
   # Needed for conda builds
@@ -80,6 +77,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cpu-shared-with-deps-pre-cxx11-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: libtorch-cpu-shared-with-deps-pre-cxx11-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -141,6 +141,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda11_8-shared-with-deps-pre-cxx11-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: libtorch-cuda11_8-shared-with-deps-pre-cxx11-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -203,6 +206,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda12_1-shared-with-deps-pre-cxx11-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: libtorch-cuda12_1-shared-with-deps-pre-cxx11-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -306,6 +312,9 @@ jobs:
         uses: ./.github/actions/teardown-rocm
   libtorch-rocm5_7-shared-with-deps-pre-cxx11-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: libtorch-rocm5_7-shared-with-deps-pre-cxx11-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -409,6 +418,9 @@ jobs:
         uses: ./.github/actions/teardown-rocm
   libtorch-rocm6_0-shared-with-deps-pre-cxx11-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: libtorch-rocm6_0-shared-with-deps-pre-cxx11-test
     with:
       PYTORCH_ROOT: /pytorch

@@ -29,12 +29,6 @@ on:
 {%- endfor %}
   workflow_dispatch:
 
-{%- if branches == "nightly" %}
-permissions:
-  id-token: write
-  contents: read
-{%- endif %}
-
 env:
   # Needed for conda builds
   {%- if "aarch64" in build_environment %}

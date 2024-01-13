@@ -17,9 +17,6 @@ on:
       - 'ciflow/binaries/*'
       - 'ciflow/binaries_wheel/*'
   workflow_dispatch:
-permissions:
-  id-token: write
-  contents: read
 
 env:
   # Needed for conda builds
@@ -133,6 +130,9 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_8-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: wheel-py3_8-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
@@ -249,6 +249,9 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_9-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: wheel-py3_9-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
@@ -365,6 +368,9 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_10-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: wheel-py3_10-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
@@ -481,6 +487,9 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_11-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: wheel-py3_11-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
@@ -597,6 +606,9 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_12-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: wheel-py3_12-cpu-build
     with:
       PYTORCH_ROOT: /pytorch

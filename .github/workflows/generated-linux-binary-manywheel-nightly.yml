@@ -17,9 +17,6 @@ on:
       - 'ciflow/binaries/*'
       - 'ciflow/binaries_wheel/*'
   workflow_dispatch:
-permissions:
-  id-token: write
-  contents: read
 
 env:
   # Needed for conda builds
@@ -78,6 +75,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_8-cpu-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -136,6 +136,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cpu-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_8-cpu-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -196,6 +199,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_8-cuda11_8-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -256,6 +262,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_8-cuda12_1-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -356,6 +365,9 @@ jobs:
         uses: ./.github/actions/teardown-rocm
   manywheel-py3_8-rocm5_7-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_8-rocm5_7-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -456,6 +468,9 @@ jobs:
         uses: ./.github/actions/teardown-rocm
   manywheel-py3_8-rocm6_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_8-rocm6_0-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -513,6 +528,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_9-cpu-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -571,6 +589,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_9-cpu-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -631,6 +652,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_9-cuda11_8-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -691,6 +715,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_9-cuda12_1-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -791,6 +818,9 @@ jobs:
         uses: ./.github/actions/teardown-rocm
   manywheel-py3_9-rocm5_7-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_9-rocm5_7-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -891,6 +921,9 @@ jobs:
         uses: ./.github/actions/teardown-rocm
   manywheel-py3_9-rocm6_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_9-rocm6_0-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -948,6 +981,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_10-cpu-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -1006,6 +1042,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_10-cpu-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -1066,6 +1105,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_10-cuda11_8-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -1126,6 +1168,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_10-cuda12_1-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -1226,6 +1271,9 @@ jobs:
         uses: ./.github/actions/teardown-rocm
   manywheel-py3_10-rocm5_7-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_10-rocm5_7-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -1326,6 +1374,9 @@ jobs:
         uses: ./.github/actions/teardown-rocm
   manywheel-py3_10-rocm6_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_10-rocm6_0-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -1383,6 +1434,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_11-cpu-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -1441,6 +1495,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_11-cpu-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -1501,6 +1558,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_11-cuda11_8-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -1561,6 +1621,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_11-cuda12_1-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -1661,6 +1724,9 @@ jobs:
         uses: ./.github/actions/teardown-rocm
   manywheel-py3_11-rocm5_7-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_11-rocm5_7-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -1761,6 +1827,9 @@ jobs:
         uses: ./.github/actions/teardown-rocm
   manywheel-py3_11-rocm6_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_11-rocm6_0-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -1818,6 +1887,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_12-cpu-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -1876,6 +1948,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_12-cpu-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -1936,6 +2011,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_12-cuda11_8-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -1996,6 +2074,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_12-cuda12_1-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -2096,6 +2177,9 @@ jobs:
         uses: ./.github/actions/teardown-rocm
   manywheel-py3_12-rocm5_7-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_12-rocm5_7-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -2196,6 +2280,9 @@ jobs:
         uses: ./.github/actions/teardown-rocm
   manywheel-py3_12-rocm6_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+        id-token: write
+        contents: read
     needs: manywheel-py3_12-rocm6_0-test
     with:
       PYTORCH_ROOT: /pytorch
