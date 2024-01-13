@@ -33,7 +33,7 @@ class TestSortAndSelect(TestCase):
                 # see above
                 return ((b != b) | (a <= b)).all().item()
         else:
-            error(f'unknown order "{order}", must be "ascending" or "descending"')
+            error(f'unknown order "{order}", must be "ascending" or "descending"')  # noqa: F821
 
         are_ordered = True
         for k in range(1, SIZE):
@@ -437,6 +437,12 @@ class TestSortAndSelect(TestCase):
         t = torch.randn((2, 10000), device=device)
         compare(t, 2000, 1, True)
         compare(t, 2000, 1, False)
+
+    def test_topk_quantized_scalar_input(self):
+        # Calling topk on a quantized scalar input used to segfault,
+        # see https://github.com/pytorch/pytorch/issues/116324
+        x = torch.quantize_per_tensor(torch.randn(()), 0.1, 10, torch.qint8)
+        x.topk(1)
 
     def test_topk_arguments(self, device):
         q = torch.randn(10, 2, 10, device=device)

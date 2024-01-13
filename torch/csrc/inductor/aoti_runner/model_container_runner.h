@@ -24,10 +24,12 @@ class TORCH_API AOTIModelContainerRunner {
   ~AOTIModelContainerRunner();
 
   std::vector<at::Tensor> run(
-      std::vector<at::Tensor> inputs,
-      AOTInductorStreamHandle cuda_stream_handle = nullptr,
-      AOTIProxyExecutorHandle proxy_executor_handle = nullptr);
+      std::vector<at::Tensor>& inputs,
+      AOTInductorStreamHandle cuda_stream_handle = nullptr);
 
+  std::unordered_map<std::string, std::string> getConstantNamesToOriginalFQNs()
+      const;
+  std::unordered_map<std::string, int32_t> getConstantNamesToDtypes() const;
   void update_inactive_constant_buffer(const TensorConstantMap& const_map);
   void update_constant_buffer(
       const TensorConstantMap& const_map,
@@ -35,21 +37,29 @@ class TORCH_API AOTIModelContainerRunner {
       bool validate_full_updates);
   void swap_constant_buffer();
 
-  std::vector<const char*> get_call_spec();
-
-  AOTIModelContainerRunner(
-      const char* model_path,
-      size_t num_models,
-      bool is_cpu,
-      const char* cubin_dir);
+  std::vector<std::string> get_call_spec();
 
  protected:
+  AOTIModelContainerRunner(
+      const std::string& model_so_path,
+      size_t num_models,
+      bool is_cpu,
+      const std::string& cubin_dir);
+
   std::unique_ptr<at::DynamicLibrary> model_so_;
   decltype(&AOTInductorModelContainerCreate) create_func_{nullptr};
   decltype(&AOTInductorModelContainerDelete) delete_func_{nullptr};
   decltype(&AOTInductorModelContainerGetNumOutputs) get_num_outputs_func_{
       nullptr};
   decltype(&AOTInductorModelContainerRun) run_func_{nullptr};
+  decltype(&AOTInductorModelContainerGetNumConstants) get_num_constants_func_{
+      nullptr};
+  decltype(&AOTInductorModelContainerGetConstantName) get_constant_name_func_{
+      nullptr};
+  decltype(&AOTInductorModelContainerGetConstantOriginalFQN)
+      get_constant_original_fqn_func_{nullptr};
+  decltype(&AOTInductorModelContainerGetConstantDtype) get_constant_dtype_func_{
+      nullptr};
   decltype(&AOTInductorModelContainerUpdateConstantBuffer)
       update_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerUpdateInactiveConstantBuffer)
@@ -57,7 +67,12 @@ class TORCH_API AOTIModelContainerRunner {
   decltype(&AOTInductorModelContainerSwapConstantBuffer)
       swap_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerGetCallSpec) get_call_spec_func_{nullptr};
+
   AOTInductorModelContainerHandle container_handle_ = nullptr;
+
+  // TODO: need an OSS proxy executor implementation. For now,
+  // proxy_executor_handle_ will always be nullptr.
+  AOTIProxyExecutorHandle proxy_executor_handle_ = nullptr;
 };
 
 } // namespace torch::inductor

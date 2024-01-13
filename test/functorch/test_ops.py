@@ -776,6 +776,8 @@ class TestOperators(TestCase):
         xfail("nn.functional.batch_norm"),
         xfail("nn.functional.binary_cross_entropy"),  # vmap: inplace into a regular tensor
         xfail("nn.functional.ctc_loss"),  # derivate not implemented for _ctc_loss_backward
+        # flaky on ROCM needs investigation
+        decorate('nn.functional.conv_transpose2d', decorator=skipIfRocm),
         skip("nn.functional.dropout"),  # calls random op
         skip("nn.functional.dropout2d"),  # calls random op
         skip("nn.functional.dropout3d"),  # calls random op

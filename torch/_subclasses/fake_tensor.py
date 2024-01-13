@@ -88,7 +88,11 @@ class UnsupportedOperatorException(RuntimeError):
     func: OpOverload
 
 
-_device_not_kwarg_ops = (
+def ordered_set(*items):
+    return {k: True for k in items}
+
+
+_device_not_kwarg_ops = ordered_set(
     aten._resize_output_.default,
     aten._nested_tensor_from_tensor_list.default,
     aten._nested_tensor_from_tensor_list.out,
@@ -121,7 +125,7 @@ def contains_tensor_types(type):
     )
 
 
-_like_tensor_constructors = (
+_like_tensor_constructors = ordered_set(
     aten.empty_like.default,
     aten.empty_like.out,
     aten.full_like.default,
@@ -410,25 +414,36 @@ class FakeTensorConverter:
         )
 
 
-op_implementations = []
+op_implementations_dict = {}
+op_implementations_checks = []
 
 
 def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverload]):
     def impl_decorator(op_impl):
-        global op_implementations
         if isinstance(run_impl_check, OpOverload):
-            op_implementations.append((lambda func: func == run_impl_check, op_impl))
+            assert (
+                run_impl_check not in op_implementations_dict
+            ), f"duplicate registration: {run_impl_check}"
+            op_implementations_dict[run_impl_check] = op_impl
+        elif isinstance(run_impl_check, (list, tuple)):
+            for op in run_impl_check:
+                register_op_impl(op)(op_impl)
         else:
-            op_implementations.append((run_impl_check, op_impl))
+            assert callable(run_impl_check)
+            op_implementations_checks.append((run_impl_check, op_impl))
 
         return op_impl
 
     return impl_decorator
 
 
-@register_op_impl(
-    lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors)
-)
+@register_op_impl(op_implementations_dict.__contains__)
+def dispatch_to_op_implementations_dict(fake_mode, func, *args, **kwargs):
+    return op_implementations_dict[func](fake_mode, func, *args, **kwargs)
+
+
+@register_op_impl(_is_tensor_constructor)
+@register_op_impl([*_like_tensor_constructors])
 def constructors(fake_mode, func, *args, **kwargs):
     assert func not in _non_kwarg_device_constructors
     _, new_kwargs = normalize_function(
@@ -452,7 +467,8 @@ def constructors(fake_mode, func, *args, **kwargs):
     return FakeTensor(fake_mode, r, out_device)
 
 
-@register_op_impl(lambda func: func in (aten.to.prim_Device, aten.to.device))
+@register_op_impl(aten.to.prim_Device)
+@register_op_impl(aten.to.device)
 def non_kwarg_to(fake_mode, func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args, kwargs, normalize_to_only_use_kwargs=True
@@ -529,7 +545,7 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
 
 
-@register_op_impl(lambda func: func is aten.repeat_interleave.Tensor)
+@register_op_impl(aten.repeat_interleave.Tensor)
 def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     if output_size is None:
         if (
@@ -548,7 +564,7 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     return repeats.new_empty(output_size)
 
 
-@register_op_impl(lambda func: func is torch.ops.aten._local_scalar_dense.default)
+@register_op_impl(torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(fake_mode, func, arg):
     if fake_mode.shape_env is None or not fake_mode.shape_env.allow_scalar_outputs:
         # Without symints/symfloats, cannot handle this
@@ -563,7 +579,7 @@ def local_scalar_dense(fake_mode, func, arg):
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
 
 
-@register_op_impl(lambda func: func is torch.ops.aten.nonzero.default)
+@register_op_impl(torch.ops.aten.nonzero.default)
 def nonzero(fake_mode, func, arg):
     if (
         fake_mode.shape_env is None
@@ -607,7 +623,7 @@ def nonzero(fake_mode, func, arg):
     return arg.new_empty((arg.nonzero_memo, arg.dim()), dtype=torch.int64)
 
 
-@register_op_impl(lambda func: func is torch.ops.aten.masked_select.default)
+@register_op_impl(torch.ops.aten.masked_select.default)
 def masked_select(fake_mode, func, self, mask):
     if (
         fake_mode.shape_env is None
@@ -627,9 +643,9 @@ def masked_select(fake_mode, func, self, mask):
         has_free_symbols,
     )
 
-    if not has_free_symbols(arg.numel()):
-        if arg.numel() >= 2:
-            maxval = int(arg.numel())
+    if not has_free_symbols(self.numel()):
+        if self.numel() > 2:
+            maxval = int(self.numel())
 
     _constrain_range_for_size(nnz, max=maxval)
 
@@ -666,8 +682,11 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
     return FakeTensor(fake_mode, out, out_device)
 
 
+_is_builtin_namespaces = ordered_set("aten", "prims", "prim")
+
+
 def is_builtin(op):
-    return op.namespace in ("aten", "prims", "prim")
+    return op.namespace in _is_builtin_namespaces
 
 
 def has_meta(func):
@@ -782,14 +801,33 @@ def index_put_impl(fake_mode, func, *args, **kwargs):
         return out
 
 
-@register_op_impl(lambda fn: fn in _device_not_kwarg_ops)
+@register_op_impl(aten._nested_tensor_from_tensor_list.default)
+@register_op_impl(aten._nested_tensor_from_tensor_list.out)
+def nested_tensors_unsupported(fake_mode, func, *args, **kwargs):
+    raise UnsupportedOperatorException(
+        "torch.compile does not support strided NestedTensor"
+    )
+
+
+@register_op_impl(
+    [
+        x
+        for x in _device_not_kwarg_ops
+        if x
+        not in (
+            # these are already registered elsewhere
+            aten.to.device,
+            aten.to.prim_Device,
+            aten._nested_tensor_from_tensor_list.default,
+            aten._nested_tensor_from_tensor_list.out,
+        )
+    ]
+)
 def nyi(fake_mode, func, *args, **kwargs):
     assert func not in _device_not_kwarg_ops, f"NYI: {func}"
 
 
-@register_op_impl(
-    lambda func: func in (aten.convolution.default, aten.convolution_backward.default)
-)
+@register_op_impl([aten.convolution.default, aten.convolution_backward.default])
 def conv(fake_mode, func, *args, **kwargs):
     _, kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -1465,41 +1503,22 @@ class FakeTensorMode(TorchDispatchMode):
                 torch._C._set_dispatch_mode(maybe_prev_fake_mode)
 
     def dispatch(self, func, types, args=(), kwargs=None):
-        kwargs = kwargs if kwargs else {}
+        kwargs = kwargs or {}
         log.debug("%s %s %s", func, args, kwargs)
 
-        if func == torch.ops.prim.device.default:
-            # NB: Don't use is_our_fake, just serve the fake information
-            # as is.  Notice we don't use 'self'; we use args[0].fake_mode
-            # because they may not be the same.  It would also be possible
-            # to return NotImplemented here, in which case the FakeTensor
-            # handler on args[0] would handle it, but we're being nice and
-            # short-circuiting quickly.
-            assert len(args) == 1 and isinstance(args[0], FakeTensor)
-            if args[0].fake_mode.in_kernel_invocation:
-                return torch.device("meta")
-            else:
-                return args[0].fake_device
-        elif func is torch.ops.aten.size.default:
-            return tuple(int(s) for s in args[0].size())
-        elif func is torch.ops.aten.stride.default:
-            return tuple(int(s) for s in args[0].stride())
-        elif func is torch.ops.aten.storage_offset.default:
-            return int(args[0].storage_offset())
+        if func in _DISPATCH_META_HANDLERS:
+            return _DISPATCH_META_HANDLERS[func](args)
 
         if log.getEffectiveLevel() <= logging.DEBUG:
             log.debug(
                 "%sFakeTensorMode.__torch_dispatch__: %s", " " * RECURSION_COUNT, func
             )
+            # NOTE: incr is intentionally unused for a RAII pattern
             incr = IncrementRecursionCount()
 
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]
-        if func in {
-            torch.ops.aten.is_coalesced.default,
-            torch.ops.aten.dense_dim.default,
-            torch.ops.aten.sparse_dim.default,
-        }:
+        if func in _DISPATCH_HANDLE_DIRECLTY:
             # NB: no_dispatch is ok here too, this func is very simple
             with in_kernel_invocation_manager(self):
                 return func(*args, **kwargs)
@@ -1687,48 +1706,11 @@ class FakeTensorMode(TorchDispatchMode):
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors
         # and then afterwards wrapping them to a FakeTensor
-        for run_impl_check, op_impl in op_implementations:
-            if func in (
-                aten._nested_tensor_from_tensor_list.default,
-                aten._nested_tensor_from_tensor_list.out,
-            ):
-                raise UnsupportedOperatorException(
-                    "torch.compile does not support strided NestedTensor"
-                )
+        for run_impl_check, op_impl in op_implementations_checks:
             if run_impl_check(func):
                 op_impl_out = op_impl(self, func, *args, **kwargs)
                 if op_impl_out != NotImplemented:
                     return op_impl_out
-
-        def can_run_unsafe_fallback(func: OpOverload):
-            if not self.allow_fallback_kernels:
-                return False
-            # It's OK to try the fallback for built-in ops (e.g. aten, prims)
-            # because we control and test these but the fallback leads to unexpected behavior
-            # in user-defined custom ops
-            #
-            # WARNING: DO NOT add any additional namespaces/operators here if they refer to operators
-            # outside of the pytorch/pytorch library! Any pre-existing things here
-            # are either in the pytorch/pytorch library or have been grandfathered in.
-            # The fallback does not always work and MAY CRASH and emit unreadable error messages
-            # so it should not be allowed by default.
-            allowed_namespaces = {
-                "debugprims",
-                "prims",
-                "aten",
-                "xla",
-                "vision",
-                "torchtext",
-                "torchaudio",
-                "quantized",
-            }
-            grandfathered_ops_FIXME = {
-                "fbgemm::gmm",
-            }
-            return (
-                func.namespace in allowed_namespaces
-                or func.name() in grandfathered_ops_FIXME
-            )
 
         def maybe_run_unsafe_fallback(error=None):
             # We infer the meta of a custom ops that return None to just
@@ -1737,7 +1719,7 @@ class FakeTensorMode(TorchDispatchMode):
             if can_generate_trivial_abstract_impl(func):
                 return None
             # no meta kernel registered, fallback to kernel for the device
-            if has_symbolic_sizes or not can_run_unsafe_fallback(func):
+            if has_symbolic_sizes or not self.can_run_unsafe_fallback(func):
                 raise UnsupportedOperatorException(func)
             if error is None:
                 error = UnsupportedOperatorException(func)
@@ -1759,6 +1741,33 @@ class FakeTensorMode(TorchDispatchMode):
 
         return self.wrap_meta_outputs_with_default_device_logic(
             r, func, flat_args, device=kwargs.get("device")
+        )
+
+    # WARNING: DO NOT add any additional namespaces/operators here if they refer to operators
+    # outside of the pytorch/pytorch library! Any pre-existing things here
+    # are either in the pytorch/pytorch library or have been grandfathered in.
+    # The fallback does not always work and MAY CRASH and emit unreadable error messages
+    # so it should not be allowed by default.
+    _can_run_unsafe_fallback_allowed_namespaces = ordered_set(
+        "debugprims",
+        "prims",
+        "aten",
+        "xla",
+        "vision",
+        "torchtext",
+        "torchaudio",
+        "quantized",
+    )
+
+    def can_run_unsafe_fallback(self, func: OpOverload):
+        if not self.allow_fallback_kernels:
+            return False
+        # It's OK to try the fallback for built-in ops (e.g. aten, prims)
+        # because we control and test these but the fallback leads to unexpected behavior
+        # in user-defined custom ops
+        return (
+            func.namespace in self._can_run_unsafe_fallback_allowed_namespaces
+            or func.name() == "fbgemm::gmm"
         )
 
     # [subclass inputs]
@@ -1862,26 +1871,26 @@ class FakeTensorMode(TorchDispatchMode):
 
         return tree_map(wrap, r)
 
+    _cpp_meta_supports_symint = ordered_set(
+        aten.empty.memory_format,
+        aten.empty_strided.default,
+        aten.as_strided_scatter.default,
+        aten.as_strided.default,
+        aten.as_strided_.default,
+        aten.zeros.default,
+        aten.detach.default,
+        aten.view_as_real.default,
+        aten.view_as_complex.default,
+        aten.set_.source_Storage_storage_offset,
+        aten._sparse_coo_tensor_with_dims_and_tensors.default,
+    )
+
     def cpp_meta_supports_symint(self, func):
         if torch.Tag.view_copy in func.tags:
             return True
-        return func in [
-            aten.empty.memory_format,
-            aten.empty_strided.default,
-            aten.as_strided_scatter.default,
-            aten.as_strided.default,
-            aten.as_strided_.default,
-            aten.zeros.default,
-            aten.detach.default,
-            aten.view_as_real.default,
-            aten.view_as_complex.default,
-            aten.set_.source_Storage_storage_offset,
-            aten._sparse_coo_tensor_with_dims_and_tensors.default,
-        ]
+        return func in self._cpp_meta_supports_symint
 
-    @property
-    def lift_fns(self):
-        return (aten.lift_fresh.default, aten.lift_fresh_copy.default)
+    lift_fns = ordered_set(aten.lift_fresh.default, aten.lift_fresh_copy.default)
 
     def may_turn_const(self, t):
         return (
@@ -2049,3 +2058,31 @@ class FakeCopyMode(TorchFunctionMode):
         else:
             with torch._C.DisableTorchFunctionSubclass():
                 return func(*args, **kwargs)
+
+
+def _device_handler(args):
+    # NB: Don't use is_our_fake, just serve the fake information
+    # as is.  Notice we don't use 'self'; we use args[0].fake_mode
+    # because they may not be the same.  It would also be possible
+    # to return NotImplemented here, in which case the FakeTensor
+    # handler on args[0] would handle it, but we're being nice and
+    # short-circuiting quickly.
+    assert len(args) == 1 and isinstance(args[0], FakeTensor)
+    if args[0].fake_mode.in_kernel_invocation:
+        return torch.device("meta")
+    else:
+        return args[0].fake_device
+
+
+_DISPATCH_META_HANDLERS = {
+    torch.ops.prim.device.default: _device_handler,
+    torch.ops.aten.size.default: lambda args: tuple(int(s) for s in args[0].size()),
+    torch.ops.aten.stride.default: lambda args: tuple(int(s) for s in args[0].stride()),
+    torch.ops.aten.storage_offset.default: lambda args: int(args[0].storage_offset()),
+}
+
+_DISPATCH_HANDLE_DIRECLTY = ordered_set(
+    torch.ops.aten.is_coalesced.default,
+    torch.ops.aten.dense_dim.default,
+    torch.ops.aten.sparse_dim.default,
+)

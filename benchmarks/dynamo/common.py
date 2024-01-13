@@ -61,12 +61,21 @@ from torch._dynamo.testing import (
     reset_rng_state,
     same,
 )
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 
 try:
-    from torch._dynamo.utils import clone_inputs, graph_break_reasons
-    from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
+    from torch._dynamo.utils import (
+        clone_inputs,
+        graph_break_reasons,
+        maybe_enable_compiled_autograd,
+    )
+    from torch._inductor.utils import fresh_inductor_cache
 except ImportError:
-    from _dynamo.utils import clone_inputs, graph_break_reasons
+    from _dynamo.utils import (
+        clone_inputs,
+        graph_break_reasons,
+        maybe_enable_compiled_autograd,
+    )
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -235,6 +244,12 @@ CI_USE_SGD = {
     "mobilevit_s",
     "pytorch_CycleGAN_and_pix2pix",
     "vision_maskrcnn",
+    "resmlp_12_224",
+    "dlrm",
+    "resnet50",
+    "dm_nfnet_f0",
+    "pit_b_224",
+    "tf_mixnet_l",
 }
 
 
@@ -655,7 +670,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             # call mark_step between the 2 calls to make the comparison fair.
             maybe_mark_step(args)
 
-            with maybe_mark_profile(p=p, mark="actual"):
+            with maybe_mark_profile(p=p, mark="actual"), maybe_enable_compiled_autograd(
+                args.compiled_autograd
+            ):
                 timings[rep, 1], actual_output = timed(
                     model,
                     frozen_model_iter_fn,
@@ -666,7 +683,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                 )
 
     if args.export_profiler_trace:
-        name = args.profiler_trace_name + "_" + model.name + ".json"
+        name = args.profiler_trace_name + "_" + model.name
+        if hasattr(args, "rank"):
+            name += f"_rank_{args.rank}"
+        name += ".json"
         name = os.path.join(torch._dynamo.config.base_dir, name)
         p.export_chrome_trace(name)
     median = np.median(timings, axis=0)
@@ -1107,14 +1127,12 @@ class AOTInductorModelCache:
 
             so_path = torch._export.aot_compile(model, example_args, example_kwargs)
 
-            module = torch.utils.cpp_extension.load_inline(
-                name="aot_inductor",
-                cpp_sources=[aot_inductor_launcher(so_path, device)],
-                functions=["run", "get_call_spec"],
-                with_cuda=(device == "cuda"),
+            runner = (
+                torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
+                if device == "cpu"
+                else torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1)
             )
-
-            cls.cache[key] = module
+            cls.cache[key] = runner
 
         return cls.cache[key]
 
@@ -1134,8 +1152,8 @@ def export(model, example_inputs):
 
 
 def export_aot_inductor(model, example_inputs, device):
-    module = AOTInductorModelCache.load(model, example_inputs, device)
-    call_spec = module.get_call_spec()
+    runner = AOTInductorModelCache.load(model, example_inputs, device)
+    call_spec = runner.get_call_spec()
     in_spec = pytree.treespec_loads(call_spec[0])
     out_spec = pytree.treespec_loads(call_spec[1])
 
@@ -1145,7 +1163,7 @@ def export_aot_inductor(model, example_inputs, device):
         flat_inputs = fx_pytree.tree_flatten_spec(
             (example_args, example_kwargs), in_spec
         )
-        flat_outputs = module.run(flat_inputs)
+        flat_outputs = runner.run(flat_inputs)
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
     return opt_aot_inductor
@@ -1203,8 +1221,16 @@ class OnnxModel(abc.ABC):
 
     _COMPILER_NAME: str
 
-    def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
+    def __init__(
+        self,
+        output_directory,
+        model,
+        example_inputs,
+        dynamic_shapes: bool,
+        copy_before_export: bool = False,
+    ):
         model_name = current_name
+        self.copy_before_export = copy_before_export
         self.model_dir = self._generate_onnx_model_directory(
             output_directory, self._COMPILER_NAME, model_name
         )
@@ -1373,10 +1399,14 @@ class OnnxModelFromTorchScript(OnnxModel):
 
     _COMPILER_NAME = "torchscript"
 
-    def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
+    def __init__(
+        self, output_directory, model, example_inputs, dynamic_shapes: bool, **kwargs
+    ):
         if dynamic_shapes:
             raise NotImplementedError("NYI dynamic shapes for OnnxModelFromTorchScript")
-        super().__init__(output_directory, model, example_inputs, dynamic_shapes)
+        super().__init__(
+            output_directory, model, example_inputs, dynamic_shapes, **kwargs
+        )
         self._export(
             model,
             example_inputs,
@@ -1388,6 +1418,10 @@ class OnnxModelFromTorchScript(OnnxModel):
         self.onnx_session = self._init_ort_session(self.model_path)
 
     def _export(self, model, example_inputs, output_path: str, /, **kwargs) -> None:
+        if self.copy_before_export:
+            # Deepcopy model before export to avoid modification to baseline model.
+            model = copy.deepcopy(model)
+
         # Hack for huggingface models (kwargs only).
         if isinstance(example_inputs, dict):
 
@@ -1449,8 +1483,12 @@ class OnnxModelFromDynamo(OnnxModel):
 
     _COMPILER_NAME = "dynamo"
 
-    def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
-        super().__init__(output_directory, model, example_inputs, dynamic_shapes)
+    def __init__(
+        self, output_directory, model, example_inputs, dynamic_shapes: bool, **kwargs
+    ):
+        super().__init__(
+            output_directory, model, example_inputs, dynamic_shapes, **kwargs
+        )
         self._dynamic_shapes = dynamic_shapes
         self._onnx_program = self._export(model, example_inputs, self.model_path)
         # Clear the model proto to save memory.
@@ -1462,6 +1500,10 @@ class OnnxModelFromDynamo(OnnxModel):
     def _export(
         self, model, example_inputs, output_path: str
     ) -> torch.onnx.ONNXProgram:
+        if self.copy_before_export:
+            # Deepcopy model before export to avoid modification to baseline model.
+            model = copy.deepcopy(model)
+
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
         onnx_program = torch.onnx.dynamo_export(
@@ -1659,6 +1701,7 @@ def optimize_onnx_ctx(
     onnx_model_cls: Type[OnnxModel],
     run_n_iterations: Callable,
     dynamic_shapes: bool = False,
+    copy_before_export: bool = False,
 ) -> Callable:
     # NOTE(bowbao): This function creates and returns the onnx version of 'run_n_iterations',
     # which does the following:
@@ -1689,6 +1732,7 @@ def optimize_onnx_ctx(
                     model,
                     copy.deepcopy(inputs),
                     dynamic_shapes=dynamic_shapes,
+                    copy_before_export=copy_before_export,
                 )
             onnx_model = context.onnx_model
 
@@ -1848,6 +1892,12 @@ def get_dynamo_stats():
             "graph_breaks": sum(torch._dynamo.utils.counters["graph_break"].values()),
             # NB: The plus removes zero counts
             "unique_graph_breaks": len(+torch._dynamo.utils.counters["graph_break"]),
+            "autograd_captures": torch._dynamo.utils.counters["compiled_autograd"][
+                "captures"
+            ],
+            "autograd_compiles": torch._dynamo.utils.counters["compiled_autograd"][
+                "compiles"
+            ],
         }
     )
 
@@ -1948,7 +1998,9 @@ class BenchmarkRunner:
             if (name in CI_USE_SGD and self.args.ci) or name in BENCHMARK_USE_SGD:
                 self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
             else:
-                self.optimizer = torch.optim.Adam(params, lr=0.01, foreach=True)
+                self.optimizer = torch.optim.Adam(
+                    params, lr=0.01, capturable=True, foreach=True
+                )
         else:
             self.optimizer = None
 
@@ -2139,7 +2191,6 @@ class BenchmarkRunner:
         else:
             mod.zero_grad(True)
 
-    @torch._disable_dynamo(recursive=True)
     def optimizer_step(self):
         if self.optimizer is not None:
             self.optimizer.step()
@@ -2185,7 +2236,7 @@ class BenchmarkRunner:
 
         return ModuleWrapPolicy(MODEL_FSDP_WRAP[model_name])
 
-    def deepcopy_and_maybe_ddp(self, model):
+    def deepcopy_and_maybe_parallelize(self, model):
         model = self.deepcopy_model(model)
         if self.args.ddp:
             assert (
@@ -2278,9 +2329,10 @@ class BenchmarkRunner:
             # Collect the fp64 reference outputs to be used later for accuracy checking.
             fp64_outputs = None
             model_fp64 = None
+            inputs_fp64 = None
             try:
                 model_fp64, inputs_fp64 = cast_to_fp64(
-                    self.deepcopy_and_maybe_ddp(model),
+                    self.deepcopy_and_maybe_parallelize(model),
                     clone_inputs(example_inputs),
                 )
                 self.init_optimizer(name, current_device, model_fp64.parameters())
@@ -2314,7 +2366,7 @@ class BenchmarkRunner:
             reset_rng_state()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_ddp(model)
+                model_copy = self.deepcopy_and_maybe_parallelize(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 correct_result = self.run_n_iterations(
                     model_copy, clone_inputs(example_inputs)
@@ -2335,7 +2387,7 @@ class BenchmarkRunner:
             reset_rng_state()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_ddp(model)
+                model_copy = self.deepcopy_and_maybe_parallelize(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 correct_rerun_result = self.run_n_iterations(
                     model_copy, clone_inputs(example_inputs)
@@ -2382,7 +2434,7 @@ class BenchmarkRunner:
             torch._dynamo.reset()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_ddp(model)
+                model_copy = self.deepcopy_and_maybe_parallelize(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 if self.args.export or self.args.export_aot_inductor:
                     # apply export on module directly
@@ -2395,7 +2447,8 @@ class BenchmarkRunner:
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-                    new_result = optimized_model_iter_fn(model_copy, example_inputs)
+                    with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+                        new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 log.exception(e)
                 print(
@@ -2565,7 +2618,7 @@ class BenchmarkRunner:
         model, example_inputs = self.maybe_cast(model, example_inputs)
 
         # Use distributed wrapping as necessary
-        model = self.deepcopy_and_maybe_ddp(model)
+        model = self.deepcopy_and_maybe_parallelize(model)
 
         self.init_optimizer(name, current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
@@ -2587,9 +2640,10 @@ class BenchmarkRunner:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
                 aot_compilation_time = 0
 
-            dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
-                optimized_model_iter_fn, model, example_inputs, "dynamo"
-            )
+            with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+                dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
+                    optimized_model_iter_fn, model, example_inputs, "dynamo"
+                )
 
             compilation_time = dynamo_latency - eager_latency + aot_compilation_time
             compression_ratio = (
@@ -2850,9 +2904,6 @@ def parse_args(args=None):
     )
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
-        "--cpp-wrapper", action="store_true", help="turn on cpp/cuda wrapper codegen"
-    )
-    parser.add_argument(
         "--freezing", action="store_true", help="turn on freezing", default=False
     )
     parser.add_argument(
@@ -3110,6 +3161,12 @@ def parse_args(args=None):
         help="Enable minification when failure is below tolerance. Save repro script for each model.",
     )
 
+    parser.add_argument(
+        "--compiled-autograd",
+        action="store_true",
+        help="Enables compiled autograd on compiled benchmark",
+    )
+
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
     group_fuser.add_argument("--nvfuser", action="store_true", help=argparse.SUPPRESS)
@@ -3355,12 +3412,6 @@ def run(runner, args, original_dir=None):
             CI, args.backend, training=args.training, dynamic=args.dynamic_shapes
         )
     if args.ddp:
-        # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
-        # but just to measure impact on singlenode of performing graph-breaks.
-        # Left it as a follow up to keep this PR isolated.
-        assert (
-            args.accuracy
-        ), "DDP benchmark is currently only hooked up to --accuracy bench"
         assert args.training, "DDP benchmark requires --training mode"
         if args.no_optimize_ddp:
             torch._dynamo.config.optimize_ddp = False
@@ -3536,7 +3587,10 @@ def run(runner, args, original_dir=None):
         output_filename = "xla.csv"
     elif args.torchscript_onnx:
         optimize_ctx = functools.partial(
-            optimize_onnx_ctx, args.output_directory or ".", OnnxModelFromTorchScript
+            optimize_onnx_ctx,
+            args.output_directory or ".",
+            OnnxModelFromTorchScript,
+            copy_before_export=args.performance,  # Accuarcy bench already did deepcopy
         )
         experiment = speedup_experiment_onnx
         output_filename = "torchscript_onnx.csv"
@@ -3547,6 +3601,7 @@ def run(runner, args, original_dir=None):
             args.output_directory or ".",
             OnnxModelFromDynamo,
             dynamic_shapes=args.dynamic_shapes,
+            copy_before_export=args.performance,
         )
         experiment = speedup_experiment_onnx
         output_filename = "dynamo_onnx.csv"
@@ -3557,6 +3612,7 @@ def run(runner, args, original_dir=None):
             args.output_directory or ".",
             OnnxModelFromDynamoAotInline,
             dynamic_shapes=args.dynamic_shapes,
+            copy_before_export=args.performance,
         )
         experiment = speedup_experiment_onnx
         output_filename = "dynamo_onnx_aot_inline.csv"
@@ -3619,7 +3675,6 @@ def run(runner, args, original_dir=None):
         )
         inductor_config.split_reductions = not args.disable_split_reductions
         inductor_config.triton.divisible_by_16 = not args.disable_divisible_by_16
-        inductor_config.cpp_wrapper = args.cpp_wrapper
         if args.inference:
             inductor_config.freezing = args.freezing
 
@@ -3749,7 +3804,7 @@ def run(runner, args, original_dir=None):
                                     batch_size=batch_size,
                                     extra_args=extra_args,
                                 )
-                except RuntimeError as e:
+                except Exception as e:
                     import traceback
 
                     mode = "train" if args.training else "eval"

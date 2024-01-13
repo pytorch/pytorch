@@ -953,7 +953,6 @@ def aot_export_module(
     (5) If an input is mutated, it is not allowed to alias any other inputs.
     (6) Parameters must not be duplicated.
     """
-
     if pre_dispatch and trace_joint:
         raise RuntimeError("pre_dispatch is not supported when trace_joint is True.")
     named_parameters = dict(mod.named_parameters(remove_duplicate=False))
@@ -1150,8 +1149,8 @@ def aot_export_joint_simple(
 
     if config.debug_assert:
         # Smoke test that after partitioning, we can run the forward without any calling convention changes.
-        fw_module, bw_module = aot_config.default_partition(
-            fx_g, args, num_fwd_outputs=len(fw_metadata.output_infos)
+        fw_module, bw_module = aot_config.default_partition(  # noqa: F821
+            fx_g, args, num_fwd_outputs=len(fw_metadata.output_infos)  # noqa: F821
         )
         # Attempt to run the fw_module with the original user inputs
         fake_mode = detect_fake_mode(args)
