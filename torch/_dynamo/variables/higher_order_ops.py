@@ -132,7 +132,7 @@ def validate_args_and_maybe_create_graph_inputs(
     sub_args,
     tracer,
     tx,
-    manually_set_subgraph_inputs,
+    set_subgraph_inputs,
     description,
 ):
     from . import AutogradFunctionContextVariable, ConstantVariable, EnumVariable
@@ -140,47 +140,64 @@ def validate_args_and_maybe_create_graph_inputs(
 
     assert tracer.parent is not None
 
-    args = []
-    for a in sub_args:
-        assert isinstance(a, VariableTracker)
-        if not manually_set_subgraph_inputs:
-            args.append(a)
-            continue
+    if set_subgraph_inputs == "flatten_manual":
+        flat_args, tree_spec = _make_inlined(tx, pytree.tree_flatten)(
+            ListVariable(sub_args)
+        ).unpack_var_sequence(tx)
 
-        if isinstance(a, (ConstantVariable, EnumVariable)):
-            # This arg is not used in the body of the higher order op.
-            # Currently, this new input is added to make the calls
-            # happy, which expect a fixed number of arguments. In
-            # future, we can clean this up.
-            tracer.create_graph_input("const")
-            new_arg = a
-        # Weird special case, we probably want to delete it or fold it
-        # into the next case (of `a` being placeable into a graph)
-        elif isinstance(a, AutogradFunctionContextVariable):
-            tracer.create_graph_input(a.as_proxy().node.name)
-            new_arg = a
-        # If `a` can be put into a graph
-        elif a.maybe_fx_node() is not None:
-            node = a.maybe_fx_node()
-            new_proxy = tracer.create_graph_input(node.name)
-            example_value = (
-                node.meta["example_value"] if "example_value" in node.meta else None
-            )
-            new_arg = wrap_fx_proxy_cls(
-                target_cls=type(a),
-                tx=tx,
-                proxy=new_proxy,
-                example_value=example_value,
-            )
-        # If `a` cannot be put into a graph
-        else:
-            # HOPs work much better if they use speculate_subgraph(manually_set_subgraph_inputs=False).
-            raise unimplemented(
-                f"{description} with body that accepts non-Tensors as input. "
-                f"Got: {a.python_type()}"
-            )
-        args.append(new_arg)
-    return args
+        flat_inputs = validate_args_and_maybe_create_graph_inputs(
+            flat_args.unpack_var_sequence(tx),
+            tracer,
+            tx,
+            set_subgraph_inputs="manual",
+            description=description,
+        )
+
+        return _make_inlined(tx, pytree.tree_unflatten)(
+            ListVariable(flat_inputs), tree_spec
+        ).unpack_var_sequence(tx)
+    else:
+        args = []
+        for a in sub_args:
+            assert isinstance(a, VariableTracker)
+            if set_subgraph_inputs == "automatic":
+                args.append(a)
+                continue
+
+            if isinstance(a, (ConstantVariable, EnumVariable)):
+                # This arg is not used in the body of the higher order op.
+                # Currently, this new input is added to make the calls
+                # happy, which expect a fixed number of arguments. In
+                # future, we can clean this up.
+                tracer.create_graph_input("const")
+                new_arg = a
+            # Weird special case, we probably want to delete it or fold it
+            # into the next case (of `a` being placeable into a graph)
+            elif isinstance(a, AutogradFunctionContextVariable):
+                tracer.create_graph_input(a.as_proxy().node.name)
+                new_arg = a
+            # If `a` can be put into a graph
+            elif a.maybe_fx_node() is not None:
+                node = a.maybe_fx_node()
+                new_proxy = tracer.create_graph_input(node.name)
+                example_value = (
+                    node.meta["example_value"] if "example_value" in node.meta else None
+                )
+                new_arg = wrap_fx_proxy_cls(
+                    target_cls=type(a),
+                    tx=tx,
+                    proxy=new_proxy,
+                    example_value=example_value,
+                )
+            # If `a` cannot be put into a graph
+            else:
+                # HOPs work much better if they use speculate_subgraph(set_subgraph_inputs="automatic").
+                raise unimplemented(
+                    f"{description} with body that accepts non-Tensors as input. "
+                    f"Got: {a.python_type()}"
+                )
+            args.append(new_arg)
+        return args
 
 
 # See NOTE [HigherOrderOperator tracing design] for details of the design
@@ -196,14 +213,16 @@ def speculate_subgraph(
     source_target=None,
     always_restore=False,
     enable_grad=None,
-    # NOTE [Temporary argument `manually_set_subgraph_inputs`]
-    # If manually_set_subgraph_inputs=True, then we manually add
-    # the `sub_args` to `subgraph`, if False then we rely
-    # on tracer's lifting mechanism to lift these args.
-    # NOTE: Default `True` is temporary and plan is
-    #       to always lift args in future and remove this
-    #       argument.
-    manually_set_subgraph_inputs=True,
+    # NOTE [argument `set_subgraph_inputs`]
+    # set_subgraph_inputs controls what how to construct subgraphs' placeholders from sub_args.
+    # 1. if your HOP supports arbitrary inputs, use set_subtraph_inputs="automatic" (most recommended).
+    # 2. if your HOP supports only Tensor and symnode inputs, use set_subgraph_inputs="flatten_manual" (recommended).
+    # If sub_args contain Pytree structure (e.g. dict/list/tuple/set), the sub_args will be flattened first.
+    # Then the flattend args are manually set as subgraph's placeholders.
+    # 3. if your HOP must preserve inputs that are not tensor or symnode as placeholders e.g. AutogradFunctionContextVariable
+    # use set_subgraph_inputs="manual" (not recommended). We do not recommend it in general because it has the
+    # restriction that user need to manually control how to create placeholders and VariableTrackers for the args.
+    set_subgraph_inputs="automatic",
     restore_side_effects=True,
     should_flatten_outputs=False,
     # Pass in an originating tracer - this is needed for preserving context
@@ -213,11 +232,15 @@ def speculate_subgraph(
     if sub_kwargs is None:
         sub_kwargs = {}
 
-    # See NOTE [Temporary argument `manually_set_subgraph_inputs`]
-    if sub_kwargs and manually_set_subgraph_inputs:
-        unimplemented(
-            "Use `manually_set_subgraph_inputs=False` when passing `sub_kwargs`."
-        )
+    assert set_subgraph_inputs in {
+        "automatic",
+        "flatten_manual",
+        "manual",
+    }, "Please use one of the supported set_subgraph_inputs options."
+
+    # See NOTE [Temporary argument `set_subgraph_inputs`]
+    if sub_kwargs and set_subgraph_inputs != "automatic":
+        unimplemented("Use `set_subgraph_inputs=automatic` when passing `sub_kwargs`.")
 
     try:
         f, sub_args, sub_kwargs = VariableTracker.apply(
@@ -225,16 +248,17 @@ def speculate_subgraph(
             lambda x: x.realize(),
             (f, sub_args, sub_kwargs),
         )
+
         with tx.output.subtracer(source_target, tracer) as subtracer:
             args = validate_args_and_maybe_create_graph_inputs(
-                sub_args, subtracer, tx, manually_set_subgraph_inputs, description
+                sub_args, subtracer, tx, set_subgraph_inputs, description
             )
 
             validate_args_and_maybe_create_graph_inputs(
                 sub_kwargs.values(),
                 subtracer,
                 tx,
-                manually_set_subgraph_inputs=False,
+                set_subgraph_inputs="automatic",
                 description=description,
             )
 
@@ -395,6 +419,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return ExportTracepointHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "trace_wrapped":
             return TraceWrappedHigherOrderOperatorVariable(value, source, **kwargs)
+        elif value.__name__ == "strict_mode":
+            return StrictModeHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -510,7 +536,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 {},
                 "cond",
                 source_target=self.value,
-                manually_set_subgraph_inputs=False,
                 should_flatten_outputs=True,
             )
 
@@ -624,7 +649,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = dedup_and_sort_lifted_freevars(true_lifted_freevars, false_lifted_freevars)
 
         # Let's say we capture cond(pred, true_fn, false_fn, (x,))
-        # With mannually_set_graph_input set to False,
+        # With set_graph_input set to automatic,
         # true_fn has lifted variables x, a, b, c
         # false_fn has lifted variables x, a, b, d
         # Then fixup_branch_inps make sure both branches have the same signature, i.e.:
@@ -750,6 +775,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             {},
             "torch.ops.higher_order.map",
             source_target=self.value,
+            set_subgraph_inputs="flatten_manual",
             should_flatten_outputs=True,
         )
 
@@ -763,11 +789,11 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         body_node = make_attr(tx, body_name)
+
         p_args = (
             body_node,
-            1,  # right now we only supports num_mapped = 1
-            *(arg.as_proxy() for arg in args[1:]),
-            *(arg for arg in body_lifted_freevars.keys()),
+            [args[1].as_proxy()],
+            [arg.as_proxy() for arg in args[2:]] + list(body_lifted_freevars.keys()),
         )
         return _call_function_and_unflatten_output(
             tx, torch.ops.higher_order.map_impl, p_args, {}, body_r, body_spec
@@ -876,6 +902,7 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             # See NOTE [HACK: Enable autograd while tracing function]
             enable_grad=True,
+            set_subgraph_inputs="manual",
         )
 
         body_name = add_subgraph(
@@ -1080,6 +1107,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 {},
                 "torch.vmap",
                 source_target=self.value,
+                set_subgraph_inputs="manual",
             )
 
         body_name = add_subgraph(
@@ -1214,6 +1242,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             restore_side_effects=False,
             tracer=tracer,
             enable_grad=enable_grad,
+            set_subgraph_inputs="manual",
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:
@@ -1268,7 +1297,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             kwargs,
             description,
             source_target=self.value,
-            manually_set_subgraph_inputs=False,
             should_flatten_outputs=True,
         )
 
@@ -1282,7 +1310,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_node = make_attr(tx, body_name)
 
-        # Since, we call `speculate_subgraph` with `manually_set_subgraph_inputs=False`,
+        # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
         # all the arguments are lifted.
         lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
 
@@ -1340,6 +1368,80 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 kwargs={},
             ),
             example_value=example_value,
+        )
+
+
+class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    @raise_hard_error_if_graph_break(
+        reason="strict_mode HOO doesn't work unless it is captured completely with torch.compile."
+    )
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
+        callable = args[0]
+
+        unpacked_sequence = args[1].unpack_var_sequence(tx)
+        # TODO (tmanlaibaatar) support pytree here
+        for arg in unpacked_sequence:
+            if isinstance(arg, (ListVariable, TupleVariable, ConstDictVariable)):
+                unimplemented("strict_mode HOO only works for flat inputs for now")
+
+        if kwargs:
+            unimplemented(
+                f"strict_mode HOO received unexpected kwargs: {list(kwargs.keys())}"
+            )
+
+        (
+            (ret_val, ret_treespec),
+            ret_graph,
+            ret_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            args[0],
+            unpacked_sequence,
+            {},
+            "strict_mode",
+            source_target=self.value,
+            should_flatten_outputs=True,
+        )
+
+        strict_mode_nn_modules = dict(tx.output.nn_modules)
+
+        strict_mode_name = add_subgraph(
+            tx,
+            self.source,
+            "strict_mode_body",
+            torch.fx.GraphModule(strict_mode_nn_modules, ret_graph),
+        )
+
+        strict_mode_node = make_attr(tx, strict_mode_name)
+        p_args = (
+            strict_mode_node,
+            tuple(arg for arg in ret_lifted_freevars.keys()),
+        )
+
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            ret_val.as_proxy(),
+        )
+
+        # Store the invocation as a call
+        flat_variable = wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                torch.ops.higher_order.strict_mode,
+                args=tuple(p_args),
+                kwargs={},
+            ),
+            example_value=flat_example_value,
+        )
+
+        return _call_function_and_unflatten_output(
+            tx, torch.ops.higher_order.strict_mode, p_args, {}, ret_val, ret_treespec
         )
 
 

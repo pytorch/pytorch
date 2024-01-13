@@ -18,9 +18,7 @@
 #endif /* __CUDACC_RTC__ */
 #endif /* __HIPCC__ */
 
-namespace c10 {
-namespace cuda {
-namespace compat {
+namespace c10::cuda::compat {
 
 __MATH_FUNCTIONS_DECL__ float abs(float x) {
   return ::fabsf(x);
@@ -149,8 +147,6 @@ __MATH_FUNCTIONS_DECL__ double normcdf(double x) {
   return ::normcdf(x);
 }
 
-} // namespace compat
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda::compat
 
 #endif
