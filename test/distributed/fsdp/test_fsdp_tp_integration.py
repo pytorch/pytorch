@@ -396,37 +396,49 @@ class TestTPFSDPIntegration(FSDPTest):
                 replicated_dt = DTensor.from_local(
                     torch.randn(8, 8), tp_mesh, [Replicate()], run_check=False
                 )
+                replicated_buffer_dt = DTensor.from_local(
+                    torch.randn(8, 8), tp_mesh, [Replicate()], run_check=False
+                )
                 self.param = torch.nn.Parameter(replicated_dt)
+                self.register_buffer("buf", replicated_buffer_dt)
 
             def forward(self, x):
-                return self.param + 1
+                return self.param + self.buffer + 1
 
         model = TestModel()
 
-        # check on dp mesh dim local tensor does not equal
+        def assert_local_shard_across_ranks(local_tensor, group, check_equal=True):
+            gathered_tensors = [
+                torch.empty_like(local_tensor) for _ in range(group.size())
+            ]
+            dist.all_gather(gathered_tensors, local_tensor, group=group)
+            # on dp mesh dim local tensor does not equal
+            tensor_to_compare = gathered_tensors[0]
+            for tensor in gathered_tensors[1:]:
+                if check_equal:
+                    self.assertTrue(torch.equal(tensor, tensor_to_compare))
+                else:
+                    self.assertFalse(torch.equal(tensor, tensor_to_compare))
+
         dp_group = dp_mesh.get_group()
-        local_tensor = model.param.to_local()
-        gathered_tensors = [
-            torch.empty_like(local_tensor) for _ in range(dp_mesh.size())
-        ]
-        dist.all_gather(gathered_tensors, local_tensor, group=dp_group)
-        # on dp mesh dim local tensor does not equal
-        tensor_to_compare = gathered_tensors[0]
-        for tensor in gathered_tensors[1:]:
-            self.assertFalse(torch.equal(tensor, tensor_to_compare))
+
+        # check on dp mesh dim param local tensor does not equal
+        local_param = model.param.to_local()
+        assert_local_shard_across_ranks(local_param, dp_group, check_equal=False)
+        # check on dp mesh dim buffer local tensor does not equal
+        local_buf = model.buf.to_local()
+        assert_local_shard_across_ranks(local_buf, dp_group, check_equal=False)
 
         # wrap with fsdp sync param should sync dp mesh dim
         fsdp_mod = FSDP(model, device_mesh=dp_mesh, sync_module_states=True)
         with fsdp_mod.summon_full_params(fsdp_mod):
-            local_tensor = fsdp_mod.param.to_local()
-            gathered_tensors = [
-                torch.empty_like(local_tensor) for _ in range(dp_mesh.size())
-            ]
-            dist.all_gather(gathered_tensors, local_tensor, group=dp_group)
-            # on dp mesh dim local tensor does equal
-            tensor_to_compare = gathered_tensors[0]
-            for tensor in gathered_tensors[1:]:
-                self.assertTrue(torch.equal(tensor, tensor_to_compare))
+            # on dp mesh dim local param does equal after sync_module_states
+            local_param = fsdp_mod.param.to_local()
+            assert_local_shard_across_ranks(local_param, dp_group, check_equal=True)
+
+            # on dp mesh dim local buf does equal after sync_module_states
+            local_buf = fsdp_mod.buf.to_local()
+            assert_local_shard_across_ranks(local_buf, dp_group, check_equal=True)
 
 
 instantiate_parametrized_tests(TestTPFSDPIntegration)
