@@ -59,7 +59,7 @@ Tensor _lerp_scalar(
   vTensor v_output{
       context,
       v_start.sizes(),
-      start_arg.scalar_type(),
+      v_start.dtype(),
   };
 
   const float weight = weight_arg.to<float>();
@@ -184,7 +184,7 @@ Tensor _lerp_tensor(
   vTensor v_output{
       context,
       v_start.sizes(),
-      start_arg.scalar_type(),
+      v_start.dtype(),
   };
 
   const struct Block final {

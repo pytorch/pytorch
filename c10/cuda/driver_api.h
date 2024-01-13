@@ -35,8 +35,7 @@
   _(nvmlDeviceGetNvLinkRemotePciInfo_v2) \
   _(nvmlDeviceGetComputeRunningProcesses)
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 struct DriverAPI {
 #define CREATE_MEMBER(name) decltype(&name) name##_;
@@ -47,5 +46,4 @@ struct DriverAPI {
   static void* get_nvml_handle();
 };
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda
