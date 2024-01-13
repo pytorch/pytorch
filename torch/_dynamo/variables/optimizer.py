@@ -199,7 +199,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
                         from .builder import SourcelessBuilder, VariableBuilder
 
                         if arg.source:
-                            arg.items.append(VariableBuilder(tx, arg.source)(val))
+                            arg.items.append(
+                                VariableBuilder(tx, GetItemSource(arg.source, i))(val)
+                            )
                         else:
                             arg.items.append(SourcelessBuilder()(tx, val))
 
