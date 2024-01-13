@@ -95,16 +95,16 @@ class Scalar:
 if has_triton():
     import triton
 
+    def replacement_fn(self, *args, **kwargs):
+        if len(args) > 0:
+            Scalar.check(args[0])
+        return self
+
     for name, _ in inspect.getmembers(triton.language.core.tensor, inspect.isfunction):
         if name in ["__init__", "__radd__"]:
             continue
 
-        def fn(self, *args, **kwargs):
-            if len(args) > 0:
-                Scalar.check(args[0])
-            return self
-
-        setattr(Scalar, name, fn)
+        setattr(Scalar, name, replacement_fn)
 
 
 # Given a triton kernel and the arguments for this kernel, this function traces
@@ -138,6 +138,7 @@ def identify_mutated_tensors(kernel, kwargs):
         "atomic_max",
         "atomic_min",
         "atomic_xchg",
+        "make_block_ptr",
     }
     try:
         # Monkey patch all triton language functions
