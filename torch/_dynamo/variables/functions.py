@@ -85,6 +85,16 @@ class BaseUserFunctionVariable(VariableTracker):
             self, list(self.self_args()) + list(args), kwargs
         )
 
+    def call_hasattr(self, tx, name: str) -> VariableTracker:
+        result = False
+
+        try:
+            result = hasattr(self.get_function(), name)
+        except NotImplementedError:
+            if name == "__name__" and isinstance(self, NestedUserFunctionVariable):
+                result = True
+        return variables.ConstantVariable.create(result)
+
     def inspect_parameter_names(self):
         return list(inspect.signature(self.get_function()).parameters)
 
@@ -594,7 +604,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
 
 class FunctoolsPartialVariable(VariableTracker):
-    def __init__(self, func, args, keywords, original=None, **kwargs):
+    def __init__(self, func: VariableTracker, args, keywords, original=None, **kwargs):
         super().__init__(**kwargs)
         self.func = func
         assert isinstance(args, list)
@@ -610,6 +620,15 @@ class FunctoolsPartialVariable(VariableTracker):
         merged_kwargs = {**self.keywords, **kwargs}
         return self.func.call_function(tx, merged_args, merged_kwargs)
 
+    def call_hasattr(self, tx, name: str) -> VariableTracker:
+        from .constant import ConstantVariable
+
+        # reconstruct the partial without the keyword arguments
+        # This works as PyTorch does not allow mutating the partial variable
+        p = functools.partial(self.func.get_function())
+        r = hasattr(p, name)
+        return ConstantVariable.create(r)
+
     def as_python_constant(self):
         if self.original:
             return self.original
@@ -622,7 +641,7 @@ class FunctoolsPartialVariable(VariableTracker):
                     return v.as_python_constant()
 
             return functools.partial(
-                self.func.fn,
+                self.func.get_function(),
                 *[get_val(arg) for arg in self.args],
                 **{k: get_val(v) for k, v in self.keywords.items()},
             )
