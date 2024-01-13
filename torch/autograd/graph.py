@@ -657,10 +657,19 @@ def _register_logging_hooks_on_whole_graph(t_outputs: List[torch.Tensor]):
 
             yield node
 
-    def prehook(grad_output):
+    def fmt(t):
+        # Avoid circular import
+        from torch.testing._internal.common_utils import dtype_abbrs
+
+        if t is None:
+            return "None"
+        return f"{dtype_abbrs[t.dtype]}[{', '.join(map(str, t.shape))}]"
+
+    def prehook(grad_outputs):
         node = torch._C._current_autograd_node()
-        log_str = f"Executing: {node} with grad_output: {grad_output}"
-        log.info(log_str)
+        grad_outputs_str = f"[{','.join(fmt(t) for t in grad_outputs)}]"
+        log_str = f"Executing: {node} with grad_outputs: {grad_outputs_str}"
+        log.debug(log_str)
 
     handles = []
     for node in iter_graph(grad_fns):
@@ -674,7 +683,7 @@ def _register_logging_hooks_on_whole_graph(t_outputs: List[torch.Tensor]):
 
 
 def _engine_run_backward(t_outputs, *args, **kwargs):
-    attach_logging_hooks = log.getEffectiveLevel() <= logging.INFO
+    attach_logging_hooks = log.getEffectiveLevel() <= logging.DEBUG
     if attach_logging_hooks:
         unregister_hooks = _register_logging_hooks_on_whole_graph(t_outputs)
     try:

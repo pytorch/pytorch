@@ -195,7 +195,7 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
 
     @staticmethod
     def sqrt(x):
-        return torch.sym_sqrt(x)
+        return torch._sym_sqrt(x)  # type: ignore[attr-defined]
 
     @staticmethod
     def minimum(a, b):

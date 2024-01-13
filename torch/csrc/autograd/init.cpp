@@ -1082,7 +1082,7 @@ static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
 
 PyObject* THPModule_increment_version(PyObject* _unused, PyObject* tensor) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  TORCH_CHECK(
       THPVariable_Check(tensor), "increment_version expect a Tensor as input");
   torch::autograd::increment_version((THPVariable_Unpack(tensor)));
   Py_RETURN_NONE;

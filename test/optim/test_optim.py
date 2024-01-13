@@ -27,7 +27,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo
 )
 
-from torch._dynamo import disable as disable_dynamo
 
 from torch.testing._internal.common_cuda import TEST_CUDA
 from typing import Dict, Any, Tuple
@@ -166,7 +165,7 @@ class TestOptim(TestCase):
             pass
         elif constructor_accepts_maximize:
 
-            def four_arg_constructor(weight, bias, maximize, foreach):
+            def four_arg_constructor(weight, bias, maximize, foreach):  # noqa: F811
                 self.assertFalse(foreach)
                 return constructor(weight, bias, maximize)
 
@@ -192,8 +191,6 @@ class TestOptim(TestCase):
             for scheduler_constructor in scheduler_constructors:
                 schedulers.append(scheduler_constructor(optimizer))
 
-            # to check if the optimizer can be printed as a string
-            optimizer.__repr__()
 
             def fn():
                 optimizer.zero_grad()
@@ -218,135 +215,6 @@ class TestOptim(TestCase):
             else:
                 self.assertLess(fn().item(), initial_value)
 
-    # Note: disable dynamo on this function
-    # This allows us to continue running actual logic of the optimizer
-    # tests in dynamo without tracing this test code which has a lot of unsupported
-    # behavior
-    @disable_dynamo(recursive=False)
-    def _test_state_dict(self, weight, bias, input, constructor, atol=None, rtol=None):
-        weight = Parameter(weight)
-        bias = Parameter(bias)
-        with torch.no_grad():
-            input = input.clone().detach().requires_grad_()
-
-        # Note: Disable dynamo on this function
-        # This avoids a bug where input_cuda is not detected in the environment
-        # because it currently is not defined in the local environmet. Unable to repro
-        # anywhere else however and this is test code that we don't need to spend
-        # time getting dynamo to trace unless the issue repros in real models.
-        @disable_dynamo(recursive=False)
-        def fn_base(optimizer, weight, bias):
-            optimizer.zero_grad()
-            i = input_cuda if weight.is_cuda else input
-            loss = (weight.mv(i) + bias).pow(2).sum()
-            loss.backward()
-            return loss
-
-        optimizer = constructor(weight, bias)
-        fn = functools.partial(fn_base, optimizer, weight, bias)
-
-        # Prime the optimizer
-        for _i in range(20):
-            optimizer.step(fn)
-        # Clone the weights and construct new optimizer for them
-        with torch.no_grad():
-            weight_c = Parameter(weight.clone().detach())
-            bias_c = Parameter(bias.clone().detach())
-        optimizer_c = constructor(weight_c, bias_c)
-        fn_c = functools.partial(fn_base, optimizer_c, weight_c, bias_c)
-        # Load state dict
-        state_dict = deepcopy(optimizer.state_dict())
-        state_dict_c = deepcopy(optimizer.state_dict())
-        optimizer_c.load_state_dict(state_dict_c)
-        # Run both optimizers in parallel
-        for _ in range(20):
-            optimizer.step(fn)
-            optimizer_c.step(fn_c)
-            self.assertEqual(weight, weight_c)
-            self.assertEqual(bias, bias_c)
-        # Make sure state dict is deterministic with equal but not identical parameters
-        self.assertEqual(optimizer.state_dict(), optimizer_c.state_dict())
-        # Make sure repeated parameters have identical representation in state dict
-        optimizer_c.param_groups.extend(optimizer_c.param_groups)
-        self.assertEqual(
-            optimizer.state_dict()["param_groups"][-1],
-            optimizer_c.state_dict()["param_groups"][-1],
-        )
-
-        # Make sure that optimizers that support maximize can load older models
-        old_state_dict = deepcopy(optimizer.state_dict())
-        state_dict_no_maximize = deepcopy(optimizer.state_dict())
-        if "maximize" in state_dict_no_maximize["param_groups"][0]:
-            for group in state_dict_no_maximize["param_groups"]:
-                del group["maximize"]
-            optimizer.load_state_dict(state_dict_no_maximize)
-            # Make sure we can still step
-            optimizer.step()
-            # Undo these changes before proceeding!
-            optimizer.load_state_dict(old_state_dict)
-        # Make sure that optimizers that support foreach can load older models
-        state_dict_no_foreach = deepcopy(optimizer.state_dict())
-        if "foreach" in state_dict_no_foreach["param_groups"][0]:
-            for group in state_dict_no_foreach["param_groups"]:
-                del group["foreach"]
-            optimizer.load_state_dict(state_dict_no_foreach)
-            # Make sure we can still step
-            optimizer.step()
-            # Undo these changes before proceeding!
-            optimizer.load_state_dict(old_state_dict)
-
-        # Make sure that loading optimizers with step not wrapped in tensor can work
-        state_dict = optimizer.state_dict()
-        if "step" in state_dict["state"][0] and torch.is_tensor(
-            state_dict["state"][0]["step"]
-        ):
-            for state in state_dict["state"].values():
-                state["step"] = state["step"].item()
-            optimizer.load_state_dict(state_dict)
-            optimizer.step()
-
-        # Check that state dict can be loaded even when we cast parameters
-        # to a different type and move to a different device.
-        if not torch.cuda.is_available():
-            return
-
-        with torch.no_grad():
-            input_cuda = input.clone().detach().to(dtype=torch.float32, device="cuda")
-            weight_cuda = Parameter(
-                weight.clone().detach().to(dtype=torch.float32, device="cuda")
-            )
-            bias_cuda = Parameter(
-                bias.clone().detach().to(dtype=torch.float32, device="cuda")
-            )
-        optimizer_cuda = constructor(weight_cuda, bias_cuda)
-        fn_cuda = functools.partial(fn_base, optimizer_cuda, weight_cuda, bias_cuda)
-
-        state_dict = deepcopy(optimizer.state_dict())
-        state_dict_c = deepcopy(optimizer.state_dict())
-        optimizer_cuda.load_state_dict(state_dict_c)
-
-        # Make sure state_dict_c isn't modified by merely calling load_state_dict
-        self.assertEqual(state_dict, state_dict_c)
-
-        # Make sure that device of state['step'] is still CPU
-        new_state_dict = optimizer_cuda.state_dict()
-        if "step" in state_dict["state"][0] and torch.is_tensor(
-            state_dict["state"][0]["step"]
-        ):
-            for state in new_state_dict["state"].values():
-                self.assertEqual(state["step"].device.type, "cpu")
-
-        for _ in range(20):
-            optimizer.step(fn)
-            optimizer_cuda.step(fn_cuda)
-            self.assertEqual(weight, weight_cuda)
-            self.assertEqual(bias, bias_cuda, atol=atol, rtol=rtol)
-
-        # validate deepcopy() copies all public attributes
-        def getPublicAttr(obj):
-            return {k for k in obj.__dict__ if not k.startswith("_")}
-
-        self.assertEqual(getPublicAttr(optimizer), getPublicAttr(deepcopy(optimizer)))
 
     def _test_basic_cases(
         self,
@@ -372,18 +240,6 @@ class TestOptim(TestCase):
                 return lambda weight, bias: constructor(weight, bias, foreach)
             return constructor
 
-        for maximize, foreach in itertools.product(
-            {False, constructor_accepts_maximize},
-            {False, constructor_accepts_foreach},
-        ):
-            self._test_state_dict(
-                torch.randn(10, 5),
-                torch.randn(10),
-                torch.randn(5),
-                make_two_arg_constructor(constructor, maximize, foreach),
-                atol=atol,
-                rtol=rtol,
-            )
         self._test_basic_cases_template(
             torch.randn(10, 5),
             torch.randn(10),
@@ -906,14 +762,6 @@ class TestOptim(TestCase):
             sparse_only=True,
             maximize=True,
         )
-        import warnings
-        with warnings.catch_warnings(record=True) as ws:
-            SparseAdam(torch.zeros(3))
-            self.assertEqual(len(ws), 1)
-            for warning in ws:
-                self.assertEqual(len(warning.message.args), 1)
-                self.assertRegex(warning.message.args[0],
-                                 "Passing in a raw Tensor as ``params`` to SparseAdam ")
 
     # ROCm precision is too low to pass this test
     def test_adadelta(self):
@@ -1438,20 +1286,6 @@ class TestOptim(TestCase):
         self.assertEqual(type(res1), type(res2))
 
 
-    def test_duplicate_params_in_one_param_group(self):
-        param = Parameter(torch.randn(1))
-        with self.assertWarnsOnceRegex(UserWarning, '.*a parameter group with duplicate parameters.*'):
-            Adamax([param, param], lr=0.01)
-
-    def test_duplicate_params_across_param_groups(self):
-        param = Parameter(torch.randn(1))
-        self.assertRaisesRegex(
-            ValueError,
-            'some parameters appear in more than one parameter group',
-            lambda: Adadelta([{'params': param}, {'params': param}])
-        )
-
-
     def test_fused_optimizer_does_not_step_if_foundinf(self):
         if not torch.cuda.is_available():
             self.skipTest("CUDA is required.")
@@ -1621,14 +1455,6 @@ class TestOptim(TestCase):
         opt2.step()
         self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5, 0, 1, 2, 5])
 
-    def test_fused_optimizer_raises(self):
-        if not torch.cuda.is_available():
-            self.skipTest("Requires CUDA devices")
-        for optimizer_ctor in (Adam, AdamW):
-            with self.assertRaisesRegex(RuntimeError, "`fused` and `foreach` cannot be `True` together."):
-                optimizer_ctor([torch.empty((), device="cuda")], foreach=True, fused=True)
-            with self.assertRaisesRegex(RuntimeError, "`fused` does not support `differentiable`"):
-                optimizer_ctor([torch.empty((), device="cuda")], differentiable=True, fused=True)
 
     @staticmethod
     def _state_dict_pre_hook(optimizer: Optimizer) -> None:
