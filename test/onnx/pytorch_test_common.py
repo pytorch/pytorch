@@ -287,17 +287,21 @@ def xfail(error_message: str, reason: Optional[str] = None):
     def wrapper(func):
         @functools.wraps(func)
         def inner(self, *args, **kwargs):
-            with pytest.raises(Exception) as e:
+            try:
                 func(self, *args, **kwargs)
-            if isinstance(e.value, torch.onnx.OnnxExporterError):
-                # diagnostic message is in the cause of the exception
-                assert error_message in str(
-                    e.value.__cause__
-                ), f"Expected error message: {error_message} NOT in {str(e.value.__cause__)}"
+            except Exception as e:
+                if isinstance(e, torch.onnx.OnnxExporterError):
+                    # diagnostic message is in the cause of the exception
+                    assert error_message in str(
+                        e.__cause__
+                    ), f"Expected error message: {error_message} NOT in {str(e.__cause__)}"
+                else:
+                    assert error_message in str(
+                        e
+                    ), f"Expected error message: {error_message} NOT in {str(e)}"
+                pytest.xfail(reason if reason else f"Expected failure: {error_message}")
             else:
-                assert error_message in str(
-                    e.value
-                ), f"Expected error message: {error_message} NOT in {str(e.value)}"
+                pytest.fail("Unexpected success!")
 
         return inner
 

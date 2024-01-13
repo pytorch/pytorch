@@ -479,8 +479,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.xfail_dynamic_fx_test(
         error_message="[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. "
-        "Name:'_inline_aten_slice_scattern13' Status Message: slice.cc:193 "
-        "FillVectorsFromInput Starts must be a 1-D array"
     )
     @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
         error_message="Expected 1 outputs, got 2"
@@ -501,8 +499,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.xfail_dynamic_fx_test(
         error_message="[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. "
-        "Name:'_inline_aten_slice_scattern13' Status Message: slice.cc:193 "
-        "FillVectorsFromInput Starts must be a 1-D array"
     )
     @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
         error_message="Expected 1 outputs, got 2"
