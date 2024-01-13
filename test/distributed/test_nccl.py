@@ -105,7 +105,7 @@ class TestNCCL(TestCase):
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "only one GPU detected")
     @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_ROCM and HIP_VERSION < 3.5 and dtype == torch.bfloat16,
+        TEST_WITH_ROCM and HIP_VERSION < 3.5 and dtype == torch.bfloat16,  # noqa: F821
         "Skip bfloat16 test for ROCm < 3.5",
     )
     @dtypes(*datatypes)

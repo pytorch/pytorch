@@ -1,6 +1,7 @@
 import copy
 import dataclasses
 import functools
+import logging
 import re
 from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -45,6 +46,9 @@ from .graph_signature import (
     SymIntArgument,
     TensorArgument,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -375,7 +379,6 @@ def _export_non_strict(
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
-    decomp_table=None,
 ):
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
@@ -386,7 +389,6 @@ def _export_non_strict(
             (*fake_args, *fake_kwargs.values()),
             trace_joint=False,
             pre_dispatch=pre_dispatch,
-            decompositions=decomp_table,
         )
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
@@ -473,7 +475,6 @@ def _export(
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
     pre_dispatch: bool = False,
-    decomp_table: Optional[Dict[str, Callable]] = None,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -567,13 +568,12 @@ def _export(
         )
         assert out_spec is not None
         return ExportedProgram(
-            ep_non_strict.gm,
-            ep_non_strict.gm.graph,
-            ep_non_strict.sig,
-            _get_params_buffers(f),
-            range_constraints,
-            equality_constraints,
-            [
+            root=ep_non_strict.gm,
+            graph=ep_non_strict.gm.graph,
+            graph_signature=ep_non_strict.sig,
+            state_dict=_get_params_buffers(f),
+            range_constraints=range_constraints,
+            module_call_graph=[
                 ModuleCallEntry(
                     "",
                     ModuleCallSignature(
@@ -581,7 +581,7 @@ def _export(
                     ),
                 )
             ],
-            (args, kwargs),
+            example_inputs=(args, kwargs),
             tensor_constants=ep_non_strict.tensor_constants,
         )
 
@@ -711,7 +711,6 @@ def _export(
         fake_params_buffers,
         transform=_process_user_inputs,
         pre_dispatch=pre_dispatch,
-        decomp_table=decomp_table,
     )
 
     gm = ep_non_strict.gm
@@ -752,7 +751,7 @@ def _export(
         len(export_graph_signature.input_specs),
     )
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
-    range_constraints, equality_constraints = _process_constraints(
+    range_constraints = _process_constraints(
         gm,
         num_lifted,
         flat_args,
@@ -777,14 +776,13 @@ def _export(
 
     assert orig_out_spec is not None
     exported_program = ExportedProgram(
-        gm,
-        gm.graph,
-        export_graph_signature,
+        root=gm,
+        graph=gm.graph,
+        graph_signature=export_graph_signature,
         # TODO(zhxchen17) Return empty state_dict for functions.
-        params_buffers,
-        range_constraints,
-        equality_constraints,
-        [
+        state_dict=params_buffers,
+        range_constraints=range_constraints,
+        module_call_graph=[
             ModuleCallEntry(
                 "",
                 ModuleCallSignature(
@@ -793,15 +791,14 @@ def _export(
             )
         ]
         + [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
-        (args, kwargs),
+        example_inputs=(args, kwargs),
         tensor_constants=tensor_constants,
     )
+    log.debug("Exported program from AOTAutograd:\n%s", exported_program)
 
-    if len(range_constraints) > 0 or len(equality_constraints) > 0:
-        exported_program = exported_program._transform(
-            _AddRuntimeAssertionsForInlineConstraintsPass(
-                range_constraints, equality_constraints
-            )
+    if len(range_constraints) > 0:
+        exported_program = exported_program._transform_do_not_use(
+            _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)
         )
 
     return exported_program
