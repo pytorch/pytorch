@@ -5046,6 +5046,8 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: rsqrt.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: rsqrt_nested
   tags: [core, pointwise]
 
 - func: rsqrt_(Tensor(a!) self) -> Tensor(a!)
@@ -5700,6 +5702,7 @@
   dispatch:
     SparseCPU, SparseCUDA: sqrt_sparse
     SparseCsrCPU, SparseCsrCUDA: sqrt_sparse_csr
+    NestedTensorCPU, NestedTensorCUDA: sqrt_nested
   tags: [core, pointwise]
 
 - func: sqrt_(Tensor(a!) self) -> Tensor(a!)

@@ -132,6 +132,14 @@ Tensor cos_nested(const Tensor& self) {
   return map_nt(self, at::cos);
 }
 
+Tensor rsqrt_nested(const Tensor& self) {
+  return map_nt(self, at::rsqrt);
+}
+
+Tensor sqrt_nested(const Tensor& self) {
+  return map_nt(self, at::sqrt);
+}
+
 Tensor pow_nested_scalar(const Tensor& self, const Scalar& scalar) {
   return map_nt_scalar<Tensor(const Tensor&, const Scalar&)>(self, scalar, at::pow);
 }
