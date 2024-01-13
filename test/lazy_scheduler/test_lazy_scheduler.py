@@ -118,6 +118,7 @@ def split_module_based_on_segment_info(gm: torch.fx.GraphModule):
   return gm_after_split
 
 
+# TODO: maybe merge LazySchedulerGraphModule and AsyncFuncHandle
 class LazySchedulerGraphModule(torch.nn.Module):
   """
   This module wraps around a GraphModule.
@@ -745,6 +746,7 @@ class TestLazyScheduler(TestCase):
 
 """
 TODO:
+- Eager mode prototype (use https://docs.google.com/document/d/1jJyGiWNntkHefI2MX4dHOP8MISmsiYBRn3oWMXQyHCk/edit as design source of truth)
 - Support user calling a method multiple times and only tag a specific call as segment (i.e. make `nth_call=X` work)
 - Unit test: graph break within segment (i.e. multiple graphs per segment)
 - Unit test: in-place op in named segment
@@ -754,6 +756,7 @@ TODO:
 - Integration with activation checkpointing
 - Implement "fall back when there is side effect in delayed region detected by Dynamo”
 - what if a segment is in the schedule but is never run due to dynamic control flow change? we should gracefully fall back to no-scheduler mode
+- Try on Ads model: https://docs.google.com/document/d/1tFLUh4Xe4_eGKOtgpj08kfNDhy7Fqp-dSq0d7lejdZU/edit#bookmark=id.wds06wiqwjh2 figure out integration point with trainer loop
 - (Later) Integration with compiled autograd
 
 AsyncTensor specific:
