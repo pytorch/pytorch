@@ -26,9 +26,8 @@ class C10_CUDA_API FreeMemoryCallback {
 C10_DECLARE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 #define REGISTER_FREE_MEMORY_CALLBACK(name, ...) \
   C10_REGISTER_CLASS(FreeCudaMemoryCallbacksRegistry, name, __VA_ARGS__);
-
-namespace cuda {
-
+} // namespace c10
+  //
 // TODO: Turn this into an honest to goodness class. I briefly attempted to do
 // this, but it was a bit irritating to figure out how to also correctly
 // apply pimpl pattern so I didn't have to leak any internal implementation
@@ -42,7 +41,7 @@ namespace cuda {
 // not counted as a word boundary, so you would otherwise have to list each
 // of these functions.
 
-namespace CUDACachingAllocator {
+namespace c10::cuda::CUDACachingAllocator {
 
 extern const size_t kLargeBuffer;
 
@@ -445,6 +444,4 @@ inline void enablePeerAccess(int dev, int dev_to_access) {
   return get()->enablePeerAccess(dev, dev_to_access);
 }
 
-} // namespace CUDACachingAllocator
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda::CUDACachingAllocator
