@@ -9,7 +9,7 @@ ComputeGraph::ComputeGraph(GraphConfig config)
     : config_{config},
       context_{new api::Context(
           api::runtime()->default_adapter_i(),
-          config_.context_config)},
+          config_.contextConfig)},
       values_{},
       prepack_nodes_{},
       execute_nodes_{},
@@ -28,26 +28,26 @@ ComputeGraph::~ComputeGraph() {
 }
 
 ValueRef ComputeGraph::add_tensor(
-    const IntArrayRef sizes,
-    const c10::ScalarType dtype) {
-  ValueRef idx(values_.size());
+    const std::vector<int64_t>& sizes,
+    const api::ScalarType dtype) {
+  ValueRef idx(static_cast<int>(values_.size()));
   values_.emplace_back(vTensor(context(), sizes, dtype));
   return idx;
 }
 
 ValueRef ComputeGraph::add_tensorref(
-    const IntArrayRef sizes,
-    const c10::ScalarType dtype,
+    const std::vector<int64_t>& sizes,
+    const api::ScalarType dtype,
     const void* const data) {
-  ValueRef idx(values_.size());
+  ValueRef idx(static_cast<int>(values_.size()));
   values_.emplace_back(TensorRef(sizes, dtype, data));
   return idx;
 }
 
 ValueRef ComputeGraph::add_staging(
-    const c10::ScalarType dtype,
+    const api::ScalarType dtype,
     const size_t numel) {
-  ValueRef idx(values_.size());
+  ValueRef idx(static_cast<int>(values_.size()));
   values_.emplace_back(api::StorageBuffer(context(), dtype, numel));
   return idx;
 }
@@ -86,7 +86,7 @@ void ComputeGraph::copy_into_staging(
     const size_t numel) {
   Value& in_val = get_val(idx);
   api::StorageBuffer& staging = in_val.toStaging();
-  size_t nbytes = numel * c10::elementSize(staging.dtype());
+  size_t nbytes = numel * api::element_size(staging.dtype());
   copy_ptr_to_staging(data, staging, nbytes);
 }
 
@@ -96,7 +96,7 @@ void ComputeGraph::copy_from_staging(
     const size_t numel) {
   Value& out_val = get_val(idx);
   api::StorageBuffer& staging = out_val.toStaging();
-  size_t nbytes = numel * c10::elementSize(staging.dtype());
+  size_t nbytes = numel * api::element_size(staging.dtype());
   copy_staging_to_ptr(staging, data, nbytes);
 }
 

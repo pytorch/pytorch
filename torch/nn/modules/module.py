@@ -2124,7 +2124,7 @@ class Module:
                 if child is not None:
                     child_prefix = prefix + name + '.'
                     child_state_dict = {k: v for k, v in local_state_dict.items() if k.startswith(child_prefix)}
-                    load(child, child_state_dict, child_prefix)
+                    load(child, child_state_dict, child_prefix)  # noqa: F821
 
             # Note that the hook can modify missing_keys and unexpected_keys.
             incompatible_keys = _IncompatibleKeys(missing_keys, unexpected_keys)

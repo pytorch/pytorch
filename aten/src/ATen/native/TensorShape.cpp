@@ -525,10 +525,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   Tensor new_values = values.expand(broadcast_dense_sizes).repeat_interleave(nnz_factor, 0);
   Tensor new_indices = indices.new_empty(new_indices_size);
   if (!broadcast_sizes.empty()) {
-    // ones(broadcast_sizes).nonzero() is equivalent to
-    // product(map(arange, broadcast_sizes)) but avoids creating
-    // auxilary arange tensors
-    Tensor broadcast_indices = at::native::new_ones(indices, broadcast_sizes).nonzero().transpose(0, 1).tile(nnz);
+    Tensor broadcast_indices = at::sparse::full_coo_indices(broadcast_sizes, indices.options()).tile(nnz);
     new_indices.narrow(0, 0, sparse_extra_ndim).copy_(broadcast_indices.narrow(0, 0, sparse_extra_ndim));
     for (size_t i=0; i<broadcast_dims.size(); i++) {
       int64_t j=broadcast_dims[i];
