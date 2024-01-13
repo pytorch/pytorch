@@ -4,6 +4,7 @@
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: linux-binary-libtorch-pre-cxx11
 
+
 on:
   push:
     # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
@@ -47,7 +48,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-2.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
@@ -66,7 +67,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-2.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
@@ -76,6 +77,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cpu-shared-with-deps-pre-cxx11-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: libtorch-cpu-shared-with-deps-pre-cxx11-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -85,14 +89,12 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-2.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -109,7 +111,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-2.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda11_8-shared-with-deps-pre-cxx11
@@ -129,7 +131,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-2.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda11_8-shared-with-deps-pre-cxx11
@@ -139,6 +141,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda11_8-shared-with-deps-pre-cxx11-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: libtorch-cuda11_8-shared-with-deps-pre-cxx11-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -149,14 +154,12 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-2.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda11_8-shared-with-deps-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -173,7 +176,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-2.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda12_1-shared-with-deps-pre-cxx11
@@ -193,7 +196,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-2.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda12_1-shared-with-deps-pre-cxx11
@@ -203,6 +206,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda12_1-shared-with-deps-pre-cxx11-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: libtorch-cuda12_1-shared-with-deps-pre-cxx11-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -213,14 +219,12 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-2.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-cuda12_1-shared-with-deps-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -237,7 +241,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-2.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm5_6-shared-with-deps-pre-cxx11
@@ -259,7 +263,7 @@ jobs:
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-2.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
     steps:
@@ -300,13 +304,16 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.2
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.6-2.2
+          docker-image: pytorch/manylinux-builder:rocm5.6-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
   libtorch-rocm5_6-shared-with-deps-pre-cxx11-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: libtorch-rocm5_6-shared-with-deps-pre-cxx11-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -317,14 +324,12 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-2.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm5_6-shared-with-deps-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -341,7 +346,7 @@ jobs:
       DESIRED_CUDA: rocm5.7
       GPU_ARCH_VERSION: 5.7
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.7-2.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.7-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm5_7-shared-with-deps-pre-cxx11
@@ -363,7 +368,7 @@ jobs:
       GPU_ARCH_VERSION: 5.7
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.7-2.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.7-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
     steps:
@@ -404,13 +409,16 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.2
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.7-2.2
+          docker-image: pytorch/manylinux-builder:rocm5.7-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
   libtorch-rocm5_7-shared-with-deps-pre-cxx11-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: libtorch-rocm5_7-shared-with-deps-pre-cxx11-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -421,14 +429,12 @@ jobs:
       DESIRED_CUDA: rocm5.7
       GPU_ARCH_VERSION: 5.7
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.7-2.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.7-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm5_7-shared-with-deps-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
