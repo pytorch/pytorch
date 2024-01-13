@@ -190,6 +190,9 @@ jobs:
         ]}
 
   linux-focal-rocm5_7-py3_8-test:
+    permissions:
+      id-token: write
+      contents: read
     name: linux-focal-rocm5.7-py3.8
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-focal-rocm5_7-py3_8-build
