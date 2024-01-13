@@ -374,6 +374,7 @@ aten::_int_mm
 aten::_int_mm.out
 aten::_is_all_true
 aten::_is_any_true
+aten::_lazy_clone
 aten::_linalg_check_errors
 aten::_linalg_det
 aten::_linalg_det.result
@@ -466,7 +467,9 @@ aten::_sample_dirichlet
 aten::_sample_dirichlet.out
 aten::_scaled_dot_product_efficient_attention
 aten::_scaled_dot_product_efficient_attention_backward
+aten::_scaled_dot_product_flash_attention
 aten::_scaled_dot_product_flash_attention_backward
+aten::_scaled_dot_product_flash_attention_for_cpu_backward
 aten::_scaled_mm
 aten::_scaled_mm.out
 aten::_segment_reduce_backward
