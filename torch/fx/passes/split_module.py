@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import inspect
 from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 from collections import OrderedDict
@@ -169,7 +171,7 @@ def split_module(
 
     partitions: Dict[str, Partition] = {}
     orig_nodes: Dict[str, Node] = {}
-    symbol_to_node: Dict["sympy.Symbol", Node] = {}
+    symbol_to_node: Dict[sympy.Symbol, Node] = {}
 
     def record_cross_partition_use(
         def_node: Node, use_node: Optional[Node]
