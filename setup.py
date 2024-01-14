@@ -355,7 +355,6 @@ def get_submodule_folders():
             "tbb",
             "onnx",
             "foxi",
-            "QNNPACK",
             "fbgemm",
             "cutlass",
         ]
