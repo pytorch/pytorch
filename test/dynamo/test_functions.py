@@ -1661,6 +1661,38 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(program(input1, input2), input1 + input1))
 
+    def test_compare_constant_and_tensor(self):
+        for op in [
+            operator.lt,
+            operator.le,
+            operator.gt,
+            operator.ge,
+            operator.ne,
+            operator.eq,
+            operator.is_,
+            operator.is_not,
+        ]:
+            with self.subTest(op=op):
+
+                def fn(x):
+                    return op(-10, x)
+
+                opt_fn = torch.compile(fullgraph=True)(fn)
+
+                x = torch.randn(10)
+                self.assertEqual(opt_fn(x), fn(x))
+
+    def test_unary_fold_op(self):
+        for op in (operator.abs, abs, operator.neg, operator.pos, operator.truth):
+            with self.subTest(op=op):
+
+                def fn():
+                    a = range(-10, 10)
+                    return list(map(op, a))
+
+                opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+                self.assertEqual(opt_fn(), fn())
+
 
 def udf_mul(x, y):
     return x * y
@@ -2114,38 +2146,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         # Should cause fallback if allow graph break
         with self.assertRaisesRegex(ValueError, "zip()"):
             opt_fn(x, ys[:1], zs)
-
-    def test_compare_constant_and_tensor(self):
-        for op in [
-            operator.lt,
-            operator.le,
-            operator.gt,
-            operator.ge,
-            operator.ne,
-            operator.eq,
-            operator.is_,
-            operator.is_not,
-        ]:
-            with self.subTest(op=op):
-
-                def fn(x):
-                    return op(-10, x)
-
-                opt_fn = torch.compile(fullgraph=True)(fn)
-
-                x = torch.randn(10)
-                self.assertEqual(opt_fn(x), fn(x))
-
-    def test_unary_fold_op(self):
-        for op in (operator.abs, abs, operator.pos, operator.neg):
-            with self.subTest(op=op):
-
-                def fn():
-                    a = range(-10, 10)
-                    return list(map(op, a))
-
-                opt_fn = torch._dynamo.optimize(nopython=True)(fn)
-                self.assertEqual(opt_fn(), fn())
 
 
 instantiate_parametrized_tests(FunctionTests)

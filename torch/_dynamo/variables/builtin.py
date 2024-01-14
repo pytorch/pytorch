@@ -116,6 +116,7 @@ class BuiltinVariable(VariableTracker):
             operator.pos,
             operator.neg,
             operator.not_,
+            operator.truth,
             operator.invert,
             operator.pow,
             operator.mul,
