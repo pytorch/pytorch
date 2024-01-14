@@ -77,14 +77,6 @@ jobs:
         continue-on-error: true
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: DEBUG
-        shell: bash
-        continue-on-error: true
-        run: |
-          set -ex
-          ps -ef | grep docker
-          cat ~/.docker/*
-
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
