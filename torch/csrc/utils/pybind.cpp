@@ -19,6 +19,18 @@ bool type_caster<c10::SymInt>::load(py::handle src, bool) {
   }
 
   auto raw_obj = src.ptr();
+
+  if (THPVariable_Check(raw_obj)) {
+    auto& var = THPVariable_Unpack(raw_obj);
+    if (var.numel() == 1 &&
+        at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
+      auto scalar = var.item();
+      TORCH_INTERNAL_ASSERT(scalar.isIntegral(/*include bool*/ false));
+      value = scalar.toSymInt();
+      return true;
+    }
+  }
+
   if (THPUtils_checkIndex(raw_obj)) {
     value = c10::SymInt{THPUtils_unpackIndex(raw_obj)};
     return true;
