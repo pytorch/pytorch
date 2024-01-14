@@ -418,6 +418,16 @@ class TestInductorDynamic(TestCase):
         cfn = self.compile_fn(fn)
         self.assertEqual(fn(a), cfn(a))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_item_materialize(self, device):
+        def fn(x):
+            return x.sum(dim=0).view(4).tolist()
+
+        cfn = torch.compile(fullgraph=True)(fn)
+
+        a = torch.ones(3, 4, dtype=torch.int64, device=device)
+        self.assertEqual(cfn(a), fn(a))
+
     def test_abs(self, device):
         def fn(x, y):
             y0, y1 = y.shape
