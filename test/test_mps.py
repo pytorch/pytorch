@@ -3194,6 +3194,14 @@ class TestMPS(TestCaseMPS):
         r_cpu = y_cpu + 1
         self.assertEqual(r, r_cpu)
 
+    def test_reshape_basic(self):
+        t_cpu = torch.ones(2, 6)[1].reshape(2, 3)
+        t_mps = torch.ones(2, 6, device="mps")[1].reshape(2, 3)
+        t_cpu = t_cpu + 1
+        # This used to crash, see https://github.com/pytorch/pytorch/issues/96153
+        t_mps = t_mps + 1
+        self.assertEqual(t_cpu, t_mps)
+
     def test_slice_reshape(self):
         x = torch.randn([1, 6, 4, 2], dtype=torch.float, device="mps")
         x_cpu = x.detach().clone().to("cpu")

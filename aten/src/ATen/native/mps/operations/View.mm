@@ -539,7 +539,7 @@ MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape* mp
   }
 
   int64_t view_numel = 1;
-  for (const auto i : c10::irange(firstDimToSlice + 1, src_base_shape.size())) {
+  for (const auto i : c10::irange(firstDimToSlice, src_base_shape.size())) {
     view_numel *= src_base_shape[i];
   }
 
