@@ -1092,7 +1092,12 @@ def cat(inputs, dim=0):
 
         return False
 
-    if len(inputs) <= config.max_pointwise_cat_inputs:
+    # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
+    #             We will revisit this later after enabling vectorization on index_expr.
+    if (
+        len(inputs) <= config.max_pointwise_cat_inputs
+        and inputs[0].get_device().type != "cpu"
+    ):
         pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
         all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
         any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
@@ -2561,14 +2566,6 @@ def _local_scalar_dense(data):
     buffer = ir.DynamicScalar(sym, data)
     buffer.name = V.graph.register_buffer(buffer)
     return sym
-
-
-@register_lowering(aten._assert_scalar)
-def _assert_scalar(data, msg):
-    buffer = ir.AssertScalar(data, msg)
-    # This buffer isn't used by anyone (it returns None), so we must explicitly register it
-    buffer.name = V.graph.register_buffer(buffer)
-    return buffer
 
 
 def _full(fill_value, device, dtype, size):
@@ -5313,6 +5310,11 @@ def accumulate_grad_(variable, new_grad):
     new_grad.realize()
     ir.AccumulateGrad(variable, new_grad)
     return variable
+
+
+from torch._higher_order_ops.auto_functionalize import auto_functionalized
+
+make_fallback(auto_functionalized)
 
 
 @register_lowering(triton_kernel_wrapper_mutation)
