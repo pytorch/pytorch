@@ -2,6 +2,7 @@
 # flake8: noqa
 import copy
 import dataclasses
+import io
 import unittest
 from contextlib import contextmanager
 from dataclasses import dataclass
