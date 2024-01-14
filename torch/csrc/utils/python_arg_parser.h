@@ -961,28 +961,6 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
         signature.params[i].name, idx, var, c10::IntType::get());
   }
 
-  // convert FakeTensor to SymInt
-  // expect empty sizes, numel = 1
-  // and ScalarType::Int
-  if (is_dynamo_compiling && THPVariable_Check(obj)) {
-    auto& var = THPVariable_Unpack(obj);
-
-    if (var.numel() != 1 || !var.sizes().empty() ||
-        !at::isIntegralType(
-            var.dtype().toScalarType(), /*include_bool*/ true)) {
-      throw TypeError(
-          "%s(): argument '%s' must be %s, failed to convert %s with sizes.empty()=%d",
-          signature.name.c_str(),
-          signature.params[i].name.c_str(),
-          signature.params[i].type_name().c_str(),
-          Py_TYPE(obj)->tp_name,
-          var.sizes().empty());
-    }
-    auto scalar = var.item();
-    TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
-    return scalar.toSymInt();
-  }
-
   return py::cast<c10::SymInt>(py::handle(args[i]));
 }
 
