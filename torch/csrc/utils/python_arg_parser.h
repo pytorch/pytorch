@@ -950,7 +950,6 @@ inline int64_t PythonArgs::toInt64(int i) {
 }
 
 inline c10::SymInt PythonArgs::toSymInt(int i) {
-  PyObject* obj = args[i];
   if (!args[i]) {
     return c10::SymInt(signature.params[i].default_int);
   }
