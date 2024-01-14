@@ -165,7 +165,6 @@ _SYM_INT_OPS = {
     operator.sub,
     operator.floordiv,
     operator.mod,
-    torch.sym_sqrt,
     torch.sym_int,
     torch.sym_ite,
     torch.sym_max,
@@ -1631,15 +1630,14 @@ class ExportedProgramDeserializer:
         state_dict = deserialize_torch_artifact(serialized_artifact.state_dict)
 
         exported_program = ep.ExportedProgram(
-            res.graph_module,
-            res.graph_module.graph,
-            res.signature,
-            state_dict,  # type: ignore[arg-type]
-            range_constraints,
-            [],
-            res.module_call_graph,
-            None,
-            load_verifier(serialized_artifact.exported_program.dialect),
+            root=res.graph_module,
+            graph=res.graph_module.graph,
+            graph_signature=res.signature,
+            state_dict=state_dict,  # type: ignore[arg-type]
+            range_constraints=range_constraints,
+            module_call_graph=res.module_call_graph,
+            example_inputs=None,
+            verifier=load_verifier(serialized_artifact.exported_program.dialect),
             tensor_constants=tensor_constants,
         )
         return upgrader.upgrade(exported_program)
