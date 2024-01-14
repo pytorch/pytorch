@@ -23,8 +23,7 @@ bool type_caster<c10::SymInt>::load(py::handle src, bool) {
   if (THPVariable_Check(raw_obj)) {
     auto& var = THPVariable_Unpack(raw_obj);
     if (var.numel() == 1 &&
-        at::isIntegralType(
-            var.dtype().toScalarType(), /*include_bool*/ true)) {
+        at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
       auto scalar = var.item();
       TORCH_INTERNAL_ASSERT(scalar.isIntegral(/*include bool*/ false));
       value = scalar.toSymInt();
