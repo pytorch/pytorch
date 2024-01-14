@@ -1116,7 +1116,9 @@ class DynamicDimConstraintPrinter(StrPrinter):
 
     def _print_Symbol(self, expr) -> str:
         assert isinstance(expr, sympy.Symbol), str(type(expr))
-
+        assert self.symbol_to_source.get(expr), (
+            f"Unknown symbol {expr} created by constraints solver"
+        )
         return self.print_source(self.symbol_to_source[expr][0])
 
     def _print_Relational(self, expr):
@@ -1405,7 +1407,7 @@ class DimConstraints:
                         self._dynamic_results.add(self._dcp.doprint(arg))
                 else:
                     self._dynamic_results.add(self._dcp.doprint(solution))
-            except NotImplementedError as e:
+            except (NotImplementedError, AssertionError) as e:
                 log.warning("Failed to reduce inequalities: %s", e)
                 for expr in exprs:
                     self._dynamic_results.add(self._dcp.doprint(expr))
