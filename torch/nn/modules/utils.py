@@ -63,7 +63,7 @@ def consume_prefix_in_state_dict_if_present(
         if key.startswith(prefix):
             new_key = key[len(prefix):]
             state_dict[new_key] = state_dict.pop(key)
-           
+
         # Key corresponds to the metadata
         elif key == "_metadata":
             metadata = state_dict["_metadata"]
@@ -75,10 +75,10 @@ def consume_prefix_in_state_dict_if_present(
                 if metadata_key.startswith(prefix):
                     new_key = metadata_key[len(prefix):]
                 metadata[new_key] = metadata.pop(metadata_key)
-               
+
             # while the order is kept within _metadata, we need to reinsert it
             state_dict["_metadata"] = state_dict.pop("_metadata")
-           
-        # if any of the previous options did not work, we reinsert it as it is        
+
+        # if any of the previous options did not work, we reinsert it as it is
         else:
             state_dict[key] = state_dict.pop(key)
