@@ -74,6 +74,7 @@ jobs:
 
       - name: Login to Amazon ECR
         id: login-ecr
+        continue-on-error: true
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Calculate docker image
