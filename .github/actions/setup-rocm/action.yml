@@ -17,7 +17,7 @@ runs:
 
         cat ~/.docker/config.json || true
         # https://stackoverflow.com/questions/64455468/error-when-logging-into-ecr-with-docker-login-error-saving-credentials-not
-        rm -f .docker/config.json
+        rm -f ~/.docker/config.json
 
     - name: Stop all running docker containers
       if: always()
