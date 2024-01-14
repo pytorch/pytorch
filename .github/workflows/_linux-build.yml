@@ -62,6 +62,10 @@ on:
         value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build:
     # Don't run on forked repos
