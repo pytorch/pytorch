@@ -142,6 +142,7 @@ def validate_args_and_maybe_create_graph_inputs(
     tx,
     manually_set_subgraph_inputs,
     description,
+    proxy_for_constants=False,
 ):
     from . import AutogradFunctionContextVariable, ConstantVariable, EnumVariable
     from .builder import wrap_fx_proxy_cls
@@ -160,8 +161,14 @@ def validate_args_and_maybe_create_graph_inputs(
             # Currently, this new input is added to make the calls
             # happy, which expect a fixed number of arguments. In
             # future, we can clean this up.
-            tracer.create_graph_input("const")
-            new_arg = a
+            const_proxy = tracer.create_graph_input("const")
+            if isinstance(a, ConstantVariable) and proxy_for_constants:
+                sym_a = torch.SymInt(a.as_python_constant())
+                const_proxy.node.meta["example_value"] = sym_a
+                sym_arg = SymNodeVariable(const_proxy, sym_a)
+                new_arg = sym_arg
+            else:
+                new_arg = a
         # Weird special case, we probably want to delete it or fold it
         # into the next case (of `a` being placeable into a graph)
         elif isinstance(a, AutogradFunctionContextVariable):
@@ -220,6 +227,7 @@ def speculate_subgraph(
     # Allow ConstantVariable return values in the output. Default only allows Tensors.
     allow_constant_outputs=False,
     log_error_on_graph_break=True,
+    proxy_for_constants=False
 ):
     if sub_kwargs is None:
         sub_kwargs = {}
@@ -238,7 +246,7 @@ def speculate_subgraph(
         )
         with tx.output.subtracer(source_target, tracer) as subtracer:
             args = validate_args_and_maybe_create_graph_inputs(
-                sub_args, subtracer, tx, manually_set_subgraph_inputs, description
+                sub_args, subtracer, tx, manually_set_subgraph_inputs, description, proxy_for_constants=proxy_for_constants
             )
 
             validate_args_and_maybe_create_graph_inputs(
@@ -247,6 +255,7 @@ def speculate_subgraph(
                 tx,
                 manually_set_subgraph_inputs=False,
                 description=description,
+                proxy_for_constants=proxy_for_constants,
             )
 
             autograd_ctx = (
@@ -292,9 +301,9 @@ def speculate_subgraph(
 
                 if not only_consist_of(
                     output,
-                    (TensorVariable, ConstantVariable)
+                    (TensorVariable, ConstantVariable, SymNodeVariable)
                     if allow_constant_outputs
-                    else TensorVariable,
+                    else (TensorVariable, SymNodeVariable),
                 ):
                     unimplemented(
                         "HigherOrderOperator body's output must consist of tensors only"
@@ -1279,6 +1288,9 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # E.g. in `for i in range(10)`, there is a `STORE_FAST i``
         assert loop_body_instructions[0].opname == "STORE_FAST"
         co_code: List[int] = []
+
+        iter_name = loop_body_instructions[0].argval
+
         loop_body = loop_body_instructions[1:-1]
         if not loop_body:
             raise CannotConvertRangeToHigherOrder("Empty loop body.")
@@ -1304,7 +1316,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         co_code = bytes(co_code)
         argcount = host_code_object.co_nlocals
         posonlyargcount = kwonlyargouncount = 0
-        nlocals = argcount
+        nlocals = host_code_object.co_nlocals
         stacksize = host_code_object.co_stacksize
         flags = 1
         codestring = co_code
@@ -1390,8 +1402,8 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Assign the for loop value
         args = list(self.args)
         assert self.store_target >= 0
-        args[self.store_target] = val_range[0]
 
+        args[self.store_target] = val_range[0]
         try:
             # Convert the entire loop body to a subgraph.
             (
@@ -1407,6 +1419,8 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 source_target=self.func,
                 allow_constant_outputs=True,
                 log_error_on_graph_break=False,
+                # REQUIRED! Without this, the store_target gets burned in
+                proxy_for_constants=True
             )
         except Unsupported as e:
             raise CannotConvertRangeToHigherOrder("graph break in function") from e
