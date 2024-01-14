@@ -62,10 +62,6 @@ on:
         value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
 
-permissions:
-  id-token: write
-  contents: read
-
 jobs:
   build:
     # Don't run on forked repos
@@ -90,21 +86,6 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
-
-      - name: configure aws credentials
-        id: aws_creds
-        uses: aws-actions/configure-aws-credentials@v3
-        with:
-          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
-          aws-region: us-east-1
-
-      - name: DEBUG
-        shell: bash
-        run: |
-          echo "${AWS_ACCESS_KEY_ID}" > /tmp/AWS_ACCESS_KEY_ID
-          echo "${AWS_SECRET_ACCESS_KEY}" > /tmp/AWS_SECRET_ACCESS_KEY
-          echo "${AWS_SESSION_TOKEN}" > /tmp/AWS_SESSION_TOKEN
-          sleep 3600
 
       - name: Calculate docker image
         id: calculate-docker-image

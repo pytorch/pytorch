@@ -9,12 +9,13 @@ runs:
       shell: bash
       run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
 
-    - name: Start Docker daemon
+    - name: DEBUG
       shell: bash
       continue-on-error: true
       run: |
         set -ex
-        sudo systemctl start docker
+        ps -ef | grep docker
+        cat ~/.docker/*
 
     - name: Stop all running docker containers
       if: always()
