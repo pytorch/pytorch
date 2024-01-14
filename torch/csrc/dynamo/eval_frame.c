@@ -177,7 +177,6 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
 // Flag to just run a frame normally
 #define SKIP_CODE ((void*)0x1)
 
-bool is_dynamo_compiling = false;
 static PyObject* guard_error_hook = NULL;
 const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 
@@ -1080,7 +1079,6 @@ static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate) {
   // is installed.
   eval_frame_callback_set(new_callback);
 
-  is_dynamo_compiling = !(new_callback == Py_None);
   return old_callback;
 }
 
