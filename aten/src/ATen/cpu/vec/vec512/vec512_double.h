@@ -83,7 +83,7 @@ public:
     if (count == size())
       return _mm512_loadu_pd(reinterpret_cast<const double*>(ptr));
 
-    __mmask8 mask = (1 << count) - 1;
+    __mmask8 mask = (1ULL << count) - 1;
     return _mm512_maskz_loadu_pd(mask, ptr);
   }
   void store(void* ptr, int count = size()) const {
