@@ -200,3 +200,68 @@ if HAS_CUDA:
             pack=1,
         )
         tl.store(Z + tl.arange(0, BLOCK), z)
+
+    @triton.jit
+    def add_kernel_with_block_ptr(
+        x_ptr,
+        y_ptr,
+        output_ptr,
+        n_elements,
+        BLOCK_SIZE: tl.constexpr,
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        x = tl.load(
+            tl.make_block_ptr(
+                base=x_ptr,
+                shape=[n_elements],
+                strides=[1],
+                offsets=[block_start],
+                block_shape=[BLOCK_SIZE],
+                order=[0],
+            ),
+            boundary_check=[0],
+        )
+        y = tl.load(
+            tl.make_block_ptr(
+                base=y_ptr,
+                shape=[n_elements],
+                strides=[1],
+                offsets=[block_start],
+                block_shape=[BLOCK_SIZE],
+                order=[0],
+            ),
+            boundary_check=[0],
+        )
+        output = x + y
+        tl.store(
+            tl.make_block_ptr(
+                base=output_ptr,
+                shape=[n_elements],
+                strides=[1],
+                offsets=[block_start],
+                block_shape=[BLOCK_SIZE],
+                order=[0],
+            ),
+            output,
+            boundary_check=[0],
+        )
+
+    from triton.language import load, store
+
+    @triton.jit
+    def add_kernel_with_import(
+        in_ptr0,
+        in_ptr1,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = load(in_ptr0 + offsets, mask=mask)
+        y = load(in_ptr1 + offsets, mask=mask)
+        output = x + y
+        store(out_ptr + offsets, output, mask=mask)

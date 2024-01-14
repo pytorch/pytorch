@@ -138,7 +138,6 @@ def identify_mutated_tensors(kernel, kwargs):
         "atomic_max",
         "atomic_min",
         "atomic_xchg",
-        "make_block_ptr",
     }
     try:
         # Monkey patch all triton language functions
@@ -146,19 +145,25 @@ def identify_mutated_tensors(kernel, kwargs):
             default_impls[name] = impl
 
             if name in mutation_ops:
+                # Ops that mutate the first argument tensor pointer
 
-                def fn(*args, **kwargs):
-                    # mypy does not like it when conditional variants have
-                    # different signatures
-                    pointer = args[0]
+                def fn(pointer, *args, **kwargs):
+                    assert isinstance(pointer, Proxy)
                     pointer.mutated = True
                     return Scalar()
+
+            elif name == "make_block_ptr":
+                # Creates indirection to base tensor pointer
+
+                def fn(base, *args, **kwargs):  # type: ignore[misc] # different conditional signatures
+                    assert isinstance(base, Proxy)
+                    return base
 
             elif name == "inline_asm_elementwise":
                 # If there's inline asm in the kernel, anything can happen.
                 # Do not optimize
 
-                def fn(*args, **kwargs):
+                def fn(*args, **kwargs):  # type: ignore[misc] # different conditional signatures
                     raise IdentifyMutationException("inline_asm_elementwise in kernel")
 
             else:
@@ -167,7 +172,7 @@ def identify_mutated_tensors(kernel, kwargs):
                 # for the purposes of tracing cause an uninteresting
                 # side effect.
 
-                def fn(*args, **kwargs):
+                def fn(*args, **kwargs):  # type: ignore[misc] # different conditional signatures
                     return Scalar()
 
             setattr(tl, name, fn)
@@ -178,15 +183,20 @@ def identify_mutated_tensors(kernel, kwargs):
             for key, value in proxy_kwargs.items()
             if isinstance(value, Proxy) and value.mutated
         ]
-    except (AttributeError, IdentifyMutationException, RuntimeError) as e:
+    except (AttributeError, IdentifyMutationException, RuntimeError, ValueError) as e:
         # - AttributeError: Triton converts constexpr to special objects
         #   TODO(oulgen): we also need to wrap them appropriately
         #
         # - IdentifyMutationException: An indication for us to not optimize
         #
         # - RuntimeError: Throw when the kernel calls another @triton.jit kernel
-        #   Cannot call @triton.jit'd outside of the scope of a kernel
+        #   "Cannot call @triton.jit'd outside of the scope of a kernel"
         #   TODO(oulgen): Find a way to monkey patch @triton.jit away
+        #
+        # - ValueError: If triton language function are imported ahead of time,
+        #   we are no longer able to monkey patch them, so the execution throws
+        #   "Did you forget to add @triton.jit ?"
+        #   TODO(oulgen): Find a way to monkey patch this
         import traceback
 
         log.debug(

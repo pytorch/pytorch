@@ -891,6 +891,30 @@ class MutationTests(torch._dynamo.test_case.TestCase):
                 {"X": t, "Y": t, "Z": t, "n": 4, "BLOCK": 4},
                 ["X", "Y", "Z"],
             ],
+            [
+                add_kernel_with_block_ptr,
+                {
+                    "x_ptr": t,
+                    "y_ptr": t,
+                    "output_ptr": t,
+                    "n_elements": 4,
+                    "BLOCK_SIZE": 4,
+                },
+                ["output_ptr"],
+            ],
+            [
+                add_kernel_with_import,
+                {
+                    "in_ptr0": t,
+                    "in_ptr1": t,
+                    "out_ptr": t,
+                    "n_elements": 4,
+                    "BLOCK_SIZE": 4,
+                },
+                # TODO(oulgen): Improve this by finding a way to monkey
+                # patch the imported tl functions
+                ["in_ptr0", "in_ptr1", "out_ptr"],
+            ],
         ]
         for kernel, inputs, outputs in tests:
             self.assertListEqual(
