@@ -149,7 +149,7 @@ def _strip_init_py(s):
     # TODO: Once we require py3.9 use removesuffix instead.
     suffix = "__init__.py"
     if s.endswith(suffix):
-        return s[:-len(suffix)]
+        return s[: -len(suffix)]
     else:
         return s
 
