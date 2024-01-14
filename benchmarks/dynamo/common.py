@@ -2002,9 +2002,7 @@ class BenchmarkRunner:
                 # After autotuning and fake tensor caching lands, we can enable, becuase the compile time impact will be lower.
                 # Fake Tensor caching: https://github.com/pytorch/pytorch/pull/113873
                 # Autotuning: https://github.com/pytorch/pytorch/issues/117447
-                self.optimizer._multi_tensor_sgd = torch._dynamo.disable(
-                    self.optimizer._multi_tensor_sgd
-                )
+                self.optimizer.step = torch._dynamo.disable(self.optimizer.step)
             else:
                 self.optimizer = torch.optim.Adam(
                     params, lr=0.01, capturable=True, foreach=True
