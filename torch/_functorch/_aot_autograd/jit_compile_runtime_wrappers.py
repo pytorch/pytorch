@@ -148,6 +148,7 @@ def aot_dispatch_autograd(
     *,
     fw_metadata: ViewAndMutationMeta,
 ):
+    fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
     fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(  # type: ignore[misc]
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
@@ -538,6 +539,18 @@ def aot_dispatch_autograd(
                 + num_mutated_runtime_inps
                 + num_intermediate_bases
             )
+            deterministic = CompiledFunction.metadata.deterministic
+            global_deterministic = torch.are_deterministic_algorithms_enabled()
+            if deterministic is not None:
+                torch._check(
+                    not (not deterministic and global_deterministic),
+                    lambda: (
+                        "This compiled backward function is being run with "
+                        "torch.use_deterministic_algorithms(True), "
+                        "but it was previously generated during the forward function while "
+                        "torch.use_deterministic_algorithms(False) was set."
+                    ),
+                )
 
             if num_graph_handled_inputs > 0:
                 flat_args = flat_args[:-num_graph_handled_inputs]
