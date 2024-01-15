@@ -485,7 +485,7 @@ void int4pack_mm_kernel(
   int K = A.size(1);
 
   constexpr int BLOCK_M = 4;
-  // 64 for avx512 and 64 for avx2/non-vectorized
+  // 64 for avx512 and 32 for avx2/non-vectorized
   constexpr int BLOCK_N = vec::Vectorized<float>::size() * 4;
   // 32, 64, 128, 256
   const int BLOCK_K = qGroupSize;
