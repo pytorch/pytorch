@@ -1562,9 +1562,11 @@ class CppKernel(Kernel):
                                 ws_init,
                                 ws_tores,
                             ) = get_reduction_code_buffer(loops, is_suffix=False)
-                            if reduction_prefix:
+                            if ws_init:
+                                assert ws_tores
                                 worksharing.reduction_init = ws_init
                                 worksharing.reduction_stores = ws_tores
+                            if reduction_prefix:
                                 stack_outer.enter_context(code.indent())
                             code.splice(reduction_prefix)
                         if loop_nest.is_reduction_only() and loop.parallel:
