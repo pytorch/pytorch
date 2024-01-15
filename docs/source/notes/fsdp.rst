@@ -86,7 +86,7 @@ Please note that in this example we didn't include the additional communications
 embedding, which should be accounted for as well. And the math would depend on whether the input and
 output embeddings are tied or not. If they aren't tied there will be 2x more communications.
 
-.. _fsdp_buffers_sizes
+.. _fsdp_buffers_sizes:
 
 FSDP buffers sizes
 ------------------
