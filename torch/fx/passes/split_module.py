@@ -1,5 +1,5 @@
 import inspect
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 from collections import OrderedDict
 import logging
 
@@ -7,6 +7,9 @@ import torch
 from torch.fx._compatibility import compatibility
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
+
+if TYPE_CHECKING:
+    import sympy  # noqa: F401
 
 __all__ = ["Partition", "split_module"]
 _LOGGER = logging.getLogger(__name__)
@@ -166,10 +169,13 @@ def split_module(
 
     partitions: Dict[str, Partition] = {}
     orig_nodes: Dict[str, Node] = {}
+    symbol_to_node: Dict["sympy.Symbol", Node] = {}
 
     def record_cross_partition_use(
         def_node: Node, use_node: Optional[Node]
     ):  # noqa: B950
+        from torch.fx.experimental.symbolic_shapes import free_symbols
+
         defined = getattr(def_node, "_fx_partition", None)
         used = getattr(use_node, "_fx_partition", None)
         if defined != used:
@@ -182,6 +188,9 @@ def split_module(
             if used is not None:
                 use_partition = partitions[used]
                 use_partition.inputs.setdefault(def_node.name)
+                if (def_val := def_node.meta.get("example_value")) is not None:
+                    for s in sorted(free_symbols(def_val)):
+                        use_partition.inputs.setdefault(symbol_to_node[s].name)
                 if defined is not None:
                     use_partition.dependencies.setdefault(defined)
 
@@ -223,8 +232,17 @@ def split_module(
     active_grad = None
     active_autocasts = set()
 
+    import sympy  # noqa: F811
+
     for node in m.graph.nodes:
         if node.op in ["placeholder", "get_attr", "output"]:
+            if (
+                node.op == "placeholder" and
+                (val := node.meta.get("example_value")) is not None and
+                isinstance(val, torch.SymInt) and
+                isinstance(val.node.expr, sympy.Symbol)
+            ):
+                symbol_to_node[val.node.expr] = node
             continue
 
         instantiate_node_partition_mapping(node)
