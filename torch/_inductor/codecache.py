@@ -1877,12 +1877,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow
         extern "C" void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj);
 
-        template <typename T> static inline T parse_arg(PyObject* args, int n) {
+        template <typename T> static inline T parse_arg(PyObject* args, size_t n) {
             static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
             return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
         }
-        template <> inline long parse_arg<long>(PyObject* args, int n) {
-            long result = PyLong_AsLong(PyTuple_GET_ITEM(args, n));
+        template <> inline long parse_arg<long>(PyObject* args, size_t n) {
+            auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
             if(result == -1 && PyErr_Occurred())
                 [[unlikely]] throw std::runtime_error("expected int arg");
             return result;
