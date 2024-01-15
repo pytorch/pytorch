@@ -3390,10 +3390,7 @@ def meta__convert_weight_to_int4pack(w, inner_k_tiles):
     k = w.size(1)
     if device_hint(w) == "cpu":
         return w.new_empty(
-            (
-                n,
-                k // 2
-            ),
+            (n, k // 2),
             dtype=torch.uint8,
         )
     # cuda path
