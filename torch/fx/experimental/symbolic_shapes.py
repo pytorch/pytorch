@@ -339,7 +339,7 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
     """Returns True if x can be simplified to a constant and is true.
 
     NOTE: This function doesn't introduce new guards, so the expression may end
-    up evaluating to true at runtime.
+    up evaluating to true at runtime even if this function returns False.
 
     """
     if isinstance(x, SymBool):
