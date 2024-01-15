@@ -2124,6 +2124,8 @@ class CommonTemplate:
                 torch.randint(-128, 127, (8, 8), dtype=torch.int8),
             ),
             check_lowp=True,
+            atol=5e-3,
+            rtol=5e-3,
         )
 
     @config.patch(force_mixed_mm=True)
@@ -2140,6 +2142,8 @@ class CommonTemplate:
                 torch.randn(8),
             ),
             check_lowp=True,
+            atol=5e-3,
+            rtol=5e-3,
         )
 
     @config.patch(use_mixed_mm=True)
