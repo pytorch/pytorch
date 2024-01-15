@@ -253,6 +253,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
     aten = torch.ops.aten
     return get_decompositions(
         [
+            aten.addbmm,
             aten.addcdiv,
             aten.addcdiv_,
             aten.addcmul,
