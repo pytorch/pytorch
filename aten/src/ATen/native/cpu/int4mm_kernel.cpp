@@ -9,6 +9,12 @@
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
+#if (defined(_WIN32) || defined(_WIN64))
+#define RESTRICT __restrict
+#else
+#define RESTRICT __restrict__
+#endif
+
 namespace at::native {
 
 namespace {
@@ -38,10 +44,10 @@ inline __m128i conver_int4_to_int8(const uint8_t* data) {
 //
 template <int BLOCK_M, int BLOCK_N>
 inline void tinygemm_kernel(
-    const BFloat16* __restrict__ A,
-    const uint8_t* __restrict__ B,
-    const BFloat16* __restrict__ ScaleAndZeros,
-    BFloat16* __restrict__ C,
+    const BFloat16* RESTRICT A,
+    const uint8_t* RESTRICT B,
+    const BFloat16* RESTRICT ScaleAndZeros,
+    BFloat16* RESTRICT C,
     int lda,
     int ldb,
     int ldc,
@@ -188,10 +194,10 @@ inline void tinygemm_kernel(
 
 template <int BLOCK_M, int BLOCK_N>
 inline void tinygemm_kernel(
-    const BFloat16* __restrict__ A,
-    const uint8_t* __restrict__ B,
-    const BFloat16* __restrict__ ScaleAndZeros,
-    BFloat16* __restrict__ C,
+    const BFloat16* RESTRICT A,
+    const uint8_t* RESTRICT B,
+    const BFloat16* RESTRICT ScaleAndZeros,
+    BFloat16* RESTRICT C,
     int lda,
     int ldb,
     int ldc,
@@ -320,10 +326,10 @@ inline float convert_int4_to_float(uint8_t a, bool is_even) {
 // non-vectorized version
 template <int BLOCK_M, int BLOCK_N>
 inline void tinygemm_kernel(
-    const BFloat16* __restrict__ A,
-    const uint8_t* __restrict__ B,
-    const BFloat16* __restrict__ ScaleAndZeros,
-    BFloat16* __restrict__ C,
+    const BFloat16* RESTRICT A,
+    const uint8_t* RESTRICT B,
+    const BFloat16* RESTRICT ScaleAndZeros,
+    BFloat16* RESTRICT C,
     int lda,
     int ldb,
     int ldc,
