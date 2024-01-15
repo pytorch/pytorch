@@ -177,6 +177,7 @@ def reduction_init(reduction_type, dtype):
 def sync_stores_to_parallel_reduction_stores(
     store_buffer, parallel_reduction_stores_buffer
 ):
+    return
     for line in store_buffer._lines:
         if isinstance(line, DeferredLine):
             parallel_reduction_stores_buffer.writeline(line)
