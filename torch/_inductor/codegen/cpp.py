@@ -281,6 +281,9 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
         f"struct {struct_name} {{size_t index; {DTYPE_TO_CPP[src_dtype]} value;}};",
         f"{struct_name} {tmpvar}{{0, {reduction_init(reduction_type, src_dtype)}}};",
     ]
+    worksharing_init = [
+        f"{struct_name} {tmpvar}_local{{0, {reduction_init(reduction_type, src_dtype)}}};",
+    ]
     tmpvar_per_thd = f"{tmpvar}_arr[{nthds}]"
     tmpvar_local = tmpvar_per_thd.replace(f"[{nthds}]", "[tid]")
     parapllel_init = [
@@ -289,7 +292,7 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
         f"    {tmpvar_local} = {{0, {reduction_init(reduction_type, src_dtype)}}};",
     ]
     parallel_prefix = prefix + parapllel_init
-    return prefix, parallel_prefix
+    return prefix, parallel_prefix, worksharing_init
 
 
 def parallel_num_threads():
@@ -1291,6 +1294,8 @@ class CppKernel(Kernel):
         self.parallel_reduction_prefix = IndentedBuffer()
         self.parallel_reduction_suffix = IndentedBuffer()
         self.parallel_reduction_stores = IndentedBuffer()
+        self.worksharing_reduction_init = IndentedBuffer()
+        self.worksharing_reduction_stores = IndentedBuffer()
         self.reduction_var_map = {}
         self.reduction_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
         self.preloads = IndentedBuffer()
@@ -1364,14 +1369,16 @@ class CppKernel(Kernel):
         acc = self.reduction_cse.generate(
             self.loads, f"reduction {reduction_key}", write=False
         )
+        acc_local = f"{acc}_local"
         nthds = parallel_num_threads()
         acc_per_thd = f"{acc}_arr[{nthds}]"
-        acc_local = acc_per_thd.replace(f"[{nthds}]", "[tid]")
+        acc_local_in_array = acc_per_thd.replace(f"[{nthds}]", "[tid]")
         self.reduction_var_map[acc] = reduction_type
         if argmax_or_argmin:
-            prefix, parallel_prefix = argmax_argmin_prefix(
+            prefix, parallel_prefix, worksharing_init = argmax_argmin_prefix(
                 reduction_type, src_dtype, acc
             )
+            self.worksharing_reduction_init.writelines(worksharing_init)
             self.reduction_prefix.writelines(prefix)
             self.parallel_reduction_prefix.writelines(parallel_prefix)
             compare_op = "<" if reduction_type == "argmax" else ">"
@@ -1397,11 +1404,16 @@ class CppKernel(Kernel):
                 [
                     f"for (int tid = 0; tid < {nthds}; tid++)",
                     "{",
-                    f"    if ({acc}.value {compare_op} {acc_local}.value) {{",
-                    f"        {acc}.index = {acc_local}.index; {acc}.value = {acc_local}.value;",
+                    f"    if ({acc}.value {compare_op} {acc_local_in_array}.value) {{",
+                    f"        {acc}.index = {acc_local_in_array}.index; {acc}.value = {acc_local_in_array}.value;",
                     "    }",
                     "}",
                 ],
+            )
+            self.worksharing_reduction_stores.writelines(
+                [
+                    f"{acc_local_in_array} = {acc_local};",
+                ]
             )
         else:
             acc_type = reduction_acc_type(reduction_type, dtype)
@@ -1412,28 +1424,36 @@ class CppKernel(Kernel):
             self.stores.writeline(
                 f"{acc} = {reduction_combine(reduction_type, acc, value)};"
             )
+            self.worksharing_reduction_init.writeline(
+                f"{acc_type} {acc_local} = {reduction_init(reduction_type, dtype)};"
+            )
             self.parallel_reduction_prefix.writeline(
                 f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
             )
             self.parallel_reduction_prefix.writeline(f"{acc_type} {acc_per_thd};")
-            self.parallel_reduction_prefix.writelines(
-                [
-                    f"for (int tid = 0; tid < {nthds}; tid++) ",
-                    "{",
-                    f"    {acc_local} = {reduction_init(reduction_type, dtype)};",
-                    "}",
-                ]
-            )
+            # self.parallel_reduction_prefix.writelines(
+            #     [
+            #         f"for (int tid = 0; tid < {nthds}; tid++) ",
+            #         "{",
+            #         f"    {acc_local} = {reduction_init(reduction_type, dtype)};",
+            #         "}",
+            #     ]
+            # )
             self.parallel_reduction_stores.writelines(
                 [
                     f"{acc_local} = {reduction_combine(reduction_type, acc_local, value)};",
+                ]
+            )
+            self.worksharing_reduction_stores.writelines(
+                [
+                    f"{acc_local_in_array} = {acc_local};",
                 ]
             )
             self.parallel_reduction_suffix.writelines(
                 [
                     f"for (int tid = 0; tid < {nthds}; tid++)",
                     "{",
-                    f"    {acc} = {reduction_combine(reduction_type, acc, acc_local)};",
+                    f"    {acc} = {reduction_combine(reduction_type, acc, acc_local_in_array)};",
                     "}",
                 ],
             )
@@ -1515,29 +1535,36 @@ class CppKernel(Kernel):
                     for kernel in loop.get_kernels():
                         if is_suffix:
                             suffix = (
-                                kernel.parallel_reduction_suffix
+                                (kernel.parallel_reduction_suffix, None, None)
                                 if loop.parallel
-                                else kernel.reduction_suffix
+                                else (kernel.reduction_suffix, None, None)
                             )
                             return suffix
                         else:
                             prefix = (
-                                kernel.parallel_reduction_prefix
+                                (
+                                    kernel.parallel_reduction_prefix,
+                                    kernel.worksharing_reduction_init,
+                                    kernel.worksharing_reduction_stores,
+                                )
                                 if loop.parallel
-                                else kernel.reduction_prefix
+                                else (kernel.reduction_prefix, None, None)
                             )
                             return prefix
-                return None
 
             def gen_loops(loops: List[LoopLevel], in_reduction=False):
                 with contextlib.ExitStack() as stack_outer:
                     if loops:
                         loop = loops[0]
                         if loop.is_reduction() and not in_reduction:
-                            reduction_prefix = get_reduction_code_buffer(
-                                loops, is_suffix=False
-                            )
+                            (
+                                reduction_prefix,
+                                ws_init,
+                                ws_tores,
+                            ) = get_reduction_code_buffer(loops, is_suffix=False)
                             if reduction_prefix:
+                                worksharing.reduction_init = ws_init
+                                worksharing.reduction_stores = ws_tores
                                 stack_outer.enter_context(code.indent())
                             code.splice(reduction_prefix)
                         if loop_nest.is_reduction_only() and loop.parallel:
@@ -1552,7 +1579,7 @@ class CppKernel(Kernel):
                             worksharing.close()
                         if loop.is_reduction() and not in_reduction:
                             code.splice(
-                                get_reduction_code_buffer(loops, is_suffix=True)
+                                get_reduction_code_buffer(loops, is_suffix=True)[0]
                             )
 
             def gen_loop(loop: LoopLevel, in_reduction=False):
@@ -1824,28 +1851,40 @@ class CppVecKernel(CppKernel):
         )
         self.parallel_reduction_prefix.writeline(f"{acc_type} {acc_per_thd};")
         self.parallel_reduction_prefix.writeline(f"{acc_type_vec} {acc_vec_per_thd};")
-        acc_local = acc_per_thd.replace(f"[{nthds}]", "[tid]")
-        acc_vec_local = acc_vec_per_thd.replace(f"[{nthds}]", "[tid]")
-        self.parallel_reduction_prefix.writelines(
-            [
-                f"for (int tid = 0; tid < {nthds}; tid++) ",
-                "{",
-                f"    {acc_local} = {reduction_init(reduction_type, dtype)};",
-                f"    {acc_vec_local} = {reduction_init_vec(reduction_type, dtype)};",
-                "}",
-            ]
+        acc_local_in_array = acc_per_thd.replace(f"[{nthds}]", "[tid]")
+        acc_vec_local_in_array = acc_vec_per_thd.replace(f"[{nthds}]", "[tid]")
+        acc_local = f"{acc}_local"
+        acc_vec_local = f"{acc_vec}_local"
+        self.worksharing_reduction_init.writeline(
+            f"{acc_type} {acc_local} = {reduction_init(reduction_type, dtype)};"
+            f"{acc_type_vec} {acc_vec_local} = {reduction_init_vec(reduction_type, dtype)};"
         )
+        # self.parallel_reduction_prefix.writelines(
+        #     [
+        #         f"for (int tid = 0; tid < {nthds}; tid++) ",
+        #         "{",
+        #         f"    {acc_local} = {reduction_init(reduction_type, dtype)};",
+        #         f"    {acc_vec_local} = {reduction_init_vec(reduction_type, dtype)};",
+        #         "}",
+        #     ]
+        # )
         self.parallel_reduction_stores.writelines(
             [
                 f"{acc_vec_local} = {reduction_combine_vec(reduction_type, acc_vec_local, value)};",
+            ]
+        )
+        self.worksharing_reduction_stores.writelines(
+            [
+                f"{acc_local_in_array} = {acc_local};",
+                f"{acc_vec_local_in_array} = {acc_vec_local};",
             ]
         )
         self.parallel_reduction_suffix.writelines(
             [
                 f"for (int tid = 0; tid < {nthds}; tid++)",
                 "{",
-                f"    {acc} = {reduction_combine(reduction_type, acc, acc_local)};",
-                f"    {acc_vec} = {reduction_combine_vec(reduction_type, acc_vec, acc_vec_local)};",
+                f"    {acc} = {reduction_combine(reduction_type, acc, acc_local_in_array)};",
+                f"    {acc_vec} = {reduction_combine_vec(reduction_type, acc_vec, acc_vec_local_in_array)};",
                 "}",
             ],
         )
@@ -3192,6 +3231,8 @@ class WorkSharing:
         self.code = code
         self.in_parallel = False
         self.num_threads = None
+        self.reduction_init = IndentedBuffer()
+        self.reduction_stores = IndentedBuffer()
         self.stack = contextlib.ExitStack()
 
     def parallel(self, threads):
@@ -3209,6 +3250,8 @@ class WorkSharing:
             self.code.writeline(
                 "int tid = omp_get_thread_num();",
             )
+            self.code.splice(self.reduction_init)
+            self.reduction_init = IndentedBuffer()
 
     def single(self):
         if self.in_parallel:
@@ -3216,6 +3259,8 @@ class WorkSharing:
         return self.in_parallel
 
     def close(self):
+        self.code.splice(self.reduction_stores)
+        self.reduction_stores = IndentedBuffer()
         self.stack.close()
         self.in_parallel = False
 
