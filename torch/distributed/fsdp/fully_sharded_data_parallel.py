@@ -128,6 +128,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     .. _`Xu et al.`: https://arxiv.org/abs/2004.13336
     .. _DeepSpeed: https://www.deepspeed.ai/
 
+    For advanced notes please refer to :ref:`fsdp_notes`.
+
     Example::
 
         >>> # xdoctest: +SKIP("undefined variables")
@@ -242,9 +244,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         group being inter-node, setting ``NCCL_CROSS_NIC=1`` can help improve
         the all-reduce times over the replication process group for some
         cluster setups.
-
-    .. note::
-        For advanced notes please refer to :ref:`fsdp_notes`.
 
     Args:
         module (nn.Module):
