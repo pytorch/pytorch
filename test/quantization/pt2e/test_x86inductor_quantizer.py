@@ -376,7 +376,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     @skipIfNoX86
     def test_conv2d_unary(self):
         """
-        Test pattern of conv2d with unary post ops (such as relu, hardtanh, relu6) with X86InductorQuantizer.
+        Test pattern of conv2d with unary post ops (such as relu, hardtanh, hardswish, relu6) with X86InductorQuantizer.
         """
         unary_map = {
             "relu": [torch.nn.ReLU(inplace=False), torch.ops.aten.relu.default],
@@ -384,7 +384,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             "hardtanh": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=False), torch.ops.aten.hardtanh.default],
             "hardtanh_inplace": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=True), torch.ops.aten.hardtanh_.default],
             "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
-            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default]
+            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default],
+            "hardswish": [torch.nn.Hardswish(inplace=False), torch.ops.aten.hardswish.default],
+            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default]
         }
         use_bias_list = [True, False]
         with override_quantized_engine("x86"), torch.no_grad():
@@ -1056,7 +1058,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             "hardtanh": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=False), torch.ops.aten.hardtanh.default],
             "hardtanh_inplace": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=True), torch.ops.aten.hardtanh_.default],
             "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
-            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default]
+            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default],
+            "hardswish": [torch.nn.Hardswish(inplace=False), torch.ops.aten.hardswish.default],
+            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default]
         }
 
         with override_quantized_engine("x86"):
