@@ -389,7 +389,10 @@ def _shard_orig_param_state(
     param_idx = fsdp_param_info.param_indices[fqn]
     shard_param_info = flat_param._shard_param_infos[param_idx]  # type: ignore[attr-defined]
     optim_state = _gather_state_dict(
-        optim_state, pg=fsdp_state.process_group, device=fsdp_state.compute_device
+        optim_state,
+        pg=fsdp_state.process_group,
+        device=fsdp_state.compute_device,
+        cpu_offload=fsdp_state.cpu_offload,
     )
     if not shard_param_info.in_shard:
         return {}
