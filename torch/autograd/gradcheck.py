@@ -349,8 +349,8 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
 
 
 def _compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
-    # Performs finite differencing by perturbing `entry` in-place by `v` and
-    # returns the gradient of each of the outputs wrt to x at idx.
+    # Computes numerical directional derivative as finite difference 
+    # of function `fn` at input `entry`, perturbed by vector `v`.
     if _is_sparse_compressed_tensor(entry):
         # sparse compressed tensors don't implement sub/add/copy_
         # yet. However, in non-masked semantics context entry and v
@@ -373,7 +373,7 @@ def _compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
 
     def compute(a, b):
         nbhd_checks_fn(a, b)
-        ret = (b - a) / (2 * norm_v)
+        ret = (b - a) / (2 * norm_v) # use central difference approx
         return ret.detach().reshape(-1)
 
     return tuple(compute(a, b) for (a, b) in zip(outa, outb))
