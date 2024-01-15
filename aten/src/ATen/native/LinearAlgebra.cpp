@@ -1462,7 +1462,7 @@ static void addmm_impl_cpu_(
   } else if (m1_strides[transpose_c ? 0 : 1] == 1 &&
              m1_strides[transpose_c ? 1 : 0] >= std::max(int64_t{1}, k)) {
     transpose_a = true;
-    a = m1.resolve_conj();
+    a = m1;
   } else {
     transpose_a = !transpose_c;
     a = m1.clone(at::MemoryFormat::Contiguous);
@@ -1479,7 +1479,7 @@ static void addmm_impl_cpu_(
   } else if (m2_strides[transpose_c ? 0 : 1] == 1 &&
              m2_strides[transpose_c ? 1 : 0] >= std::max(int64_t{1}, n)) {
     transpose_b = true;
-    b = m2.resolve_conj();
+    b = m2;
   } else {
     transpose_b = !transpose_c;
     b = m2.clone(at::MemoryFormat::Contiguous);
