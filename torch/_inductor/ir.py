@@ -10,7 +10,6 @@ import traceback
 from contextlib import nullcontext
 from enum import Enum
 from functools import partial
-from inspect import signature
 from typing import (
     Any,
     Callable,
@@ -3593,7 +3592,7 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def process_kernel(cls, kernel, *args, **kwargs):
-        binded_args = signature(kernel).bind(*args, **kwargs).arguments
+        binded_args = {"args": args, "kwargs": kwargs}
 
         args_flat, args_spec = pytree.tree_flatten(binded_args)
 
@@ -4521,6 +4520,7 @@ class FallbackKernel(ExternKernelAlloc):
         self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
+        self.init_args_default_value(kernel._schema)
         self.ordered_kwargs_for_cpp_kernel = [
             x.name for x in kernel._schema.arguments if x.kwarg_only
         ]
@@ -4528,10 +4528,26 @@ class FallbackKernel(ExternKernelAlloc):
     def is_legacy_abi_kernel(self):
         return "_scaled_dot_product_flash_attention" in str(self.python_kernel_name)
 
+    def init_args_default_value(self, schema):
+        self.args_default_value = [
+            {
+                "name": x.name,
+                "type": x.real_type,
+                "value": x.default_value,
+            }
+            for x in schema.arguments
+            if not x.kwarg_only
+        ]
+
     def get_pos_arg_value(self, pos, kwargs):
         # positional args may be provided in kwargs
         pos_arg_name = self.args_default_value[pos]["name"]
         if pos_arg_name in kwargs:
+            log.debug(
+                "Found argument %s with value %s from kwargs",
+                pos_arg_name,
+                kwargs[pos_arg_name],
+            )
             return kwargs[pos_arg_name]
 
         assert hasattr(
@@ -4540,7 +4556,11 @@ class FallbackKernel(ExternKernelAlloc):
         assert pos < len(
             self.args_default_value
         ), f"expected the index {pos} to be smaller than len(self.args_default_value): {len(self.args_default_value)}"
-        return self.args_default_value[pos]["value"]
+        arg_default_value = self.args_default_value[pos]["value"]
+        log.debug(
+            "Use default value %s for argument %s", arg_default_value, pos_arg_name
+        )
+        return arg_default_value
 
     # Generate abi-compatible kernel names for shim kernels.
     # Each individual shim kernel may have its own versioning rule.
@@ -4599,16 +4619,7 @@ class FallbackKernel(ExternKernelAlloc):
         # can be found at:
         # https://docs.google.com/document/d/1FzWm-sHYwmRi3x_g036kOxd99KaYquUsA-L5JwOn8ys/edit?usp=sharing
         if V.graph.cpp_wrapper and hasattr(self, "args_default_value"):
-            n_args = len(args)
-            n_pos_args = len(self.args_default_value)
-            # For cpp wrapper, if some positional args are not provided, we need to check
-            # if they're in the kwargs or use their default value
-            if n_args < n_pos_args:
-                pos_args = [
-                    self.get_pos_arg_value(i, kwargs) for i in range(n_args, n_pos_args)
-                ]
-                pos_args = [V.graph.wrapper_code.val_to_arg_str(x) for x in pos_args]
-                args.extend(pos_args)
+            self.fill_non_provided_args(args, kwargs, convert_val_to_str=True)
 
         # let self.codegen_kwargs handle kwargs
         self.kwargs.update(kwargs)
@@ -4648,6 +4659,30 @@ class FallbackKernel(ExternKernelAlloc):
             return [inp.get_name() for inp in self.inputs]
         return []
 
+    def fill_non_provided_args(self, args, kwargs, convert_val_to_str=False):
+        assert isinstance(args, (list, tuple))
+        if isinstance(args, tuple):
+            args = list(args)
+        assert hasattr(self, "args_default_value")
+        n_args = len(args)
+        n_pos_args = len(self.args_default_value)
+        # For cpp wrapper, if some positional args are not provided, we need to check
+        # if they're in the kwargs or use their default value
+        if n_args < n_pos_args:
+            log.debug(
+                "%s has %d unprovided positional arguments. "
+                "Will check if they are in the keyword arguments or will use default values.",
+                self.op_overload,
+                n_pos_args - n_args,
+            )
+            pos_args = [
+                self.get_pos_arg_value(i, kwargs) for i in range(n_args, n_pos_args)
+            ]
+            if convert_val_to_str:
+                pos_args = [V.graph.wrapper_code.val_to_arg_str(x) for x in pos_args]
+            args.extend(pos_args)
+        return args
+
     # ProxyExecutor Design Note
     # We export the ExternFallbackNodes (for custom ops) into a serialized file
     # and run it with a host side proxy executor to address the ABI problem
@@ -4657,6 +4692,7 @@ class FallbackKernel(ExternKernelAlloc):
     def export_extern_kernel_node(self):
         assert isinstance(self, FallbackKernel)
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
+        args = self.fill_non_provided_args(args, kwargs)
         ordered_kwargs = [
             kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
         ]
@@ -4732,15 +4768,7 @@ class FallbackKernel(ExternKernelAlloc):
                 else:
                     self.cpp_kernel_name = get_aten_cpp_kernel_name(kernel)
                     schema = kernel._schema
-                    self.args_default_value = [
-                        {
-                            "name": x.name,
-                            "type": x.real_type,
-                            "value": x.default_value,
-                        }
-                        for x in schema.arguments
-                        if not x.kwarg_only
-                    ]
+                    self.init_args_default_value(schema)
                     self.ordered_kwargs_for_cpp_kernel = [
                         x.name for x in schema.arguments if x.kwarg_only
                     ]
@@ -4753,12 +4781,7 @@ class FallbackKernel(ExternKernelAlloc):
                 self.python_kernel_name = str(kernel)
 
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
-            if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
-                self.python_kernel_name = f"torch._prims.rng_prims.{kernel.__name__}"
-            else:
-                raise NotImplementedError(
-                    "Unable to find HigherOrderOperator kernel name"
-                )
+            self.python_kernel_name = f"torch.ops.higher_order.{kernel.__name__}"
         else:
             # For non-aten OpOverload, i.e. custom ops
             if V.graph.cpp_wrapper:

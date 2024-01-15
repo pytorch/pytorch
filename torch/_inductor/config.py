@@ -213,8 +213,11 @@ coordinate_descent_search_radius = int(
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
 )
 
-layout_optimization = os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", "1") == "1"
-
+# Disabled by default on ROCm, opt-in if model utilises NHWC convolutions
+layout_opt_default = "1" if not torch.version.hip else "0"
+layout_optimization = (
+    os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", layout_opt_default) == "1"
+)
 
 force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
 
@@ -232,7 +235,6 @@ warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 # For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
-realize_bytes_threshold = 2000
 realize_opcount_threshold = 30
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
@@ -456,6 +458,9 @@ class cpp:
     # Use funsafe-math-optimizations when compiling
     enable_unsafe_math_opt_flag = False
 
+    # Use ffp-contract when compiling
+    enable_floating_point_contract_flag = False
+
 
 # config specific to codegen/triton.py
 class triton:
@@ -523,7 +528,7 @@ class triton:
 
     # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
-    max_block = {"X": 2048, "Y": 1024, "Z": 1024}
+    max_block = {"X": 2048, "Y": 1024, "Z": 1024, "R": 4096}
 
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False
@@ -540,6 +545,9 @@ class triton:
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 16
+
+    # Generate code containing the newer tl.make_block_ptr() API for loads/store
+    use_block_ptr = False
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
