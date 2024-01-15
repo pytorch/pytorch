@@ -81,7 +81,7 @@ __all__ = [
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool", "is_singleton", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
     "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext",
-    "StatefulSymbolicContext", "SubclassSymbolicContext"
+    "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
