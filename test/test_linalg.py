@@ -5890,7 +5890,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
     def test__int4_mm(self, device, m, k, n):
-        if device == "cuda" and not SM80OrLater:
+        if self.device_type == 'cuda' and not SM80OrLater:
             self.skipTest("requires SM80 or later")
 
         if TEST_WITH_ROCM:
@@ -5932,7 +5932,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
     def test_compile_int4_mm(self, device, m, k, n):
-        if device == "cuda" and not SM80OrLater:
+        if self.device_type == 'cuda' and not SM80OrLater:
             self.skipTest("requires SM80 or later")
 
         if TEST_WITH_ROCM:
