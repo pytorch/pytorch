@@ -5885,12 +5885,14 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @onlyCUDA
+    @onlyNativeDeviceTypes
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
     def test__int4_mm(self, device, m, k, n):
+        if device == "cuda" and not SM80OrLater:
+            self.skipTest("requires SM80 or later")
+
         if TEST_WITH_ROCM:
             self.skipTest("_int4_mm not compiled for ROCM")
 
@@ -5925,12 +5927,14 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @onlyCUDA
+    @onlyNativeDeviceTypes
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
     def test_compile_int4_mm(self, device, m, k, n):
+        if device == "cuda" and not SM80OrLater:
+            self.skipTest("requires SM80 or later")
+
         if TEST_WITH_ROCM:
             self.skipTest("_int4_mm not compiled for ROCM")
 

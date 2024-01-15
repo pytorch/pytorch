@@ -48,6 +48,31 @@ inline bool data_index_step(T& x, const T& X, Args&&... args) {
   return false;
 }
 
+// Helper struct for compile time loop unrolling
+template <int i>
+struct compile_time_for {
+  template <typename Lambda, typename... Args>
+  inline static void op(const Lambda& function, Args... args) {
+    compile_time_for<i - 1>::op(function, args...);
+    function(std::integral_constant<int, i - 1>{}, args...);
+  }
+};
+
+template <>
+struct compile_time_for<1> {
+  template <typename Lambda, typename... Args>
+  inline static void op(const Lambda& function, Args... args) {
+    function(std::integral_constant<int, 0>{}, args...);
+  }
+};
+
+template <>
+struct compile_time_for<0> {
+  // 0 loops, do nothing
+  template <typename Lambda, typename... Args>
+  inline static void op(const Lambda& function, Args... args) {}
+};
+
 // Helper struct for bfloat16 vectorization
 // Useful when you need float as immediate dtype or accumulate dtype
 using namespace vec;
