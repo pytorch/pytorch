@@ -9,6 +9,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_convert_weight_to_int4pack.h>
+#include <ATen/ops/_convert_weight_to_int4pack_native.h>
 #include <ATen/ops/_convert_weight_to_int4pack_cpu_dispatch.h>
 #include <ATen/ops/empty.h>
 #endif
