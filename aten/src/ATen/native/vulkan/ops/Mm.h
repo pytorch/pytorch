@@ -27,7 +27,7 @@ void stage_pack_weights(
   const int64_t dst_plane_sz = dst_kw_sz * dst_kh_sz;
   const int64_t dst_matrix_sz = dst_plane_sz * 4;
   const T* const src_weight_ptr = weight.data_ptr<T>();
-  api::StorageBuffer staging(context, at::kFloat, v_weight.gpu_numel());
+  api::StorageBuffer staging(context, api::kFloat, v_weight.gpu_numel());
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
