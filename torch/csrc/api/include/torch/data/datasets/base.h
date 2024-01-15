@@ -80,6 +80,9 @@ class Dataset : public BatchDataset<Self, std::vector<SingleExample>> {
   /// Returns the example at the given index.
   virtual ExampleType get(size_t index) = 0;
 
+  /// Returns the example at the given index (const version).
+  virtual ExampleType get(size_t index) const = 0;
+
   /// Returns a batch of data.
   /// The default implementation calls `get()` for every requested index
   /// in the batch.
