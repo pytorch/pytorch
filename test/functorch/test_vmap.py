@@ -31,7 +31,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
     markDynamoStrictTest,
-    decorateIf,
     skipIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import \
