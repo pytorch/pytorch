@@ -863,7 +863,6 @@ dynamo_expected_failures = {
     "TestEinsum.test_different_paths_dtype_e",  # torch_np/numpy_tests/core/test_einsum
     "TestEinsum.test_different_paths_dtype_B",  # torch_np/numpy_tests/core/test_einsum
     "TestEinsum.test_different_paths_dtype_b",  # torch_np/numpy_tests/core/test_einsum
-    "TestMisc.test_f16_on_cuda",
     "TestDLPack.test_dtype_passthrough_dtype4",  # torch_np/numpy_tests/core/test_dlpack
     "TestDLPack.test_higher_dims_ndim_23",  # torch_np/numpy_tests/core/test_dlpack
     "TestDLPack.test_higher_dims_ndim_12",  # torch_np/numpy_tests/core/test_dlpack
