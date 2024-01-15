@@ -40,21 +40,10 @@ from torch.testing._internal.common_utils import (
 
 
 def get_filtered_export_db_tests():
-    unsupported_test_names = {
-        "dynamic_shape_constructor",  # 'NoneType' object has no attribute 'from_tensor'
-        "dictionary",  # Graph output must be a tuple()
-        "fn_with_kwargs",  # export doesn't support kwargs yet
-        "scalar_output",  # Tracing through 'f' must produce a single graph
-        "user_input_mutation",  # TODO(zhxchen17) Support serializing user inputs mutation.
-    }
-
     return [
         (name, case)
         for name, case in all_examples().items()
-        if (
-            case.support_level == SupportLevel.SUPPORTED and
-            name not in unsupported_test_names
-        )
+        if case.support_level == SupportLevel.SUPPORTED
     ]
 
 
@@ -541,8 +530,8 @@ class TestSchemaVersioning(TestCase):
         ep = export(f, (torch.randn(1, 3),))
 
         serialized_artifact = ExportedProgramSerializer().serialize(ep)
-        serialized_artifact.exported_program.schema_version = -1
-        with self.assertRaisesRegex(SerializeError, r"Serialized schema version -1 does not match our current"):
+        serialized_artifact.exported_program.schema_version.major = -1
+        with self.assertRaisesRegex(SerializeError, r"Serialized schema version .* does not match our current"):
             ExportedProgramDeserializer().deserialize(serialized_artifact)
 
 
@@ -573,6 +562,21 @@ class TestOpVersioning(TestCase):
 
 unittest.expectedFailure(
     TestDeserialize.test_exportdb_supported_case_tensor_setattr
+)
+
+# We didn't set up kwargs input yet
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_fn_with_kwargs
+)
+
+# Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph.
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_scalar_output
+)
+
+# TODO(zhxchen17) Support serializing user inputs mutation.
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_user_input_mutation
 )
 
 
@@ -657,9 +661,9 @@ class TestSaveLoad(TestCase):
 
             # Modify the version
             with zipfile.ZipFile(f, 'a') as zipf:
-                zipf.writestr('version', "-1")
+                zipf.writestr('version', "-1.1")
 
-            with self.assertRaisesRegex(RuntimeError, r"Serialized version -1 does not match our current"):
+            with self.assertRaisesRegex(RuntimeError, r"Serialized version .* does not match our current"):
                 f.seek(0)
                 load(f)
 

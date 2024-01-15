@@ -443,6 +443,12 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def num_keys_total(self):
         return 6
 
+    def test_underlying_non_prefix_store(self):
+        store = self._create_store()
+        wrapped_store = dist.PrefixStore(self.prefix, dist.PrefixStore(self.prefix, store))
+        self.assertEqual(self.tcpstore, store._underlying_non_prefix_store)
+        self.assertEqual(self.tcpstore, wrapped_store._underlying_non_prefix_store)
+
 class MyPythonStore(dist.Store):
     def __init__(self):
         super().__init__()
@@ -778,7 +784,7 @@ class TimeoutTest(TestCase):
                 else:
                     my_store.wait(["foo"], datetime.timedelta(seconds=10))
                 rank_res[rank] = True
-            except Error as e:
+            except Error as e:  # noqa: F821
                 rank_res[rank] = e
             time.sleep(1)
 

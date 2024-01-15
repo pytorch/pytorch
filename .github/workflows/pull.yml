@@ -17,6 +17,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
+permissions: read-all
+
 jobs:
   linux-jammy-py3_8-gcc11-build:
     name: linux-jammy-py3.8-gcc11

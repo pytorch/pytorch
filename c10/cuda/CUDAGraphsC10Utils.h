@@ -7,8 +7,7 @@
 // CUDA Graphs utils used by c10 and aten.
 // aten/cuda/CUDAGraphsUtils.cuh adds utils used by aten only.
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 using CaptureId_t = unsigned long long;
 
@@ -89,5 +88,4 @@ inline CaptureStatus currentStreamCaptureStatusMayInitCtx() {
 #endif
 }
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda
