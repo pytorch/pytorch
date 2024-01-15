@@ -548,6 +548,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
             "Gemm", "uint8, int8, int16, int32, int64"
         ),
     ),
+    xfail(
+        "addmm",
+        matcher=lambda sample: sample.args[0].numel() == 0,
+        reason="ONNX Runtime does not support empty tensors multiplication",
+    ),
     skip(
         "amax",
         matcher=lambda sample: len(sample.input.shape) == 0,
