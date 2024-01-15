@@ -2546,6 +2546,29 @@ class CommonTemplate:
             (torch.randn([2, 20, 2]),),
         )
 
+    # It's a view so it doens't generate a kernel
+    @expectedFailureCodegenDynamic
+    def test_slice3(self):
+        def fn(a, b):
+            return torch.ops.aten.slice.Tensor(a, 0, 0, -b)
+
+        x = torch.rand(48, 3, 512, 512)
+        self.common(fn, (x, 2))
+
+    @expectedFailureCodegenDynamic
+    def test_slice4(self):
+        # empty slices that require clamping the start or end
+        def fn(a):
+            return (
+                aten.slice.Tensor(a, 0, 2, 0, 1),
+                aten.slice.Tensor(a, 0, a.shape[0], a.shape[0] + 10, 1),
+                aten.slice.Tensor(a, 0, -20, 0, 1),
+                aten.slice.Tensor(a, 0, -20, -16, 1),
+            )
+
+        x = torch.rand(10)
+        self.common(fn, (x,))
+
     def test_split_with_sizes(self):
         def fn(a, sizes):
             return [t + 1.0 for t in torch.split(a * 2.0, sizes, -1)]
@@ -7785,29 +7808,6 @@ class CommonTemplate:
 
         x = torch.randn(2, 2)
         self.common(fn, (x,), atol=0, rtol=0)
-
-    # It's a view so it doens't generate a kernel
-    @expectedFailureCodegenDynamic
-    def test_slice(self):
-        def fn(a, b):
-            return torch.ops.aten.slice.Tensor(a, 0, 0, -b)
-
-        x = torch.rand(48, 3, 512, 512)
-        self.common(fn, (x, 2))
-
-    @expectedFailureCodegenDynamic
-    def test_slice2(self):
-        # empty slices that require clamping the start or end
-        def fn(a):
-            return (
-                aten.slice.Tensor(a, 0, 2, 0, 1),
-                aten.slice.Tensor(a, 0, a.shape[0], a.shape[0] + 10, 1),
-                aten.slice.Tensor(a, 0, -20, 0, 1),
-                aten.slice.Tensor(a, 0, -20, -16, 1),
-            )
-
-        x = torch.rand(10)
-        self.common(fn, (x,))
 
     def test_inplace_resize_as(self):
         def fn(x, y):

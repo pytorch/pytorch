@@ -51,6 +51,35 @@
 
 namespace {
 
+#ifdef USE_C10D_NCCL
+
+bool acquire_gil() {
+  // basically if this function can acquire the gil, it will return quickly.
+  // if not, it will hang forever.  The idea is to call this from a thread
+  // wrapped in a future, and then check the future after a timeout, to
+  // determine whether we're facing gil contention.
+  if (Py_IsInitialized()) {
+    pybind11::gil_scoped_acquire gil;
+    return true;
+  }
+
+  // If we end up here, its probably still a "pass" from the perspective of
+  // checking whether python is stuck. but currently we don't check the return
+  // value of this function anyway, just check whether it returned quickly vs
+  // timing out.  Taking a long time is the main sign of trouble.  Fast return
+  // with true or with false is both OK from the perspective of debugging python
+  // hangs.
+  return false;
+}
+
+bool registerGilChecker() {
+  c10d::get_gil_checker() = &acquire_gil;
+  return true;
+}
+
+static bool registered = registerGilChecker();
+#endif // USE_C10D_NCCL
+
 // Wrapper to ensure GIL is released before destructing ProcessGroupGloo
 // TODO: move this somewhere more generally useful
 template <typename T>
