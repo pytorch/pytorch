@@ -25,6 +25,8 @@ def checkpoint_wrapper(fn):
 
 
 class TestSDPAPatternRewriterTemplate(TestCase):
+    use_static_shapes = True
+
     def _clone_inputs(self, inputs):
         def clone(x):
             if not isinstance(x, torch.Tensor):
@@ -62,16 +64,22 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 if isinstance(x, torch.Tensor) and x.is_floating_point():
                     x.requires_grad = training
 
+            if not self.use_static_shapes:
+                torch._dynamo.mark_dynamic(args2[0], 0)
+                torch._dynamo.mark_dynamic(args2[1], 0)
+                torch._dynamo.mark_dynamic(args2[2], 0)
+
             dropout_arg = [training] if has_dropout else []
             torch.manual_seed(1234)
             result1 = dot_prod_attention(*(args1 + dropout_arg))
 
             counters.clear()
             torch.manual_seed(1234)
-            result2, (source_code,) = run_and_get_code(
+            result2, source_code = run_and_get_code(
                 torch.compile(dot_prod_attention, fullgraph=True),
                 *(args2 + dropout_arg),
             )
+            source_code = "\n".join(source_code)
             if has_fuse_pattern:
                 self.assertGreaterEqual(counters["inductor"]["fuse_attention"], 1)
             if contains:
@@ -415,6 +423,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             )
 
     def _test_pattern_fails_with_unsupported_mask(self):
+        if not self.use_static_shapes:
+            self.skipTest("Causes shape specialization. TODO: investigate")
+
         # https://github.com/pytorch/pytorch/issues/100315
         class Model(torch.nn.Module):
             def __init__(
@@ -631,6 +642,9 @@ if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13, dtype=torch.half
         )
 
+    class SDPAPatternRewriterCudaDynamicTests(SDPAPatternRewriterCudaTests):
+        use_static_shapes = False
+
 
 if HAS_CPU:
 
@@ -660,6 +674,9 @@ if HAS_CPU:
         test_sdpa_rewriter_13_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13, dtype=torch.float32
         )
+
+    class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):
+        use_static_shapes = False
 
 
 if __name__ == "__main__":
