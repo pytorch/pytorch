@@ -651,8 +651,7 @@ PyObject* torch_c_dynamo_guards_init() {
   return m;
 }
 
-extern "C" TORCH_API void* _torchinductor_pyobject_tensor_data_ptr(
-    PyObject* obj) {
+extern "C" void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
   if (C10_UNLIKELY(
           obj == nullptr ||
           (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)))) {
