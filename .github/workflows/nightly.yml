@@ -17,33 +17,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # docs-build:
-  #   name: docs build
-  #   uses: ./.github/workflows/_linux-build.yml
-  #   with:
-  #     build-environment: linux-jammy-py3.8-gcc11
-  #     docker-image-name: pytorch-linux-jammy-py3.8-gcc11
+  docs-build:
+    name: docs build
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-py3.8-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.8-gcc11
 
-  # docs-push:
-  #   name: docs push
-  #   uses: ./.github/workflows/_docs.yml
-  #   needs: docs-build
-  #   with:
-  #     build-environment: linux-jammy-py3.8-gcc11
-  #     docker-image: ${{ needs.docs-build.outputs.docker-image }}
-  #     push: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
-  #     run-doxygen: true
-  #   secrets:
-  #     GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+  docs-push:
+    name: docs push
+    uses: ./.github/workflows/_docs.yml
+    needs: docs-build
+    with:
+      build-environment: linux-jammy-py3.8-gcc11
+      docker-image: ${{ needs.docs-build.outputs.docker-image }}
+      push: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
+      run-doxygen: true
+    secrets:
+      GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
   update-vision-commit-hash:
     runs-on: ubuntu-latest
     environment: update-commit-hash
     steps:
       - name: update-vision-commit-hash
+        # TODO: Switch to main once https://github.com/pytorch/test-infra/pull/4885 lands
         uses: pytorch/test-infra/.github/actions/update-commit-hash@migrate-update-commit-hash-to-test-infra
-        # TODO: UNCOMMENT
-        # if: ${{ github.event_name == 'schedule' }}
+        if: ${{ github.event_name == 'schedule' }}
         with:
           repo-name: vision
           branch: main
@@ -57,9 +57,9 @@ jobs:
     environment: update-commit-hash
     steps:
       - name: update-audio-commit-hash
+        # TODO: Switch to main once https://github.com/pytorch/test-infra/pull/4885 lands
         uses: pytorch/test-infra/.github/actions/update-commit-hash@migrate-update-commit-hash-to-test-infra
-        # TODO: UNCOMMENT
-        # if: ${{ github.event_name == 'schedule' }}
+        if: ${{ github.event_name == 'schedule' }}
         with:
           repo-name: audio
           branch: main
@@ -74,8 +74,8 @@ jobs:
     steps:
       - name: update-executorch-commit-hash
         uses: pytorch/test-infra/.github/actions/update-commit-hash@migrate-update-commit-hash-to-test-infra
-        # TODO: UNCOMMENT
-        # if: ${{ github.event_name == 'schedule' }}
+        # TODO: Switch to main once https://github.com/pytorch/test-infra/pull/4885 lands
+        if: ${{ github.event_name == 'schedule' }}
         with:
           repo-name: executorch
           branch: main
