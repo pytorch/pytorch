@@ -232,7 +232,7 @@ def split_module(
     active_grad = None
     active_autocasts = set()
 
-    import sympy
+    import sympy  # noqa: F811
 
     for node in m.graph.nodes:
         if node.op in ["placeholder", "get_attr", "output"]:
