@@ -11,7 +11,6 @@ from torch.nn.functional import scaled_dot_product_attention
 from torch.nn.attention.bias import CausalVariant, causal_lower_right, causal_upper_left
 from torch.nn.parameter import Parameter
 import unittest
-from unittest import expectedFailure as xfail
 from unittest.mock import patch, MagicMock, ANY
 import math
 from torch.backends.cuda import sdp_kernel, SDPBackend
@@ -3296,7 +3295,6 @@ class TestAttnMasks(NNTestCase):
         "shape",
         [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
     )
-    @xfail
     def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
         make_tensor = partial(
             torch.rand, device=device, dtype=torch.float16, requires_grad=True
@@ -3317,7 +3315,11 @@ class TestAttnMasks(NNTestCase):
         else:
             attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
 
-        self.run_test(device, True, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol)
+        if causal_variant == CausalVariant.LOWER_RIGHT and shape in [(16, 16, 128, 256, 32), (1, 1, 23, 56, 15)]:
+            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "call_function UserDefinedClassVariable"):
+                self.run_test(device, True, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol)
+        else:
+            self.run_test(device, True, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol)
 
     @parametrize("shape", [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)])
     def test_is_causal_equals_upper_left(self, device, shape: List[Tuple[int]]):
