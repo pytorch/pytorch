@@ -2482,7 +2482,6 @@ dynamo_expected_failures = {
     "TestJacCPU.test_empty_output_jacfwd_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_hessian_simple_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_inplace_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestJacCPU.test_inplace_jacfwd_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_jac_with_non_tensor_args_jacfwd_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_multiple_inputs_outputs_pytree_jacfwd_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_multiple_inputs_pytree_jacfwd_cpu",  # functorch/test_eager_transforms.py
