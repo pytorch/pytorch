@@ -17,7 +17,7 @@ from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_fun
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 
 from torch._utils_internal import print_graph
-from torch.fx.experimental.symbolic_shapes import definitely_true, sym_eq
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.fx.immutable_collections import immutable_dict
 
 from .. import config, inductor_prims, ir, pattern_matcher
@@ -502,13 +502,13 @@ def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
     return (
         val1 is not None
         and val2 is not None
-        and definitely_true(sym_eq(val1.size(), val2.size()))
+        and statically_known_true(sym_eq(val1.size(), val2.size()))
         and val1.layout == val2.layout
         and val1.dtype == val2.dtype
         and val1.device == val2.device
         and (
             val1.layout != torch.strided
-            or definitely_true(sym_eq(val1.stride(), val2.stride()))
+            or statically_known_true(sym_eq(val1.stride(), val2.stride()))
         )
     )
 
