@@ -1,6 +1,5 @@
 import contextlib
 import functools
-import itertools
 import logging
 
 from typing import Dict, List, Optional
@@ -9,7 +8,6 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.builtin import BuiltinVariable
@@ -1017,7 +1015,7 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 return TupleVariable([TupleVariable(items), aux])
 
 
-class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
+class FunctorchVmapHigherOrderVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":

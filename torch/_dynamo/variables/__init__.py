@@ -25,8 +25,8 @@ from .functions import (
     UserMethodVariable,
 )
 from .higher_order_ops import (
-    TorchHigherOrderOperatorVariable,
     FunctorchVmapHigherOrderVariable,
+    TorchHigherOrderOperatorVariable,
 )
 from .iter import (
     CountIteratorVariable,
