@@ -162,7 +162,7 @@ def validate_args_and_maybe_create_graph_inputs(
             # happy, which expect a fixed number of arguments. In
             # future, we can clean this up.
             const_proxy = tracer.create_graph_input("const")
-            if isinstance(a, ConstantVariable) and proxy_for_constants:
+            if isinstance(a, ConstantVariable) and proxy_for_constants and a.as_python_constant() is not None:
                 sym_a = torch.SymInt(a.as_python_constant())
                 const_proxy.node.meta["example_value"] = sym_a
                 sym_arg = SymNodeVariable(const_proxy, sym_a)
@@ -1266,11 +1266,11 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from . import ConstantVariable
 
         if (
-            len(value.unpack_var_sequence(tx))
+            (loop_items := len(value.unpack_var_sequence(tx)))
             < torch._dynamo.config.for_loop_medium_size_boundary
         ):
             raise CannotConvertRangeToHigherOrder(
-                "Loop too small to consider optimizing"
+                f"Loop of length {loop_items} too small to consider optimizing"
             )
         assert loop_body_instructions[-1].opname in {"JUMP_BACKWARD", "JUMP_ABSOLUTE"}
         if loop_body_instructions[0].opname == "UNPACK_SEQUENCE":
