@@ -148,9 +148,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def get_globals(self):
         return self.fn.__globals__
 
-    def as_proxy(self):
-        return self.fn
-
     def bind_args(self, parent, args, kwargs):
         assert not self.is_constant
         tx = parent.output.root_tx

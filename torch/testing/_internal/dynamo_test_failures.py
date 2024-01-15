@@ -2450,9 +2450,6 @@ dynamo_expected_failures = {
     "TestMinFunctorchOnly.test_diag",  # functorch/test_dims
     "TestMinFunctorchOnly.test_expand",  # functorch/test_dims
     "TestMin.test_stack",  # functorch/test_dims
-    "TestControlFlowTraced.test_cond_functionalized_data_dependent_pred",  # functorch/test_control_flow
-    "TestControlFlowTraced.test_cond_functionalized_hah",  # functorch/test_control_flow
-    "TestControlFlowTraced.test_cond_functionalized_nested",  # functorch/test_control_flow
     "TestControlFlowTraced.test_tracing_map_symbolic_simple",  # functorch/test_control_flow
     "TestControlFlow.test_map_list_in_out",  # functorch/test_control_flow
     "TestControlFlowTraced.test_nested_cond_map_cond_symbolic",  # functorch/test_control_flow

@@ -26,6 +26,7 @@ from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._higher_order_ops.wrap import wrap
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
+from torch.testing._internal.common_utils import xfailIfTorchDynamo
 
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
@@ -2395,6 +2396,7 @@ class HigherOrderOpLoggingTests(LoggingTestCase):
         self.assertEqual(len(records), 0)
         self.assertEqual(z.sin(), w)
 
+    @xfailIfTorchDynamo
     @config.patch(capture_func_transforms=True)
     @make_logging_test(recompiles=True)
     def test_vmap_guard_fail(self, records):
@@ -2423,6 +2425,15 @@ class HigherOrderOpLoggingTests(LoggingTestCase):
 
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
+    def tearDown(self):
+        # Ensure that in the case of a test failure, the next test won't fail
+        # because of a previous call to _vmap_increment_nesting that wasn't undone
+        # i.e. test_vmap_free_tensor fails when PYTORCH_TEST_WITH_DYNAMO=1
+        # and the call to increment nesting is not undone
+        ci = torch._C._functorch.peek_interpreter_stack()
+        if ci and ci.key() == torch._C._functorch.TransformType.Vmap:
+            torch._C._functorch._vmap_decrement_nesting()
+
     def _compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
         backend = EagerAndRecordGraphs()
         actual = fn(*inputs)
