@@ -788,8 +788,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         p_args = (
             body_node,
-            1,  # right now we only supports num_mapped = 1
-            *([arg.as_proxy() for arg in args[1:]] + list(body_lifted_freevars.keys())),
+            [args[1].as_proxy()],
+            [arg.as_proxy() for arg in args[2:]] + list(body_lifted_freevars.keys()),
         )
         return _call_function_and_unflatten_output(
             tx, torch.ops.higher_order.map_impl, p_args, {}, body_r, body_spec
