@@ -748,23 +748,39 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_conv2d_unary(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        fused_partitions = []
-        unary_patterns = [
-            [torch.nn.Conv2d, torch.nn.ReLU],
-            [torch.nn.Conv2d, torch.nn.Hardtanh],
-            [torch.nn.Conv2d, torch.nn.ReLU6],
-        ]
-        for unary_pattern in unary_patterns:
-            partitions = find_sequential_partitions(gm, unary_pattern)
-            if partitions:
-                # Extend the fused_partitions if partitions is not empty
-                fused_partitions.extend(partitions)
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
 
-        for fused_partition in fused_partitions:
-            conv_partition, unary_partition = fused_partition
-            conv_node, unary_node = self._get_output_nodes_of_partitions(
-                [conv_partition, unary_partition]
+        @functools.lru_cache(None)
+        def _get_relu6_inplace():
+            from functools import partial
+
+            return partial(torch.nn.functional.relu6, inplace=True)
+
+        matcher_helpers = _generate_conv2d_pattern_matcher(
+            unary_fns=(
+                torch.nn.functional.relu,
+                torch.nn.functional.relu_,
+                torch.nn.functional.hardtanh,
+                torch.nn.functional.hardtanh_,
+                torch.nn.functional.relu6,
+                # torch.nn.ReLU6(inplace=True),
+                # _get_relu6_inplace(),
+                # torch._C._nn.relu6_,
             )
+        )
+        # print(_generate_conv2d_pattern_matcher.cache_info(), flush=True)
+        # print(_generate_conv2d_pattern_matcher.cache_parameters(), flush=True)
+        # print(_generate_conv2d_pattern_matcher.__wrapped__, flush=True)
+
+        matches = []
+        for matcher_helper in matcher_helpers:
+            matches.extend(matcher_helper.match(gm.graph))
+        for match in matches:
+            name_node_map = match.name_node_map
+            conv_node = name_node_map["conv"]
+            unary_node = name_node_map["unary"]
+
             if (
                 conv_node.op != "call_function"
                 or conv_node.target != torch.ops.aten.conv2d.default
@@ -781,7 +797,10 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_conv2d(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        matches = _generate_conv2d_pattern_matcher().match(gm.graph)
+        matcher_helpers = _generate_conv2d_pattern_matcher()
+        matches = []
+        for matcher_helper in matcher_helpers:
+            matches.extend(matcher_helper.match(gm.graph))
 
         for match in matches:
             name_node_map = match.name_node_map

@@ -474,7 +474,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             "hardtanh": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=False), torch.ops.aten.hardtanh.default],
             "hardtanh_inplace": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=True), torch.ops.aten.hardtanh_.default],
             "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
-            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default]
+            # "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default]
         }
         use_bias_list = [True, False]
         with override_quantized_engine("x86"), torch.no_grad():

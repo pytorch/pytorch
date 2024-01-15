@@ -84,14 +84,17 @@ def _get_conv_unary_pattern(
         else:
             bn = conv
         if unary_fn is not None:
-            output = unary_fn(bn)
+            unary = unary_fn(bn)
         else:
-            output = bn
+            unary = bn
+        output = unary
         return output, {
             "input": x,
             "conv": conv,
             "conv_weight": conv_weight,
             "conv_bias": conv_bias,
+            "bn": bn,
+            "unary": unary,
             "output": output,
         }
 
@@ -108,11 +111,20 @@ def _generate_pattern_matcher_helper(
 
 
 @functools.lru_cache(None)
-def _generate_conv2d_pattern_matcher() -> SubgraphMatcherWithNameNodeMap:
+def _generate_conv2d_pattern_matcher(
+    unary_fns=(None,)
+) -> List[SubgraphMatcherWithNameNodeMap]:
     # Ensure it's only be invoked once, due to the cache size limitation in
     # https://github.com/pytorch/pytorch/blob/
     # 4c6e842496da636123f83ef868ca1974631f1f1e/torch/_dynamo/config.py#L35-L39
-    return _generate_pattern_matcher_helper(
-        _get_conv_unary_pattern(torch.nn.functional.conv2d),
-        _conv2d_example_inputs,
-    )
+    # print("---- hit once ----", flush=True)
+    # print(unary_fns, flush=True)
+    matcher_helpers = []
+    for unary_fn in unary_fns:
+        matcher_helpers.append(
+            _generate_pattern_matcher_helper(
+                _get_conv_unary_pattern(torch.nn.functional.conv2d, unary_fn=unary_fn),
+                _conv2d_example_inputs,
+            )
+        )
+    return matcher_helpers
