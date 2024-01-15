@@ -1643,7 +1643,6 @@ class TestVmapOfGrad(TestCase):
         result = vmap(partial(grad(compute_loss), weights))(data, targets)
         self._compare_expected_and_result(expected, result, mechanism)
 
-    @xfailIfTorchDynamo
     def test_log_softmax(self, device):
         x = torch.randn(3, 5, device=device)
         v = torch.randn(5, device=device)
