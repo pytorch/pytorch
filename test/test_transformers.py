@@ -30,7 +30,8 @@ from torch.testing._internal.common_utils import (
     set_default_dtype,
     gradcheck,
     make_tensor,
-    NOTEST_CPU
+    NOTEST_CPU,
+    skipIfTorchDynamo
 )
 
 
@@ -3290,6 +3291,7 @@ class TestAttnMasks(NNTestCase):
         self.run_test(device, False, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol)
 
     @skipIfRocm  # No support for the second variant for now
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
     @parametrize(
         "shape",
