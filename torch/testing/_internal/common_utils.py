@@ -1342,6 +1342,14 @@ def xfailIfTorchDynamo(func):
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
+    """
+    Usage:
+    @skipIfTorchDynamo(msg)
+    def test_blah(self):
+        ...
+    """
+    assert isinstance(msg, str), "Are you using skipIfTorchDynamo correctly?"
+
     def decorator(fn):
         if not isinstance(fn, type):
             @wraps(fn)
@@ -1358,7 +1366,6 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
             fn.__unittest_skip_why__ = msg
 
         return fn
-
 
     return decorator
 
@@ -1386,7 +1393,6 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
 
 def unMarkDynamoStrictTest(cls=None):
     def decorator(cls):
-        assert inspect.isclass(cls)
         cls.dynamo_strict = False
         return cls
 
@@ -1485,6 +1491,9 @@ IS_TBB = "tbb" in os.getenv("BUILD_ENVIRONMENT", "")
 numpy_to_torch_dtype_dict = {
     np.bool_      : torch.bool,
     np.uint8      : torch.uint8,
+    np.uint16     : torch.uint16,
+    np.uint32     : torch.uint32,
+    np.uint64     : torch.uint64,
     np.int8       : torch.int8,
     np.int16      : torch.int16,
     np.int32      : torch.int32,
@@ -2702,7 +2711,15 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 if os.environ["STRICT_DEFAULT"] == "1":
                     strict_default = True
 
-        strict_mode = getattr(test_cls, "dynamo_strict", strict_default) and compiled
+        strict_mode = False
+        if compiled:
+            test_method = getattr(self, self._testMethodName)
+            if hasattr(test_method, "dynamo_strict"):
+                strict_mode = test_method.dynamo_strict
+            elif hasattr(test_cls, "dynamo_strict"):
+                strict_mode = test_cls.dynamo_strict
+            else:
+                strict_mode = strict_default
         nopython = getattr(test_cls, "dynamo_strict_nopython", False) and compiled
 
         if strict_mode:
