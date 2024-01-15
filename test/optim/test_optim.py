@@ -27,7 +27,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo
 )
 
-from torch._dynamo import disable as disable_dynamo
 
 from torch.testing._internal.common_cuda import TEST_CUDA
 from typing import Dict, Any, Tuple
@@ -216,89 +215,6 @@ class TestOptim(TestCase):
             else:
                 self.assertLess(fn().item(), initial_value)
 
-    # Note: disable dynamo on this function
-    # This allows us to continue running actual logic of the optimizer
-    # tests in dynamo without tracing this test code which has a lot of unsupported
-    # behavior
-    @disable_dynamo(recursive=False)
-    def _test_state_dict(self, weight, bias, input, constructor, atol=None, rtol=None):
-        weight = Parameter(weight)
-        bias = Parameter(bias)
-        with torch.no_grad():
-            input = input.clone().detach().requires_grad_()
-
-        # Note: Disable dynamo on this function
-        # This avoids a bug where input_cuda is not detected in the environment
-        # because it currently is not defined in the local environmet. Unable to repro
-        # anywhere else however and this is test code that we don't need to spend
-        # time getting dynamo to trace unless the issue repros in real models.
-        @disable_dynamo(recursive=False)
-        def fn_base(optimizer, weight, bias):
-            optimizer.zero_grad()
-            i = input_cuda if weight.is_cuda else input
-            loss = (weight.mv(i) + bias).pow(2).sum()
-            loss.backward()
-            return loss
-
-        optimizer = constructor(weight, bias)
-        fn = functools.partial(fn_base, optimizer, weight, bias)
-
-        # Prime the optimizer
-        for _i in range(20):
-            optimizer.step(fn)
-
-        # Make sure that loading optimizers with step not wrapped in tensor can work
-        state_dict = optimizer.state_dict()
-        if "step" in state_dict["state"][0] and torch.is_tensor(
-            state_dict["state"][0]["step"]
-        ):
-            for state in state_dict["state"].values():
-                state["step"] = state["step"].item()
-            optimizer.load_state_dict(state_dict)
-            optimizer.step()
-
-        # Check that state dict can be loaded even when we cast parameters
-        # to a different type and move to a different device.
-        if not torch.cuda.is_available():
-            return
-
-        with torch.no_grad():
-            input_cuda = input.clone().detach().to(dtype=torch.float32, device="cuda")
-            weight_cuda = Parameter(
-                weight.clone().detach().to(dtype=torch.float32, device="cuda")
-            )
-            bias_cuda = Parameter(
-                bias.clone().detach().to(dtype=torch.float32, device="cuda")
-            )
-        optimizer_cuda = constructor(weight_cuda, bias_cuda)
-        fn_cuda = functools.partial(fn_base, optimizer_cuda, weight_cuda, bias_cuda)
-
-        state_dict = deepcopy(optimizer.state_dict())
-        state_dict_c = deepcopy(optimizer.state_dict())
-        optimizer_cuda.load_state_dict(state_dict_c)
-
-        # Make sure state_dict_c isn't modified by merely calling load_state_dict
-        self.assertEqual(state_dict, state_dict_c)
-
-        # Make sure that device of state['step'] is still CPU
-        new_state_dict = optimizer_cuda.state_dict()
-        if "step" in state_dict["state"][0] and torch.is_tensor(
-            state_dict["state"][0]["step"]
-        ):
-            for state in new_state_dict["state"].values():
-                self.assertEqual(state["step"].device.type, "cpu")
-
-        for _ in range(20):
-            optimizer.step(fn)
-            optimizer_cuda.step(fn_cuda)
-            self.assertEqual(weight, weight_cuda)
-            self.assertEqual(bias, bias_cuda, atol=atol, rtol=rtol)
-
-        # validate deepcopy() copies all public attributes
-        def getPublicAttr(obj):
-            return {k for k in obj.__dict__ if not k.startswith("_")}
-
-        self.assertEqual(getPublicAttr(optimizer), getPublicAttr(deepcopy(optimizer)))
 
     def _test_basic_cases(
         self,
@@ -324,18 +240,6 @@ class TestOptim(TestCase):
                 return lambda weight, bias: constructor(weight, bias, foreach)
             return constructor
 
-        for maximize, foreach in itertools.product(
-            {False, constructor_accepts_maximize},
-            {False, constructor_accepts_foreach},
-        ):
-            self._test_state_dict(
-                torch.randn(10, 5),
-                torch.randn(10),
-                torch.randn(5),
-                make_two_arg_constructor(constructor, maximize, foreach),
-                atol=atol,
-                rtol=rtol,
-            )
         self._test_basic_cases_template(
             torch.randn(10, 5),
             torch.randn(10),

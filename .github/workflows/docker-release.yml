@@ -28,6 +28,8 @@ env:
   USE_BUILDX: 1
   WITH_PUSH: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
 
+permissions: read-all
+
 jobs:
   generate-matrix:
     if: github.repository_owner == 'pytorch'
