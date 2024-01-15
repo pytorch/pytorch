@@ -67,9 +67,14 @@ i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
 u8 = torch.uint8  # not tested except upsampling and interpolate ops
+u16 = torch.uint16  # not tested
+u32 = torch.uint32  # not tested
+u64 = torch.uint64  # not tested
 
 _ops = partial(
-    ops, dtypes=OpDTypes.supported, allowed_dtypes=[f16, f32, f64, i32, i64, b8, u8]
+    ops,
+    dtypes=OpDTypes.supported,
+    allowed_dtypes=[f16, f32, f64, i32, i64, b8, u8, u16, u32, u64],
 )
 
 # Success forces pass; failure forces fail; skip unconditionally skips testing
