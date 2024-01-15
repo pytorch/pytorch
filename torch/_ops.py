@@ -149,7 +149,6 @@ class OperatorBase:
             return fn(_CppFunctionalizeAPI(), *args, **kwargs)
 
         def functionalize_dispatch_mode_fn(mode, *args, **kwargs):
-            # Mode is unused (there's a global FunctionalTensorMode that we can access)
             return fn(_PythonFunctionalizeAPI(), *args, **kwargs)
 
         def functionalize_functorch_fn(interpreter, *args, **kwargs):
