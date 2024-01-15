@@ -24,9 +24,9 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._higher_order_ops.wrap import wrap
+from torch.testing._internal.common_utils import xfailIfTorchDynamo
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-from torch.testing._internal.common_utils import xfailIfTorchDynamo
 
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
