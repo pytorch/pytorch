@@ -1450,6 +1450,9 @@ def cpp_compile_command(
     aot_mode: bool = False,
     compile_only: bool = False,
     use_absolute_path: bool = False,
+    *,
+    extra_cflags: List[str] = [],
+    extra_post_cflags: List[str] = [],
 ) -> str:
     ipaths, lpaths, libs, macros, build_arch_flags = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
@@ -1481,8 +1484,9 @@ def cpp_compile_command(
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} {inp_name_str} {get_shared(shared)}
+            {cpp_compiler()} {get_shared(shared)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
+            {' '.join(extra_cflags)}
             {get_glibcxx_abi_build_flags()}
             {ipaths_str} {lpaths} {libs} {build_arch_flags}
             {macros} {linker_paths} {clang_flags}
@@ -1491,7 +1495,9 @@ def cpp_compile_command(
             {use_fb_internal_macros()}
             {use_standard_sys_dir_headers()}
             {get_compile_only(compile_only)}
+            {inp_name_str}
             -o {out_name}
+            {' '.join(extra_post_cflags)}
         """,
     ).strip()
 
@@ -1749,6 +1755,11 @@ def compile_file(
             torch_includes_path = os.path.join(
                 torch.utils.cpp_extension._TORCH_PATH, "include"
             )
+            # FIXME: Will be removed before committing
+            # print("******************************************")
+            # print(f"compile file, torch_includes_path is {torch_includes_path} ")
+            # print("******************************************")
+
             with tempfile.TemporaryDirectory() as tmp_dir:
                 # Copy everything to tmp compilation folder
                 shutil.copy(header_path, os.path.join(tmp_dir, header_name))
@@ -1757,7 +1768,20 @@ def compile_file(
                 dest_include_path = os.path.join(tmp_dir, "include")
                 shutil.copytree(torch_includes_path, dest_include_path)
                 # Run the build
+                if "-lomp" in cmd:
+                    print("**********************")
+                    print(f"old cmd: {cmd}")
+                    print("**********************")
+                    cmd = [x for x in cmd if x != "-lomp"]
+                    print("**********************")
+                    print(f"new cmd: {cmd}")
+                    print("**********************")
+
                 output_file_path = _run_build_command(cmd, tmp_dir, output_name)
+                # FIXME: REMOVE before commit
+                # print(f"output name {output_name}", file=sys.stderr)
+                # print(f"output path {output_path}", file=sys.stderr)
+                # print(f"output file path {output_file_path}", file=sys.stderr)
                 # Copy output from the build
                 if os.path.exists(output_path):
                     os.remove(output_path)

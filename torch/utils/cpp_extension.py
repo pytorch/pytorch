@@ -25,6 +25,7 @@ from typing import Dict, List, Optional, Union, Tuple
 from torch.torch_version import TorchVersion, Version
 
 from setuptools.command.build_ext import build_ext
+from libfb.py import parutil
 
 IS_WINDOWS = sys.platform == 'win32'
 IS_MACOS = sys.platform.startswith('darwin')
@@ -1789,11 +1790,7 @@ def _write_ninja_file_and_build_library(
         verbose: bool,
         with_cuda: Optional[bool],
         is_standalone: bool = False) -> None:
-    verify_ninja_availability()
 
-    compiler = get_cxx_compiler()
-
-    get_compiler_abi_compatibility_and_version(compiler)
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
     extra_ldflags = _prepare_ldflags(
@@ -1801,6 +1798,27 @@ def _write_ninja_file_and_build_library(
         with_cuda,
         verbose,
         is_standalone)
+
+    from torch._inductor import config
+    if config.is_fbcode():
+        print(f'******Building extension module {name}...', file=sys.stderr)
+        _fbcode_build_library(
+            path=build_directory,
+            name=name,
+            sources=sources,
+            extra_cflags=extra_cflags or [],
+            extra_cuda_cflags=extra_cuda_cflags or [],
+            extra_ldflags=extra_ldflags or [],
+            extra_include_paths=extra_include_paths or [],
+            with_cuda=with_cuda,
+            is_standalone=is_standalone)
+        return
+
+    verify_ninja_availability()
+
+    compiler = get_cxx_compiler()
+    get_compiler_abi_compatibility_and_version(compiler)
+
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
         print(f'Emitting ninja build file {build_file_path}...', file=sys.stderr)
@@ -2135,6 +2153,127 @@ def _import_module_from_library(module_name, path, is_python_module):
     else:
         torch.ops.load_library(filepath)
 
+def _fbcode_build_library(
+    path,
+    name,
+    sources,
+    extra_cflags,
+    extra_cuda_cflags,
+    extra_ldflags,
+    extra_include_paths,
+    with_cuda,
+    is_standalone) -> None:
+
+    extra_cflags = [flag.strip() for flag in extra_cflags]
+    extra_cuda_cflags = [flag.strip() for flag in extra_cuda_cflags]
+    extra_ldflags = [flag.strip() for flag in extra_ldflags]
+    extra_include_paths = [flag.strip() for flag in extra_include_paths]
+
+    # Turn into absolute paths so we can emit them into the ninja build
+    # file wherever it is.
+    user_includes = [os.path.abspath(file) for file in extra_include_paths]
+
+    # include_paths() gives us the location of torch/extension.h
+    system_includes = include_paths(with_cuda)
+    # sysconfig.get_path('include') gives us the location of Python.h
+    # Explicitly specify 'posix_prefix' scheme on non-Windows platforms to workaround error on some MacOS
+    # installations where default `get_path` points to non-existing `/Library/Python/M.m/include` folder
+    python_include_path = sysconfig.get_path('include', scheme='posix_prefix')
+    if python_include_path is not None:
+        system_includes.append(python_include_path)
+
+    common_cflags = []
+    if not is_standalone:
+        common_cflags.append(f'-DTORCH_EXTENSION_NAME={name}')
+        common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
+
+    common_cflags += [f"{x}" for x in _get_pybind11_abi_build_flags()]
+
+    common_cflags += [f'-I{include}' for include in user_includes]
+    common_cflags += [f'-isystem {include}' for include in system_includes]
+
+    common_cflags += [f"{x}" for x in _get_glibcxx_abi_build_flags()]
+
+    cflags = common_cflags + ['-fPIC', '-std=c++17'] + extra_cflags
+
+    if with_cuda and IS_HIP_EXTENSION:
+        cuda_flags = ['-DWITH_HIP'] + cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
+        cuda_flags += extra_cuda_cflags
+        cuda_flags += _get_rocm_arch_flags(cuda_flags)
+    elif with_cuda:
+        cuda_flags = common_cflags + COMMON_NVCC_FLAGS + _get_cuda_arch_flags()
+        cuda_flags += ['--compiler-options', "'-fPIC'"]
+        cuda_flags += extra_cuda_cflags
+        if not any(flag.startswith('-std=') for flag in cuda_flags):
+            cuda_flags.append('-std=c++17')
+        cc_env = os.getenv("CC")
+        if cc_env is not None:
+            cuda_flags = ['-ccbin', cc_env] + cuda_flags
+    else:
+        cuda_flags = None
+
+    def object_file_path(source_file: str) -> str:
+        # '/path/to/file.cpp' -> 'file'
+        file_name = os.path.splitext(os.path.basename(source_file))[0]
+        if _is_cuda_file(source_file) and with_cuda:
+            # Use a different object filename in case a C++ and CUDA file have
+            # the same filename but different extension (.cpp vs. .cu).
+            target = f'{file_name}.cuda.o'
+        else:
+            target = f'{file_name}.o'
+        return target
+
+    objects = [object_file_path(src) for src in sources]
+    ldflags = ([] if is_standalone else [SHARED_FLAG]) + extra_ldflags
+
+    # The darwin linker needs explicit consent to ignore unresolved symbols.
+    # if IS_MACOS:
+    #    ldflags.append('-undefined dynamic_lookup')
+
+    ext = EXEC_EXT if is_standalone else LIB_EXT
+    library_target = f'{name}{ext}'
+
+
+    print("****************************** build *******************************", file=sys.stderr)
+
+    # import subprocess
+    from torch._inductor.codecache import cpp_compile_command, compile_file
+
+    print(f"sources: {sources}", file=sys.stderr)
+    print(f"objects: {objects}", file=sys.stderr)
+
+    for i, source in enumerate(sources):
+        obj = objects[i]
+        print(f"******************** {i, source, obj} **************************", file=sys.stderr)
+
+        cmd = cpp_compile_command(
+            input=source,
+            output=obj,
+            warning_all=True,
+            shared=True,
+            extra_cflags=cflags,
+        )
+
+        cmd_shlex = cmd = shlex.split(cmd)
+        print(f"** build: {source, obj, cmd}", file=sys.stderr)
+        compile_file(source, obj, cmd)
+
+    ldflags=ldflags[:2]
+    print(f"** link flags: {ldflags}", file=sys.stderr)
+
+    cmd = cpp_compile_command(
+        input=objects,
+        output=library_target,
+        extra_cflags=ldflags,
+        warning_all=True,
+        shared=True,
+    )
+
+    so_path = os.path.join(path, library_target)
+    cmd_shlex = cmd = shlex.split(cmd)
+    print(f"** build-link: {objects, so_path, cmd}", file=sys.stderr)
+    compile_file(objects, so_path, cmd)
+
 
 def _write_ninja_file_to_build_library(path,
                                        name,
@@ -2394,6 +2533,10 @@ def _write_ninja_file(path,
     # Ninja requires a new lines at the end of the .ninja file
     content += "\n"
     _maybe_write(path, content)
+
+    print(f"@wrote to path {path}:")
+    print(content)
+    print("***")
 
 def _join_cuda_home(*paths) -> str:
     """
