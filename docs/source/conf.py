@@ -974,7 +974,6 @@ coverage_ignore_functions = [
     "is_symbolic",
     "parallel_and",
     "parallel_or",
-    "statically_known_true",
     "sym_eq",
     "canonicalize_bool_expr",
     # torch.fx.experimental.unification.core
