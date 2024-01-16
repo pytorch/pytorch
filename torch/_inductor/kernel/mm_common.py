@@ -156,14 +156,11 @@ def mm_grid(m, n, meta):
 
 def acc_type(dtype):
     mm_cfg = torch.backends.cuda.matmul
-    cast_fp16 = (
-        dtype == torch.float16 and mm_cfg.allow_fp16_reduced_precision_reduction
-    )
+    cast_fp16 = dtype == torch.float16 and mm_cfg.allow_fp16_reduced_precision_reduction
     cast_bf16 = dtype == torch.bfloat16
     cast_fp32 = (
-        (dtype == torch.float16 or dtype == torch.bfloat)
-        and not mm_cfg.allow_fp16_reduced_precision_reduction
-    )
+        dtype == torch.float16 or dtype == torch.bfloat16
+    ) and not mm_cfg.allow_fp16_reduced_precision_reduction
 
     if cast_fp16:
         return "tl.float16"
