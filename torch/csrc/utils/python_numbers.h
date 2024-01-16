@@ -93,7 +93,17 @@ inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
 }
 
 inline uint64_t THPUtils_unpackUInt64(PyObject* obj) {
-  unsigned long long value = PyLong_AsUnsignedLongLong(obj);
+  unsigned long long value;
+#ifdef USE_NUMPY
+  // PyLong_AsUnsignedLongLong does not deal with numpy uint64 scalar (e.g.
+  // numpy.uint64(1))
+  if (torch::utils::is_numpy_int(obj) &&
+      (torch::utils::numpy_scalar_scalar_type(obj) == at::kUInt64)) {
+    torch::utils::numpy_scalar_to_c(obj, &value);
+    return value;
+  }
+#endif
+  value = PyLong_AsUnsignedLongLong(obj);
   if (PyErr_Occurred()) {
     throw python_error();
   }

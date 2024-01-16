@@ -35,17 +35,20 @@ class TestNumbaIntegration(common.TestCase):
         https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
         """
 
-        types = [
-            torch.DoubleTensor,
-            torch.FloatTensor,
-            torch.HalfTensor,
-            torch.LongTensor,
-            torch.IntTensor,
-            torch.ShortTensor,
-            torch.CharTensor,
-            torch.ByteTensor,
+        torch_dtypes = [
+            torch.float64,
+            torch.float32,
+            torch.float16,
+            torch.int64,
+            torch.int32,
+            torch.int16,
+            torch.int8,
+            torch.uint64,
+            torch.uint32,
+            torch.uint16,
+            torch.uint8,
         ]
-        dtypes = [
+        numpy_dtypes = [
             numpy.float64,
             numpy.float32,
             numpy.float16,
@@ -53,18 +56,21 @@ class TestNumbaIntegration(common.TestCase):
             numpy.int32,
             numpy.int16,
             numpy.int8,
+            numpy.uint64,
+            numpy.uint32,
+            numpy.uint16,
             numpy.uint8,
         ]
-        for tp, npt in zip(types, dtypes):
+        for dt, npt in zip(torch_dtypes, numpy_dtypes):
 
             # CPU tensors do not implement the interface.
-            cput = tp(10)
+            cput = torch.arange(10).to(dtype=dt)
 
             self.assertFalse(hasattr(cput, "__cuda_array_interface__"))
             self.assertRaises(AttributeError, lambda: cput.__cuda_array_interface__)
 
             # Sparse CPU/CUDA tensors do not implement the interface
-            if tp not in (torch.HalfTensor,):
+            if dt not in (torch.float16,):
                 indices_t = torch.empty(1, cput.size(0), dtype=torch.long).clamp_(min=0)
                 sparse_t = torch.sparse_coo_tensor(indices_t, cput)
 
@@ -81,7 +87,7 @@ class TestNumbaIntegration(common.TestCase):
                 )
 
             # CUDA tensors have the attribute and v2 interface
-            cudat = tp(10).cuda()
+            cudat = torch.arange(10).to(dtype=dt, device="cuda")
 
             self.assertTrue(hasattr(cudat, "__cuda_array_interface__"))
 
@@ -110,6 +116,9 @@ class TestNumbaIntegration(common.TestCase):
             torch.float32,
             torch.float64,
             torch.uint8,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
             torch.int8,
             torch.int16,
             torch.int32,
@@ -255,6 +264,9 @@ class TestNumbaIntegration(common.TestCase):
             numpy.int16,
             numpy.int8,
             numpy.uint8,
+            numpy.uint16,
+            numpy.uint32,
+            numpy.uint64,
         ]
         for dtype in dtypes:
             numpy_arys = [
@@ -309,6 +321,9 @@ class TestNumbaIntegration(common.TestCase):
             numpy.int16,
             numpy.int8,
             numpy.uint8,
+            numpy.uint16,
+            numpy.uint32,
+            numpy.uint64,
         ]
         for dtype in dtypes:
             numpy_ary = numpy.arange(6).reshape(2, 3).astype(dtype)

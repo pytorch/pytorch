@@ -15,6 +15,8 @@ bool is_numpy_available();
 bool is_numpy_int(PyObject* obj);
 bool is_numpy_bool(PyObject* obj);
 bool is_numpy_scalar(PyObject* obj);
+at::ScalarType numpy_scalar_scalar_type(PyObject* obj);
+void numpy_scalar_to_c(PyObject* obj, void* cptr);
 
 void warn_numpy_not_writeable();
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj);

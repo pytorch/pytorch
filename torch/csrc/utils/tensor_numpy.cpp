@@ -377,6 +377,62 @@ bool is_numpy_scalar(PyObject* obj) {
        PyArray_IsScalar(obj, ComplexFloating));
 }
 
+ScalarType numpy_scalar_scalar_type(PyObject* obj) {
+  if (!is_numpy_scalar(obj)) {
+    throw TypeError("not a numpy scalar");
+  }
+  if (PyArray_IsScalar(obj, Float64)) {
+    return kDouble;
+  }
+  if (PyArray_IsScalar(obj, Float32)) {
+    return kFloat;
+  }
+  if (PyArray_IsScalar(obj, Half)) {
+    return kHalf;
+  }
+  if (PyArray_IsScalar(obj, Complex64)) {
+    return kComplexFloat;
+  }
+  if (PyArray_IsScalar(obj, Complex128)) {
+    return kComplexDouble;
+  }
+  if (PyArray_IsScalar(obj, Int64)) {
+    return kLong;
+  }
+  if (PyArray_IsScalar(obj, Int32)) {
+    return kInt;
+  }
+  if (PyArray_IsScalar(obj, Int16)) {
+    return kShort;
+  }
+  if (PyArray_IsScalar(obj, Int8)) {
+    return kChar;
+  }
+  if (PyArray_IsScalar(obj, UInt8)) {
+    return kByte;
+  }
+  if (PyArray_IsScalar(obj, UInt16)) {
+    return kUInt16;
+  }
+  if (PyArray_IsScalar(obj, UInt32)) {
+    return kUInt32;
+  }
+  if (PyArray_IsScalar(obj, UInt64)) {
+    return kUInt64;
+  }
+  if (PyArray_IsScalar(obj, Bool)) {
+    return kBool;
+  }
+  throw TypeError("unknown numpy scalar type");
+}
+
+void numpy_scalar_to_c(PyObject* obj, void* cptr) {
+  if (!is_numpy_scalar(obj)) {
+    throw TypeError("not a numpy scalar");
+  }
+  PyArray_ScalarAsCtype(obj, cptr);
+}
+
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   if (!is_numpy_available()) {
     throw std::runtime_error("Numpy is not available");

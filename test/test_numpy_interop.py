@@ -65,6 +65,9 @@ class TestNumPyInterop(TestCase):
             torch.float,
             torch.double,
             torch.long,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
         ]
 
         for dtp in dtypes:
@@ -194,6 +197,9 @@ class TestNumPyInterop(TestCase):
             np.int32,
             np.int16,
             np.int8,
+            np.uint64,
+            np.uint32,
+            np.uint16,
             np.uint8,
             np.longlong,
             np.bool_,
@@ -292,6 +298,9 @@ class TestNumPyInterop(TestCase):
             np.int64,
             np.int32,
             np.int16,
+            np.uint64,
+            np.uint32,
+            np.uint16,
             np.uint8,
             np.bool_,
         ]
@@ -316,16 +325,16 @@ class TestNumPyInterop(TestCase):
 
     @onlyCPU
     def test_numpy_array_interface(self, device):
-        types = [
-            torch.DoubleTensor,
-            torch.FloatTensor,
-            torch.HalfTensor,
-            torch.LongTensor,
-            torch.IntTensor,
-            torch.ShortTensor,
-            torch.ByteTensor,
+        torch_dtypes = [
+            torch.float64,
+            torch.float32,
+            torch.float16,
+            torch.int64,
+            torch.int32,
+            torch.int16,
+            torch.uint8,
         ]
-        dtypes = [
+        numpy_dtypes = [
             np.float64,
             np.float32,
             np.float16,
@@ -334,15 +343,15 @@ class TestNumPyInterop(TestCase):
             np.int16,
             np.uint8,
         ]
-        for tp, dtype in zip(types, dtypes):
+        for dt, dtype in zip(torch_dtypes, numpy_dtypes):
             # Only concrete class can be given where "Type[number[_64Bit]]" is expected
             if np.dtype(dtype).kind == 'u':  # type: ignore[misc]
                 # .type expects a XxxTensor, which have no type hints on
                 # purpose, so ignore during mypy type checking
-                x = torch.tensor([1, 2, 3, 4]).type(tp)  # type: ignore[call-overload]
+                x = torch.tensor([1, 2, 3, 4]).to(dt)  # type: ignore[call-overload]
                 array = np.array([1, 2, 3, 4], dtype=dtype)
             else:
-                x = torch.tensor([1, -2, 3, -4]).type(tp)  # type: ignore[call-overload]
+                x = torch.tensor([1, -2, 3, -4]).to(dt)  # type: ignore[call-overload]
                 array = np.array([1, -2, 3, -4], dtype=dtype)
 
             # Test __array__ w/o dtype argument
@@ -355,12 +364,13 @@ class TestNumPyInterop(TestCase):
             # Test __array_wrap__, same dtype
             abs_x = np.abs(x)
             abs_array = np.abs(array)
-            self.assertIsInstance(abs_x, tp)
+            self.assertIsInstance(abs_x, torch.Tensor)
+            self.assertEqual(abs_x.dtype, dt)
             for i in range(len(x)):
                 self.assertEqual(abs_x[i], abs_array[i])
 
         # Test __array__ with dtype argument
-        for dtype in dtypes:
+        for dtype in numpy_dtypes:
             x = torch.IntTensor([1, -2, 3, -4])
             asarray = np.asarray(x, dtype=dtype)
             self.assertEqual(asarray.dtype, dtype)
@@ -374,22 +384,23 @@ class TestNumPyInterop(TestCase):
                     self.assertEqual(asarray[i], x[i])
 
         # Test some math functions with float types
-        float_types = [torch.DoubleTensor, torch.FloatTensor]
-        float_dtypes = [np.float64, np.float32]
-        for tp, dtype in zip(float_types, float_dtypes):
-            x = torch.tensor([1, 2, 3, 4]).type(tp)  # type: ignore[call-overload]
+        float_torch_dtypes = [torch.float64, torch.float32]
+        float_numpy_dtypes = [np.float64, np.float32]
+        for tp, dtype in zip(float_torch_dtypes, float_numpy_dtypes):
+            x = torch.tensor([1, 2, 3, 4]).to(tp)  # type: ignore[call-overload]
             array = np.array([1, 2, 3, 4], dtype=dtype)
             for func in ['sin', 'sqrt', 'ceil']:
                 ufunc = getattr(np, func)
                 res_x = ufunc(x)
                 res_array = ufunc(array)
-                self.assertIsInstance(res_x, tp)
+                self.assertIsInstance(res_x, torch.Tensor)
+                self.assertEqual(res_x.dtype, tp)
                 for i in range(len(x)):
                     self.assertEqual(res_x[i], res_array[i])
 
         # Test functions with boolean return value
-        for tp, dtype in zip(types, dtypes):
-            x = torch.tensor([1, 2, 3, 4]).type(tp)  # type: ignore[call-overload]
+        for tp, dtype in zip(torch_dtypes, numpy_dtypes):
+            x = torch.tensor([1, 2, 3, 4]).to(tp)  # type: ignore[call-overload]
             array = np.array([1, 2, 3, 4], dtype=dtype)
             geq2_x = np.greater_equal(x, 2)
             geq2_array = np.greater_equal(array, 2).astype('uint8')
@@ -399,7 +410,7 @@ class TestNumPyInterop(TestCase):
 
     @onlyCPU
     def test_multiplication_numpy_scalar(self, device) -> None:
-        for np_dtype in [np.float32, np.float64, np.int32, np.int64, np.int16, np.uint8]:
+        for np_dtype in [np.float32, np.float64, np.int32, np.int64, np.int16, np.uint64, np.uint32, np.uint16, np.uint8]:
             for t_dtype in [torch.float, torch.double]:
                 # mypy raises an error when np.floatXY(2.0) is called
                 # even though this is valid code
@@ -446,7 +457,8 @@ class TestNumPyInterop(TestCase):
 
     def test_has_storage_numpy(self, device):
         for dtype in [np.float32, np.float64, np.int64,
-                      np.int32, np.int16, np.uint8]:
+                      np.int32, np.int16, np.uint64,
+                      np.uint32, np.uint16, np.uint8]:
             arr = np.array([1], dtype=dtype)
             self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.float32).storage())
             self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.double).storage())
