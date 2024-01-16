@@ -1207,7 +1207,6 @@ def forward(self, arg0_1):
         self.assertEqual(res, g(pred, x, y))
         self.check_map_count(gm, 1)
 
-    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Require making map and map_impl to have the same signature.")
     def test_nested_cond_map_cond_symbolic(self):
 
         def true_fn(x, y):
