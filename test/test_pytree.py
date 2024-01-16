@@ -1134,6 +1134,36 @@ TreeSpec(tuple, None, [*,
             actual = py_pytree.tree_unflatten([leaf for _, leaf in key_leaves], spec)
             self.assertEqual(actual, pytree)
 
+    def test_tree_leaves_with_path(self):
+        class ANamedTuple(NamedTuple):
+            x: torch.Tensor
+            y: int
+            z: str
+
+        @dataclass
+        class ACustomPytree:
+            x: Any
+            y: Any
+            z: Any
+
+        py_pytree.register_pytree_node(
+            ACustomPytree,
+            flatten_fn=lambda f: ([f.x, f.y], f.z),
+            unflatten_fn=lambda xy, z: ACustomPytree(xy[0], xy[1], z),
+            flatten_with_keys_fn=lambda f: ((("x", f.x), ("y", f.y)), f.z),
+        )
+
+        SOME_PYTREES = [
+            (None,),
+            ["hello", [1, 2], {"foo": [(3)]}],
+            [ANamedTuple(x=torch.rand(2, 3), y=1, z="foo")],
+            [ACustomPytree(x=12, y={"cin": [1, 4, 10], "bar": 18}, z="leaf"), 5],
+        ]
+        for pytree in SOME_PYTREES:
+            flat_out, _ = py_pytree.tree_flatten_with_path(pytree)
+            leaves_out = py_pytree.tree_leaves_with_path(pytree)
+            self.assertEqual(flat_out, leaves_out)
+
     def test_key_str(self):
         class ANamedTuple(NamedTuple):
             x: str
