@@ -1076,7 +1076,6 @@ def main():
         "typing-extensions>=4.8.0",
         "sympy",
         "networkx",
-        "jinja2",
         "fsspec",
     ]
 

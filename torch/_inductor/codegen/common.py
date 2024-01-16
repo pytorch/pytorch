@@ -1298,14 +1298,16 @@ class OptimizationContext:
 
 @functools.lru_cache(None)
 def jinja2_env():
-    try:
-        import jinja2
+    import jinja2
 
-        return jinja2.Environment(
-            undefined=jinja2.StrictUndefined,
-        )
-    except ImportError:
-        return None
+    return jinja2.Environment(
+        undefined=jinja2.StrictUndefined,
+    )
+
+
+@functools.lru_cache(None)
+def jinja2_template_from_string(template_string):
+    return jinja2_env().from_string(template_string)
 
 
 class ChoiceCaller:
@@ -1346,13 +1348,6 @@ class KernelTemplate:
 
     Children classes: TritonTemplate, CUDATemplate
     """
-
-    @staticmethod
-    def _template_from_string(source):
-        env = jinja2_env()
-        if env is not None:
-            return env.from_string(source)
-        return None
 
     @staticmethod
     def _fake_get_dtype(fake_out):

@@ -20,7 +20,7 @@ from torch._dynamo.utils import counters, identity, preserve_rng_state
 from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import ChoiceCaller, IndentedBuffer, KernelTemplate
+from .codegen.common import ChoiceCaller, IndentedBuffer, KernelTemplate, jinja2_template_from_string
 from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
@@ -401,7 +401,7 @@ class TritonTemplate(KernelTemplate):
     def __init__(self, name: str, grid: Any, source: str, debug=False):
         super().__init__(name)
         self.grid = grid
-        self.template = self._template_from_string(source)
+        self.source = source
         assert name not in self.all_templates, "duplicate template name"
         self.all_templates[name] = self
         self.debug = debug
@@ -417,7 +417,10 @@ class TritonTemplate(KernelTemplate):
         epilogue_fn=identity,
         **kwargs,
     ):
-        assert self.template, "requires jinja2"
+        try:
+            self.template = jinja2_template_from_string(self.source)
+        except ImportError as e:
+            raise AssertionError("requires jinja2") from e
         defines = StringIO()
         for name, val in kwargs.items():
             defines.write(f"    {name} : tl.constexpr = {val}\n")
