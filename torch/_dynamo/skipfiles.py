@@ -219,6 +219,7 @@ MOD_INLINELIST = {
     "torch.utils._pytree",
     "torch._higher_order_ops.map",
     "torch._tensor",
+    "torch._higher_order_ops.strict_mode",
 }
 
 

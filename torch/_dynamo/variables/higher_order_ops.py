@@ -237,6 +237,12 @@ def speculate_subgraph(
     if sub_kwargs is None:
         sub_kwargs = {}
 
+    assert set_subgraph_inputs in {
+        "automatic",
+        "flatten_manual",
+        "manual",
+    }, "Please use one of the supported set_subgraph_inputs options."
+
     # See NOTE [Temporary argument `set_subgraph_inputs`]
     if sub_kwargs and set_subgraph_inputs != "automatic":
         unimplemented("Use `set_subgraph_inputs=automatic` when passing `sub_kwargs`.")
@@ -410,6 +416,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return ExportTracepointHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "trace_wrapped":
             return TraceWrappedHigherOrderOperatorVariable(value, source, **kwargs)
+        elif value.__name__ == "strict_mode":
+            return StrictModeHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -638,7 +646,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = dedup_and_sort_lifted_freevars(true_lifted_freevars, false_lifted_freevars)
 
         # Let's say we capture cond(pred, true_fn, false_fn, (x,))
-        # With mannually_set_graph_input set to False,
+        # With set_graph_input set to automatic,
         # true_fn has lifted variables x, a, b, c
         # false_fn has lifted variables x, a, b, d
         # Then fixup_branch_inps make sure both branches have the same signature, i.e.:
@@ -778,12 +786,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         flat_mapped, spec = pytree.tree_flatten(args[1].as_proxy())
         p_args = (
             body_node,
-            len(flat_mapped),
-            *(
-                flat_mapped
-                + [arg.as_proxy() for arg in args[2:]]
-                + list(body_lifted_freevars.keys())
-            ),
+            flat_mapped,
+            [arg.as_proxy() for arg in args[2:]] + list(body_lifted_freevars.keys()),
         )
         return _call_function_and_unflatten_output(
             tx, torch.ops.higher_order.map_impl, p_args, {}, body_r, body_spec
@@ -1259,6 +1263,80 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    @raise_hard_error_if_graph_break(
+        reason="strict_mode HOO doesn't work unless it is captured completely with torch.compile."
+    )
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
+        callable = args[0]
+
+        unpacked_sequence = args[1].unpack_var_sequence(tx)
+        # TODO (tmanlaibaatar) support pytree here
+        for arg in unpacked_sequence:
+            if isinstance(arg, (ListVariable, TupleVariable, ConstDictVariable)):
+                unimplemented("strict_mode HOO only works for flat inputs for now")
+
+        if kwargs:
+            unimplemented(
+                f"strict_mode HOO received unexpected kwargs: {list(kwargs.keys())}"
+            )
+
+        (
+            (ret_val, ret_treespec),
+            ret_graph,
+            ret_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            args[0],
+            unpacked_sequence,
+            {},
+            "strict_mode",
+            source_target=self.value,
+            should_flatten_outputs=True,
+        )
+
+        strict_mode_nn_modules = dict(tx.output.nn_modules)
+
+        strict_mode_name = add_subgraph(
+            tx,
+            self.source,
+            "strict_mode_body",
+            torch.fx.GraphModule(strict_mode_nn_modules, ret_graph),
+        )
+
+        strict_mode_node = make_attr(tx, strict_mode_name)
+        p_args = (
+            strict_mode_node,
+            tuple(arg for arg in ret_lifted_freevars.keys()),
+        )
+
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            ret_val.as_proxy(),
+        )
+
+        # Store the invocation as a call
+        flat_variable = wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                torch.ops.higher_order.strict_mode,
+                args=tuple(p_args),
+                kwargs={},
+            ),
+            example_value=flat_example_value,
+        )
+
+        return _call_function_and_unflatten_output(
+            tx, torch.ops.higher_order.strict_mode, p_args, {}, ret_val, ret_treespec
+        )
+
+
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
@@ -1425,7 +1503,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_args,
             kwargs,
             "autograd.Function",
-            enable_grad=False,
+            set_subgraph_inputs="manual",
             restore_side_effects=False,
             tracer=fwd_tracer,
         )
@@ -1478,9 +1556,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 kwargs,
                 "autograd.Function",
                 enable_grad=False,
+                set_subgraph_inputs="manual",
                 restore_side_effects=False,
                 tracer=bwd_tracer,
-                manually_set_subgraph_inputs=True,
             )
 
         # TODO: assert that bwd_graph didn't capture values that were
