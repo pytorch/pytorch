@@ -30,9 +30,6 @@ jobs:
     name: linux-jammy-xpu-py3.8
     uses: ./.github/workflows/_xpu-test.yml
     needs: linux-jammy-xpu-py3_8-build
-    permissions:
-      id-token: write
-      contents: read
     with:
       build-environment: linux-jammy-xpu-py3.8
       docker-image: ${{ needs.linux-jammy-xpu-py3_8-build.outputs.docker-image }}
