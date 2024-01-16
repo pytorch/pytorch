@@ -41,8 +41,7 @@ jobs:
     environment: update-commit-hash
     steps:
       - name: update-vision-commit-hash
-        # TODO: Switch to main once https://github.com/pytorch/test-infra/pull/4885 lands
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@migrate-update-commit-hash-to-test-infra
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
         if: ${{ github.event_name == 'schedule' }}
         with:
           repo-name: vision
@@ -57,8 +56,7 @@ jobs:
     environment: update-commit-hash
     steps:
       - name: update-audio-commit-hash
-        # TODO: Switch to main once https://github.com/pytorch/test-infra/pull/4885 lands
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@migrate-update-commit-hash-to-test-infra
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
         if: ${{ github.event_name == 'schedule' }}
         with:
           repo-name: audio
@@ -73,8 +71,7 @@ jobs:
     environment: update-commit-hash
     steps:
       - name: update-executorch-commit-hash
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@migrate-update-commit-hash-to-test-infra
-        # TODO: Switch to main once https://github.com/pytorch/test-infra/pull/4885 lands
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
         if: ${{ github.event_name == 'schedule' }}
         with:
           repo-name: executorch
