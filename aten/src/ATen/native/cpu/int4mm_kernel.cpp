@@ -54,8 +54,8 @@ inline void tinygemm_kernel(
     int K,
     int BLOCK_K) {
 
-  constexpr int ROWS = BLOCK_M;
-  constexpr int COLS = BLOCK_N / 16;
+  constexpr const int ROWS = BLOCK_M;
+  constexpr const int COLS = BLOCK_N / 16;
 
   const int PREFETCH_SIZE_K = 16 * 4;
   const int PREFETCH_SIZE_KB = (PREFETCH_SIZE_K + BLOCK_K - 1) / BLOCK_K;
@@ -117,8 +117,8 @@ inline void tinygemm_kernel(
   compile_time_for<ROWS * COLS>::op(loadc);
 
   auto compute = [&](auto i, int k) {
-    constexpr int row = i / COLS;
-    constexpr int col = i % COLS;
+    constexpr const int row = i / COLS;
+    constexpr const int col = i % COLS;
 
     if constexpr (col == 0) {
       float aa = static_cast<float>(A[row * lda + k]);
@@ -158,7 +158,7 @@ inline void tinygemm_kernel(
       }
     }
 
-    constexpr int idx = row * COLS + col;
+    constexpr const int idx = row * COLS + col;
     vc[idx] = _mm512_fmadd_ps(va, vb[col], vc[idx]);
   };
 
@@ -171,8 +171,8 @@ inline void tinygemm_kernel(
 
   //store to C
   auto storec = [&](auto i) {
-    constexpr int row = i / COLS;
-    constexpr int col = i % COLS;
+    constexpr const int row = i / COLS;
+    constexpr const int col = i % COLS;
     if constexpr (COLS == 4) {
       // when BLOCK_N = 64, handle each row at a time
       // to reduce `cvtfp32_bf16` overhead.
@@ -204,8 +204,8 @@ inline void tinygemm_kernel(
     int K,
     int BLOCK_K) {
 
-  constexpr int ROWS = BLOCK_M;
-  constexpr int COLS = BLOCK_N / 8;
+  constexpr const int ROWS = BLOCK_M;
+  constexpr const int COLS = BLOCK_N / 8;
 
   const int PREFETCH_SIZE_K = 8 * 4;
   const int PREFETCH_SIZE_KB = (PREFETCH_SIZE_K + BLOCK_K - 1) / BLOCK_K;
@@ -255,8 +255,8 @@ inline void tinygemm_kernel(
   compile_time_for<ROWS * COLS>::op(loadc);
 
   auto compute = [&](auto i, int k) {
-    constexpr int row = i / COLS;
-    constexpr int col = i % COLS;
+    constexpr const int row = i / COLS;
+    constexpr const int col = i % COLS;
 
     if constexpr (col == 0) {
       float aa = static_cast<float>(A[row * lda + k]);
@@ -287,7 +287,7 @@ inline void tinygemm_kernel(
       }
     }
 
-    constexpr int idx = row * COLS + col;
+    constexpr const int idx = row * COLS + col;
     vc[idx] = _mm256_fmadd_ps(va, vb[col], vc[idx]);
   };
   for (int k = 0, kb = 0; k < K; ++k) {
@@ -299,8 +299,8 @@ inline void tinygemm_kernel(
 
   // store to C
   auto storec = [&](auto i) {
-    constexpr int row = i / COLS;
-    constexpr int col = i % COLS;
+    constexpr const int row = i / COLS;
+    constexpr const int col = i % COLS;
     if constexpr (col % 2 == 0) {
       __m256i ci = vec::cvtfp32_bf16(vc[row * COLS + col], vc[row * COLS + col + 1]);
       _mm256_storeu_si256((__m256i*)(C + row * ldc + col * 8), ci);
