@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
+import torch.nn.functional as F
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
@@ -23,7 +24,7 @@ from torch.export._trace import (
     DEFAULT_EXPORT_DYNAMO_CONFIG,
 )
 from torch._export import capture_pre_autograd_graph
-from torch._export.pass_base import _ExportPassBase
+from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.utils import (
     get_buffer,
     get_param,
@@ -35,6 +36,13 @@ from torch._subclasses import FakeTensorMode
 from torch.export import Constraint, Dim
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+)
+from torch.testing._internal.common_device_type import (
+    onlyCPU,
+    onlyCUDA,
+)
 from torch.testing._internal.common_utils import run_tests
 from torch._dynamo.test_case import TestCase
 from torch.utils._pytree import (
@@ -1244,6 +1252,46 @@ def forward(self, arg_0):
             )
         )
 
+    @testing.expectedFailureNonStrict  # non-strict does not add deferred runtime assertions
+    def test_automatic_constrain_size(self):
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.item()
+                return y.sum() + torch.ones(n, 5).sum()
+
+        ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Deferred runtime assertion failed -i0 <= 0"):
+            _ = ep(torch.tensor(-1), torch.randn(4, 5))
+
+        self.assertTrue(
+            torch.allclose(
+                ep(torch.tensor(1), torch.ones(4, 5)),
+                M()(torch.tensor(1), torch.ones(4, 5)),
+            )
+        )
+
+    def test_constrain_decomp(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.freq = torch.ones(5, 5)
+
+            def forward(self, start_pos: torch.Tensor):
+                pos = start_pos.item()
+                torch._constrain_as_size(pos, min=0, max=4)
+                return self.freq[pos] * self.freq[pos]
+
+        ep = torch.export.export(M(), (torch.tensor(1),))
+        FileCheck().check_count(
+            "torch.ops.aten._assert_async.msg", 2, exactly=True
+        ).run(ep.graph_module.code)
+        decompose_ep = ep.run_decompositions()
+        FileCheck().check_count(
+            "torch.ops.aten._assert_async.msg", 2, exactly=True
+        ).run(decompose_ep.graph_module.code)
+
     @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_mixed_input(self):
@@ -1762,7 +1810,6 @@ def forward(self, arg_0):
         self.assertTrue(torch.allclose(ep(inp), torch.nonzero(inp)))
 
     @testing.expectedFailureSerDer
-    @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
     def test_redundant_asserts(self):
         def f(x):
@@ -2005,6 +2052,30 @@ def forward(self, l_x_):
 
         check_device_and_fake_mode()
 
+    def test_run_decomposition_supports_user_input_mutation(self):
+        class SingleOp(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.op = torch.ops.aten.native_batch_norm
+
+            def forward(self, input, weight, bias, running_mean, running_var, training, momentum, eps, **kwargs):
+                return self.op(input, weight, bias, running_mean, running_var, training, momentum, eps, **kwargs)
+
+        input = torch.randn(5, 5, 5)
+        weight = torch.randn(5)
+        bias = torch.randn(5)
+        running_mean = torch.randn(5)
+        running_var = torch.randn(5)
+        training = True
+        momentum = 0.5
+        eps = 0.6
+
+        model = SingleOp()
+        output = model(input, weight, bias, running_mean, running_var, training, momentum, eps)
+
+        ep = torch.export.export(model, args=(input, weight, bias, running_mean, running_var, training, momentum, eps))
+        ep.run_decompositions(decomp_table=torch._decomp.decomposition_table)
+        self.assertEqual(ep(input, weight, bias, running_mean, running_var, training, momentum, eps), output)
 
     def test_export_graph_with_no_inputs(self):
         # We saw this pattern when users want to export
@@ -2138,6 +2209,17 @@ def forward(self, l_x_):
         self.assertEqual(inputs[0][0] * 2.0, inputs_model[0][0])
         self.assertEqual(inputs[0][0] * 2.0, inputs_export[0][0])
 
+    def test__scaled_dot_product_flash_attention(self):
+        class Module(torch.nn.Module):
+            def forward(self, q, k, v):
+                res = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+                return res[0]
+
+        m = Module()
+        inputs = (torch.randn(5, 4, 3, 2), torch.randn(5, 4, 3, 2), torch.randn(5, 4, 3, 2))
+        ep = export(m, inputs)
+        self.assertEqual(ep(*inputs), m(*inputs))
+
     @testing.expectedFailureSerDer  # symfloat nyi
     @testing.expectedFailureRetraceability
     def test_sym_sqrt(self):
@@ -2147,9 +2229,9 @@ def forward(self, l_x_):
                 return x / torch.sym_sqrt(x.shape[0])
 
         ep = export(M(), (torch.ones(16, 4),), dynamic_shapes={'x': {0: Dim("dim")}})
-        _ExportPassBase()(ep.graph_module)
+        _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
         FileCheck().check_count(
-            "torch.sym_sqrt", 1, exactly=True
+            "torch._sym_sqrt", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_check_specialized_int(self):
@@ -2453,6 +2535,74 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         # this doesn't work today
         gm_unflat_strict = unflatten(ep)
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestOneOffModelExportResult(TestCase):
+    def test_scaled_dot_product_attention_cpu(self):
+        """
+        This test makes sure we are always getting the same decomposition result for SDPA.
+        As of now _scaled_dot_product_flash_attention_for_cpu is expected to show up in
+        export() result. Some downstream backend then further decompose it into core ATen
+        ops in torch/_decomp/decompositions.py (search for
+        _scaled_dot_product_flash_attention_for_cpu).
+
+        Export is decomposing based on the CompositeImplicitAutograd kernel implementation
+        of SDPA. If this test fails, it means the kernel is being modified. In this case
+        we strongly encourage you to change the decomposition rule under
+        torch/_decomp/decompositions.py along with the kernel changes, so all of the
+        downstream backends are not being affected.
+        """
+        class ScaledDotProductAttention(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, q, k, v):
+                attn_output = F.scaled_dot_product_attention(
+                    q, k, v, None, dropout_p=0.0, is_causal=True
+                )
+                return attn_output
+        q = torch.randn(1, 1, 8, 8, device="cpu")
+        k = torch.randn(1, 1, 8, 8, device="cpu")
+        v = torch.randn(1, 1, 8, 8, device="cpu")
+
+        ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
+        self.assertExpectedInline(ep.graph_module.code.strip(), """\
+def forward(self, l_q_, l_k_, l_v_):
+    _scaled_dot_product_flash_attention_for_cpu = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(l_q_, l_k_, l_v_, 0.0, True);  l_q_ = l_k_ = l_v_ = None
+    getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
+    return (getitem,)""")
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Can't run fused SDPA on this platform",
+    )
+    def test_scaled_dot_product_attention_cuda(self):
+        """
+        This test makes sure we are always getting the same decomposition result for SDPA.
+        As of now _scaled_dot_product_flash_attention is expected to show up in
+        export() result (GPU tensors are given). Currently there's no downstream
+        backend relies on this export result so if this test fails, feel free to
+        change it to the latest export() result.
+        """
+        class ScaledDotProductAttention(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, q, k, v):
+                attn_output = F.scaled_dot_product_attention(
+                    q, k, v, None, dropout_p=0.0, is_causal=True
+                )
+                return attn_output
+        q = torch.randn(1, 16, 16, 64, dtype = torch.bfloat16, device="cuda")
+        k = torch.randn(1, 16, 16, 64, dtype = torch.bfloat16, device="cuda")
+        v = torch.randn(1, 16, 16, 64, dtype = torch.bfloat16, device="cuda")
+
+        ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
+        self.assertExpectedInline(ep.graph_module.code.strip(), """\
+def forward(self, l_q_, l_k_, l_v_):
+    _scaled_dot_product_flash_attention = torch.ops.aten._scaled_dot_product_flash_attention.default(l_q_, l_k_, l_v_, 0.0, True, scale = 0.125);  l_q_ = l_k_ = l_v_ = None
+    getitem = _scaled_dot_product_flash_attention[0];  _scaled_dot_product_flash_attention = None
+    return (getitem,)""")
 
 
 if __name__ == '__main__':

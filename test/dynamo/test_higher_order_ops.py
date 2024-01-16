@@ -1132,7 +1132,7 @@ def forward(self, L_xs_ : torch.Tensor, L_y_ : torch.Tensor):
     xs_1 = L_xs_
     l_y_ = L_y_
     map_body_1 = self.map_body_1
-    map_impl = torch.ops.higher_order.map_impl(map_body_1, 1, xs_1, l_y_);  map_body_1 = xs_1 = l_y_ = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_1, [xs_1], [l_y_]);  map_body_1 = xs_1 = l_y_ = None
     getitem_1 = map_impl[0];  map_impl = None
     return (getitem_1,)""",
             )
@@ -1142,7 +1142,7 @@ def forward(self, L_xs_ : torch.Tensor, L_y_ : torch.Tensor):
 def forward(self, getitem, l_y_):
     getitem_1 = getitem[0]
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, getitem, l_y_);  map_body_0 = getitem = l_y_ = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, [getitem], [l_y_]);  map_body_0 = getitem = l_y_ = None
     getitem_2 = map_impl[0];  map_impl = None
     return (getitem_2,)""",
             )
@@ -1163,7 +1163,7 @@ def forward(self, getitem, l_y_):
 def forward(self, L_x_ : torch.Tensor):
     xs_1 = L_x_
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, xs_1);  map_body_0 = xs_1 = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, [xs_1], []);  map_body_0 = xs_1 = None
     getitem_1 = map_impl[0]
     getitem_2 = map_impl[1];  map_impl = None
     return (getitem_1, getitem_2)""",
@@ -1199,7 +1199,7 @@ def forward(self, getitem):
 def forward(self, L_x_ : torch.Tensor):
     xs_1 = L_x_
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, xs_1);  map_body_0 = xs_1 = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, [xs_1], []);  map_body_0 = xs_1 = None
     getitem_1 = map_impl[0]
     getitem_2 = map_impl[1]
     getitem_3 = map_impl[2]
@@ -1241,7 +1241,7 @@ def forward(self, L_xs_0_ : torch.Tensor, L_xs_1_0_0_0_ : torch.Tensor, L_xs_2_ 
     xs_6 = L_xs_4_g_
     l_y_ = L_y_
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, 7, xs, xs_1, xs_2, xs_3, xs_4, xs_5, xs_6, l_y_);  map_body_0 = xs = xs_1 = xs_2 = xs_3 = xs_4 = xs_5 = xs_6 = l_y_ = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, [xs, xs_1, xs_2, xs_3, xs_4, xs_5, xs_6], [l_y_]);  map_body_0 = xs = xs_1 = xs_2 = xs_3 = xs_4 = xs_5 = xs_6 = l_y_ = None
     getitem_7 = map_impl[0]
     getitem_8 = map_impl[1]
     getitem_9 = map_impl[2]
@@ -1313,7 +1313,7 @@ def forward(self, getitem, getitem_1, getitem_2, getitem_3, getitem_4, getitem_5
 def forward(self, L_x_ : torch.Tensor):
     xs_1 = L_x_
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, xs_1, 3);  map_body_0 = xs_1 = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, [xs_1], [3]);  map_body_0 = xs_1 = None
     getitem_1 = map_impl[0];  map_impl = None
     return (getitem_1,)""",
             )
@@ -1347,7 +1347,7 @@ def forward(self, getitem, const):
 def forward(self, L_x_ : torch.Tensor):
     xs_1 = L_x_
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, xs_1, 3);  map_body_0 = xs_1 = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, [xs_1], [3]);  map_body_0 = xs_1 = None
     getitem_1 = map_impl[0];  map_impl = None
     return (getitem_1,)""",
             )

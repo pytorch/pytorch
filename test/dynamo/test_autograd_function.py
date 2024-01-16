@@ -842,6 +842,26 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         foo(torch.randn(2, requires_grad=True))
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_default_values(self):
+        from torch.autograd import Function
+
+        class Foo(Function):
+            @staticmethod
+            def forward(ctx, x, alpha=0.99):
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out
+
+        @torch.compile
+        def foo(x):
+            return Foo.apply(x)
+
+        # Make sure guards for default values do not crash
+        foo(torch.randn(2))
+        foo(torch.randn(2, requires_grad=True))
+
     @requires_cuda()
     @skipIfRocm
     def test_triton_kernel_basic(self):
