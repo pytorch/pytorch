@@ -1,6 +1,8 @@
 import torch
 import inspect
 
+from torch.utils._pytree import register_pytree_node, SequenceKey
+
 __all__ = ["pytree_register_structseq"]
 
 # error: Module has no attribute "_return_types"
@@ -10,10 +12,16 @@ def pytree_register_structseq(cls):
     def structseq_flatten(structseq):
         return list(structseq), None
 
+    def structseq_flatten_with_keys(structseq):
+        return list(zip(tuple(SequenceKey(i) for i in range(len(structseq))), structseq)), None
+
     def structseq_unflatten(values, context):
         return cls(values)
 
-    torch.utils._pytree.register_pytree_node(cls, structseq_flatten, structseq_unflatten)
+    register_pytree_node(cls,
+                         structseq_flatten,
+                         structseq_unflatten,
+                         flatten_with_keys_fn=structseq_flatten_with_keys)
 
 for name in dir(return_types):
     if name.startswith('__'):
