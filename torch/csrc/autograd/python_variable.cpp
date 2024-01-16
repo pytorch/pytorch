@@ -594,6 +594,26 @@ static PyObject* THPVariable_rev_view_func_unsafe(
   return rev_view_func_impl(self_, arg);
 }
 
+static PyObject* THPVariable_set_sizes_strides_offset_unsafe(
+    PyObject* _self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  const auto& self = THPVariable_Unpack(_self);
+  static PythonArgParser parser({
+      "_set_sizes_strides_offset_unsafe(SymIntArrayRef size, SymIntArrayRef strides, SymInt storage_offset)",
+  });
+  ParsedArgs<3> parsed_args{};
+  auto r = parser.parse(_self, args, kwargs, parsed_args);
+  auto sym_sizes = r.symintlist(0);
+  auto sym_strides = r.symintlist(1);
+  auto sym_offset = r.toSymInt(2);
+  self.unsafeGetTensorImpl()->set_sizes_and_strides(
+      sym_sizes, sym_strides, sym_offset);
+  return THPVariable_Wrap(self);
+  END_HANDLE_TH_ERRORS
+}
+
 // Instantiates a subclass of self with the same data.
 static PyObject* THPVariable_as_subclass(
     PyObject* _self,
@@ -1673,6 +1693,10 @@ static PyMethodDef extra_methods[] = {
     {"_rev_view_func_unsafe",
      THPVariable_rev_view_func_unsafe,
      METH_O,
+     nullptr},
+    {"_set_sizes_strides_offset_unsafe",
+     castPyCFunctionWithKeywords(THPVariable_set_sizes_strides_offset_unsafe),
+     METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {nullptr}};
 
