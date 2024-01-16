@@ -2,6 +2,8 @@ from typing import Callable
 
 import torch
 
+__all__ = ["WrapperModule"]
+
 
 class WrapperModule(torch.nn.Module):
     """Class to wrap a callable in an :class:`torch.nn.Module`. Use this if you

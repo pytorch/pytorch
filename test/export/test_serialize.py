@@ -705,12 +705,17 @@ class TestSaveLoad(TestCase):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerializeCustomClass(TestCase):
     def setUp(self):
-        if IS_SANDCASTLE or IS_MACOS or IS_FBCODE:
+        if IS_SANDCASTLE or IS_FBCODE:
+            torch.ops.load_library(
+                "//caffe2/test/cpp/jit:test_custom_class_registrations"
+            )
+        elif IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
-        lib_file_path = find_library_location('libtorchbind_test.so')
-        if IS_WINDOWS:
-            lib_file_path = find_library_location('torchbind_test.dll')
-        torch.ops.load_library(str(lib_file_path))
+        else:
+            lib_file_path = find_library_location('libtorchbind_test.so')
+            if IS_WINDOWS:
+                lib_file_path = find_library_location('torchbind_test.dll')
+            torch.ops.load_library(str(lib_file_path))
 
     def test_custom_class(self):
         custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
