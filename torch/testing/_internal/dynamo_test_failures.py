@@ -2049,7 +2049,6 @@ dynamo_expected_failures = {
     "TestOutDtypeOp.test_out_dtype_wrong_output",  # test_out_dtype_op
     "TestNumPyInteropCPU.test_numpy_non_writeable_cpu",  # test_numpy_interop
     "TestNN.test_Sequential_append",  # test_nn
-    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_False_mode_bicubic_memory_format0_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_all_ignored_cpu",  # test_nn
     "TestNN.test_ParameterList_replication",  # test_nn
     "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_none_use_module_form_False_cpu",  # test_nn
@@ -2066,8 +2065,6 @@ dynamo_expected_failures = {
     "TestNNDeviceTypeCPU.test_hardswish_grad_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_threshold_inplace_overlap_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_module_to_empty_cpu_float64",  # test_nn
-    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_True_mode_bicubic_memory_format1_cpu",  # test_nn
-    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_True_mode_bicubic_memory_format0_cpu",  # test_nn
     "TestNN.test_Sequential_imul",  # test_nn
     "TestNN.test_upsampling_bfloat16",  # test_nn
     "TestNNDeviceTypeCPU.test_triplet_margin_with_distance_loss_cpu",  # test_nn
@@ -2075,7 +2072,6 @@ dynamo_expected_failures = {
     "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_sum_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format0_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format1_cpu",  # test_nn
-    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_False_mode_bicubic_memory_format1_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_batchnorm_grad_cpu",  # test_nn
     "TestNN.test_interpolate",  # test_nn
     "TestNN.test_register_state_dict_pre_hook",  # test_nn

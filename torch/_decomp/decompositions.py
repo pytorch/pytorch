@@ -3286,6 +3286,18 @@ def upsample_bilinear2d_aa_vec(input, output_size, align_corners, scale_factors)
     )
 
 
+@register_decomposition(aten._upsample_bicubic2d_aa.vec)
+@aten._upsample_bicubic2d_aa.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten._upsample_bicubic2d_aa.vec.py_impl(DispatchKey.Autograd)
+def upsample_bicubic2d_aa_vec(input, output_size, align_corners, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_h = get_scale_value(scale_factors, 0)
+    scale_w = get_scale_value(scale_factors, 1)
+    return torch.ops.aten._upsample_bicubic2d_aa(
+        input, osize, align_corners, scale_h, scale_w
+    )
+
+
 @register_decomposition(aten.upsample_bilinear2d.vec)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.Autograd)
