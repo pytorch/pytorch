@@ -179,6 +179,7 @@ def sync_stores_to_parallel_reduction_stores(
 ):
     for line in store_buffer._lines:
         if isinstance(line, DeferredLine):
+            # only copy the DeferredLine which written by "store" node
             parallel_reduction_stores_buffer.writeline(line)
 
 
