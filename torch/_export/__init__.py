@@ -3,9 +3,9 @@ import dataclasses
 import functools
 import io
 import json
+import os
 import re
 import sys
-import os
 import types
 import warnings
 import weakref
@@ -156,11 +156,10 @@ def capture_pre_autograd_graph(
             _restore_state_dict(f, m)
 
         flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
-        range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
+        range_constraints = _process_constraints(m, 0, flat_args)
         module = _create_stateful_graph_module(
             m,
             range_constraints=range_constraints,
-            equality_constraints=equality_constraints,
         )
 
     def _train(self, mode: bool = True):
@@ -211,6 +210,9 @@ def save(
     extra_files: Optional[Dict[str, Any]] = None,
     opset_version: Optional[Dict[str, int]] = None,
 ) -> None:
+    if not isinstance(ep, ExportedProgram):
+        raise TypeError(f"save() expects an ExportedProgram but got {type(ep)}")
+
     from .serde.serialize import serialize, SerializedArtifact
     from .serde.schema import SCHEMA_VERSION
     artifact: SerializedArtifact = serialize(ep, opset_version)
@@ -220,12 +222,12 @@ def save(
 
     with zipfile.ZipFile(f, 'w') as zipf:
         # Save every field the SerializedArtifact to a file
-        for field in dataclasses.fields(artifact):
-            field_name = field.name
-            serialized_field = getattr(artifact, field_name)
-            zipf.writestr(f"serialized_{field_name}.json", serialized_field)
+        assert isinstance(artifact.exported_program, bytes)
+        zipf.writestr("serialized_exported_program.json", artifact.exported_program)
+        zipf.writestr("serialized_state_dict.pt", artifact.state_dict)
+        zipf.writestr("serialized_constants.pt", artifact.constants)
 
-        zipf.writestr('version', str(SCHEMA_VERSION))
+        zipf.writestr('version', ".".join(map(str, SCHEMA_VERSION)))
 
         # Add extra files if provided
         if extra_files:
@@ -243,12 +245,15 @@ def load(
     if isinstance(f, (str, os.PathLike)):
         f = os.fspath(f)
 
+    extra_files = extra_files or {}
+
     with zipfile.ZipFile(f, 'r') as zipf:
         # Check the version
-        version = int(zipf.read('version'))
+        version = zipf.read('version').decode().split('.')
         from .serde.schema import SCHEMA_VERSION
 
-        if version != SCHEMA_VERSION:
+        assert len(version) == len(SCHEMA_VERSION)
+        if version[0] != str(SCHEMA_VERSION[0]):
             raise RuntimeError(
                 f"Serialized version {version} does not match our current "
                 f"schema version {SCHEMA_VERSION}."
@@ -257,20 +262,41 @@ def load(
         from .serde.serialize import deserialize, SerializedArtifact
 
         # Load serialized_ep and serialized_state_dict from the zip file
+
+        serialized_exported_program: Optional[bytes] = None
+        serialized_state_dict: Optional[bytes] = None
+        serialized_constants: Optional[bytes] = None
+
+        for file_info in zipf.infolist():
+            file_content = zipf.read(file_info.filename)
+
+            if file_info.filename == "serialized_exported_program.json":
+                serialized_exported_program = file_content
+            elif file_info.filename == "serialized_state_dict.json":
+                warnings.warn("This version of file is deprecated")
+                serialized_state_dict = file_content
+            elif file_info.filename == "serialized_constants.json":
+                warnings.warn("This version of file is deprecated")
+                serialized_constants = file_content
+            elif file_info.filename == "serialized_state_dict.pt":
+                serialized_state_dict = file_content
+            elif file_info.filename == "serialized_constants.pt":
+                serialized_constants = file_content
+            elif file_info.filename.startswith("extra_files"):
+                filename = file_info.filename.split("/", 1)[1]
+                extra_files[filename] = file_content.decode('utf-8')
+
+        assert serialized_exported_program is not None
+        assert serialized_state_dict is not None
+        assert serialized_constants is not None
         artifact: SerializedArtifact = SerializedArtifact(
-            **{
-                field.name: zipf.read(f"serialized_{field.name}.json")
-                for field in dataclasses.fields(SerializedArtifact)
-            }
+            serialized_exported_program,
+            serialized_state_dict,
+            serialized_constants,
         )
 
         # Deserialize ExportedProgram
-        ep = deserialize(artifact)
-
-        # Populate extra_files map
-        if extra_files is not None:
-            for filename in extra_files.keys():
-                extra_files[filename] = zipf.read(f"extra_files/{filename}").decode('utf-8')
+        ep = deserialize(artifact, expected_opset_version)
 
         return ep
 
@@ -329,7 +355,7 @@ def aot_compile(
         constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
 
     if config.is_predispatch:
-        gm = capture_pre_autograd_graph(f, args, kwargs, constraints)
+        gm = torch.export._trace._export(f, args, kwargs, constraints, pre_dispatch=True).module()
     else:
         # We want to export to Torch IR here to utilize the pre_grad passes in
         # inductor, which run on Torch IR.
@@ -338,7 +364,10 @@ def aot_compile(
             args,
             kwargs,
             constraints,
-            disable_constraint_solver=disable_constraint_solver
+            disable_constraint_solver=disable_constraint_solver,
+            # Disabling this flag, because instead we can rely on the mapping
+            # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
+            restore_fqn=False,
         )
     flat_example_inputs = pytree.arg_tree_leaves(*args, **(kwargs or {}))
 
