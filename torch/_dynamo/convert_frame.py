@@ -26,7 +26,6 @@ from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.utils._traceback import format_traceback_short
 
 from . import config, exc
-from .allowed_functions import is_numpy
 from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
@@ -62,6 +61,7 @@ from .hooks import Hooks
 from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator, SpeculationLog
+from .trace_rules import is_numpy
 from .types import BytecodeHook
 from .utils import (
     CleanupManager,
@@ -454,6 +454,7 @@ def _compile(
     )
 
     output: Optional[OutputGraph] = None
+    tracer: Optional[InstructionTranslator] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
     fail_type: Optional[str] = None
@@ -465,6 +466,7 @@ def _compile(
     @preserve_global_state
     def transform(instructions, code_options):
         nonlocal output
+        nonlocal tracer
         speculation_log.restart()
         tracer = InstructionTranslator(
             instructions,
@@ -669,6 +671,9 @@ def _compile(
                 e.__traceback__
             ) from None
         finally:
+            if tracer:
+                tracer.output.local_scope = {}
+
             from .utils import curr_frame
 
             frame_key = str(curr_frame)

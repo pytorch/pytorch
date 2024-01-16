@@ -133,6 +133,7 @@ if RUN_CPU:
         code_string_count: dict = {}
 
     for item in [
+        BaseTest("test_add_complex2"),
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_bernoulli1"),
         BaseTest("test_bitwise"),  # int32
@@ -167,6 +168,7 @@ if RUN_CPU:
             slow=True,
         ),
         BaseTest("test_conv_transpose2d_packed", "cpu", test_cpu_repro.CPUReproTests()),
+        BaseTest("test_cumsum"),
         BaseTest("test_custom_op"),
         BaseTest("test_dtype_sympy_expr"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
