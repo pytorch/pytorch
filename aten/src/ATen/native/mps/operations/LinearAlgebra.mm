@@ -80,10 +80,9 @@ id<MTLLibrary> compileLinalgOpLibrary(id<MTLDevice> device) {
   NSError* error = nil;
   MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
   [options setLanguageVersion:MTLLanguageVersion2_3];
-  linalgLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_LINALG
-                                                                  encoding:NSASCIIStringEncoding]
-                                      options:options
-                                        error:&error];
+  linalgLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_LINALG encoding:NSASCIIStringEncoding]
+                                       options:options
+                                         error:&error];
   TORCH_CHECK(linalgLibrary, "Failed to create metal linalg library, error: ", [[error description] UTF8String]);
   return linalgLibrary;
 }
@@ -107,11 +106,35 @@ id<MTLComputePipelineState> matmulPipelineState(id<MTLDevice> device, ScalarType
   return pso;
 }
 
-} // namespace
+Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
+  auto stream = getCurrentMPSStream();
+  auto device = MPSDevice::getInstance()->device();
+  auto matmulPSO = matmulPipelineState(device, output.scalar_type());
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(matmulPSO, "naive_matmul", {self, other});
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:matmulPSO];
+      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self.size(0)),
+                                       static_cast<uint32_t>(self.size(1)),
+                                       static_cast<uint32_t>(output.size(1))};
+      std::array<int64_t, 6> strides = {
+          self.stride(0), self.stride(1), other.stride(0), other.stride(1), output.stride(0), output.stride(1)};
+      mtl_setBuffer(computeEncoder, self, 0);
+      mtl_setBuffer(computeEncoder, other, 1);
+      mtl_setBuffer(computeEncoder, output, 2);
+      [computeEncoder setBytes:strides.data() length:sizeof(uint64_t) * strides.size() atIndex:3];
+      [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
+      mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
+      getMPSProfiler().endProfileKernel(matmulPSO);
+    }
+  });
+  return output;
+}
 
-static std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* graph,
-                                                                           const Tensor& self,
-                                                                           const Tensor& other) {
+std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* graph,
+                                                                    const Tensor& self,
+                                                                    const Tensor& other) {
   if (self.numel() == 0 || other.numel() == 0) {
     auto output = [graph constantWithScalar:0.0
                                       shape:getMPSShape({self.size(0), other.size(1)})
@@ -123,6 +146,15 @@ static std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGr
   auto output = [graph matrixMultiplicationWithPrimaryTensor:selfTensor secondaryTensor:otherTensor name:nil];
   return {selfTensor, otherTensor, output};
 }
+
+bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
+  static bool always_use_metal = std::getenv("PYTORCH_MPS_PREFER_METAL") != nullptr;
+  constexpr auto max_stride_size = 32768;
+  return always_use_metal || self.stride(0) > max_stride_size || self.stride(1) > max_stride_size ||
+      other.stride(0) > max_stride_size || other.stride(1) > max_stride_size;
+}
+
+} // anonymous namespace
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
@@ -142,26 +174,14 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
     return output;
   }
 
+  // MPS matmul returns silently incorrect results if one of the matrix dimentions is greater than 2**15
+  // And crashes if its a view of matrix with dimentions larger than 2**15
+  // See https://github.com/pytorch/pytorch/issues/116769#issuecomment-1888302095
+  // In such cases, fallback to navie but accurate metal shader
+  if (use_metal_mm(self, other, output)) {
+    return do_metal_mm(self, other, output);
+  }
 
-#if 1
-    auto stream = getCurrentMPSStream();
-    auto device = MPSDevice::getInstance()->device();
-    dispatch_sync_with_rethrow(stream->queue(), ^() {
-      @autoreleasepool {
-        auto matmulPSO = matmulPipelineState(device, output.scalar_type());
-        auto computeEncoder = stream->commandEncoder();
-        [computeEncoder setComputePipelineState:matmulPSO];
-        std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self.size(0)), static_cast<uint32_t>(self.size(1)), static_cast<uint32_t>(output.size(1))};
-        std::array<int64_t, 6> strides = {self.stride(0), self.stride(1), other.stride(0), other.stride(1), output.stride(0), output.stride(1)};
-        mtl_setBuffer(computeEncoder, self, 0);
-        mtl_setBuffer(computeEncoder, other, 1);
-        mtl_setBuffer(computeEncoder, output, 2);
-        [computeEncoder setBytes:strides.data() length:sizeof(uint64_t) * strides.size() atIndex:3];
-        [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
-        mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
-      }
-    });
-#else
   @autoreleasepool {
     string key = "mm_out_mps_impl" + getTensorsStringKey({self, other});
 
@@ -185,7 +205,6 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
 
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
   }
-#endif
 
   return output;
 }
