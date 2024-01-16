@@ -214,6 +214,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "multinomial": {f16, f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
+    "nn.functional.avg_pool3d": {i64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.rrelu": {f32, f64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
