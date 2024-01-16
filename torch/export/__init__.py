@@ -59,9 +59,11 @@ __all__ = [
     "unflatten",
     "FlatArgsAdapter",
     "UnflattenedModule",
+    "WrapperModule",
 ]
 
 
+from ._wrapper import WrapperModule
 from .dynamic_shapes import Constraint, Dim, dims, dynamic_dim
 from .exported_program import ExportedProgram, ModuleCallEntry, ModuleCallSignature
 from .graph_signature import ExportBackwardSignature, ExportGraphSignature
