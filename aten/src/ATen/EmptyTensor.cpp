@@ -12,6 +12,9 @@ namespace at::detail {
 namespace {
 c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
   if (pin_memory) {
+    // NB: This is not quite right, if you somehow had both CUDA and PrivateUse1 initialized
+    // in the same PyTorch build, you would ONLY ever get the CUDA pinned memory allocator.
+    // To properly support this, see https://github.com/pytorch/pytorch/issues/14560
     if (at::globalContext().hasCUDA()) {
       return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
     } else if(at::isPrivateUse1HooksRegistered()) {
