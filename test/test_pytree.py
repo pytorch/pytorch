@@ -28,7 +28,7 @@ if IS_FBCODE:
 else:
     import torch.utils._cxx_pytree as cxx_pytree
 
-import torch._dynamo
+GlobalPoint = namedtuple("GlobalPoint", ["x", "y"])
 
 
 class GlobalDummyType:
