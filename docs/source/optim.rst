@@ -50,7 +50,7 @@ This means that ``model.base``'s parameters will use the default learning rate o
     between parameter groups.
 
 
-Consider the following example related to the distinct penalization of parameters.
+Also consider the following example related to the distinct penalization of parameters.
 Remember that :func:`~torch.nn.Module.parameters` returns an iterable that 
 contains all learnable parameters, including biases and other 
 parameters that may need distinct penalization. To address this, one can specify
