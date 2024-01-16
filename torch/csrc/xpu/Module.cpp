@@ -38,7 +38,7 @@ static PyObject* THXPModule_isInBadFork_wrap(PyObject* self, PyObject* noargs) {
 
 PyObject* THXPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to set_device");
+  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to set_device");
 
   int device = THPUtils_unpackInt(arg);
   c10::xpu::set_device(static_cast<c10::DeviceIndex>(device));
