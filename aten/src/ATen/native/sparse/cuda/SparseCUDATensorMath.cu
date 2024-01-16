@@ -296,12 +296,8 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
   Tensor dense_buffer = dense.to(commonDtype);
   Tensor values = sparse._values().to(commonDtype);
 
-  if (is_same_tensor(r, dense_buffer)) {
-    TORCH_CHECK(r_.is_contiguous(), "add: CUDA dense-sparse addition with a non-contiguous output tensor does not work; shout if you need it (see https://github.com/pytorch/pytorch/issues/1521 )");
-  } else {
-    r.resize_as_(dense);
-    r.copy_(dense_buffer);
-  }
+  r.resize_as_(dense);
+  r.copy_(dense_buffer);
 
   Tensor indices = sparse._indices();
   int64_t nDim = dense.dim();
