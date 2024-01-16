@@ -45,7 +45,8 @@
 #include <thrust/for_each.h>
 #include <thrust/sequence.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -736,4 +737,5 @@ Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bo
   return result;
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

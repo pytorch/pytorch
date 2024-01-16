@@ -89,11 +89,6 @@ static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
 static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC = {
     "TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC"};
 
-// Control the interval inside the watchdog thread to check the coordinated
-// signal from other ranks, e.g. to dump the debugging information.
-static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
-    "TORCH_NCCL_COORD_CHECK_MILSEC"};
-
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 constexpr const char* TIMEOUT_DUMP = "timeout_dump";
@@ -858,10 +853,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Extra time of sleep when waiting for timeout dump to finish.
   int waitTimeoutDumpInMilSec_;
 
-  // Interval of check coordinated signals in ProcessGroupNCCL from other ranks
-  // e.g., trigger the dump of the debugging info for timeout when notified.
-  int coordCheckIntervalMilSec_;
-
   // Size of ring buffer where we store NCCL Traces for debugging.
   int ncclTraceBufferSize_;
 
@@ -1021,12 +1012,6 @@ TORCH_API std::string dump_nccl_trace();
 // tracing
 TORCH_API c10::optional<std::function<std::string()>>& get_cpp_trace_dumper();
 
-// Similar to get_cpp_trace_dumper, this stores a function defined in
-// torch-python layer that lets us check whether the GIL can be acquired,
-// helpful for instrumenting in cases where a hang was observed.
-typedef bool (*gil_checker_t)();
-
-TORCH_API gil_checker_t& get_gil_checker();
 } // namespace c10d
 
 #endif // USE_C10D_NCCL

@@ -84,7 +84,6 @@ from .ctx_manager import (
     AutocastModeVariable,
     EventVariable,
     NullContextVariable,
-    StreamContextVariable,
     StreamVariable,
 )
 from .dicts import (
@@ -571,17 +570,12 @@ class VariableBuilder:
         elif isinstance(value, HigherOrderOperator):
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
-        elif isinstance(value, torch.cuda.StreamContext):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            stream_source = AttrSource(self.source, "stream")
-            stream_var = VariableBuilder(self.tx, stream_source)(value.stream)
-            return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, _StreamBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             return StreamVariable(
                 None,
                 value,
-                value.device,
+                value.device.type,
                 source=self.source,
             )
         elif isinstance(value, _EventBase):
@@ -701,7 +695,7 @@ class VariableBuilder:
             istype(value, (types.ModuleType, replay_record.DummyModule))
             # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
             # type(torch.ops) -> <class 'torch._ops._Ops'>
-            or any(value is obj for obj in (torch.backends.cudnn, torch.ops))
+            or value in [torch.backends.cudnn, torch.ops]
             or isinstance(value, torch._ops._OpNamespace)
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
@@ -1506,7 +1500,9 @@ def wrap_fx_proxy_cls(
         for _, device_interface in get_registered_device_interfaces()
     ]:
         proxy.node.meta["example_value"] = example_value
-        return StreamVariable(proxy, example_value, example_value.device, **options)
+        return StreamVariable(
+            proxy, example_value, example_value.device.type, **options
+        )
     elif (
         inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, _EventBase)
     ) or proxy.node.target in [

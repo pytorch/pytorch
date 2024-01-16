@@ -22,5 +22,6 @@ DECLARE_DISPATCH(sparse_mask_projection_out_fn, sparse_mask_projection_out_stub)
 using flatten_indices_fn = Tensor (*)(const Tensor& indices, IntArrayRef size);
 DECLARE_DISPATCH(flatten_indices_fn, flatten_indices_stub);
 
-} // namespace native
-} // namespace at
+}
+
+}

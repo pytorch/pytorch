@@ -883,6 +883,10 @@ def slice_(x, dim=0, start=0, end=2**63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
+    if V.graph.sizevars.evaluate_expr(sympy.Lt(start + dim_size, 0)):
+        start = 0
+    if V.graph.sizevars.evaluate_expr(sympy.Lt(end + dim_size, 0)):
+        end = 0
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
 
@@ -2399,8 +2403,14 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
-
-    start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
+    if start is not None and V.graph.sizevars.evaluate_expr(sympy.Lt(start, 0)):
+        start = start + dim_size
+    if end is not None and V.graph.sizevars.evaluate_expr(sympy.Lt(end, 0)):
+        end = end + dim_size
+    if start is None:
+        start = 0
+    if end is None or V.graph.sizevars.statically_known_leq(x.get_size()[dim], end):
+        end = dim_size
 
     src_size = list(x.get_size())
     src_size[dim] = FloorDiv(end - start + (step - 1), step)
@@ -5302,11 +5312,6 @@ def accumulate_grad_(variable, new_grad):
     return variable
 
 
-from torch._higher_order_ops.auto_functionalize import auto_functionalized
-
-make_fallback(auto_functionalized)
-
-
 @register_lowering(triton_kernel_wrapper_mutation)
 def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
     ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
@@ -5315,28 +5320,11 @@ def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
 
 @register_lowering(triton_kernel_wrapper_functional)
 def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
-    new_kwargs = {}
-    for name, value in kwargs.items():
-        if isinstance(value, ir.TensorBox):
-            x = value.data
-            has_non_rv_views = False
-            while isinstance(x, ir.BaseView):
-                if not isinstance(x, ir.ReinterpretView):
-                    has_non_rv_views = True
-                    break
-                x = x.data
-            if has_non_rv_views:
-                # we realize the inputs wrapped into any view which is not
-                # ReinterpretView to convert them into ReinterpretView during
-                # realization; all views being ReinterpretView is assumed by
-                # the downstream code (e.g., preserving ReinterpretView in
-                # cloning; layout should be available in mutation marking)
-                value = ir.TensorBox(ir.ExternKernel.realize_input(value))
-            if name in tensors_to_clone:
-                value = clone_preserve_reinterpret_view(value)
-        new_kwargs[name] = value
-
-    return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=new_kwargs)
+    kwargs = {
+        key: (clone_preserve_reinterpret_view(x) if key in tensors_to_clone else x)
+        for key, x in kwargs.items()
+    }
+    return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
 
 
 try:

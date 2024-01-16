@@ -346,30 +346,6 @@ c10::optional<std::function<std::string()>>& get_cpp_trace_dumper() {
   return dumper;
 }
 
-gil_checker_t& get_gil_checker() {
-  static gil_checker_t gil_checker = nullptr;
-  return gil_checker;
-}
-
-std::future<bool> launchAsyncGilCheck() {
-  std::promise<bool> resultPromise;
-  std::future<bool> resultFuture = resultPromise.get_future();
-  TORCH_CHECK(get_gil_checker(), "Can't check GIL with null GIL checker");
-  std::thread workerThread([promise = std::move(resultPromise)]() mutable {
-    try {
-      auto& gil_checker = get_gil_checker();
-      promise.set_value((*gil_checker)());
-    } catch (...) {
-      promise.set_exception(std::current_exception());
-    }
-  });
-
-  // Detach the thread to allow it to run independently
-  workerThread.detach();
-
-  return resultFuture;
-}
-
 // Return CUDA device with ordinal given by input rank.  If we aren't
 // bound to a specific device, there is no strict guarantee that this
 // heuristic is the correct assignment of ranks to GPUs that Python
@@ -770,7 +746,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 10 /*10 Mins*/);
   waitTimeoutDumpInMilSec_ =
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 2000);
-  coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
@@ -836,6 +811,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const std::string OFF = "OFF";
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
+  std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
             << "NCCL version: " << getNcclVersion() << ", size: " << size
             << ", global rank: " << globalRank()
@@ -860,8 +836,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << monitorThreadEnabled_.load()
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
-            << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
-            << ", ID=" << this->getID();
+            << ", NCCL_DEBUG: " << nccl_debug << ", ID=" << this->getID();
 
   if (options_->global_ranks_in_group.empty()) {
     this->globalRankStart = 0;
@@ -1309,23 +1284,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // local disk)
   std::future<bool> asyncDebugDump = launchAsyncDebugDump();
 
-  if (get_gil_checker() != nullptr) {
-    auto fut = launchAsyncGilCheck();
-    auto kGilCheckTimeout = std::chrono::milliseconds(300);
-    auto futStatus = fut.wait_for(kGilCheckTimeout);
-    if (futStatus != std::future_status::ready) {
-      TORCH_CHECK(
-          futStatus != std::future_status::deferred,
-          "Expected the future to have been launched eagerly.");
-      LOG(ERROR)
-          << "Could not acquire GIL within 300 ms on exit, possible GIL induced hang";
-    }
-    LOG(INFO) << "Could acquire GIL on exit";
-  } else {
-    LOG(INFO)
-        << "GIL checker was not registered, perhaps this is a no-python build?";
-  }
-
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
   // collective timeout -> desync -> exception handling -> destructors
@@ -1551,7 +1509,7 @@ void ProcessGroupNCCL::watchdogHandler() {
               (currentTime - lastTimePollStore))
               .count();
       if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
-          timeSinceLastPollStore >= coordCheckIntervalMilSec_) {
+          timeSinceLastPollStore >= heartbeatTimeoutInSec_ * 1000) {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(TIMEOUT_DUMP)}) &&
             !optAsyncDebugDump) {
@@ -1637,7 +1595,7 @@ void ProcessGroupNCCL::watchdogHandler() {
 
       // Clean up completed work
       if (work.isCompleted()) {
-        NCCLTraceBuffer::get()->retire_id(work.trace_id_, true);
+        NCCLTraceBuffer::get()->retire_id(work.trace_id_);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
@@ -2034,8 +1992,10 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
-  LOG(INFO) << logPrefix()
-            << "NCCL_DEBUG: " << getCvarString({"NCCL_DEBUG"}, "N/A");
+  if (getRank() == 0) {
+    LOG(INFO) << logPrefix()
+              << "NCCL_DEBUG: " << getCvarString({"NCCL_DEBUG"}, "N/A");
+  }
 
   // See [Group Start/End Note]
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
@@ -2332,16 +2292,18 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
 }
 
 float ProcessGroupNCCL::WorkNCCL::getDuration() const {
-  TORCH_CHECK(timingEnabled_, "getDuration only works if timing was enabled");
+  TORCH_CHECK(timingEnabled_, "getDuration only works if timing was enabled")
   TORCH_CHECK(
-      ncclStartEvents_,
-      "getDuration only works if ncclStartEvents_ is populated, true if timing enabled");
+      ncclStartEvents_->size() == 1,
+      "getDuration only works for single device per ProcessGroup.");
   TORCH_CHECK(
-      ncclEndEvents_,
-      "getDuration only works if ncclEndEvents_ is populated, which should always be true");
-  return getDurationFromFirstEvent(*ncclStartEvents_, *ncclEndEvents_);
+      ncclEndEvents_->size() == 1,
+      "getDuration only works for single device per ProcessGroup.");
+  TORCH_CHECK(
+      (*ncclEndEvents_)[0].query(),
+      "getDuration can only be called after work is succeeded.")
+  return (*ncclStartEvents_)[0].elapsed_time((*ncclEndEvents_)[0]);
 }
-
 uint64_t ProcessGroupNCCL::WorkNCCL::getSequencenumber() const {
   return seq_;
 }
