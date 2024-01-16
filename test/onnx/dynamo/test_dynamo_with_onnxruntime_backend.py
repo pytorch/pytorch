@@ -381,8 +381,10 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self, config):
                 super().__init__()
                 try:
+                    # New version of LlamaAttention has layer_idx argument.
                     self.attention = LlamaAttention(config, layer_idx=0)
                 except TypeError:
+                    # Fall back to old version of LlamaAttention.
                     self.attention = LlamaAttention(config)
 
             def forward(self, hidden_states, attention_mask, position_ids):
@@ -472,8 +474,10 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self, config):
                 super().__init__()
                 try:
+                    # New version of LlamaDecoderLayer has layer_idx argument.
                     self.decoder = LlamaDecoderLayer(config, layer_idx=0)
                 except TypeError:
+                    # Fall back to old version of LlamaDecoderLayer.
                     self.decoder = LlamaDecoderLayer(config)
 
             def forward(self, hidden_states, attention_mask, position_ids):

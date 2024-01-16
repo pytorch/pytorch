@@ -112,7 +112,7 @@ def _retrieve_or_adapt_input_to_graph_set(
         #    torch.jit.Value, fx_name_to_onnxscript_value[fx_node_arg.name],
         #    in TorchScript graph.
         return fx_name_to_onnxscript_value[onnx_tensor.name]
-    if isinstance(onnx_tensor, (tuple, list)) and any(
+    elif isinstance(onnx_tensor, (tuple, list)) and any(
         isinstance(node, torch.fx.Node)
         and fx_type_utils.is_torch_symbolic_type(node.meta.get("val"))
         for node in onnx_tensor
