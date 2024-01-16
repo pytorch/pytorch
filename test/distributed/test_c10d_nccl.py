@@ -3924,7 +3924,8 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
     def test_timeout_dumps(self, timing_enabled):
-        os.environ['TORCH_NCCL_COORD_DUMP_CHECK_MS'] = '10000'
+        # We need to reduce the coordinated check frequency to avoid rank 0 also timeout.
+        os.environ['TORCH_NCCL_COORD_CHECK_MILSEC'] = '15000'
 
         if self.rank == self.MAIN_PROCESS_RANK:
             # wait for rank0 to crash before looking for its output file
