@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -28,10 +29,6 @@ else:
     import torch.utils._cxx_pytree as cxx_pytree
 
 import torch._dynamo
-
-torch._dynamo.config.suppress_errors = True
-
-GlobalPoint = namedtuple("GlobalPoint", ["x", "y"])
 
 
 class GlobalDummyType:
@@ -1100,6 +1097,7 @@ TreeSpec(tuple, None, [*,
         from_one_tree = py_pytree.tree_map(lambda a: a + 2, tree1)
         self.assertEqual(from_two_trees, from_one_tree)
 
+    @skipIfTorchDynamo("dynamo pytree tracing doesn't work here")
     def test_tree_flatten_with_path_is_leaf(self):
         leaf_dict = {"foo": [(3)]}
         pytree = (["hello", [1, 2], leaf_dict],)
@@ -1188,6 +1186,7 @@ TreeSpec(tuple, None, [*,
             ],
         )
 
+    @skipIfTorchDynamo("AssertionError in dynamo")
     def test_flatten_flatten_with_key_consistency(self):
         """Check that flatten and flatten_with_key produces consistent leaves/context."""
         reg = py_pytree.SUPPORTED_NODES
