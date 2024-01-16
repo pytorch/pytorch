@@ -24,7 +24,7 @@ from torch._export.serde.serialize import (
 )
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.export import Dim, export, load, save
-from torch.export._wrapper import WrapperModule
+from torch.export import WrapperModule
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.testing._internal.common_utils import (
     find_library_location,
