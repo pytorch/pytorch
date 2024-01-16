@@ -87,10 +87,7 @@ class FSDPParamGroup:
 
         # - Mixed precision
         self._orig_dtype, self._reduce_dtype = self._get_mp_dtypes()
-        # TODO: Only support fp8/non-fp8 mixing for now.
-        self._use_uint8_all_gather = any(
-            fsdp_param.is_float8tensor for fsdp_param in self.fsdp_params
-        )
+        self._use_uint8_all_gather = False  # TODO
         if not self._use_uint8_all_gather:
             unsharded_param_dtypes = {
                 fsdp_param.unsharded_param_data_dtype for fsdp_param in self.fsdp_params
@@ -129,8 +126,7 @@ class FSDPParamGroup:
         self._init_gradient_divide_factors()
 
         # - CUDA events for stream synchronization
-        # Holds the all-gather output buffer as a list of per-rank shards
-        # and the all-gather CUDA event
+        # Holds the all-gather output buffer and the all-gather CUDA event
         self._all_gather_result: Optional[AllGatherResult] = None
         # Holds the reshard-after-forward CUDA event when resharding to a
         # different world size, which should be waited on in the next unshard
@@ -220,15 +216,14 @@ class FSDPParamGroup:
 
     # Runtime #
     def _unshard(self, async_op: bool = False):
-        if self._all_gather_result is not None:  # manually unsharded
+        if self._all_gather_result is not None:  # already called, pending wait
             return
         log.info("_unshard for %s", self._module_fqn)
         if self._reshard_after_forward_event is not None:
             # If previously resharded to a different world size, the resharded
             # parameter data are allocated in the default stream and used in
             # the all-gather streams.
-            self.all_gather_copy_in_stream.wait_event(self._reshard_after_forward_event)
-            self.all_gather_stream.wait_event(self._reshard_after_forward_event)
+            self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
             self._reshard_after_forward_event = None
         self._all_gather_result = foreach_all_gather(
             self.fsdp_params,
@@ -340,6 +335,7 @@ class FSDPParamGroup:
         log.info("post-backward for %s", self._module_fqn)
         # Reset this flag to enable the next (pre-backward, post-backward)
         # interval to handle the case of multiple forwards
+        # TODO: Remove after https://github.com/pytorch/pytorch/pull/115628
         self.ran_pre_backward = False
         self._training_state = TrainingState.POST_BACKWARD
         for fsdp_param in self.fsdp_params:
