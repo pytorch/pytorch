@@ -1043,6 +1043,7 @@ test_executorch() {
 
   # NB: We need to build ExecuTorch runner here and not inside the Docker image
   # because it depends on PyTorch
+  # shellcheck disable=SC1091
   source .ci/scripts/utils.sh
   build_executorch_runner "cmake"
 
