@@ -47,9 +47,9 @@ try:
     import torch.onnx._internal.fx.passes
     from torch.onnx._internal.fx import fx_onnx_interpreter
     from torch.onnx._internal.fx.type_utils import (
-        from_python_type_to_onnx_tensor_element_type,
         _TORCH_DTYPE_TO_NUMPY_DTYPE,
         _TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE,
+        from_python_type_to_onnx_tensor_element_type,
     )
 
     _SUPPORT_ONNXRT = True
