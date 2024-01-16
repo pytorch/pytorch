@@ -93,8 +93,8 @@ from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    GPUS,
     HAS_CPU,
+    HAS_CUDA,
     HAS_GPU,
     HAS_MULTIGPU,
     skipCPUIf,
@@ -104,9 +104,10 @@ from torch.testing._internal.inductor_utils import (
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
 _desired_test_bases = get_desired_device_type_test_bases()
 RUN_CPU = any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
-RUN_GPU = any(getattr(x, "device_type", "") in GPUS for x in _desired_test_bases)
+RUN_GPU = any(getattr(x, "device_type", "") == GPU_TYPE for x in _desired_test_bases)
 
 aten = torch.ops.aten
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
 
 requires_multigpu = functools.partial(
@@ -857,7 +858,7 @@ class CommonTemplate:
             ),
         )
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 5)
-        assertGeneratedKernelCountEqual(self, 1 if self.device in GPUS else 3)
+        assertGeneratedKernelCountEqual(self, 1 if self.device == GPU_TYPE else 3)
 
     def test_index_propagation(self):
         def flip(x):
@@ -2236,7 +2237,7 @@ class CommonTemplate:
     @config.patch({"freezing": True})
     def test_conv_bn_fuse(self):
         # For gpu path, there is an accuracy issue
-        if self.device in GPUS:
+        if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv bn test")
 
         # fails dynamic check which bn is fused, and there will not have loops vars.
@@ -2295,7 +2296,7 @@ class CommonTemplate:
 
     def test_conv_functional_bn_fuse(self):
         # For gpu path, there is an accuracy issue
-        if self.device in GPUS:
+        if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv bn test")
 
         # Define a BatchNorm using functional BN.
@@ -2379,7 +2380,7 @@ class CommonTemplate:
 
     @skipIfRocm
     def test_conv_inference_heuristics(self):
-        if self.device in GPUS:
+        if self.device != GPU_TYPE:
             raise unittest.SkipTest("gpu only test")
 
         in_channels = 6
@@ -2419,7 +2420,7 @@ class CommonTemplate:
             FileCheck().check(".run(").check(".convolution(").run(code[0])
 
     def test_upsample_cat_conv(self):
-        if self.device in GPUS:
+        if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu upsample_cat_conv test")
 
         class M(torch.nn.Module):
@@ -2619,7 +2620,7 @@ class CommonTemplate:
         def fn(a):
             if a.device.type == "cpu":
                 return aten._to_copy(
-                    a, device=torch.device(self.device), dtype=6, layout=0
+                    a, device=torch.device(GPU_TYPE), dtype=6, layout=0
                 )
             else:
                 return aten._to_copy(a, device=torch.device("cpu"), dtype=6, layout=0)
@@ -2650,7 +2651,7 @@ class CommonTemplate:
         def fn(a):
             d1 = a.device.type
             if d1 == "cpu":
-                d2 = self.device
+                d2 = GPU_TYPE
             else:
                 d2 = "cpu"
 
@@ -2671,13 +2672,13 @@ class CommonTemplate:
         def fn(x):
             x = x + 1
             x = x + 2
-            x = x.to(self.device)
+            x = x.to(GPU_TYPE)
             x = x + 3
             x = x + 4
             x = x.cpu()
             x = x + 5
             x = x + 6
-            x = x.to(self.device)
+            x = x.to(GPU_TYPE)
             x = x + 7
             x = x + 8
             x = x.cpu()
@@ -2695,11 +2696,11 @@ class CommonTemplate:
     @requires_multigpu()
     def test_multi_gpu_device(self):
         # TODO: https://github.com/pytorch/pytorch/issues/92627
-        x = torch.rand([4], device=self.device)
+        x = torch.rand([4], device=GPU_TYPE)
 
         def fn(x, y):
             r = torch.ops.aten.div(x, y)
-            r = r.to(f"{self.device}:1")
+            r = r.to(f"{GPU_TYPE}:1")
             return 2 * r
 
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
@@ -2719,13 +2720,13 @@ class CommonTemplate:
 
         gemm_opt = torch._dynamo.optimize("inductor", guard_fail_fn=fail)(gemm)
 
-        x0 = torch.randn(1024, 1024, device=f"{self.device}:0")
-        y0 = torch.randn(1024, 1024, device=f"{self.deivce}:0")
+        x0 = torch.randn(1024, 1024, device=f"{GPU_TYPE}:0")
+        y0 = torch.randn(1024, 1024, device=f"{GPU_TYPE}:0")
 
         gemm_opt(x0, y0)
 
-        x1 = torch.randn(1024, 1024, device=f"{self.device}:1")
-        y1 = torch.randn(1024, 1024, device=f"{self.device}:1")
+        x1 = torch.randn(1024, 1024, device=f"{GPU_TYPE}:1")
+        y1 = torch.randn(1024, 1024, device=f"{GPU_TYPE}:1")
 
         gemm_opt(x1, y1)
         self.assertTrue(failed_guard is not None)
@@ -2807,7 +2808,7 @@ class CommonTemplate:
         )
 
     def test_conv2d_channels_last(self):
-        if self.device in GPUS:
+        if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv2d channels_last")
 
         m = torch.nn.Sequential(
@@ -2862,7 +2863,7 @@ class CommonTemplate:
         )
 
     def test_conv3d_channels_last(self):
-        if self.device in GPUS:
+        if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv3d channels_last")
 
         m = torch.nn.Sequential(
@@ -3420,7 +3421,7 @@ class CommonTemplate:
 
     @config.patch(fallback_random=True)
     def test_randn_with_dtype_and_device(self):
-        if self.device in GPUS:
+        if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu randn_with_dtype_and_device test")
 
         def fn(vectors):
@@ -3571,8 +3572,8 @@ class CommonTemplate:
                 self_2 = self.self_2(self_1)
                 return (self_2,)
 
-        inp = torch.randn((4, 64, 192, 256), dtype=torch.float32, device=self.device)
-        mod = Repro().to(self.device)
+        inp = torch.randn((4, 64, 192, 256), dtype=torch.float32, device=GPU_TYPE)
+        mod = Repro().to(GPU_TYPE)
         o1 = mod(inp)
         o2 = torch.compile(mod)(inp)
         self.assertEqual(o1, o2)
@@ -3797,7 +3798,7 @@ class CommonTemplate:
         for inp in (
             torch.randn(
                 [16, 16],
-                dtype=torch.float16 if self.device in GPUS else torch.float32,
+                dtype=torch.float16 if self.device == GPU_TYPE else torch.float32,
                 device=self.device,
             ),
             torch.randint(16, (16, 16), device=self.device),
@@ -6144,9 +6145,9 @@ class CommonTemplate:
             x = torch.ones(10, device=device1, dtype=torch.float32)
             return fn(x, device2).clone()
 
-        a0 = test_like_rands_on_different_device("cpu", self.device)
-        a1 = test_like_rands_on_different_device(self.device, "cpu")
-        self.assertTrue(a0.device.type == self.device)
+        a0 = test_like_rands_on_different_device("cpu", GPU_TYPE)
+        a1 = test_like_rands_on_different_device(GPU_TYPE, "cpu")
+        self.assertTrue(a0.device.type == GPU_TYPE)
         self.assertTrue(a1.device.type == "cpu")
 
     def test_max_pool2d_with_indices_backward(self):
@@ -6475,7 +6476,7 @@ class CommonTemplate:
         torch.manual_seed(1234)
         weight.grad.zero_()
         r2, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(ones))
-        if self.device in GPUS:
+        if self.device == GPU_TYPE:
             self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         g2 = weight.grad.clone()
@@ -6511,7 +6512,7 @@ class CommonTemplate:
             lambda: run(torch.randn([8, 32], device=self.device))
         )
 
-        if self.device in GPUS:
+        if self.device == GPU_TYPE:
             self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         expected_kernel = 4
@@ -6529,7 +6530,7 @@ class CommonTemplate:
             return random_tensor1, random_tensor2, random_tensor3
 
         _, source_codes = run_and_get_code(fn1)
-        if self.device in GPUS:
+        if self.device == GPU_TYPE:
             self.assertEqual(len(source_codes), 1)
             self.assertEqual(source_codes[0].count("async_compile.triton"), 1)
 
@@ -6933,7 +6934,7 @@ class CommonTemplate:
 
         for d in dtypes:
             inputs = (
-                rand_strided((2, 3), (3, 1), dtype=torch.float32, device=self.device),
+                rand_strided((2, 3), (3, 1), dtype=torch.float32, device=GPU_TYPE),
                 rand_strided((), (), dtype=d, device="cpu"),
             )
             self.assertTrue(same(opt(*inputs), fn(*inputs)))
@@ -6992,7 +6993,7 @@ class CommonTemplate:
                     fn_compiled(inps)
 
                 # do an extra run to make sure we are deallocating on warmup and record
-                if self.device in GPUS:
+                if self.device == GPU_TYPE:
                     inps.extend(
                         [
                             torch.rand([5, 5]).to(self.device),
@@ -7021,7 +7022,7 @@ class CommonTemplate:
         self.common(fn, (x,))
 
     def test_kwargs(self):
-        if self.device in GPUS:
+        if self.device == GPU_TYPE:
             raise unittest.SkipTest("histogramdd only supports cpu")
 
         def fn(x, y):
@@ -7050,7 +7051,7 @@ class CommonTemplate:
         b, m, n, k = 7, 11, 13, 15
 
         def gen(*shape, dtype=torch.float32):
-            return torch.randn(*shape, device=self.device, dtype=dtype) / k + 1.0
+            return torch.randn(*shape, device=GPU_TYPE, dtype=dtype) / k + 1.0
 
         for dtype in dtypes:
             x = gen(m, k, dtype=dtype)
@@ -7072,7 +7073,7 @@ class CommonTemplate:
     @torch._inductor.config.patch("layout_optimization", True)
     def test_inductor_layout_optimization_input_mutations(self):
         # channel dim must be > 64 for inductor to do layout optimization and use NHWC
-        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(self.device)
+        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(GPU_TYPE)
 
         def f(x):
             x.mul_(2)
@@ -7080,7 +7081,7 @@ class CommonTemplate:
             return out
 
         f_compiled = torch.compile(f)
-        x_ref = torch.rand(2, 3, 128, 128, device=self.device)
+        x_ref = torch.rand(2, 3, 128, 128, device=GPU_TYPE)
         x_test = x_ref.clone().detach()
         with torch.no_grad():
             out_ref = f(x_ref)
@@ -7104,7 +7105,7 @@ class CommonTemplate:
     def test_sqrt_dynamic_shapes(self):
         # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
         # TODO: support cuda path.
-        if self.device in GPUS:
+        if self.device == GPU_TYPE:
             raise unittest.SkipTest("sqrt dynamic shapes only supports cpu")
 
         class Model(torch.nn.Module):
@@ -7375,7 +7376,7 @@ class CommonTemplate:
             _scaled_dot_product_efficient_attention = None
             return (getitem,)
 
-        DEVICE = torch.device(f"{self.device}:0")
+        DEVICE = torch.device(f"{GPU_TYPE}:0")
         DTYPE = torch.float16
         B = 3
         H = 8
@@ -7433,10 +7434,10 @@ class CommonTemplate:
             _scaled_dot_product_efficient_attention = None
             return (getitem,)
 
-        query = torch.rand(8, 8, 16, 16, device=self.device)
-        key = torch.rand(8, 8, 15, 16, device=self.device)
-        value = torch.rand(8, 8, 15, 16, device=self.device)
-        bias = torch.rand(1, 1, 16, 15, device=self.device)
+        query = torch.rand(8, 8, 16, 16, device=GPU_TYPE)
+        key = torch.rand(8, 8, 15, 16, device=GPU_TYPE)
+        value = torch.rand(8, 8, 15, 16, device=GPU_TYPE)
+        bias = torch.rand(1, 1, 16, 15, device=GPU_TYPE)
         self.common(
             foo,
             (query, key, value, bias),
@@ -7488,9 +7489,9 @@ class CommonTemplate:
                 _scaled_dot_product_efficient_attention = None
                 return (getitem,)
 
-        query = torch.rand(8, 8, 16, 16, device=self.device)
-        key = torch.rand(8, 8, 15, 16, device=self.device)
-        value = torch.rand(8, 8, 15, 16, device=self.device)
+        query = torch.rand(8, 8, 16, 16, device=GPU_TYPE)
+        key = torch.rand(8, 8, 15, 16, device=GPU_TYPE)
+        value = torch.rand(8, 8, 15, 16, device=GPU_TYPE)
 
         mod = Mod()
         out_eager = mod(query, key, value)
@@ -8247,6 +8248,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
         common = check_model_gpu
         device = GPU_TYPE
 
+    CudaTests = GPUTests
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
     class TritonCodeGenTests(TestCase):

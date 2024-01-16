@@ -56,14 +56,14 @@ def check_codegen(
 
     if is_cpp_code is False:
         if hasattr(model, "to"):
-            model = model.to(self.device)
+            model = model.to(GPU_TYPE)
 
         def copy_fn(x):
             # preserve strides of the input on the device
             if not isinstance(x, torch.Tensor):
                 return x
             return torch.empty_strided(
-                x.size(), x.stride(), device=self.device, dtype=x.dtype
+                x.size(), x.stride(), device=GPU_TYPE, dtype=x.dtype
             ).copy_(x)
 
         example_inputs = tuple(copy_fn(x) for x in example_inputs)

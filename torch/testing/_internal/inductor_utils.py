@@ -41,7 +41,7 @@ HAS_MULTIGPU = any(
 
 tmp_gpus = [x for x in GPUS if getattr(torch, x).is_available()]
 assert len(tmp_gpus) <= 1
-GPU_TYPE = tmp_gpus.pop()
+GPU_TYPE = "cuda" if len(tmp_gpus) == 0 else tmp_gpus.pop()
 del tmp_gpus
 
 @register_backend
