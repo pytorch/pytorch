@@ -22,12 +22,12 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, HAS_MULTIGPU
 from torch.utils._triton import has_triton
 
 HAS_TRITON = has_triton()
 
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
 
@@ -46,18 +46,18 @@ def _run_codecache_test(start_method):
     ):
         AsyncCompile.warm_pool()
 
-        model = MyModel().cuda()
+        model = MyModel().to(GPU_TYPE)
         model = torch.compile(model)
-        inp = torch.rand(10, 10).cuda()
+        inp = torch.rand(10, 10).to(GPU_TYPE)
         model(inp).sum().backward()
 
 
-@requires_cuda()
+@requires_gpu()
 def test_codecache_spawn():
     _run_codecache_test("spawn")
 
 
-@requires_cuda()
+@requires_gpu()
 def test_codecache_fork():
     _run_codecache_test("fork")
 
@@ -99,15 +99,15 @@ class TestFxGraphCache(TestCase):
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
-    @parametrize("device", ("cuda", "cpu"))
+    @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
     def test_cache_load_function(self, device, dtype, dynamic):
         """
         Verify that we can populate and load functions from the cache.
         """
-        if device == "cuda" and not HAS_CUDA:
-            raise unittest.SkipTest("requires CUDA")
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest("requires GPU")
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires SM80 or later")
 
@@ -140,15 +140,15 @@ class TestFxGraphCache(TestCase):
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
-    @parametrize("device", ("cuda", "cpu"))
+    @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.float64))
     @parametrize("dynamic", (False, True))
     def test_cache_load_model(self, device, dtype, dynamic):
         """
         Verify that we can populate and load models from the cache.
         """
-        if device == "cuda" and not HAS_CUDA:
-            raise unittest.SkipTest("requires CUDA")
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest("requires GPU")
 
         def fn(mod, x):
             mod.zero_grad()
@@ -177,19 +177,19 @@ class TestFxGraphCache(TestCase):
         # And the results should be the same.
         self.assertEqual(grads1, grads2)
 
-    @largeTensorTest("64GB", device="cuda")
+    @largeTensorTest("64GB", device=GPU_TYPE)
     @config.patch({"fx_graph_cache": True})
-    @parametrize("device", ("cuda",))
+    @parametrize("device", (GPU_TYPE,))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_cache_load_with_guards_int32_bounds(self, device, dtype):
         """
         Test caching the same graph, but under conditions that introduce guards
         for tensor sizes < int32.
         """
-        if device == "cuda" and not HAS_CUDA:
-            raise unittest.SkipTest("requires CUDA")
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest("requires GPU")
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
-            raise unittest.SkipTest("requires SM80 or later")
+            raise unittest.SkipTest("requires CUDA SM80 or later")
 
         def fn(x, y):
             return (x + x, y + y)
@@ -227,14 +227,14 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(res1, res2)
 
     @config.patch({"fx_graph_cache": True})
-    @parametrize("device", ("cuda", "cpu"))
+    @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     def test_cache_load_with_guards_static_bounds(self, device, dtype):
         """
         Test caching the same graph, but under conditions that introduce guards
         for static bounds.
         """
-        if device == "cuda" and not HAS_CUDA:
+        if device in GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest("requires CUDA")
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires SM80 or later")
@@ -411,14 +411,14 @@ class TestFxGraphCacheHashing(TestCase):
                 FxGraphCachePickler.dumps(torch.randn(3, device="cpu")),
             )
 
-            if HAS_CUDA and torch.cuda.device_count() >= 2:
+            if HAS_MULTIGPU:
                 self.assertEqual(
-                    FxGraphCachePickler.dumps(torch.randn(3, device="cuda:1")),
-                    FxGraphCachePickler.dumps(torch.randn(3, device="cuda:1")),
+                    FxGraphCachePickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
+                    FxGraphCachePickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
                 )
                 self.assertNotEqual(
-                    FxGraphCachePickler.dumps(torch.randn(3, device="cuda:0")),
-                    FxGraphCachePickler.dumps(torch.randn(3, device="cuda:1")),
+                    FxGraphCachePickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:0")),
+                    FxGraphCachePickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
                 )
 
     def test_hash_kwargs(self):

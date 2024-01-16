@@ -42,15 +42,15 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, GPUS, HAS_CPU, HAS_CUDA
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
 try:
     try:
-        from .test_torchinductor import check_model, check_model_cuda
+        from .test_torchinductor import check_model, check_model_gpu
     except ImportError:
-        from test_torchinductor import check_model, check_model_cuda
+        from test_torchinductor import check_model, check_model_gpu
 except (unittest.SkipTest, ImportError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
@@ -144,7 +144,7 @@ def print_seen():
                 f"    {format_op(op)}: {fmt_dtypes(failed_dtypes)},{reasons}"
             )
 
-    for device_type in ("cpu", "cuda"):
+    for device_type in ("cpu", GPU_TYPE):
         expected_failures[device_type]
         nl = "\n"
         print(
@@ -426,7 +426,7 @@ class TestInductorOpInfo(TestCase):
         torch._dynamo.reset()
 
     check_model = check_model
-    check_model_cuda = check_model_cuda
+    check_model_gpu = check_model_gpu
 
     @onlyNativeDeviceTypes
     @suppress_warnings
@@ -448,7 +448,9 @@ class TestInductorOpInfo(TestCase):
     def test_comprehensive(self, device, dtype, op):
         torch._dynamo.reset()
         with torch.no_grad():
-            torch.cuda.empty_cache()
+            # Need comment: should we move empty_cache to common device interface
+            if device == "cuda":
+                torch.cuda.empty_cache()
         op_name = op.name
         if op.variant_test_name:
             op_name += f".{op.variant_test_name}"
@@ -465,7 +467,7 @@ class TestInductorOpInfo(TestCase):
 
         device_type = torch.device(device).type
 
-        assert device_type in ("cuda", "cpu")
+        assert device_type in (GPU_TYPE, "cpu")
 
         # with open("test_output.txt", "a") as f:
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
@@ -587,9 +589,9 @@ class TestInductorOpInfo(TestCase):
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 rtol, atol = _get_tolerances(dtype)
-                if device_type == "cuda":
+                if device_type in GPUS:
                     # opinfo test case have already place the input on the correct device
-                    # so we don't need do additional copy by setting copy_to_cuda=False
+                    # so we don't need do additional copy by setting copy_to_gpu=False
 
                     no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
                     for context_fn, kwarg_overrides in get_contexts(has_rng_op):
@@ -597,7 +599,7 @@ class TestInductorOpInfo(TestCase):
                             adjusted_kwargs = {
                                 "check_lowp": False,
                                 "nopython": no_python,
-                                "copy_to_cuda": False,
+                                "copy_to_gpu": False,
                                 "reference_in_float": False,
                                 "check_gradient": requires_grad,
                                 "check_has_compiled": no_python,
@@ -607,7 +609,7 @@ class TestInductorOpInfo(TestCase):
                             }
                             adjusted_kwargs.update(overridden_kwargs)
                             adjusted_kwargs.update(kwarg_overrides)
-                            self.check_model_cuda(
+                            self.check_model_gpu(
                                 fn,
                                 args,
                                 kwargs,

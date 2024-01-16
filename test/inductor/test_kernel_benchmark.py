@@ -10,7 +10,7 @@ from torch._inductor import config
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing import FileCheck
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 class TestKernelBenchmark(TestCase):
@@ -60,7 +60,7 @@ class TestKernelBenchmark(TestCase):
         def f(x):
             return torch.sin(x) + torch.cos(x)
 
-        inp = torch.rand(2, 3).cuda()
+        inp = torch.rand(2, 3).to(GPU_TYPE)
         out = f(inp)
         self.verify_compiled_kernels()
 
@@ -70,8 +70,8 @@ class TestKernelBenchmark(TestCase):
         M = 12544
         N = 256
         K = 64
-        a = torch.rand(M, K, dtype=torch.float16, device="cuda")
-        b = torch.rand(N, K, dtype=torch.float16, device="cuda").t()
+        a = torch.rand(M, K, dtype=torch.float16, device=GPU_TYPE)
+        b = torch.rand(N, K, dtype=torch.float16, device=GPU_TYPE).t()
 
         @torch.compile
         def f(a, b):
@@ -103,8 +103,8 @@ class TestKernelBenchmark(TestCase):
             return w
 
         M, N, K = 1000, 1000, 10
-        x = torch.rand(M, K).to("cuda")
-        y = torch.rand(K, N).to("cuda")
+        x = torch.rand(M, K).to(GPU_TYPE)
+        y = torch.rand(K, N).to(GPU_TYPE)
         out = f(x, y)
 
         compiled_module = self.get_compiled_module()
@@ -124,5 +124,5 @@ class TestKernelBenchmark(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
+    if HAS_GPU:
         run_tests()
