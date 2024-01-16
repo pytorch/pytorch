@@ -175,6 +175,14 @@
     CPU: _assert_async_msg_cpu
     CUDA: _assert_async_msg_cuda
 
+- func: _assert_scalar(Scalar self, str assert_msg) -> ()
+  dispatch:
+    CompositeExplicitAutograd: _assert_scalar
+
+- func: _functional_assert_scalar(Scalar self, str assert_msg, Tensor dep_token) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: _functional_assert_scalar
+
 - func: _functional_assert_async.msg(Tensor self, str assert_msg, Tensor dep_token) -> Tensor
   dispatch:
     CPU: _functional_assert_async_msg_cpu
@@ -10208,12 +10216,14 @@
   variants: function
   dispatch:
     CUDA: _amp_foreach_non_finite_check_and_unscale_cuda_
+    CPU: _amp_foreach_non_finite_check_and_unscale_cpu_
   autogen: _amp_foreach_non_finite_check_and_unscale, _amp_foreach_non_finite_check_and_unscale.out
 
 - func: _amp_update_scale_(Tensor(a!) self, Tensor(b!) growth_tracker, Tensor found_inf, float scale_growth_factor, float scale_backoff_factor, int growth_interval) -> Tensor(a!)
   variants: function
   dispatch:
     CUDA: _amp_update_scale_cuda_
+    CPU: _amp_update_scale_cpu_
   autogen: _amp_update_scale, _amp_update_scale.out
 
     #- func: _cat(Tensor[] tensors, int dim=0) -> Tensor
