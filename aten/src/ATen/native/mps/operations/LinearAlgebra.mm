@@ -25,6 +25,21 @@ namespace mps {
 
 enum LinearAlgebraOpType { ADDBMM_OP_TYPE, BADDBMM_OP_TYPE };
 
+static std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* graph,
+                                                                           const Tensor& self,
+                                                                           const Tensor& other) {
+  if (self.numel() == 0 || other.numel() == 0) {
+    auto output = [graph constantWithScalar:0.0
+                                      shape:getMPSShape({self.size(0), other.size(1)})
+                                   dataType:getMPSDataType(self)];
+    return {nil, nil, output};
+  }
+  auto selfTensor = mpsGraphRankedPlaceHolder(graph, self);
+  auto otherTensor = mpsGraphRankedPlaceHolder(graph, other);
+  auto output = [graph matrixMultiplicationWithPrimaryTensor:selfTensor secondaryTensor:otherTensor name:nil];
+  return {selfTensor, otherTensor, output};
+}
+
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
   using CachedGraph = MPSBinaryCachedGraph;
@@ -39,55 +54,32 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
   TORCH_CHECK(output.is_mps());
 
   // Transpose inputs if needed
-  IntArrayRef output_sizes = output.sizes();
-  if ((output_sizes[0] == 0) || (output_sizes[1] == 0)) {
+  if (output.numel() == 0) {
     return output;
   }
-
-  MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
     string key = "mm_out_mps_impl" + getTensorsStringKey({self, other});
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* selfTensor = nil;
-      MPSGraphTensor* otherTensor = nil;
-      MPSGraphTensor* outputTensor = nil;
-
-      if (self.numel() == 0 || other.numel() == 0) {
-        outputTensor = [mpsGraph constantWithScalar:0. shape:getMPSShape(output_sizes) dataType:getMPSDataType(output)];
-
-      } else {
-        selfTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, self);
-        otherTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, other);
-        outputTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:selfTensor secondaryTensor:otherTensor name:nil];
-      }
-
-      newCachedGraph->inputTensor_ = selfTensor;
-      newCachedGraph->otherTensor_ = otherTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
+      std::tie(newCachedGraph->inputTensor_, newCachedGraph->otherTensor_, newCachedGraph->outputTensor_) =
+          do_mm(mpsGraph, self, other);
     });
-    Placeholder selfPlaceholder = Placeholder();
-    Placeholder otherPlaceholder = Placeholder();
+    auto selfPlaceholder = self.numel() != 0 ? Placeholder(cachedGraph->inputTensor_, self) : Placeholder();
+    auto otherPlaceholder = other.numel() != 0 ? Placeholder(cachedGraph->otherTensor_, other) : Placeholder();
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    if (!(self.numel() == 0 || other.numel() == 0)) {
-      selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-      otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = self.numel() != 0 ? @{
+      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
+      otherPlaceholder.getMPSGraphTensor() : otherPlaceholder.getMPSGraphTensorData(),
     }
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
+                                                                                  : nil;
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = nil;
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
+    };
 
-    if (!(self.numel() == 0 || other.numel() == 0))
-      feeds = @{
-        selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-        otherPlaceholder.getMPSGraphTensor() : otherPlaceholder.getMPSGraphTensorData()
-      };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
   }
 
   return output;
@@ -248,12 +240,9 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
   if (&output != &self) {
     output.resize_(bias_sizes);
   }
-  IntArrayRef output_sizes = output.sizes();
-  if ((output_sizes[0] == 0) || (output_sizes[1] == 0)) {
+  if (output.numel() == 0) {
     return output;
   }
-
-  MPSStream* stream = getCurrentMPSStream();
 
   bool is_beta_non_zero = beta.toDouble() != 0.0;
 
@@ -269,15 +258,13 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
     string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, *bias_}) + ":" + to_string(beta.toDouble()) +
         ":" + to_string(alpha.toDouble());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* selfTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, self);
-      MPSGraphTensor* otherTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, other);
-      MPSGraphTensor* biasTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, *bias_);
+      MPSGraphTensor* selfTensor = nil;
+      MPSGraphTensor* otherTensor = nil;
+      MPSGraphTensor* productTensor = nil;
+      MPSGraphTensor* biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, *bias_);
 
       // TODO: Use alpha and beta here with fill_.Scalar and mul
-      // Intermediate as placeholder
-      MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:selfTensor
-                                                                      secondaryTensor:otherTensor
-                                                                                 name:@"MM/(mat1@mat2)"];
+      std::tie(selfTensor, otherTensor, productTensor) = do_mm(mpsGraph, self, other);
 
       auto productTimesAlphaTensor = productTensor;
       if (alpha.toDouble() != 1.0) {
@@ -309,21 +296,23 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->selfTensor_, self);
-    Placeholder otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
+    Placeholder selfPlaceholder = self.numel() != 0 ? Placeholder(cachedGraph->selfTensor_, self) : Placeholder();
+    Placeholder otherPlaceholder = other.numel() != 0 ? Placeholder(cachedGraph->otherTensor_, other) : Placeholder();
     Placeholder biasPlaceholder = Placeholder(cachedGraph->biasTensor_, *bias_);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      otherPlaceholder.getMPSGraphTensor() : otherPlaceholder.getMPSGraphTensorData(),
-      biasPlaceholder.getMPSGraphTensor() : biasPlaceholder.getMPSGraphTensorData()
-    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = self.numel() != 0
+        ? @{
+            selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
+            otherPlaceholder.getMPSGraphTensor() : otherPlaceholder.getMPSGraphTensorData(),
+            biasPlaceholder.getMPSGraphTensor() : biasPlaceholder.getMPSGraphTensorData()
+          }
+        : @{biasPlaceholder.getMPSGraphTensor() : biasPlaceholder.getMPSGraphTensorData()};
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
         @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
 
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
   }
 
   return output;
