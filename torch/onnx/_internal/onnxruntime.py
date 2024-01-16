@@ -47,6 +47,7 @@ try:
     import torch.onnx._internal.fx.passes
     from torch.onnx._internal.fx import fx_onnx_interpreter
     from torch.onnx._internal.fx.type_utils import (
+        from_python_type_to_onnx_tensor_element_type,
         _TORCH_DTYPE_TO_NUMPY_DTYPE,
         _TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE,
     )
@@ -431,8 +432,15 @@ def _run_onnx_session_with_ortvaluevector(
     )
     _nvtx_range_pop()
 
+    # Post-processing step:
+    #  wrap ORT's outputs to the schema represented by
+    #  `prim_output` (obtained by running the original
+    #  torch.fx.GraphModule).
     if preallocate_output:
+        # Profile the ORT-to-PyTorch type cast below
         _nvtx_range_push("after run_with_ortvaluevector")
+        # Outputs are stored on pre-allocated torch.Tensors' memory,
+        # so this case doesn't need to convert ORTValue to torch.Tensor.
         pth_outputs = tuple(
             _adjust_scalar_from_onnx_to_fx(onnx_output, prim_output)  # type: ignore[misc]
             for onnx_output, prim_output in zip(pth_outputs, normalized_prim_outputs)
@@ -440,10 +448,13 @@ def _run_onnx_session_with_ortvaluevector(
         _nvtx_range_pop()
         return pth_outputs
     else:
+        # Profile the two ORT-to-PyTorch type casts below
         _nvtx_range_push("after run_with_ortvaluevector")
+        # Map ORTValue to torch.Tensor.
         pth_outputs = onnxruntime.training.ortmodule._utils._ortvalues_to_torch_tensor(
             ort_outputs
         )
+        # Change some torch.Tensor to int, float, bool.
         pth_outputs = tuple(
             _adjust_scalar_from_onnx_to_fx(onnx_output, prim_output)  # type: ignore[misc]
             for onnx_output, prim_output in zip(pth_outputs, normalized_prim_outputs)
@@ -534,13 +545,9 @@ class OrtExecutionInfoPerSession:
                 return False
 
             # Check Python scalars such as int, float, and bool.
-            scalar_to_dtype = {
-                float: _TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE[torch.float],
-                int: _TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE[torch.int64],
-                bool: _TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE[torch.bool],
-            }
             if isinstance(arg, (int, float, bool)):
-                onnx_dtype = scalar_to_dtype[type(arg)]
+                # Map, e.g., float to onnx.TensorProto.FLOAT.
+                onnx_dtype = from_python_type_to_onnx_tensor_element_type(type(arg))
                 if onnx_dtype != value_info.type.tensor_type.elem_type:
                     return False
                 if len(value_info.type.tensor_type.shape.dim) != 0:
