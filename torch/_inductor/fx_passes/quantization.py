@@ -125,6 +125,7 @@ dequantize_per_channel_to_bf16_clone_weight_pattern = CallFunction(
     memory_format=KeywordArg("memory_format"),
 )
 
+
 def get_dequantize_qconv_pt2e_pattern(users=1):
     return CallFunction(
         torch.ops.onednn.qconv2d_pointwise.default,
@@ -147,6 +148,7 @@ def get_dequantize_qconv_pt2e_pattern(users=1):
         Arg(),  # algorithm
         _users=users,
     )
+
 
 qlinear_pt2e_pattern = CallFunction(
     torch.ops.onednn.qlinear_pointwise.default,
