@@ -10,7 +10,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     skipMeta,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_WITH_ROCM
 
 class TestMHADeviceType(TestCase):
     @torch.no_grad()
@@ -276,6 +276,8 @@ class TestMHADeviceType(TestCase):
     @torch.no_grad()
     def test_native_multihead_self_attention(self, device, dtype, use_nt,
                                              need_weights, average_attn_weights, use_padding, pad_all, fused):
+        if TEST_WITH_ROCM and use_nt:
+            self.skipTest("ROCM does not support nested tensors for Flash Attention for now.")
         for need_weights in (False, not pad_all):
             with self.subTest(use_padding=use_padding, pad_all=pad_all,
                               use_nt=use_nt, need_weights=need_weights,

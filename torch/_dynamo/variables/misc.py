@@ -16,6 +16,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
 from ..utils import (
     check_constant_args,
+    check_unspec_python_args,
     identity,
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
@@ -147,18 +148,14 @@ class SuperVariable(VariableTracker):
             return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
                 collections.OrderedDict.__getitem__(self.objvar.value, key)
             )
-        elif (
-            inner_fn in (collections.OrderedDict.__setitem__, object.__setattr__)
-            and isinstance(self.objvar, variables.CustomizedDictVariable)
-            and args
-            and variables.ConstDictVariable.is_valid_key(args[0])
-            and self.objvar.mutable_local
-        ):
+        elif inner_fn in (
+            collections.OrderedDict.__setitem__,
+            object.__setattr__,
+        ) and isinstance(self.objvar, variables.CustomizedDictVariable):
             assert not kwargs and len(args) == 2
-            k = variables.ConstDictVariable.get_key(args[0])
-            tx.output.side_effects.mutation(self)
-            self.objvar.items[k] = args[1]
-            return variables.ConstantVariable.create(None)
+            return super(variables.CustomizedDictVariable, self.objvar).call_method(
+                tx, "__setitem__", args, kwargs
+            )
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
 
@@ -278,7 +275,7 @@ class InspectSignatureVariable(VariableTracker):
         if name == "parameters":
             return variables.ConstDictVariable(
                 {
-                    name: InspectParameterVariable()
+                    variables.ConstantVariable.create(name): InspectParameterVariable()
                     for name in self.inspected.inspect_parameter_names()
                 },
                 user_cls=dict,
@@ -360,9 +357,10 @@ class AutogradFunctionVariable(VariableTracker):
                 source=AttrSource(source, member="apply"),
             ).call_function(tx, args, kwargs)
 
-        source = None
         if self.source:
-            source = AttrSource(AttrSource(self.source, "__class__"), "forward")
+            source = AttrSource(self.source, "forward")
+        else:
+            source = None
 
         fn = self.fn_cls.forward
         ctx = AutogradFunctionContextVariable.create(tx)
@@ -772,9 +770,17 @@ class NumpyVariable(VariableTracker):
     Wrapper around `numpy.*`. Currently, is able to trace a small subset of numpy functions as well as numpy dtypes.
     """
 
+    constant_fold_functions = (tnp.issubdtype,)
+
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
+
+    @classmethod
+    def can_constant_fold_through(cls, fn):
+        mod = fn.__module__.split(".")
+        assert len(mod) >= 2 and mod[:2] == ["torch", "_numpy"]
+        return fn in cls.constant_fold_functions
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -807,8 +813,21 @@ class NumpyVariable(VariableTracker):
                 msg += f"confg.use_numpy_random_stream={config.use_numpy_random_stream}"
                 unimplemented(msg)
 
-            # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
-            #  wrapped by NumpyNdarrayVariable which is wrong!
+            constant_args = check_constant_args(args, kwargs)
+            unspec_python_args = check_unspec_python_args(args, kwargs)
+
+            if self.can_constant_fold_through(func) and (
+                constant_args or unspec_python_args
+            ):
+                # constant fold
+                return variables.ConstantVariable.create(
+                    self.as_python_constant()(
+                        *[x.as_python_constant() for x in args],
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    ),
+                )
+
+            # TODO Add all the functions that go from constants to constants to can_constant_fold_through
             proxy = tx.output.create_proxy(
                 "call_function",
                 numpy_to_tensor_wrapper(func),
@@ -832,18 +851,11 @@ class NumpyVariable(VariableTracker):
         return self.value
 
     def as_proxy(self):
-        # this handles numpy dtype attribute such as np.float32. TODO(larryliu0820): we should split NumpyVariable
-        #  into NumpyVariable for instances/objects and NumpyVariable for types.
         if config.trace_numpy and isinstance(self.value, type):
-            # retrieve attribute str. E.g., "float32" if given np.float32
-
-            attr = self.value.__name__
-            # get tnp equivalent
-            tnp_dtype = tnp.dtype(attr)
-            # returning a string here because we are assuming all `dtype` kwargs for numpy
-            # functions can take an equivalent string and the behavior of the function would
-            # be the same as taking a numpy dtype.
-            return tnp_dtype.name
+            # This handles numpy dtype attributes such as np.float32
+            # We return a string as we don't want to serialize non-PyTorch objects in the output FX graph
+            # In torch/_numpy we normalize strings to their dtypes when the input is a dtype, as NumPy does
+            return self.value.__name__
 
         return super().as_proxy()
 
@@ -905,10 +917,9 @@ class StringFormatVariable(VariableTracker):
         codegen.extend_output(
             variables.TupleVariable(self.sym_args).reconstruct(codegen)
         )
-        codegen.extend_output(
-            variables.ConstDictVariable(self.sym_kwargs, user_cls=dict).reconstruct(
-                codegen
-            )
-        )
+        kwargs = {
+            variables.ConstantVariable.create(k): v for k, v in self.sym_kwargs.items()
+        }
+        codegen.extend_output(variables.ConstDictVariable(kwargs).reconstruct(codegen))
         codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=1))
         return []
