@@ -38,9 +38,9 @@ For example, this is very useful when one wants to specify per-layer learning ra
                     {'params': model.classifier.parameters()}
                 ], lr=1e-3, momentum=0.9)
 
-This means that ``model.base``'s parameters will use a learning rate of ``1e-3``,
-``model.classifier``'s parameters will use the default learning rate of ``1e-3``, and a momentum of
-``0.9`` will be used for all parameters.
+This means that ``model.base``'s parameters will use a learning rate of ``1e-2``, whereas
+``model.classifier``'s parameters will stick to the default learning rate of ``1e-3``. 
+Finally a momentum of ``0.9`` will be used for all parameters.
 
 .. note::
 
@@ -62,7 +62,7 @@ individual penalization weights for each parameter group::
     optim.SGD([
                     {'params': others },
                     {'params': bias_params, 'weight_decay': 0}
-                ], weight_decay=1e-3, lr=1e-2)
+                ], weight_decay=1e-2, lr=1e-2)
 
 In this manner, bias terms are isolated from non-bias terms, and a ``weight_decay``
 of ``0`` is set specifically for the bias terms, as to avoid any penalization for
