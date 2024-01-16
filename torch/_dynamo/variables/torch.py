@@ -18,6 +18,7 @@ import torch._refs
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._logging import warning_once
 
 from .. import config, polyfill, variables
 from ..device_interface import get_registered_device_interfaces
@@ -40,7 +41,6 @@ from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVa
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
 from .torch_function import can_dispatch_torch_function, dispatch_torch_function
-from torch._logging import warning_once
 
 log = logging.getLogger(__name__)
 
