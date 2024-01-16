@@ -49,7 +49,6 @@ Finally a momentum of ``0.9`` will be used for all parameters.
     only want to vary a single option, while keeping all others consistent
     between parameter groups.
 
-
 Also consider the following example related to the distinct penalization of parameters.
 Remember that :func:`~torch.nn.Module.parameters` returns an iterable that 
 contains all learnable parameters, including biases and other 
@@ -67,6 +66,7 @@ individual penalization weights for each parameter group::
 In this manner, bias terms are isolated from non-bias terms, and a ``weight_decay``
 of ``0`` is set specifically for the bias terms, as to avoid any penalization for
 this group.
+
 
 Taking an optimization step
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
