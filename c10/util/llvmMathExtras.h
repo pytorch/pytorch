@@ -283,7 +283,8 @@ T findLastSet(T Val, ZeroBehavior ZB = ZB_Max) {
 /// Macro compressed bit reversal table for 256 bits.
 ///
 /// http://graphics.stanford.edu/~seander/bithacks.html#BitReverseTable
-static const unsigned char BitReverseTable256[256] = {
+/// NOLINTNEXTLINE(*c-arrays*)
+static constexpr unsigned char BitReverseTable256[256] = {
 #define R2(n) n, n + 2 * 64, n + 1 * 64, n + 3 * 64
 #define R4(n) R2(n), R2(n + 2 * 16), R2(n + 1 * 16), R2(n + 3 * 16)
 #define R6(n) R4(n), R4(n + 2 * 4), R4(n + 1 * 4), R4(n + 3 * 4)
@@ -299,7 +300,9 @@ static const unsigned char BitReverseTable256[256] = {
 /// Reverse the bits in \p Val.
 template <typename T>
 T reverseBits(T Val) {
+  // NOLINTNEXTLINE(*c-arrays*)
   unsigned char in[sizeof(Val)];
+  // NOLINTNEXTLINE(*c-arrays*)
   unsigned char out[sizeof(Val)];
   std::memcpy(in, &Val, sizeof(Val));
   for (unsigned i = 0; i < sizeof(Val); ++i)
@@ -420,7 +423,7 @@ inline uint64_t maxUIntN(uint64_t N) {
 /// Gets the minimum value for a N-bit signed integer.
 inline int64_t minIntN(int64_t N) {
   assert(N > 0 && N <= 64 && "integer width out of range");
-
+  // NOLINTNEXTLINE(*-narrowing-conversions)
   return -(UINT64_C(1) << (N - 1));
 }
 
@@ -434,6 +437,7 @@ inline int64_t maxIntN(int64_t N) {
 
   // This relies on two's complement wraparound when N == 64, so we convert to
   // int64_t only at the very end to avoid UB.
+  // NOLINTNEXTLINE(*-narrowing-conversions)
   return (UINT64_C(1) << (N - 1)) - 1;
 }
 
