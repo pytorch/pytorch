@@ -917,5 +917,5 @@ def tree_map_with_path(
 
 
 def keystr(kp: KeyPath) -> str:
-    """Give a key path, return a pretty-printed representation."""
+    """Given a key path, return a pretty-printed representation."""
     raise NotImplementedError("KeyPaths are not yet supported in cxx_pytree.")
