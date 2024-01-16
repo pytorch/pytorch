@@ -49,7 +49,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, new_module_tests
-from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase, skipIfTorchDynamo
+from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
 
 try:
@@ -1486,7 +1486,6 @@ class {test_classname}(torch.nn.Module):
         for sig_type, arg_type in should_fail:
             self.assertFalse(type_matches(sig_type, arg_type))
 
-    @skipIfTorchDynamo("'_CachedForward' object has no attribute '__code__'")
     @skipIfNoMkldnn
     def test_optimize_for_inference_cpu(self):
         import torch.nn as nn

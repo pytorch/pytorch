@@ -277,14 +277,14 @@ test_dynamo_shard() {
       test_ao_sparsity \
       test_autograd \
       test_jit \
-      test_fx \
       test_quantization \
+      test_dataloader \
       test_reductions \
       profiler/test_profiler \
       profiler/test_profiler_tree \
       test_python_dispatch \
+      test_fx \
       test_package \
-      test_legacy_vmap \
       test_custom_ops \
       export/test_db \
       functorch/test_dims \
@@ -686,9 +686,8 @@ test_xpu_bin(){
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  for xpu_case in "${BUILD_BIN_DIR}"/*{xpu,sycl}*
-  do
-    if [[ "$xpu_case" != *"*"* ]]; then
+  for xpu_case in "${BUILD_BIN_DIR}"/*{xpu,sycl}*; do
+    if [[ "$xpu_case" != *"*"* && "$xpu_case" != *.so && "$xpu_case" != *.a ]]; then
       case_name=$(basename "$xpu_case")
       echo "Testing ${case_name} ..."
       "$xpu_case" --gtest_output=xml:"$TEST_REPORTS_DIR"/"$case_name".xml
