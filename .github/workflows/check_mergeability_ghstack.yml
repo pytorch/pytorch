@@ -5,7 +5,7 @@ on:
     types: [opened, synchronize, reopened, edited]
 
 jobs:
-  check-regex:
+  check-if-ghstack-pr:
     runs-on: ubuntu-latest
     outputs:
       regex-match: ${{ steps.regex-match.outputs.match }}
@@ -18,8 +18,8 @@ jobs:
           text: ${{ github.head_ref }}
           regex: '^(gh/[^/]+/[0-9]+/)head$'
 
-  pr-dependencies-check:
-    needs: check-regex
+  check-ghstack-mergeability:
+    needs: check-if-ghstack-pr
     if: ${{ needs.check-regex.outputs.regex-match != '' }}
     uses: pytorch/test-infra/.github/workflows/pr-dependencies-check.yml@main
     with:
