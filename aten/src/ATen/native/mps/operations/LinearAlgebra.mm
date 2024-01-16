@@ -22,8 +22,92 @@
 
 namespace at::native {
 namespace mps {
+namespace {
+static const char* METAL_LINALG = R"MATMUL_METAL(
+#include <metal_array>
 
-enum LinearAlgebraOpType { ADDBMM_OP_TYPE, BADDBMM_OP_TYPE };
+using namespace metal;
+template<typename T>
+T dot_product(constant T *v1, constant T* v2, ulong2 strides, uint32_t size) {
+  T rc = 0.0;
+  for (uint32_t i = 0; i < size; ++i) {
+    rc += v1[i * strides.x] * v2[i * strides.y];
+  }
+  return rc;
+}
+
+template<typename T>
+kernel void naive_matmul(
+    constant T                 * mat1Data      [[buffer(0)]],
+    constant T                 * mat2Data      [[buffer(1)]],
+    device   T                 * outputData    [[buffer(2)]],
+    constant array<ulong2, 3>  & strides       [[buffer(3)]],
+    constant uint3             & sizes         [[buffer(4)]],
+    uint                         thread_index [[thread_position_in_grid]]) {
+    uint y = thread_index / sizes.x;
+    uint x = thread_index % sizes.x;
+    if (x >= sizes.x || y >= sizes.z) {
+        return;
+    }
+    auto rc = dot_product(mat1Data + x * strides[0].x,
+                          mat2Data + y * strides[1].y,
+                          ulong2(strides[0].y, strides[1].x),
+                          sizes.y);
+    outputData[x * strides[2].x + y * strides[2].y] = rc;
+}
+
+#define INSTANTIATE_NAIVE_MM(DTYPE)                                        \
+template                                                                   \
+[[host_name("naive_matmul_" #DTYPE)]]                                      \
+kernel void naive_matmul<DTYPE>(                                           \
+    constant DTYPE             * mat1Data      [[buffer(0)]],              \
+    constant DTYPE             * mat2Data      [[buffer(1)]],              \
+    device   DTYPE             * outputData    [[buffer(2)]],              \
+    constant array<ulong2, 3>  & strides       [[buffer(3)]],              \
+    constant uint3             & sizes         [[buffer(4)]],              \
+    uint                         thread_index [[thread_position_in_grid]])
+
+INSTANTIATE_NAIVE_MM(float);
+INSTANTIATE_NAIVE_MM(half);
+)MATMUL_METAL";
+
+id<MTLLibrary> compileLinalgOpLibrary(id<MTLDevice> device) {
+  static id<MTLLibrary> linalgLibrary = nil;
+  if (linalgLibrary) {
+    return linalgLibrary;
+  }
+
+  NSError* error = nil;
+  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
+  [options setLanguageVersion:MTLLanguageVersion2_3];
+  linalgLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_LINALG
+                                                                  encoding:NSASCIIStringEncoding]
+                                      options:options
+                                        error:&error];
+  TORCH_CHECK(linalgLibrary, "Failed to create metal linalg library, error: ", [[error description] UTF8String]);
+  return linalgLibrary;
+}
+
+id<MTLComputePipelineState> matmulPipelineState(id<MTLDevice> device, ScalarType scalar_type) {
+  std::string kernel = "naive_matmul_" + mps::scalarToMetalTypeString(scalar_type);
+  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
+  id<MTLComputePipelineState> pso = psoCache[kernel];
+  if (pso) {
+    return pso;
+  }
+
+  NSError* error = nil;
+  id<MTLLibrary> linalgLib = compileLinalgOpLibrary(device);
+  id<MTLFunction> matmulFunc = [linalgLib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
+  TORCH_CHECK(matmulFunc, "Failed to create function state object for: ", kernel);
+  pso = [device newComputePipelineStateWithFunction:matmulFunc error:&error];
+  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
+
+  psoCache[kernel] = pso;
+  return pso;
+}
+
+} // namespace
 
 static std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* graph,
                                                                            const Tensor& self,
@@ -58,6 +142,26 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
     return output;
   }
 
+
+#if 1
+    auto stream = getCurrentMPSStream();
+    auto device = MPSDevice::getInstance()->device();
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto matmulPSO = matmulPipelineState(device, output.scalar_type());
+        auto computeEncoder = stream->commandEncoder();
+        [computeEncoder setComputePipelineState:matmulPSO];
+        std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self.size(0)), static_cast<uint32_t>(self.size(1)), static_cast<uint32_t>(output.size(1))};
+        std::array<int64_t, 6> strides = {self.stride(0), self.stride(1), other.stride(0), other.stride(1), output.stride(0), output.stride(1)};
+        mtl_setBuffer(computeEncoder, self, 0);
+        mtl_setBuffer(computeEncoder, other, 1);
+        mtl_setBuffer(computeEncoder, output, 2);
+        [computeEncoder setBytes:strides.data() length:sizeof(uint64_t) * strides.size() atIndex:3];
+        [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
+        mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
+      }
+    });
+#else
   @autoreleasepool {
     string key = "mm_out_mps_impl" + getTensorsStringKey({self, other});
 
@@ -81,9 +185,12 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
 
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
   }
+#endif
 
   return output;
 }
+
+enum LinearAlgebraOpType { ADDBMM_OP_TYPE, BADDBMM_OP_TYPE };
 
 static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
                                               const Tensor& batch1,
