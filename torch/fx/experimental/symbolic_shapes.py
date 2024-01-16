@@ -98,6 +98,7 @@ def uninteresting_files():
         sys.modules[__name__],
         torch.fx.experimental.recording,
         torch.fx.experimental.sym_node,
+        torch.fx.interpreter,
         torch,
         torch._inductor.sizevars,
         torch._library.abstract_impl,
@@ -1116,7 +1117,9 @@ class DynamicDimConstraintPrinter(StrPrinter):
 
     def _print_Symbol(self, expr) -> str:
         assert isinstance(expr, sympy.Symbol), str(type(expr))
-
+        assert self.symbol_to_source.get(expr), (
+            f"Unknown symbol {expr} created by constraints solver"
+        )
         return self.print_source(self.symbol_to_source[expr][0])
 
     def _print_Relational(self, expr):
@@ -1405,7 +1408,7 @@ class DimConstraints:
                         self._dynamic_results.add(self._dcp.doprint(arg))
                 else:
                     self._dynamic_results.add(self._dcp.doprint(solution))
-            except NotImplementedError as e:
+            except (NotImplementedError, AssertionError) as e:
                 log.warning("Failed to reduce inequalities: %s", e)
                 for expr in exprs:
                     self._dynamic_results.add(self._dcp.doprint(expr))
@@ -1521,7 +1524,7 @@ class DimConstraints:
                 debug_names.update(k.split(" = ")[0] for k in forced_specializations.keys())
                 buf += (
                     f"Specializations unexpectedly required ({', '.join(debug_names)})! "
-                    "For more information, run with TORCH_LOGS=dynamic.\n"
+                    "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
                 )
                 for s, val in forced_specializations.items():
                     buf += f"  - {s} must be specialized to {val} because the guards generated for it are too complex.\n"
@@ -3018,7 +3021,7 @@ class ShapeEnv:
                 err = '\n'.join(error_msgs)
                 raise ConstraintViolationError(
                     f"Constraints violated ({debug_names})! "
-                    "For more information, run with TORCH_LOGS=dynamic.\n"
+                    "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
                     f"{err}"
                 )
             elif len(warn_msgs) > 0:
@@ -3355,7 +3358,7 @@ class ShapeEnv:
             "It appears that you're trying to get a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
             f"The expression we were trying to evaluate is {expr} (unhinted: {unhinted_expr}).  "
-            "Scroll up to see where each of these data-dependent accesses originally occurred."
+            "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )
