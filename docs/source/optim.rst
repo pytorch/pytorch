@@ -64,7 +64,7 @@ individual penalization weights for each parameter group::
                     {'params': bias_params, 'weight_decay': 0}
                 ], weight_decay=1e-3, lr=1e-2)
 
-In this manner, bias terms are isolated from non-bias terms, and a ``weigth_decay``
+In this manner, bias terms are isolated from non-bias terms, and a ``weight_decay``
 of ``0`` is set specifically for the bias terms, as to avoid any penalization for
 this group.
 
