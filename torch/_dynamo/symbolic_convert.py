@@ -25,7 +25,6 @@ import torch._logging
 from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import config, exc, logging as torchdynamo_logging, skipfiles, variables
-from .allowed_functions import is_builtin_constant, is_forbidden
 from .bytecode_analysis import (
     get_indexof,
     JUMP_OPNAMES,
@@ -58,6 +57,7 @@ from .source import (
     LocalSource,
     Source,
 )
+from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     counters,
     get_fake_value,
@@ -76,7 +76,7 @@ from .variables.base import (
 )
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
-from .variables.constant import ConstantVariable, EnumVariable
+from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
     ContextWrappingVariable,
     GenericContextWrappingVariable,
@@ -461,14 +461,6 @@ def break_graph_if_unsupported(*, push):
                 )
                 return inner_fn(self, inst)
             except Unsupported as excp:
-                if self.should_compile_partial_graph() and self.has_backedge():
-                    msg = (
-                        "Skipping frame because there is a graph break in a for/while loop\n"
-                        f"{self.frame_summary()}"
-                    )
-                    log.info(msg)
-                    raise exc.SkipFrame(msg) from excp
-
                 if self.generic_context_manager_depth > 0:
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
@@ -499,6 +491,14 @@ def break_graph_if_unsupported(*, push):
                         excp,
                         user_stack_formatted,
                     )
+
+                if self.has_backedge():
+                    msg = (
+                        "Skipping frame because there is a graph break in a for/while loop\n"
+                        f"{self.frame_summary()}"
+                    )
+                    log.info(msg)
+                    raise exc.SkipFrame(msg) from excp
 
                 excp.remove_from_stats()
                 excp.add_to_stats("graph_break")
@@ -815,7 +815,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def LOAD_FAST(self, inst):
         name = inst.argval
-
         if name in self.f_locals and config.replay_record_enabled:
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
@@ -1082,15 +1081,32 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.popn(2)
         self.push(None)
 
+    def CALL_FINALLY(self, inst):
+        """
+        pushes the address of the next instruction onto the stack and increments
+        bytecode counter by delta
+        """
+        # Python 3.8 only
+        assert self.next_instruction is not None
+        addr = self.indexof[self.next_instruction]
+        self.push(ConstantVariable.create(addr))
+        self.instruction_pointer = self.indexof[inst.target]
+
     def END_FINALLY(self, inst):
+        # Python 3.8 only
+        # https://docs.python.org/3.8/library/dis.html#opcode-END_FINALLY
         tos = self.pop()
-        assert tos is None
+        if isinstance(tos, ConstantVariable):
+            self.instruction_pointer = tos.as_python_constant()
+        else:
+            pass
 
     def POP_FINALLY(self, inst):
+        # Python 3.8 only
         preserve_tos = inst.argval
         if preserve_tos:
             tos = self.pop()
-        assert self.pop() is None
+        _ = self.pop()
         if preserve_tos:
             self.push(tos)
 
@@ -1176,7 +1192,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def CALL_FUNCTION_EX(self, inst):
         kwargsvars: VariableTracker
         if inst.argval == 0:
-            kwargsvars = ConstDictVariable({}, dict)
+            kwargsvars = ConstDictVariable({})
             argsvars = self.pop()
         elif inst.argval == 1:
             kwargsvars = self.pop()
@@ -1209,7 +1225,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         ):
             unimplemented(f"non-static call {typestr(argsvars)} {typestr(kwargsvars)}")
 
-        self.call_function(fn, argsvars.items, kwargsvars.items)
+        # Map to a dictionary of str -> VariableTracker
+        kwargsvars = kwargsvars.keys_as_python_constant()
+        self.call_function(fn, argsvars.items, kwargsvars)
 
     @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION_KW(self, inst):
@@ -1358,17 +1376,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def BUILD_MAP(self, inst):
         items = self.popn(inst.argval * 2)
-        result = dict()
-        for k, v in zip(items[::2], items[1::2]):
-            assert (
-                isinstance(k, (ConstantVariable, EnumVariable, BuiltinVariable))
-                or (isinstance(k, TensorVariable) and k.specialized_value is not None)
-                or k.is_python_constant()
-            )
-
-            result[ConstDictVariable.get_key(k)] = v
-        assert len(result) == len(items) / 2
-        self.push(ConstDictVariable(result, dict, mutable_local=MutableLocal()))
+        d = dict(zip(items[::2], items[1::2]))
+        self.push(ConstDictVariable(d, mutable_local=MutableLocal()))
 
     def BUILD_MAP_UNPACK(self, inst):
         items = self.popn(inst.argval)
@@ -1381,7 +1390,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(
             ConstDictVariable(
                 result,
-                dict,
                 mutable_local=MutableLocal(),
             )
         )
@@ -1393,13 +1401,13 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         values = self.popn(inst.argval)
         assert isinstance(keys, TupleVariable)
         assert keys.is_python_constant()
-        keys = keys.as_python_constant()
-        assert istype(keys, tuple)
+
+        keys = keys.unpack_var_sequence(self)
         assert len(keys) == len(values)
+
         self.push(
             ConstDictVariable(
                 dict(zip(keys, values)),
-                dict,
                 mutable_local=MutableLocal(),
             )
         )
@@ -1409,9 +1417,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         assert inst.argval > 0
         obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ConstDictVariable)
-        assert obj.mutable_local
-        self.output.side_effects.mutation(obj)
-        obj.items[k.as_python_constant()] = v
+        obj.call_method(self, "__setitem__", (k, v), {})
 
     def SET_ADD(self, inst):
         v = self.pop()
@@ -1622,7 +1628,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def DICT_MERGE(self, inst):
         v = self.pop()
         assert inst.argval > 0
-        obj = self.stack[-inst.arg]
+        obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ConstDictVariable)
         assert obj.mutable_local
         obj.call_method(self, "update", [v], {})
@@ -1660,13 +1666,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def MATCH_KEYS(self, inst):
         tos = self.stack[-1]
-        assert tos.is_python_constant()
-        keys = tos.as_python_constant()
         tos1 = self.stack[-2]
         assert isinstance(tos1, ConstDictVariable)
-        match_obj = tos1.items
-        if all(key in match_obj for key in keys):
-            self.push(TupleVariable([match_obj[key] for key in keys]))
+
+        if all(k in tos1 for k in tos):
+            self.push(TupleVariable([tos1.getitem_const(k) for k in tos]))
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable.create(True))
         else:
