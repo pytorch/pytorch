@@ -755,6 +755,32 @@ class TestExport(TestCase):
                 dynamic_shapes={"x": (batch, M, K), "y": (batch, K, N)},
             )
 
+        # pass dynamic shapes of inputs [specialized, tuple]
+        def foo(x, y):
+            return torch.matmul(x, y)
+
+        inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
+        batch, K1, N = dims("batch", "K1", "N")
+        efoo = export(
+            foo,
+            inputs,
+            dynamic_shapes={"x": (batch, 2, K1), "y": (batch, K1, N)},
+        )
+        self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
+
+        # pass dynamic shapes of inputs [specialized, dict]
+        def foo(x, y):
+            return torch.matmul(x, y)
+
+        inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
+        batch, K1, N = dims("batch", "K1", "N")
+        efoo = export(
+            foo,
+            inputs,
+            dynamic_shapes={"x": {0: batch, 1: 2, 2: K1}, "y": {0: batch, 1: K1, 2: N}},
+        )
+        self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
+
     def test_dynamic_shapes_spec_with_pytree(self):
         from torch.export import Dim, export
         from torch.utils._pytree import tree_map

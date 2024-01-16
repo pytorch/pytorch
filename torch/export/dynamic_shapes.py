@@ -55,7 +55,7 @@ def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
     """
     _min = 2 if min is None else builtins.max(min, 2)
     _max = sys.maxsize - 1 if max is None else builtins.min(max, sys.maxsize - 1)
-    assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
+    assert _max >= _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
     dim = _Dim(name, (int,), {"min": _min, "max": _max})
     dim.__module__ = getattr(
         inspect.getmodule(inspect.stack()[1][0]), "__name__", "__main__"
@@ -404,6 +404,7 @@ def _process_dynamic_shapes(
 
     symbols = defaultdict(list)
     bounds: Dict[str, Tuple[int, int]] = {}
+    num_explicit_static_dims = [0]
 
     def check_same_bounds(dim):
         if dim.__name__ in symbols:
@@ -420,31 +421,28 @@ def _process_dynamic_shapes(
         else:
             bounds[dim.__name__] = (dim.min, dim.max)
 
+    def update_single_symbol(dim, tensor, i):
+        if isinstance(dim, int):
+            dim = Dim(name=f"explicit_static_dim_{num_explicit_static_dims[0]}", min=dim, max=dim)
+            num_explicit_static_dims[0] += 1
+        if isinstance(dim, _Dim):
+            check_same_bounds(dim)
+            symbols[dim.__name__].append(to_constraint(dim, tensor, i))
+        else:
+            if dim is not None:
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
+                    "try None instead",
+                )
+
     def update_symbols(tensor, shape):
         if isinstance(shape, dict):
             for i, dim in shape.items():
-                if isinstance(dim, _Dim):
-                    check_same_bounds(dim)
-                    symbols[dim.__name__].append(to_constraint(dim, tensor, i))
-                else:
-                    if dim is not None:
-                        raise UserError(
-                            UserErrorType.INVALID_INPUT,
-                            f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
-                            "try None instead",
-                        )
+                update_single_symbol(dim, tensor, i)
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
-                if isinstance(dim, _Dim):
-                    check_same_bounds(dim)
-                    symbols[dim.__name__].append(to_constraint(dim, tensor, i))
-                else:
-                    if dim is not None:
-                        raise UserError(
-                            UserErrorType.INVALID_INPUT,
-                            f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
-                            "try None instead",
-                        )
+                update_single_symbol(dim, tensor, i)
         else:
             if shape is not None:
                 raise UserError(
