@@ -460,7 +460,7 @@ class NullContextVariable(ContextWrappingVariable):
 
 class StreamContextVariable(ContextWrappingVariable):
     @staticmethod
-    def create_from_stream(tx, target_value, **kwargs):
+    def create(tx, target_value, **kwargs):
         from .builder import wrap_fx_proxy_cls
 
         current_stream_method = get_interface_for_device(
@@ -521,13 +521,6 @@ class StreamContextVariable(ContextWrappingVariable):
         )
         self.state.cleanup_assert()
 
-    def reconstruct(self, codegen):
-        codegen.load_import_from("torch", "cuda.stream")
-        assert len(self.target_values) == 1
-        codegen(self.target_values[0])
-        codegen.extend_output(create_call_function(1, False))
-        return []
-
 
 class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs):
@@ -540,9 +533,6 @@ class StreamVariable(VariableTracker):
         self.proxy = proxy
         self.value = value
         self.device = device
-        torch._dynamo.device_interface.register_interface_for_device(
-            self.device, torch._dynamo.device_interface.CudaInterface
-        )
 
     def call_method(
         self,
@@ -589,6 +579,22 @@ class StreamVariable(VariableTracker):
 
     def as_proxy(self):
         return self.proxy
+
+    def reconstruct(self, codegen):
+        # If we got here, this stream is fully subsumed by the graph - this means it is
+        # not an input or global
+        assert not self.source
+        # Since we just proved that - for other such structures, like lists and dicts, reconstruction
+        # is fine and sound according to dynamo principles of treating collectives. However,
+        # streams are special in that we want to preserve the identity of the stream as the same as in the graph
+        # Normally, we would do this via codegen for the proxy mapping to an output - we cannot do this yet, as we do not
+        # yet have a plan for how we want to handle the case where the stream is used as an input or an output. Pending
+        # design, to unblock current work, we lift the stream into a global and then codegen bytecode to load it from there.
+        name = f"_stream_{self.device}_{id(self.value)}"
+        if name not in codegen.tx.output.global_scope:
+            codegen.tx.output.install_global(name, self.value)
+
+        return [codegen.create_load_global(name, push_null=False, add=True)]
 
 
 class EventVariable(VariableTracker):

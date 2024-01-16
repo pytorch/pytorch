@@ -20,7 +20,6 @@ from .exc import unimplemented
 from .source import AttrSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import VariableTracker
-from .variables.ctx_manager import StreamVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -137,7 +136,6 @@ class PyCodegen:
                 SymNodeVariable,
                 UnspecializedPythonVariable,
                 NumpyNdarrayVariable,
-                StreamVariable,
             ),
         ):
             graph_outputs_key = self.add_graph_output(value)
