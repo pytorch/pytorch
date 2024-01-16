@@ -279,6 +279,7 @@ class TestFullyShardTrainingCompose(FSDPTest):
         self, reshard_after_forward: Union[bool, int], checkpoint_impl: str
     ):
         assert checkpoint_impl in ("composable", "utils")
+        foreach = False
         torch.manual_seed(42)
         vocab_size = 1024
         with torch.device(torch.device("cuda")):
@@ -290,18 +291,18 @@ class TestFullyShardTrainingCompose(FSDPTest):
             )
             model = GPT(config)
         ref_model = replicate(copy.deepcopy(model), device_ids=[self.rank])
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
         fully_shard_fn = functools.partial(
             fully_shard,
             reshard_after_forward=reshard_after_forward,
         )
         for module in model.modules():
             if isinstance(module, Block):
-                if checkpoint_impl == "compoasble":
+                if checkpoint_impl == "composable":
                     checkpoint(module)
                 fully_shard_fn(module)
         fully_shard_fn(model)
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
 
         torch.manual_seed(42 + self.rank)
         # Reuse the same input across iterations to avoid loss explosion from
@@ -343,6 +344,7 @@ class TestFullyShardTrainingCompose(FSDPTest):
         reshard_after_forward: bool,
         backend: str,
     ):
+        foreach = False
         torch.manual_seed(42)
         vocab_size = 1024
         config = GPTConfig(n_layer=3, n_head=4, vocab_size=vocab_size)
@@ -350,12 +352,12 @@ class TestFullyShardTrainingCompose(FSDPTest):
         ref_model = copy.deepcopy(model).cuda()
         for block in ref_model.transformer.h:
             block.forward = torch.compile(block.forward, backend=backend)
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
         for block in model.transformer.h:
             block.forward = torch.compile(block.forward, backend=backend)
             fully_shard(block, reshard_after_forward=reshard_after_forward)
         fully_shard(model, reshard_after_forward=reshard_after_forward)
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
         if self.rank == 0:
             print(model)
 
