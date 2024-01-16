@@ -1,6 +1,8 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/EmptyTensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/Context.h>
+#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/safe_numerics.h>
 
@@ -10,7 +12,13 @@ namespace at::detail {
 namespace {
 c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
   if (pin_memory) {
-    return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
+    if (at::globalContext().hasCUDA()) {
+      return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
+    } else if(at::isPrivateUse1HooksRegistered()) {
+      return at::GetPrivateUse1HooksInterface()->getPinnedMemoryAllocator();
+    } else {
+      TORCH_CHECK(false, "Need to provide pin_memory allocator to use pin memory.")
+    }
   }
   return c10::GetCPUAllocator();
 }
