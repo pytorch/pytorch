@@ -815,6 +815,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def LOAD_FAST(self, inst):
         name = inst.argval
+
         if name in self.f_locals and config.replay_record_enabled:
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
@@ -1628,7 +1629,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def DICT_MERGE(self, inst):
         v = self.pop()
         assert inst.argval > 0
-        obj = self.stack[-inst.arg].realize()
+        obj = self.stack[-inst.arg]
         assert isinstance(obj, ConstDictVariable)
         assert obj.mutable_local
         obj.call_method(self, "update", [v], {})

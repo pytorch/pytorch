@@ -12,7 +12,6 @@ import math
 import operator
 import os
 import random
-import re
 import sys
 import tempfile
 import threading
@@ -77,7 +76,6 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     IS_FBCODE,
     set_default_dtype,
-    wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -527,7 +525,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             orig_args = (x, y, z, n)
 
             compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            torch.compile(f, backend="inductor", fullgraph=True)(*compiled_args)
+            torch.compile(f, backend="aot_eager_decomp_partition", fullgraph=True)(
+                *compiled_args
+            )
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
@@ -9072,31 +9072,6 @@ ShapeEnv not equal: field values don't match:
             ):
                 print(fn_opt(torch.zeros(1)))
 
-    @wrapDeterministicFlagAPITest
-    def test_backward_deterministic_mode_mismatch_warning(self):
-        @torch.compile
-        def func(a, b):
-            return a + b
-
-        for forward_deterministic, backward_deterministic in itertools.product(
-            [True, False], [True, False]
-        ):
-            torch.use_deterministic_algorithms(forward_deterministic)
-            a = torch.randn(10, requires_grad=True)
-            res = func(a, 1)
-            grad = torch.ones_like(res)
-            torch.use_deterministic_algorithms(backward_deterministic)
-
-            if not forward_deterministic and backward_deterministic:
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "^This compiled backward function is being run with torch\.use_deterministic_algorithms",
-                ):
-                    res.backward(grad)
-
-            else:
-                res.backward(grad)
-
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):
             return x**2
@@ -9222,19 +9197,6 @@ fn
 fn
 """,
         )
-
-    def test_return_dict_with_graph_break_and_update(self):
-        def create():
-            torch._dynamo.graph_break()
-            return {0: torch.tensor(3)}
-
-        def fn():
-            return {**create()}
-
-        opt_fn = torch.compile(backend="eager")(fn)
-        result = opt_fn()
-        self.assertIn(0, result)
-        self.assertTrue(same(result[0], torch.tensor(3)))
 
 
 class TestTracer(JitTestCase):
