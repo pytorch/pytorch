@@ -1168,7 +1168,13 @@ def get_compile_only(compile_only: bool = True) -> str:
 
 
 def get_shared(shared: bool = True) -> str:
-    return "-shared -fPIC" if shared else ""
+    if not shared:
+        return ""
+    if platform.system() == "Darwin" and "clang" in cpp_compiler():
+        # This causes undefined symbols to behave the same as linux
+        return "-shared -fPIC -undefined dynamic_lookup"
+    else:
+        return "-shared -fPIC"
 
 
 def get_warning_all_flag(warning_all: bool = True) -> str:
