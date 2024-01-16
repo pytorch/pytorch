@@ -1,6 +1,7 @@
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
+import contextlib
 import copy
 import dataclasses
 import os
@@ -328,6 +329,77 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 # to support different batch sizes.
                 number_of_exported_onnx_models_for_all_graph_modules=(1, 1),
             )
+
+    @parameterized.expand(
+        [
+            (True,),
+            (False,),
+        ]
+    )
+    def test_dump_model(self, test_local_backend: bool):
+        @contextlib.contextmanager
+        def onnxrt_dump_path(path):
+            key = "ONNXRT_DUMP_PATH"
+            before = os.environ.get(key, None)
+            os.environ[key] = path
+            yield
+            if before is None:
+                del os.environ[key]
+            else:
+                os.environ[key] = before
+
+        example_args_collection = tuple(
+            (torch.randn(batch, 2, dtype=torch.float32),) for batch in (1, 2, 4, 6, 8)
+        )
+
+        class MLP(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(2, 4, bias=True)
+                self.fc2 = nn.Linear(4, 2, bias=True)
+
+            def forward(self, tensor_x: torch.Tensor):
+                tensor_x = self.fc1(tensor_x)
+                tensor_x = torch.sigmoid(tensor_x)
+                tensor_x = self.fc2(tensor_x)
+                tensor_x = torch.sigmoid(tensor_x)
+                return tensor_x
+
+        if test_local_backend:
+            local_aot_ort, local_ort = make_aot_ort(dynamic=True)
+        else:
+            local_aot_ort, local_ort = "onnxrt", None
+
+        prefix = f"test_dump_model_{'local' if test_local_backend else 'onnxrt'}_"
+        expected = f"{prefix}0.onnx"
+        expected_graph = f"{prefix}0.txt"
+        if os.path.exists(expected):
+            os.remove(expected)
+        if os.path.exists(expected_graph):
+            os.remove(expected_graph)
+        not_expected = f"{prefix}1.onnx"
+        self.assertFalse(os.path.exists(not_expected))
+
+        model = MLP()
+        compiled_model = torch.compile(
+            model if not isinstance(model, torch.nn.Module) else copy.deepcopy(model),
+            backend=local_aot_ort,
+            dynamic=True,
+        )
+
+        self.assertFalse(os.path.exists(expected))
+        self.assertFalse(os.path.exists(not_expected))
+
+        with onnxrt_dump_path(prefix):
+            example_args = example_args_collection[0]
+            result = compiled_model(*example_args)
+            self.assertTrue(os.path.exists(expected))
+            self.assertTrue(os.path.exists(expected_graph))
+            self.assertFalse(os.path.exists(not_expected))
+
+            result = compiled_model(*example_args)
+            self.assertTrue(os.path.exists(expected))
+            self.assertFalse(os.path.exists(not_expected))
 
 
 if __name__ == "__main__":
