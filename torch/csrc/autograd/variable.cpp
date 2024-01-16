@@ -239,6 +239,8 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
         at::TensorGeometry(self),
         view_info.view_fn_,
         std::move(gradient_edge.function));
+    torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
+        view_info.base_, view_info.base_.grad_fn(), copy_slices);
     set_gradient_edge(view_info.base_, {std::move(copy_slices), 0});
     self.grad_fn(); // trigger an update to the view's grad_fn
     return;
