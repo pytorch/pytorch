@@ -1579,6 +1579,18 @@ def forward(self, a_1):
         f(a)
         make_fx(f, tracing_mode="symbolic")(a)
 
+    def test_fake_tensor_as_size(self):
+        def f(x):
+            r = torch.zeros([x])
+            return r
+
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.tensor(4))
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, x_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return zeros""")  # noqa: B950
+
     def test_expand(self):
         def f(a):
             b = torch.mul(a, a)
