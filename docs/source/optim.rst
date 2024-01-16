@@ -53,7 +53,7 @@ This means that ``model.base``'s parameters will use the default learning rate o
 Also consider the following example related to the distinct penalization of parameters.
 Remember that :func:`~torch.nn.Module.parameters` returns an iterable that 
 contains all learnable parameters, including biases and other 
-parameters that may need distinct penalization. To address this, one can specify
+parameters that may prefer distinct penalization. To address this, one can specify
 individual penalization weights for each parameter group::
 
     bias_params = [p for name,p in self.named_parameters() if 'bias' in name]
