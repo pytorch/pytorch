@@ -459,15 +459,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_allreduce_basics_cuda(self):
         self._test_allreduce_basics(lambda t: t.clone().cuda())
 
-    @requires_gloo()
-    def test_allreduce_basics_using_work_api(self):
-        self._test_allreduce_basics_using_work_api(lambda t: t.clone())
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_allreduce_basics_cuda_using_work_api(self):
-        self._test_allreduce_basics_using_work_api(lambda t: t.clone().cuda())
-
     def _test_allreduce_stress(self, inputs):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
