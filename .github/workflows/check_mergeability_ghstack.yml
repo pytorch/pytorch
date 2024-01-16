@@ -1,4 +1,4 @@
-name: Check mergeability and dependencies for ghstack prs
+name: Check mergeability for ghstack prs
 
 on:
   pull_request:
