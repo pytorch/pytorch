@@ -102,14 +102,15 @@ C10_DEVICE __forceinline__ void adam_math(
 // parameter updates accordingly. To be functionally on par with `torch.optim`
 // optimizers and `_multi_tensor` ones, the kernel below writes out gradients
 // only when `grad_scale_ptr != nullptr.
-template <typename scalar_type, int depth = 4>
+template <typename scalar_type, int depth>
 struct FusedAdamMathFunctor {
   static_assert(
       depth == 4 || depth == 5,
       "depth of 4 for Adam, depth of 5 for Adam with AMSGrad.");
   using opmath_t = at::opmath_type<scalar_type>;
+  template <typename index_t>
   C10_DEVICE __forceinline__ void operator()(
-      int chunk_size,
+      const index_t chunk_size,
       FusedOptimizerTensorListMetadata<depth>& tl,
       const float* lr_ptr,
       const double lr,
@@ -122,9 +123,9 @@ struct FusedAdamMathFunctor {
       const float* grad_scale_ptr,
       const float* found_inf_ptr,
       const ADAM_MODE adam_mode) {
-    int tensor_loc = tl.block_to_tensor[blockIdx.x];
-    int chunk_idx = tl.block_to_chunk[blockIdx.x];
-    int n = tl.numel_for_tensor[tensor_loc];
+    const index_t tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const index_t chunk_idx = tl.block_to_chunk[blockIdx.x];
+    index_t n = tl.numel_for_tensor[tensor_loc];
     double lr_double = lr_ptr ? *lr_ptr : lr;
 
     if (found_inf_ptr && *found_inf_ptr == 1) {
@@ -140,12 +141,12 @@ struct FusedAdamMathFunctor {
     scalar_type r_args[depth][kILP];
 
     if ((n % kILP == 0) && (chunk_size % kILP == 0) && all_aligned) {
-      for (int64_t i_start = threadIdx.x;
+      for (index_t i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
 #pragma unroll
         for (int i = 0; i < depth; i++) {
-          load_store(r_args[i], args[i], 0, i_start);
+          load_store(r_args[i], args[i], static_cast<index_t>(0), i_start);
         }
         adam_math<scalar_type, opmath_t, depth>(
             r_args,
@@ -163,12 +164,12 @@ struct FusedAdamMathFunctor {
 #pragma unroll
         for (int i = 0; i < depth; i++) {
           if (i != kGradIdx || grad_scale_ptr) {
-            load_store(args[i], r_args[i], i_start, 0);
+            load_store(args[i], r_args[i], i_start, static_cast<index_t>(0));
           }
         }
       }
     } else {
-      for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+      for (index_t i_start = 0; i_start < n && i_start < chunk_size;
            i_start += blockDim.x * kILP) {
         load_args<depth>(r_args, args, i_start, chunk_size, n);
         adam_math<scalar_type, opmath_t, depth>(

@@ -4,15 +4,17 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
+#include <algorithm>
+#include <limits>
 #include <vector>
 
 namespace at::native {
 
 namespace {
 
-static constexpr int64_t kILP = 4;
-static constexpr int64_t kChunkSize = 65536;
-static constexpr int64_t kBlockSize = 512;
+static constexpr int kILP = 4;
+static constexpr int kChunkSize = 65536;
+static constexpr int kBlockSize = 512;
 
 // TODO(crcrpar): Add `n>5` for `low prec params & their higher prec copy`
 // TensorListMetadata has to be < 4KB - the limit for kernel launch argument
@@ -28,12 +30,12 @@ __device__ __forceinline__ bool is_aligned(T* p) {
   return ((uint64_t)p) % (kILP * sizeof(T)) == 0;
 }
 
-template <typename T>
+template <typename T, typename index_t = int64_t>
 __device__ __forceinline__ void load_store(
     T* dst,
     T* src,
-    int64_t dst_offset,
-    int64_t src_offset) {
+    const index_t dst_offset,
+    const index_t src_offset) {
   using LT = at::native::memory::aligned_vector<T, kILP>;
   ((LT*)dst)[dst_offset] = ((LT*)src)[src_offset];
 }
@@ -95,15 +97,16 @@ struct FusedOptimizerTensorListMetadata {
   int start_tensor_this_launch;
 };
 
-template <typename T, typename U, typename... ArgTypes>
+template <typename index_t, typename T, typename U, typename... ArgTypes>
 C10_LAUNCH_BOUNDS_1(kBlockSize)
 __global__ void multi_tensor_apply_kernel(
+    const index_t chunk_size,
     T tensorListMeta,
     U callable,
     ArgTypes... args) {
   // Hand the chunk information to the user-supplied functor to process however
   // it likes.
-  callable(kChunkSize, tensorListMeta, args...);
+  callable(chunk_size, tensorListMeta, args...);
 }
 
 } // namespace
@@ -134,6 +137,13 @@ void multi_tensor_apply(
   const size_t n_tensors = tensor_lists[0].size();
   using scalar_vals_t = typename T::opmath_t;
   TensorListScalarListMetadata<scalar_vals_t, depth> tensorListMeta;
+
+  const auto needs_64bits_for_indexing = std::any_of(
+      tensor_lists[0].cbegin(),
+      tensor_lists[0].cend(),
+      [](const auto& t) -> bool {
+        return t.numel() > std::numeric_limits<int32_t>::max();
+      });
 
   int loc_block_info = 0;
   int loc_tensor_info = 0;
@@ -178,7 +188,11 @@ void multi_tensor_apply(
             kBlockSize,
             0,
             at::cuda::getCurrentCUDAStream()>>>(
-            tensorListMeta, callable, args...);
+            needs_64bits_for_indexing ? static_cast<int64_t>(kChunkSize)
+                                      : kChunkSize,
+            tensorListMeta,
+            callable,
+            args...);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
 
         // Reset.
@@ -209,7 +223,12 @@ void multi_tensor_apply(
         loc_block_info,
         kBlockSize,
         0,
-        at::cuda::getCurrentCUDAStream()>>>(tensorListMeta, callable, args...);
+        at::cuda::getCurrentCUDAStream()>>>(
+        needs_64bits_for_indexing ? static_cast<int64_t>(kChunkSize)
+                                  : kChunkSize,
+        tensorListMeta,
+        callable,
+        args...);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
@@ -225,6 +244,13 @@ void multi_tensor_apply(
   const size_t n_tensors = tensor_lists[0].size();
   TensorListMetadata<depth> tensorListMeta;
   tensorListMeta.start_tensor_this_launch = 0;
+
+  const auto needs_64bits_for_indexing = std::any_of(
+      tensor_lists[0].cbegin(),
+      tensor_lists[0].cend(),
+      [](const auto& t) -> bool {
+        return t.numel() > std::numeric_limits<int32_t>::max();
+      });
 
   int loc_block_info = 0;
   int loc_tensor_info = 0;
@@ -261,7 +287,11 @@ void multi_tensor_apply(
             kBlockSize,
             0,
             at::cuda::getCurrentCUDAStream()>>>(
-            tensorListMeta, callable, args...);
+            needs_64bits_for_indexing ? static_cast<int64_t>(kChunkSize)
+                                      : kChunkSize,
+            tensorListMeta,
+            callable,
+            args...);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
 
         // Reset.
@@ -289,7 +319,12 @@ void multi_tensor_apply(
         loc_block_info,
         kBlockSize,
         0,
-        at::cuda::getCurrentCUDAStream()>>>(tensorListMeta, callable, args...);
+        at::cuda::getCurrentCUDAStream()>>>(
+        needs_64bits_for_indexing ? static_cast<int64_t>(kChunkSize)
+                                  : kChunkSize,
+        tensorListMeta,
+        callable,
+        args...);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
@@ -305,6 +340,13 @@ void multi_tensor_apply_for_fused_optimizer(
       "Number of tensor lists has to match the depth");
   const auto num_tensors = tensor_lists[0].size();
   FusedOptimizerTensorListMetadata<depth> tensorListMeta;
+
+  const auto needs_64bits_for_indexing = std::any_of(
+      tensor_lists[0].cbegin(),
+      tensor_lists[0].cend(),
+      [](const auto& t) -> bool {
+        return t.numel() > std::numeric_limits<int32_t>::max();
+      });
 
   int loc_block_info = 0;
   int loc_tensor_info = 0;
@@ -343,7 +385,11 @@ void multi_tensor_apply_for_fused_optimizer(
             kBlockSize,
             0,
             at::cuda::getCurrentCUDAStream()>>>(
-            tensorListMeta, callable, args...);
+            needs_64bits_for_indexing ? static_cast<int64_t>(kChunkSize)
+                                      : kChunkSize,
+            tensorListMeta,
+            callable,
+            args...);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
 
         // Reset.
@@ -371,7 +417,12 @@ void multi_tensor_apply_for_fused_optimizer(
         loc_block_info,
         kBlockSize,
         0,
-        at::cuda::getCurrentCUDAStream()>>>(tensorListMeta, callable, args...);
+        at::cuda::getCurrentCUDAStream()>>>(
+        needs_64bits_for_indexing ? static_cast<int64_t>(kChunkSize)
+                                  : kChunkSize,
+        tensorListMeta,
+        callable,
+        args...);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }

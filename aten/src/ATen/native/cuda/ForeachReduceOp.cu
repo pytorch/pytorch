@@ -25,14 +25,15 @@ template <
     int NormType,
     int depth = 1,
     int r_args_depth = 1,
-    int res_arg_index = 0>
+    int res_arg_index = 0,
+    typename index_t = int64_t>
 struct LpNormFunctor {
   static_assert(
       NormType == 1 || NormType == 2,
       "foreach_norm supports only L1 and L2 norm");
   using opmath_t = typename at::opmath_type<T>;
   __device__ __forceinline__ void operator()(
-      int chunk_size,
+      const index_t chunk_size,
       TensorListMetadata<depth>& tl,
       opmath_t* output_per_tensor,
       const int max_chunks_per_tensor) {
@@ -53,11 +54,11 @@ struct LpNormFunctor {
     }
 
     if (n % kILP == 0 && (chunk_size & kILP) == 0 && is_aligned(x)) {
-      for (int64_t i_start = threadIdx.x;
+      for (index_t i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
         // load
-        load_store(r_x, x, 0, i_start);
+        load_store(r_x, x, static_cast<index_t>(0), i_start);
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           opmath_t next = static_cast<opmath_t>(r_x[ii]);
@@ -65,7 +66,7 @@ struct LpNormFunctor {
         }
       }
     } else {
-      for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+      for (index_t i_start = 0; i_start < n && i_start < chunk_size;
            i_start += blockDim.x * kILP) {
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
