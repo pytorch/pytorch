@@ -1161,6 +1161,7 @@ aten::set_.source_Storage_storage_offset
 aten::set_.source_Tensor
 aten::slice_copy.Tensor
 aten::slice_copy.Tensor_out
+aten::slice_inverse
 aten::slice_scatter
 aten::slice_scatter.out
 aten::slow_conv3d_forward
