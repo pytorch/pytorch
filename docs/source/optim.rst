@@ -34,12 +34,12 @@ as optimization options for this group.
 For example, this is very useful when one wants to specify per-layer learning rates::
 
     optim.SGD([
-                    {'params': model.base.parameters()},
-                    {'params': model.classifier.parameters(), 'lr': 1e-3}
-                ], lr=1e-2, momentum=0.9)
+                    {'params': model.base.parameters(), 'lr': 1e-2},
+                    {'params': model.classifier.parameters()}
+                ], lr=1e-3, momentum=0.9)
 
-This means that ``model.base``'s parameters will use the default learning rate of ``1e-2``,
-``model.classifier``'s parameters will use a learning rate of ``1e-3``, and a momentum of
+This means that ``model.base``'s parameters will use a learning rate of ``1e-3``,
+``model.classifier``'s parameters will use the default learning rate of ``1e-3``, and a momentum of
 ``0.9`` will be used for all parameters.
 
 .. note::
