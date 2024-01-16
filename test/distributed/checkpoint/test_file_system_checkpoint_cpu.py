@@ -433,6 +433,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                     "sharded": sharded_tensor.rand(save_spec, tensor_size),
                     "replicated": torch.rand(tensor_size, device="cpu"),
                 }
+                dist.broadcast(save_dict["replicated"], src=0)
 
                 fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
                 save_state_dict(state_dict=save_dict, storage_writer=fs_writer)
@@ -454,11 +455,11 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                         torch.allclose(save_dict_sharded, load_dict["sharded"]),
                         f"save-spec {save_spec} load-spec {load_spec}",
                     )
+
                     self.assertTrue(
                         torch.allclose(save_dict["replicated"], load_dict_replicated),
                         f"save-spec {save_spec} load-spec {load_spec}",
                     )
-
 
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoad)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
