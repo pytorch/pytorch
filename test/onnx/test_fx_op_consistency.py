@@ -1353,7 +1353,13 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: sample.args[0].numel() == 0,
         reason="ONNX Runtime does not support empty tensors multiplication",
     ),
-    skip(
+    xfail(
+        "addmm",
+        variant_name="decomposed",
+        matcher=lambda sample: sample.args[0].numel() == 0,
+        reason="ONNX Runtime does not support empty tensors multiplication",
+    ),
+    xfail(
         "amax",
         matcher=lambda sample: len(sample.input.shape) == 0
         and (sample.kwargs.get("dim") is not None and sample.kwargs.get("dim") != ()),
