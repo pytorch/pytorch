@@ -21,8 +21,7 @@ from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
     is_view_op,
     ReplaceViewOpsWithViewCopyOpsPass,
 )
-from torch.export import export
-from torch.export._wrapper import WrapperModule
+from torch.export import export, WrapperModule
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.testing import FileCheck
