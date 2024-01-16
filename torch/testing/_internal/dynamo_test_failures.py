@@ -186,7 +186,6 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_addmm_sizes_cpu_float32",
     "TestLinalgCPU.test_norm_bfloat16_and_half_cpu_float16",
     "TestLinalgCPU.test_householder_product_cpu_complex64",
-    "TestLinalgCPU.test_linalg_lu_family_cpu_complex128",
     "TestLinalgCPU.test_inverse_cpu_float64",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_complex64",
     "TestLinalgCPU.test_pinv_cpu_complex64",
@@ -1285,7 +1284,6 @@ dynamo_expected_failures = {
     "TestIndexing.test_index_no_floats",  # torch_np/numpy_tests/core/test_indexing
     "TestBooleanIndexing.test_boolean_indexing_weirdness",  # torch_np/numpy_tests/core/test_indexing
     "TestBooleanIndexing.test_bool_as_int_argument_errors",  # torch_np/numpy_tests/core/test_indexing
-    "TestBroadcastedAssignments.test_simple_broadcasting_errors",  # torch_np/numpy_tests/core/test_indexing
     "TestFloatNonIntegerArgument.test_non_integer_argument_errors",  # torch_np/numpy_tests/core/test_indexing
     "TestIndexing.test_slicing_no_floats",  # torch_np/numpy_tests/core/test_indexing
     "TestFloatNonIntegerArgument.test_reduce_axis_float_index",  # torch_np/numpy_tests/core/test_indexing
