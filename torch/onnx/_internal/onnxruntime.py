@@ -833,6 +833,8 @@ class OrtBackend:
                 # stored models.
                 # If ONNXRT_DUMP_PATH="dumped/dumped_model_"
                 # The first file name will be 'dumped/dumped_model_0.onnx'.
+                # For every dumped model, a text file 'dumped/dumped_model_0.txt'
+                # is created as well to contain the string representing the graph_module.
                 _dump_onnx_model(onnx_model_bytes, graph_module=graph_module)
 
             # Initialize a ORT session to execute this ONNX model.
