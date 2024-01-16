@@ -167,7 +167,7 @@ def acc_type(dtype):
         # BF16 dot acc is currently neither supported in NVIDIA Tensor Cores
         # nor in Triton (via wmma/wgmma)
         # https://github.com/openai/triton/issues/2302
-        return "tl.float32"   
+        return "tl.float32"
     return f"tl.{dtype}".replace("torch.", "")
 
 
