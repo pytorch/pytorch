@@ -729,33 +729,29 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
-        from . import NestedUserFunctionVariable, TensorVariable, UserFunctionVariable
-        from .builder import wrap_fx_proxy_cls
+        from torch._higher_order_ops.map import _validate_map_inputs
+        from . import ListVariable, TensorVariable
+        from .builder import SourcelessBuilder, wrap_fx_proxy_cls
 
         if len(kwargs) > 0:
-            unimplemented(
-                "torch.ops.higher_order.map: kwargs are not supported in the map operator."
-            )
+            unimplemented("map: kwargs are not supported in the map operator.")
 
-        assert type(args[0].realize()) in (
-            UserFunctionVariable,
-            NestedUserFunctionVariable,
-        )
-        assert type(args[1].realize()) is TensorVariable
-
-        sample_shape = get_fake_value(args[1].as_proxy().node, tx).size()
-
-        if len(sample_shape) < 1 or sample_shape[0] == 0:
-            unimplemented(
-                "map() operator doesn't support scalar or zero-sized tensors during tracing."
-            )
+        invalid_reasons = _make_inlined(tx, _validate_map_inputs)(
+            ListVariable(args)
+        ).as_python_constant()
+        if invalid_reasons:
+            unimplemented("Got invalid inputs for map:\n" + "\n".join(invalid_reasons))
 
         # To get the example output from map() we will need to provide at least one sample to
         # the loop body. In our case we will always use xs[0], and our map() won't support zero
         # sized tensor during tracing.
-        first_dim = wrap_fx_proxy_cls(
-            target_cls=TensorVariable, tx=tx, proxy=args[1].as_proxy()[0]
+        sliced_examples = pytree.tree_map(
+            lambda proxy: wrap_fx_proxy_cls(
+                TensorVariable, tx, proxy[0], proxy.node.meta["example_value"][0]
+            ),
+            args[1].as_proxy(),
         )
+        sliced_vars = SourcelessBuilder()(tx, sliced_examples)
 
         # TODO: Support kwargs
         (
@@ -766,7 +762,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx,
             args[0],
             [
-                first_dim,
+                sliced_vars,
                 *args[2:],
             ],
             {},
@@ -787,9 +783,10 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_node = make_attr(tx, body_name)
 
+        flat_mapped, spec = pytree.tree_flatten(args[1].as_proxy())
         p_args = (
             body_node,
-            [args[1].as_proxy()],
+            flat_mapped,
             [arg.as_proxy() for arg in args[2:]] + list(body_lifted_freevars.keys()),
         )
         return _call_function_and_unflatten_output(

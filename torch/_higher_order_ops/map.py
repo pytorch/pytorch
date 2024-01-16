@@ -166,21 +166,41 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
         return fw_graph, joint_graph
 
 
-def map_wrapper(f, xs, *args):
+def _validate_map_inputs(args):
+    f = args[0]
+    xs = args[1]
+    invalid_reason = []
+
     flat_xs, xs_spec = pytree.tree_flatten(xs)
     if not all(isinstance(t, torch.Tensor) for t in flat_xs):
-        raise RuntimeError(f"Mapped xs can only consist of tensors. Got xs {flat_xs}.")
+        invalid_reason.append(
+            "Mapped xs can only consist of tensors. Got xs " + str(flat_xs)
+        )
+
+    if invalid_reason:
+        return invalid_reason
 
     num_mapped_args = len(flat_xs)
     shapes = [xs.shape for xs in flat_xs]
     leading_dim_size = shapes[0][0]
     if leading_dim_size == 0:
-        raise RuntimeError("Leading dimensions of mapped xs cannot be 0.")
+        invalid_reason.append("Leading dimensions of mapped xs cannot be 0.")
 
     if any(cur_shape[0] != leading_dim_size for cur_shape in shapes):
-        raise RuntimeError(
-            f"Leading dimensions of mapped xs must be consistent. Got shapes {shapes}."
+        invalid_reason.append(
+            "Leading dimensions of mapped xs must be consistent. Got shapes "
+            + str(shapes)
         )
+    return invalid_reason
+
+
+def map_wrapper(f, xs, *args):
+    invalid_reasons = _validate_map_inputs((f, xs, *args))
+    if invalid_reasons:
+        raise RuntimeError("Invalid inputs for map:\n" + "\n".join(invalid_reasons))
+
+    flat_xs, xs_spec = pytree.tree_flatten(xs)
+    num_mapped_args = len(flat_xs)
 
     out_spec = None
 
