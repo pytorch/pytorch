@@ -58,6 +58,7 @@ __all__ = [
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
     'export', 'autocast', 'cond',
+    "tensors",
 ]
 
 ################################################################################
@@ -1593,6 +1594,7 @@ import torch.nn.quantizable
 import torch.nn.quantized
 import torch.nn.qat
 import torch.nn.intrinsic
+from torch import tensors as tensors
 
 _C._init_names(list(torch._storage_classes))
 
