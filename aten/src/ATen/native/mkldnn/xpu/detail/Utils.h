@@ -9,10 +9,10 @@
 #include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_sycl.hpp>
 
-#define XPU_ONEDNN_EXEC(prim, stream, ...)                           \
+#define XPU_ONEDNN_EXEC(prim, stream, ...)                             \
   {                                                                    \
     auto q = dnnl::sycl_interop::get_queue((stream));                  \
-    XPU_EXT_SUBMIT(                                                  \
+    XPU_EXT_SUBMIT(                                                    \
         (q),                                                           \
         "onednn_kernel",                                               \
         dnnl::sycl_interop::execute((prim), (stream), ##__VA_ARGS__)); \
@@ -370,6 +370,44 @@ enum MEMORY_LAYOUT_FOR_CONV {
   ChannelsFirst = 0, // using channels_first for conv computation.
   ChannelsLast = 1, /// using channels_last for conv computation.
 };
+
+inline bool is_channels_last(at::MemoryFormat fmt){
+  return (at::MemoryFormat::ChannelsLast3d == fmt) || (at::MemoryFormat::ChannelsLast3d == fmt);
+}
+
+inline bool is_smf_channels_last(const Tensor& t){
+  return is_channels_last(t.suggest_memory_format());
+}
+
+static inline int get_memory_layout_for_conv(
+    const at::Tensor& src,
+    const at::Tensor& weight,
+    bool is_transpose) {
+  if (!src.defined() || src.is_sparse()) {
+    // suggest channels_first
+    return MEMORY_LAYOUT_FOR_CONV::ChannelsFirst;
+  }
+
+  auto suggest_channels_last_format =
+      (is_smf_channels_last(src) || is_smf_channels_last(weight));
+  if (suggest_channels_last_format) {
+    // suggest channels_last
+    return MEMORY_LAYOUT_FOR_CONV::ChannelsLast;
+  }
+
+  // suggest channels_last
+  return MEMORY_LAYOUT_FOR_CONV::ChannelsFirst;
+}
+
+static inline std::vector<int64_t> compatible_groups_deconv_strides(
+    const at::Tensor& wgh,
+    dnnl::memory::dims group_size) {
+  std::vector<int64_t> strides = wgh.strides().vec();
+  strides[0] = wgh.strides()[1];
+  strides[1] = wgh.strides()[0];
+  strides.insert(strides.begin(), group_size[2] * wgh.strides()[0]);
+  return strides;
+}
 
 } // namespace onednn
 } // namespace native::xpu
