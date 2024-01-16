@@ -2760,7 +2760,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                     @wraps(f)
                     def wrapper(*args, **kwargs):
                         try:
-                            return f(*args, **kwargs)
+                            f(*args, **kwargs)
                         except BaseException as e:
                             self.skipTest(e)
                         self.skipTest("This test passed, maybe we can remove the skip from dynamo_test_failures.py")
