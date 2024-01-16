@@ -576,16 +576,15 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.ID_MATCH)
             stream_source = AttrSource(self.source, "stream")
             stream_var = VariableBuilder(self.tx, stream_source)(value.stream)
-            return StreamContextVariable.create_from_stream(self.tx, stream_var)
+            return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, _StreamBase):
             self.install_guards(GuardBuilder.ID_MATCH)
-            stream_var = StreamVariable(
+            return StreamVariable(
                 None,
                 value,
                 value.device,
                 source=self.source,
             )
-            return self.tx.output.side_effects.track_object_existing(value, stream_var)
         elif isinstance(value, _EventBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EventVariable(

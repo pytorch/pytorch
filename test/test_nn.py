@@ -8,6 +8,7 @@ import io
 import itertools
 import warnings
 import pickle
+import re
 from copy import deepcopy
 from itertools import product
 from functools import partial
@@ -3707,6 +3708,19 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         rnn.cuda(device)
         hx = torch.randn(2, 4, 20).cuda(device)
         output = rnn(input, hx)
+
+    def test_cudnn_forward_exception(self):
+        rnns = [
+            (nn.LSTM(10, 20, batch_first=True), (torch.zeros(1, 2, 19), torch.zeros(1, 2, 19))),
+            (nn.LSTM(10, 20, batch_first=True, proj_size=10), (torch.zeros(1, 2, 19), torch.zeros(1, 2, 19))),
+            (nn.GRU(10, 20, batch_first=True), torch.zeros(1, 2, 19)),
+            (nn.RNN(10, 20, batch_first=True), torch.zeros(1, 2, 19)),
+        ]
+        x_wrong = torch.randn(2, 3, 3)
+        x_right = torch.randn(2, 3, 10)
+        for rnn, hidden in rnns:
+            self.assertRaisesRegex(RuntimeError, "Expected hidden.*size.*got", rnn, x_right, hidden)
+            self.assertRaisesRegex(RuntimeError, re.escape("input.size(-1) must be equal to input_size"), rnn, x_wrong)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @skipIfRocm
