@@ -5379,6 +5379,21 @@
     CompositeExplicitAutograd: slice_backward
   autogen: slice_backward.out
 
+# NB: This op exists to back the implementation of reverse view_funcs for various views (chunk,
+# slice.Tensor, split_with_sizes, et. al.). Currently, these are only used during fake-ification
+# of PT2 graph input subclass instances that are views. This means:
+# * This op shouldn't really show up in eager mode (so e.g. XLA shouldn't have to implement it)
+# * This op shouldn't show up in a PT2 graph (so a PT2 backend shouldn't have to implement it)
+# * A subclass will have to implement this to work in PT2 if a subclass view is used as a graph
+#   input AND the view utilizes this op in its inverse. The idea is that slice_inverse() is
+#   easier to implement for a subclass than as_strided()
+- func: slice_inverse(Tensor(a) self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: slice_inverse_symint
+
 - func: slice_scatter(Tensor self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor
   variants: function, method
   device_check: NoCheck
@@ -5386,7 +5401,7 @@
   dispatch:
     CompositeExplicitAutogradNonFunctional: slice_scatter
   autogen: slice_scatter.out
-  tags: core
+  tags: [core, view_copy]
 
 - func: select_scatter(Tensor self, Tensor src, int dim, SymInt index) -> Tensor
   variants: function, method
