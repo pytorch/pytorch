@@ -1092,7 +1092,6 @@ def main():
         "filelock",
         "typing-extensions>=4.8.0",
         "sympy",
-        "networkx",
         "jinja2",
         "fsspec",
         'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
