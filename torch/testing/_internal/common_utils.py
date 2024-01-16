@@ -2746,8 +2746,8 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                     @wraps(f)
                     def wrapper(*args, **kwargs):
                         try:
-                            return f(*args, **kwargs)
-                        except Exception as e:
+                            f(*args, **kwargs)
+                        except BaseException as e:
                             self.skipTest(e)
                         raise RuntimeError("Unexpected success, please remove test from dynamo_test_failures.py")
                     return wrapper
@@ -2761,7 +2761,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                     def wrapper(*args, **kwargs):
                         try:
                             return f(*args, **kwargs)
-                        except Exception as e:
+                        except BaseException as e:
                             self.skipTest(e)
                         self.skipTest("This test passed, maybe we can remove the skip from dynamo_test_failures.py")
                     return wrapper
