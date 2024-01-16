@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     xfailIfTorchDynamo,
     subtest,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -3558,8 +3559,13 @@ class TestNestedTensorSubclass(TestCase):
         with self.assertRaisesRegex(ValueError, "expected .* to be a contiguous jagged layout"):
             clone = transposed.clone()
 
-    # Note: Math fallback doesn't work with bfloat16 on CUDA
+    # Note 1: Math fallback doesn't work with bfloat16 on CUDA
+    # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
     @xfailIfTorchDynamo
+    @unittest.skipIf(
+        TEST_WITH_ROCM,
+        "ROCm doesn't support flash attention or mem_efficient attention for NT",
+    )
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
                  SM80OrLater else [torch.float16, torch.float32])
     def test_sdpa(self, device, dtype):

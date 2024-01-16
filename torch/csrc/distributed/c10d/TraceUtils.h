@@ -16,6 +16,22 @@
 
 namespace c10d {
 
+/* Helper used by work::getDuration() and nccl flight recorder */
+float getDurationFromFirstEvent(
+    const std::vector<at::cuda::CUDAEvent>& ncclStartEvents,
+    const std::vector<at::cuda::CUDAEvent>& ncclEndEvents) {
+  TORCH_CHECK(
+      ncclStartEvents.size() == 1,
+      "getDuration only works for single device per ProcessGroup, but found multiple start events.");
+  TORCH_CHECK(
+      ncclEndEvents.size() == 1,
+      "getDuration only works for single device per ProcessGroup, but found multiple end events.");
+  TORCH_CHECK(
+      ncclEndEvents[0].query(),
+      "getDuration can only be called after work is succeeded.")
+  return ncclStartEvents[0].elapsed_time(ncclEndEvents[0]);
+}
+
 /* Trace Utils Related to TORCH_NCCL_DESYNC_DEBUG */
 
 inline std::string getTraceStartKey(const std::string& pgName, int rank) {
@@ -359,7 +375,7 @@ struct NCCLTraceBuffer {
     const char* profiling_name_;
 
     std::shared_ptr<torch::CapturedTraceback> traceback_;
-    // we borrow pointser to start_ and end_ so we can query the state
+    // we borrow pointers to start_ and end_ so we can query the state
     // on reporting. However, once the event is completed, the call
     // to `complete` will clear these.
     EventList *start_, *end_;
@@ -367,6 +383,7 @@ struct NCCLTraceBuffer {
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
     c10::time_t time_created_;
+    c10::optional<float> duration_;
 
     const char* state_ = "scheduled";
 
@@ -475,17 +492,65 @@ struct NCCLTraceBuffer {
     return result;
   }
 
-  void retire_id(c10::optional<size_t> id) {
+  /*
+  Mark an Event as completed and free its events.
+
+  This is called by the watchdog thread, and is asynchronous from the
+  perspective of the main thread.
+
+  compute_duration defaults to true since retire_id is only called in the
+  watchdog thread, which is currently a place we call cuda APIs which may hang,
+  but care should be taken to avoid computing duration in any function that must
+  never hang. (timing must also be enabled for compute_duration - see
+  TORCH_NCCL_ENABLE_TIMING).
+  */
+  void retire_id(c10::optional<size_t> id, bool compute_duration = true) {
     if (!enabled_ || !id) {
       return;
     }
-    std::lock_guard<std::mutex> guard(mutex_);
+
+    bool can_compute_duration = false;
+    EventList* startEvents = nullptr;
+    EventList* endEvents = nullptr;
+    c10::optional<float> duration = c10::nullopt;
+
+    std::unique_lock<std::mutex> guard(mutex_);
+
     auto& entry = entries_.at(*id % max_entries_);
     if (entry.id_ == *id) {
       update_state(entry);
-      entry.retired_ = true;
-      entry.start_ = entry.end_ = nullptr;
+
+      if (compute_duration) {
+        can_compute_duration = strcmp(entry.state_, "completed") == 0 &&
+            entry.start_ && entry.end_;
+        startEvents = entry.start_;
+        endEvents = entry.end_;
+      }
     }
+
+    if (can_compute_duration) {
+      // Compute duration without without holding the lock, because
+      // cudaEventDuration() can hang, and we need to acquire the lock before we
+      // can dump(), which we never want to block.
+      guard.unlock();
+      duration = getDurationFromFirstEvent(*startEvents, *endEvents);
+      guard.lock();
+
+      // Refresh the entry ref, see if it has been overwritten
+      entry = entries_.at(*id % max_entries_);
+      if (entry.id_ != *id) {
+        LOG(INFO)
+            << "retire_id abandoned for id " << *id
+            << ", event was overwritten while waiting to compute duration.";
+        return;
+      }
+      if (duration.has_value()) {
+        entry.duration_ = duration.value();
+      }
+    }
+
+    entry.retired_ = true;
+    entry.start_ = entry.end_ = nullptr;
   }
 
   std::string dump() {
@@ -497,6 +562,7 @@ struct NCCLTraceBuffer {
     c10::IValue input_sizes_key = "input_sizes";
     c10::IValue output_sizes_key = "output_sizes";
     c10::IValue time_created_key = "time_created_us";
+    c10::IValue duration_key = "duration_ms";
 
     c10::IValue frames_key = "frames";
     c10::IValue state_key = "state";
@@ -527,6 +593,9 @@ struct NCCLTraceBuffer {
       dict.insert(seq_id_key, int64_t(e.seq_id_));
       dict.insert(profiling_name_key, e.profiling_name_);
       dict.insert(time_created_key, int64_t(e.time_created_ / 1000));
+      if (e.duration_) {
+        dict.insert(duration_key, *e.duration_);
+      }
 
       auto it = e.sizes_.begin();
       auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
