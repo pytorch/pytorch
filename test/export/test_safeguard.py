@@ -82,6 +82,43 @@ class TestSafeguard(TestCase):
         with self.assertRaises(RuntimeError):
             export(f3, (torch.randn(10, requires_grad=False),))
 
+    def test_global_autograd_exempt_predispatch(self):
+        def f1(a):
+            with torch.no_grad():
+                b = a + a
+            return b
+
+        def f2(a):
+            with torch.enable_grad():
+                b = a + a
+            return b
+
+        def f3(a):
+            with torch.set_grad_enabled(False):
+                b = a + a
+            return b
+
+        def f4(a):
+            with torch.set_grad_enabled(True):
+                b = a + a
+            return b
+
+        a = torch.randn(10)
+
+        from torch.export._trace import _export
+
+        with torch.no_grad():
+            _export(f1, (a,), pre_dispatch=True)
+            _export(f2, (a,), pre_dispatch=True)
+            _export(f3, (a,), pre_dispatch=True)
+            _export(f4, (a,), pre_dispatch=True)
+
+        with torch.enable_grad():
+            _export(f1, (a,), pre_dispatch=True)
+            _export(f2, (a,), pre_dispatch=True)
+            _export(f3, (a,), pre_dispatch=True)
+            _export(f4, (a,), pre_dispatch=True)
+
 
 if __name__ == "__main__":
     run_tests()

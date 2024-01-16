@@ -49,6 +49,22 @@ def get_filtered_export_db_tests():
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
+    def test_predispatch_export_with_autograd_op(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                with torch.enable_grad():
+                    return x + x
+
+        with torch.no_grad():
+            from torch.export._trace import _export
+            ep = _export(Foo(), (torch.ones(10),), pre_dispatch=True)
+
+        with self.assertRaisesRegex(SerializeError, "Failed serializing node _set_grad_enabled"):
+            torch.export.save(ep, io.BytesIO())
+
     def test_serialize_multiple_returns_from_node(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self):
