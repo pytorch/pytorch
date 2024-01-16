@@ -292,7 +292,9 @@ class _DDPJoinHook(JoinHook):
         ddp._check_and_sync_module_buffers()
 
         # Check if need to sync in the backward pass
-        should_sync_backwards = ddp._check_global_requires_backward_grad_sync(is_joined_rank=True)
+        should_sync_backwards = ddp._check_global_requires_backward_grad_sync(
+            is_joined_rank=True
+        )
         # Forward parameter sync is disabled in the next iteration if we
         # are skipping gradient sync this iteration, so set
         # `require_forward_param_sync` accordingly
@@ -1563,7 +1565,7 @@ class DistributedDataParallel(Module, Joinable):
             should_sync_backwards = requires_sync_tensor.item() != 0
             return should_sync_backwards
         else:
-            return None # Return value is not/should not be used.
+            return None  # Return value is not/should not be used.
 
     # When running in join mode, checks and performs sync of module buffers if
     # the models have buffers that should be synchronized in the forward pass.

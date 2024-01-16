@@ -2534,8 +2534,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             // problematic as some collectives may just return one tensor (e.g
             // all-reduce), while some others may return multiple tensors (e.g.
             // all-gather).
-            TORCH_WARN_ONCE(
-                fmt::format(kDeprecationWarning, "Work::result"));
+            TORCH_WARN_ONCE(fmt::format(kDeprecationWarning, "Work::result"));
             return work.result();
           })
       .def(
