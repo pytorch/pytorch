@@ -142,7 +142,6 @@ dynamo_expected_failures = {
     "TestAutogradFallback.test_inplace_on_tensor_that_does_not_require_grad_mode_warn",
     "TestAutogradFallback.test_inplace_autograd_function_registered_to_cpu_mode_nothing",
     "TestAutogradFallback.test_autograd_function_registered_to_cpu_mode_nothing",
-    "TestFunctionalOptimParity.test_functional_optim_parity_sgd",
     "TestIndexingCPU.test_invalid_index_cpu",
     "NumpyTestsCPU.test_boolean_shape_mismatch_cpu",
     "TestIndexingCPU.test_empty_ndim_index_bool_cpu",
