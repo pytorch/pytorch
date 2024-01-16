@@ -214,7 +214,7 @@ def map_wrapper(f, xs, *args):
         return flat_out
 
     return pytree.tree_unflatten(
-        map_impl(flat_fn, num_mapped_args, *flat_xs, *args), out_spec  # type: ignore[arg-type]
+        map_impl(flat_fn, flat_xs, args), out_spec  # type: ignore[arg-type]
     )
 
 
@@ -225,7 +225,11 @@ class MapAutogradOp(torch.autograd.Function):
         ctx._joint_graph = joint_graph
         ctx._num_mapped_args = num_mapped_args
         with torch._C._AutoDispatchBelowAutograd():
-            return (*map_impl(fw_graph, num_mapped_args, *flat_args),)
+            return (
+                *map_impl(
+                    fw_graph, flat_args[:num_mapped_args], flat_args[num_mapped_args:]
+                ),
+            )
 
     @staticmethod
     def backward(ctx, *flat_grads):
@@ -235,17 +239,13 @@ class MapAutogradOp(torch.autograd.Function):
 
         grads = map_impl(
             ctx._joint_graph,
-            ctx._num_mapped_args + len(flat_grads),
-            *fw_mapped_args,
-            *flat_grads,
-            *pos_args,
+            fw_mapped_args + flat_grads,
+            pos_args,
         )
         return None, None, None, *grads
 
 
-def trace_map(proxy_mode, func_overload, f, num_mapped, *args):
-    xs = list(args[:num_mapped])
-    pos_args = list(args[num_mapped:])
+def trace_map(proxy_mode, func_overload, f, xs, pos_args):
     leading_dim_size = xs[0].shape[0]
 
     example_input = _unstack_pytree(xs)[0]
@@ -274,7 +274,7 @@ def trace_map(proxy_mode, func_overload, f, num_mapped, *args):
 
         expanded_outs = pytree.tree_map(expand_tensor, example_outs)
 
-    node_args = (body_graph, num_mapped, *args)
+    node_args = (body_graph, list(xs), list(pos_args))
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", func_overload, proxy_args, {}, name="map_impl"
@@ -331,9 +331,7 @@ def _stack_pytree(pytrees):
 
 
 @map_impl.py_impl(DispatchKey.CompositeExplicitAutograd)
-def map_dense(f, num_mapped_args, *args):
-    xs = args[:num_mapped_args]
-    pos_args = args[num_mapped_args:]
+def map_dense(f, xs, pos_args):
     pytrees = []
     for inp in _unstack_pytree(xs):
         pytrees.append(f(*inp, *pos_args))
@@ -341,30 +339,29 @@ def map_dense(f, num_mapped_args, *args):
 
 
 @map_impl.py_impl(DispatchKey.Autograd)
-def map_autograd(f, num_mapped_args, *args):
-    fw_graph, bw_graph = create_fw_bw_graph(f, num_mapped_args, *args)
-    flat_out = MapAutogradOp.apply(fw_graph, bw_graph, num_mapped_args, *args)
+def map_autograd(f, xs, pos_args):
+    num_mapped_args = len(xs)
+    fw_graph, bw_graph = create_fw_bw_graph(f, num_mapped_args, *xs, *pos_args)
+    flat_out = MapAutogradOp.apply(fw_graph, bw_graph, num_mapped_args, *xs, *pos_args)
     return flat_out
 
 
 @map_impl.py_impl(ProxyTorchDispatchMode)
-def map_proxy_torch_dispatch_mode(mode, f, num_mapped, *args):
+def map_proxy_torch_dispatch_mode(mode, f, xs, args):
     if mode.enable_tracing:
-        return trace_map(mode, map_impl, f, num_mapped, *args)
+        return trace_map(mode, map_impl, f, xs, args)
     else:
-        return map_impl(f, num_mapped, *args)
+        return map_impl(f, xs, args)
 
 
 @map_impl.py_impl(FakeTensorMode)
-def map_fake_tensor_mode(mode, f, num_mapped, *args):
+def map_fake_tensor_mode(mode, f, xs, args):
     with mode:
-        return map_dense(f, num_mapped, *args)
+        return map_dense(f, xs, args)
 
 
 @map_impl.py_functionalize_impl
-def map_functionalize(ctx, f, num_mapped, *args):
-    xs = args[:num_mapped]
-    pos_args = args[num_mapped:]
+def map_functionalize(ctx, f, xs, pos_args):
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_args = ctx.unwrap_tensors(pos_args)
     wrapped_fn = ctx.functionalize(f)
@@ -378,5 +375,5 @@ def map_functionalize(ctx, f, num_mapped, *args):
         if _has_potential_branch_input_alias(f, example_inputs):
             raise UnsupportedAliasMutationException("torch.map is aliasing the input!")
 
-        map_return = map_impl(wrapped_fn, num_mapped, *unwrapped_xs, *unwrapped_args)
+        map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)
         return ctx.wrap_tensors(map_return)
