@@ -10,6 +10,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
+permissions: read-all
+
 jobs:
   macos-12-py3-arm64-build:
     name: macos-12-py3-arm64
