@@ -100,7 +100,7 @@ def clip_grad_norm_(
     ]
     local_sharded_norm = _get_grad_norm(local_grads, norm_type, device)
     shard_dim = 0  # hard code since we assume all 1D `Shard` placements
-    process_group = cast(dist.ProcessGroup, mesh.get_dim_groups(shard_dim))
+    process_group = cast(dist.ProcessGroup, mesh.get_group(shard_dim))
     if norm_type == math.inf:
         total_norm = local_sharded_norm
         dist.all_reduce(total_norm, op=dist.ReduceOp.MAX, group=process_group)

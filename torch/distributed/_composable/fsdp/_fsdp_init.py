@@ -71,7 +71,7 @@ def _get_post_forward_mesh_info(
         num_post_forward_meshes = (
             mesh_info.shard_mesh_size // post_forward_shard_mesh_size
         )
-        shard_pg = mesh_info.mesh.get_dim_groups(mesh_info.shard_mesh_dim)
+        shard_pg = mesh_info.mesh.get_group(mesh_info.shard_mesh_dim)
         assert isinstance(shard_pg, dist.ProcessGroup)  # mypy
         mesh_shard_ranks = sorted(
             dist.distributed_c10d.get_process_group_ranks(shard_pg)

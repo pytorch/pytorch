@@ -279,7 +279,7 @@ class TestFullyShardTrainingCompose(FSDPTest):
         self, reshard_after_forward: Union[bool, int], checkpoint_impl: str
     ):
         assert checkpoint_impl in ("composable", "utils")
-        foreach = False
+        foreach = True
         torch.manual_seed(42)
         vocab_size = 1024
         with torch.device(torch.device("cuda")):
@@ -344,7 +344,7 @@ class TestFullyShardTrainingCompose(FSDPTest):
         reshard_after_forward: bool,
         backend: str,
     ):
-        foreach = False
+        foreach = True
         torch.manual_seed(42)
         vocab_size = 1024
         config = GPTConfig(n_layer=3, n_head=4, vocab_size=vocab_size)
