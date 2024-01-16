@@ -116,10 +116,13 @@ FlattenWithKeysFunc = Callable[[PyTree], Tuple[List[Tuple[KeyEntry, Any]], Any]]
 # - unflatten_fn should take a flat list of values and some context
 #   (returned by flatten_fn). It returns the collection by reconstructing
 #   it from the list and the context.
+# - flatten_with_keys_fn, which is a callable that takes a
+#   pytree and returns a list of (keypath, value) pairs and a context.
 class NodeDef(NamedTuple):
     type: Type[Any]
     flatten_fn: FlattenFunc
     unflatten_fn: UnflattenFunc
+    flatten_with_keys_fn: Optional[FlattenWithKeysFunc]
 
 
 _NODE_REGISTRY_LOCK = threading.Lock()
@@ -142,16 +145,6 @@ class _SerializeNodeDef(NamedTuple):
 
 SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {}
 SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
-
-
-# _KeyPathNodeDef holds flatten_with_keys, which is a callable that takes a
-# pytree and returns a list of (keypath, value) pairs and a context.
-class _KeyPathNodeDef(NamedTuple):
-    typ: Type[Any]
-    flatten_with_keys: FlattenWithKeysFunc
-
-
-SUPPORTED_KEY_PATH_NODES: Dict[Type[Any], _KeyPathNodeDef] = {}
 
 
 def register_pytree_node(
@@ -298,11 +291,7 @@ def _private_register_pytree_node(
                 "Overwriting the previous registration.",
             )
 
-        node_def = NodeDef(
-            cls,
-            flatten_fn,
-            unflatten_fn,
-        )
+        node_def = NodeDef(cls, flatten_fn, unflatten_fn, flatten_with_keys_fn)
         SUPPORTED_NODES[cls] = node_def
 
         if (to_dumpable_context is None) ^ (from_dumpable_context is None):
@@ -322,9 +311,6 @@ def _private_register_pytree_node(
         )
         SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
         SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
-
-        if flatten_with_keys_fn is not None:
-            SUPPORTED_KEY_PATH_NODES[cls] = _KeyPathNodeDef(cls, flatten_with_keys_fn)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1426,26 +1412,23 @@ def _generate_key_paths(
         return
 
     node_type = _get_node_type(tree)
-    key_handler = SUPPORTED_KEY_PATH_NODES.get(node_type)
     handler = SUPPORTED_NODES.get(node_type)
-    if handler and key_handler:
-        key_children, _ = key_handler.flatten_with_keys(tree)
+    if not handler:
+        # This is a leaf
+        yield key_path, tree
+        return
+
+    flatten_with_keys = handler.flatten_with_keys_fn
+    if flatten_with_keys:
+        key_children, _ = flatten_with_keys(tree)
         for k, c in key_children:
             yield from _generate_key_paths((*key_path, k), c, is_leaf)
-    elif handler and not key_handler:
+    else:
         # We registered this pytree but didn't add a flatten_with_keys_fn, complain.
         raise ValueError(
             f"Did not find a flatten_with_keys_fn for type: {node_type}. "
             "Please pass a flatten_with_keys_fn argument to register_pytree_node."
         )
-    elif not handler and key_handler:
-        # This should be impossible, register_pytree_node does not make adding a flatten_fn optional.
-        raise AssertionError(
-            f"Found a flatten_with_keys_fn but not a flatten_fn for type: {node_type}"
-        )
-    else:
-        # This is a leaf
-        yield key_path, tree
 
 
 def tree_map_with_path(
@@ -1484,5 +1467,5 @@ def tree_map_with_path(
 
 
 def keystr(kp: KeyPath) -> str:
-    """Give a key path, return a pretty-printed representation."""
+    """Given a key path, return a pretty-printed representation."""
     return "".join([str(k) for k in kp])
