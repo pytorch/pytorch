@@ -574,3 +574,4 @@ API Reference
 .. py:module:: torch.export.dynamic_shapes
 
 .. automodule:: torch.export.unflatten
+.. automodule:: torch.export.wrapper
