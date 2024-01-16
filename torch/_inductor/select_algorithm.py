@@ -394,18 +394,6 @@ class TritonTemplateKernel(TritonKernel):
             )
 
 
-@functools.lru_cache(None)
-def _jinja2_env():
-    try:
-        import jinja2
-
-        return jinja2.Environment(
-            undefined=jinja2.StrictUndefined,
-        )
-    except ImportError:
-        return None
-
-
 class TritonTemplate(KernelTemplate):
     index_counter = itertools.count()
     all_templates: Dict[str, "TritonTemplate"] = dict()
