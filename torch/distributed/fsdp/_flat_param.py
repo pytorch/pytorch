@@ -1423,9 +1423,7 @@ class FlatParamHandle:
         """
         unsharded_size = self.flat_param._unpadded_unsharded_size
         flat_param_part = padded_unsharded_flat_param[: unsharded_size.numel()]
-        flat_param_part_view = flat_param_part.view(
-            unsharded_size
-        )  # this `.view()` is not autograd visible
+        # slicing [:] is not visible to autograd because of .data
         self.flat_param.data = flat_param_part
         in_forward = self._training_state == HandleTrainingState.FORWARD
         in_pre_backward = self._training_state == HandleTrainingState.BACKWARD_PRE
