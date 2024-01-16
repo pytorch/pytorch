@@ -58,7 +58,7 @@ if config.is_fbcode():
     from torch._inductor.fb.utils import time_and_log
 else:
     # no-op decorator
-    def time_and_log(attr: str):
+    def time_and_log(attr: str, extra_loggings: Optional[Dict[str, str]] = None):
         return dynamo_utils.identity
 
 
@@ -241,9 +241,18 @@ def fake_tensor_prop(
     return fake_mode
 
 
+# pass config dict back to user
+def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
+    with config.patch(config_patches):
+        return config.get_config_copy()
+
+
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
-@time_and_log(attr="compilation time (in seconds)")
+@time_and_log(
+    attr="compilation time (in seconds)",
+    extra_loggings={"config_dict": str(get_patched_config_dict())},
+)
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -1182,12 +1191,6 @@ def compile_fx(
             partition_fn=partition_fn,
             keep_inference_input_mutations=True,
         )(model_, example_inputs_)
-
-
-# pass config dict back to user
-def get_patched_config_dict(config_patches=None):
-    with config.patch(config_patches):
-        return config.get_config_copy()
 
 
 def _shape_env_from_inputs(inputs: List[torch.Tensor]):
