@@ -1288,7 +1288,6 @@ dynamo_expected_failures = {
     "TestBroadcastedAssignments.test_simple_broadcasting_errors",  # torch_np/numpy_tests/core/test_indexing
     "TestFloatNonIntegerArgument.test_non_integer_argument_errors",  # torch_np/numpy_tests/core/test_indexing
     "TestIndexing.test_slicing_no_floats",  # torch_np/numpy_tests/core/test_indexing
-    "TestBroadcastedAssignments.test_prepend_not_one",  # torch_np/numpy_tests/core/test_indexing
     "TestFloatNonIntegerArgument.test_reduce_axis_float_index",  # torch_np/numpy_tests/core/test_indexing
     "TestEinsum.test_different_paths_dtype_f",  # torch_np/numpy_tests/core/test_einsum
     "TestEinsum.test_different_paths_dtype_D",  # torch_np/numpy_tests/core/test_einsum

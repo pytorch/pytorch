@@ -744,7 +744,9 @@ class CommonTemplate:
         self.common(fn, (torch.linspace(-10, 10, 41), None), assert_equal=False)
 
         # generator not yet supported in dynamo
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "Generator"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "UserDefinedObjectVariable"
+        ):
             self.common(fn, (torch.linspace(-10, 10, 41), torch.Generator(self.device)))
 
     def test_sgn_extremal(self):
