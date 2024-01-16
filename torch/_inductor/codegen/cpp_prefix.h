@@ -183,8 +183,8 @@ int64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high)
   auto gen = at::Philox4_32(seed, 0, offset);
   uint64_t r0 = gen();
   uint64_t r1 = gen();
-  int64_t result = static_cast<int64_t>(r0 | (r1 << 32));
-  return (result % (high - low)) + low;
+  uint64_t result = r0 | (r1 << 32);
+  return static_cast<int64_t>(result % (high - low)) + low;
 }
 
 template <typename T> struct AsIntegerType { typedef T type; };
