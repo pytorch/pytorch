@@ -641,7 +641,9 @@ void PyTorchStreamWriter::setup(const string& file_name) {
     const std::string dir_name = parentdir(file_name);
     if(!dir_name.empty()) {
       struct stat st;
-      bool dir_exists = (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR));
+      bool dir_exists =
+          (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR)) ||
+          (dir_name.length() == 2 && dir_name.back() == ':')
       TORCH_CHECK(dir_exists, "Parent directory ", dir_name, " does not exist.");
     }
     TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
