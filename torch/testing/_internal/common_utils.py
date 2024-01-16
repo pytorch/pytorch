@@ -2708,7 +2708,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 match = re.match(r".*/test/(.*).py", full_path)
                 if match is not None:
                     filename = match.group(1)
-                    if TEST_WITH_TORCHINDUCTOR:
+                    if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
                         strict_default = filename not in FIXME_inductor_non_strict
                     else:
                         strict_default = filename not in FIXME_default_non_strict
