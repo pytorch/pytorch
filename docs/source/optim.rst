@@ -56,8 +56,8 @@ contains all learnable parameters, including biases and other
 parameters that may prefer distinct penalization. To address this, one can specify
 individual penalization weights for each parameter group::
 
-    bias_params = [p for name,p in self.named_parameters() if 'bias' in name]
-    others = [p for name,p in self.named_parameters() if 'bias' not in name]
+    bias_params = [p for name, p in self.named_parameters() if 'bias' in name]
+    others = [p for name, p in self.named_parameters() if 'bias' not in name]
 
     optim.SGD([
                     {'params': others },
