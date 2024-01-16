@@ -159,6 +159,11 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.sym_min,
                 torch.sym_not,
                 torch.sym_sqrt,
+                # TODO (tmanlaibaatar)
+                # Predispatch export is able to contain autograd ops.
+                # These will be modeled as HOO later
+                torch._C._set_grad_enabled
+
             )
 
             if not isinstance(op, _allowed_op_types()):
