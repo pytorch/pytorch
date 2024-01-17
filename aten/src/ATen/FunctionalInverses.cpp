@@ -323,8 +323,16 @@ Tensor FunctionalInverses::_nested_view_from_values_offsets_lengths_inverse(cons
 
 Tensor FunctionalInverses::_nested_get_values_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
   // TODO: Handle lengths here too.
-  auto nt = at::_nested_view_from_values_offsets(
-      mutated_view, at::_nested_get_offsets(base), base);
+  auto lengths = at::_nested_get_lengths(base);
+  auto nt = Tensor();
+  if (lengths.defined()) {
+    nt = at::_nested_view_from_values_offsets_lengths(
+        mutated_view, at::_nested_get_offsets(base), lengths, base);
+  } else {
+    nt = at::_nested_view_from_values_offsets(
+        mutated_view, at::_nested_get_offsets(base), base);
+  }
+
   if (inverse_return_mode != InverseReturnMode::NeverView) {
     return nt;
   } else {
