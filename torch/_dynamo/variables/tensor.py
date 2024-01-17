@@ -109,7 +109,6 @@ class TensorVariable(VariableTracker):
         size=None,
         stride=None,
         is_contiguous=None,
-        specialized_value=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -125,7 +124,6 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
-        self.specialized_value = specialized_value
 
     def as_proxy(self):
         return self.proxy
