@@ -267,6 +267,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.affine_grid_generator,
             aten.all,
             aten.aminmax,
+            aten.angle,
             aten.arange.default,
             aten.arange.start,
             aten.avg_pool2d_backward,

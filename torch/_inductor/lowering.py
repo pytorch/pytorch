@@ -25,6 +25,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     get_computation_dtype,
     is_boolean_dtype,
+    is_complex_dtype,
     is_float_dtype,
     is_integer_dtype,
     Number,
@@ -158,6 +159,24 @@ def is_boolean_type(x):
         return is_boolean_dtype(x.get_dtype())
     else:
         return isinstance(x, bool)
+
+
+def is_float_type(x):
+    if isinstance(x, TensorBox):
+        return is_float_dtype(x.get_dtype())
+    elif isinstance(x, sympy.Expr):
+        return x.is_real is True and x.is_integer is not True  # type: ignore[attr-defined]
+    else:
+        return isinstance(x, float)
+
+
+def is_complex_type(x):
+    if isinstance(x, TensorBox):
+        return is_complex_dtype(x.get_dtype())
+    elif isinstance(x, sympy.Expr):
+        return x.is_complex is True  # type: ignore[attr-defined]
+    else:
+        return isinstance(x, complex)
 
 
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
@@ -1665,6 +1684,8 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     # Custom fallback lowering
     if node.target is aten.view_as_complex.default:
         return False
+    if node.target is aten.angle.default:
+        return False
 
     # We should be able to remove this special case once `disable_cpp_codegen` is killed.
     if node.target is aten.lift_fresh_copy.default:
@@ -2293,7 +2314,53 @@ make_fallback(aten.soft_margin_loss_backward, warn=False)
 make_fallback(aten.linalg_pinv.atol_rtol_tensor)
 make_fallback(aten.segment_reduce.default)
 make_fallback(aten._segment_reduce_backward.default)
-make_fallback(aten.angle)
+
+
+@register_lowering(aten.angle)
+def angle(x):
+    if is_complex_type(x):
+        rtype = get_promoted_dtype(
+            x, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
+        )
+    elif is_integer_type(x):
+        rtype = get_promoted_dtype(
+            x, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        )
+    else:
+        assert is_float_type(x)
+        rtype = x.get_dtype()
+
+    itype = x.get_dtype()
+
+    if is_complex_type(x):
+        xv = ir.ReinterpretView(x, x.layout.view(rtype))  # equivalent to x.view(rtype)
+        x_real = ir.SliceView.create(xv, -1, 0, xv.get_size()[-1], step=2)
+        x_imag = ir.SliceView.create(xv, -1, 1, xv.get_size()[-1], step=2)
+        x_real_loader = x_real.make_loader()
+        x_imag_loader = x_imag.make_loader()
+
+        def inner_fn(index):
+            r = x_real_loader(index)
+            i = x_imag_loader(index)
+            return ops.atan2(i, r)
+
+    else:
+        x_loader = x.make_loader()
+
+        def inner_fn(index):
+            mask = ops.lt(x_loader(index), ops.constant(0, itype))
+            return ops.where(
+                mask, ops.constant(torch.pi, rtype), ops.constant(0, rtype)
+            )
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=rtype,
+        inner_fn=inner_fn,
+        ranges=x.get_size(),
+    )
+
+
 make_fallback(aten.cholesky_inverse)
 make_fallback(aten.cholesky_solve)
 make_fallback(aten._fft_r2c)
