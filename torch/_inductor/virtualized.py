@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import itertools
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from itertools import chain
 from threading import local
-from typing import Any, Callable, TYPE_CHECKING, Union
+from typing import Any, Callable, Generic, List, Type, TYPE_CHECKING, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
@@ -16,23 +16,44 @@ from torch.fx.graph import inplace_methods, magic_methods
 from .utils import reduction_num_outputs, sympy_str, sympy_symbol
 
 if TYPE_CHECKING:
+    import torch
+    from torch._inductor.debug import DebugContext
     from torch._inductor.graph import GraphLowering
+    from torch._inductor.ir import InterpreterShim
+    from torch._subclasses import FakeTensorMode
 
 threadlocal = local()
 
+T = TypeVar("T")
 
-class Virtualized:
+
+class NullHandler:
     """
-    A global variable that redirects via thread local variable
+    Sentinel indicating that a global variable is unset ala None.  Typically,
+    attempting to access the global variable when it is an error, but with
+    NullHandler it won't fail until you try to access an attribute on it.
+    """
+
+    pass
+
+
+class Virtualized(Generic[T]):
+    """
+    Implements a global variable that redirects via thread local variable
+    (NB: construct this class to create the global variable; this is not
+    a singleton class!)
 
     This allows us to swap in different op implementations in codegen.
+
+    NB: Despite the handler naming, we sometimes use these variables to
+    store other things, like booleans.
     """
 
-    def __init__(self, vname: str, default):
+    def __init__(self, vname: str, default: Union[Callable[[], T], Type[NullHandler]]):
         self._key: str = f"__torchinductor_{vname}"
         self._default = default
 
-    def _set_handler(self, value):
+    def _set_handler(self, value: T) -> AbstractContextManager[None]:
         prior = self._get_handler()
         setattr(threadlocal, self._key, value)
 
@@ -45,18 +66,17 @@ class Virtualized:
 
         return ctx()
 
-    def _get_handler(self):
+    def _get_handler(self) -> T:
         try:
             return getattr(threadlocal, self._key)
         except AttributeError:
-            return self._default()
+            # TODO: To be honest, I feel we probably should just error in this
+            # case, instead of making a null handler that will probably error
+            # when you getattr on it
+            return self._default()  # type: ignore[return-value]
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self._get_handler(), name)
-
-
-class NullHandler:
-    pass
 
 
 class NullKernelHandler(NullHandler):
@@ -184,15 +204,17 @@ class WrapperHandler:
 
 MockHandler._init_cls()
 
-_ops = Virtualized("ops", MockHandler)
-_graph = Virtualized("graph", NullHandler)
-_real_inputs = Virtualized("real_inputs", NullHandler)
-_fake_mode = Virtualized("fake_mode", NullHandler)
-_kernel = Virtualized("kernel", NullKernelHandler)
-_debug = Virtualized("debug", NullHandler)
-_interpreter = Virtualized("interpreter", NullHandler)
-_aot_compilation = Virtualized("aot_compilation", NullHandler)
-_current_node = Virtualized("current_node", NullHandler)
+_ops = Virtualized("ops", MockHandler)  # TODO: improve type
+_graph: Virtualized[GraphLowering] = Virtualized("graph", NullHandler)
+_real_inputs: Virtualized[List[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
+_fake_mode: Virtualized[FakeTensorMode] = Virtualized("fake_mode", NullHandler)
+_kernel: Virtualized[NullKernelHandler] = Virtualized(
+    "kernel", NullKernelHandler
+)  # TODO: improve type
+_debug: Virtualized[DebugContext] = Virtualized("debug", NullHandler)
+_interpreter: Virtualized[InterpreterShim] = Virtualized("interpreter", NullHandler)
+_aot_compilation: Virtualized[bool] = Virtualized("aot_compilation", NullHandler)
+_current_node: Virtualized[torch.fx.Node] = Virtualized("current_node", NullHandler)
 
 
 class OpsValue:
@@ -299,7 +321,7 @@ class _V:
     set_kernel_handler: Callable[[Any], Any] = _kernel._set_handler
     set_debug_handler: Callable[[Any], Any] = _debug._set_handler
     set_interpreter_handler: Callable[[Any], Any] = _interpreter._set_handler
-    set_aot_compilation: Callable[[Any], Any] = _aot_compilation._set_handler
+    set_aot_compilation: Callable[[bool], Any] = _aot_compilation._set_handler
     get_aot_compilation: Callable[[], Any] = _aot_compilation._get_handler
     set_current_node: Callable[[Any], Any] = _current_node._set_handler
     get_current_node: Callable[[], Any] = _current_node._get_handler
