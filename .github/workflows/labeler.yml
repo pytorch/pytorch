@@ -12,6 +12,8 @@ jobs:
     # Do not auto-label nightly builds PR
     if: ${{ github.event.pull_request.number != 26921 }}
     steps:
+    - name: Create annotation for build error
+      run: echo "XXX"
     - uses: actions/labeler@v4
       with:
         repo-token: "${{ secrets.GITHUB_TOKEN }}"
