@@ -34,6 +34,12 @@ class TestFullyShardMemory(FSDPTest):
             self.world_size == 2
         ), f"Requires world size of 2 since some values are hard coded: {self.world_size}"
         torch.manual_seed(42)
+        # Pre-run a linear forward (gemm and bias) and backward (gemm) to
+        # allocate the cuBLAS workspaces before measuring the memory usage
+        # since the workspace size can differ between hardwares
+        lin = torch.nn.Linear(768, 768, device="cuda")
+        inp = torch.randn(1, 768, device="cuda")
+        lin(inp).sum().backward()
         torch.cuda.empty_cache()
         base_mem_mb = self._get_peak_active_memory_mb()
         vocab_size = 32
@@ -82,7 +88,10 @@ class TestFullyShardMemory(FSDPTest):
         # Forward:
         loss = model(*inp)
         mem_mb = self._get_peak_active_memory_mb()
-        buffer_mb = 32  # 8.1 MiB cuBLAS workspaces, fragmentation, activations
+        # Allow for some buffer for fragmentation/activations (where this
+        # number is kept much smaller than the actual memory usage, which is on
+        # the order of 100-200+ MB)
+        buffer_mb = 16
         if reshard_after_forward:
             # 3x max unsharded block parameters (current all-gather + copy-out
             # and next all-gather), non-block parameters, and other
