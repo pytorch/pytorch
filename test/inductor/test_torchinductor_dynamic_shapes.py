@@ -12,10 +12,10 @@ import torch._custom_ops as custom_ops
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch.testing._internal.common_device_type import (
+    expectedFailureCPU,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
-    expectedFailureCPU,
 )
 from torch.testing._internal.common_utils import (
     IS_CI,

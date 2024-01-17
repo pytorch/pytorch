@@ -584,7 +584,9 @@ class Reduction(Loops):
         return self.__str__()
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
-        return super().get_unbacked_symbol_uses() | set().union(*(free_unbacked_symbols(e) for e in self.reduction_ranges))
+        return super().get_unbacked_symbol_uses() | set().union(
+            *(free_unbacked_symbols(e) for e in self.reduction_ranges)
+        )
 
     def get_reduction_size(self):
         return self.reduction_ranges
@@ -1561,9 +1563,9 @@ class Scan(Loops):
         # need to explicitly represent the closure so we can pull out unbacked
         # symbols here
         return (
-            super().get_unbacked_symbol_uses() |
-            set().union(*(free_unbacked_symbols(e) for e in self.scan_ranges)) |
-            set().union(*(free_unbacked_symbols(e) for e in self.size))
+            super().get_unbacked_symbol_uses()
+            | set().union(*(free_unbacked_symbols(e) for e in self.scan_ranges))
+            | set().union(*(free_unbacked_symbols(e) for e in self.size))
         )
 
     def __post_init__(self):
