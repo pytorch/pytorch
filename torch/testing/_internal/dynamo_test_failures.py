@@ -3178,7 +3178,6 @@ dynamo_expected_failures = {
     "TestProfilerTree.test_profiler_experimental_tree_with_stack_and_torch_dispatch",  # profiler/test_profiler_tree
     "TestProfilerTree.test_profiler_experimental_tree_with_stack_and_torch_function",  # profiler/test_profiler_tree
     "TestTorchTidyProfiler.test_allocation_ids_with_other_ops",  # profiler/test_profiler
-    "TestProfiler.test_profiler_disable_fwd_bwd_link",  # profiler/test_profiler
     "TestExperimentalUtils.test_profiler_synchronized_dataloader_pattern",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_impl_reuse",  # profiler/test_profiler
     "TestExperimentalUtils.test_profiler_pattern_matcher_json_report",  # profiler/test_profiler
@@ -3191,7 +3190,6 @@ dynamo_expected_failures = {
     "TestProfiler.test_source_multithreaded_complex_work_in_main_thread_False",  # profiler/test_profiler
     "TestExperimentalUtils.test_profiler_name_pattern",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_extra_fields",  # profiler/test_profiler
-    "TestProfiler.test_source_multithreaded_open_in_scope_work_in_main_thread_False",  # profiler/test_profiler
     "TestProfiler.test_flops",  # profiler/test_profiler
     "TestProfiler.test_profiler_correlation_id",  # profiler/test_profiler
     "TestProfiler.test_source_multithreaded_open_in_scope_work_in_main_thread_True",  # profiler/test_profiler
@@ -3214,7 +3212,6 @@ dynamo_expected_failures = {
     "TestTorchTidyProfiler.test_allocations",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_module_and_optimizer_ids",  # profiler/test_profiler
     "TestExperimentalUtils.test_utils_compute_queue_depth_when_no_cuda_events",  # profiler/test_profiler
-    "TestProfiler.test_source_multithreaded_multiple_preexisting_work_in_main_thread_False",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_allocation_id_uniqueness",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_sparse_tensors",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_optimizer",  # profiler/test_profiler
