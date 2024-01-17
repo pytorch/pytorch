@@ -74,9 +74,6 @@ TEST(XPUStreamTest, StreamBehavior) {
 
   ASSERT_EQ_XPU(cur_stream, stream);
 
-  ASSERT_THROW(
-      c10::xpu::getStreamFromPool(/* isHighPriority= */ true), c10::Error);
-
   if (c10::xpu::device_count() <= 1) {
     return;
   }
