@@ -821,7 +821,6 @@ class VariableBuilder:
                 unimplemented("list elements are pointing to the list itself")
 
         output = [
-            # VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(item)
             LazyVariableTracker.create(item, source=GetItemSource(self.get_source(), i))
             for i, item in enumerate(value)
         ]

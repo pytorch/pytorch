@@ -487,7 +487,7 @@ class BuiltinVariable(VariableTracker):
             k: v.as_python_constant() for k, v in kwargs.items()
         }
 
-    def get_constant_handler(self, args, kwargs):
+    def has_constant_handler(self, args, kwargs):
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = self.unspec_python_args(*args, **kwargs)
         return self.can_constant_fold_through() and (
@@ -642,7 +642,7 @@ class BuiltinVariable(VariableTracker):
             try:
                 inspect.signature(handler).bind(tx, *args, **kwargs)
             except TypeError as exc:
-                has_constant_handler = self.get_constant_handler(args, kwargs)
+                has_constant_handler = self.has_constant_handler(args, kwargs)
                 if not has_constant_handler:
                     log.warning(
                         "incorrect arg count %s %s and no constant handler",
@@ -657,17 +657,17 @@ class BuiltinVariable(VariableTracker):
                 if result is not None:
                     return result
             except Unsupported as exc:
-                has_constant_handler = self.get_constant_handler(args, kwargs)
+                has_constant_handler = self.has_constant_handler(args, kwargs)
                 if not has_constant_handler:
                     raise
                 # Actually, we will handle this just fine
                 exc.remove_from_stats()
 
-        # NB: call to get_constant_handler is deliberately delayed post generic
-        # handler because get_constant_handler calls as_python_constant
+        # NB: call to has_constant_handler is deliberately delayed post generic
+        # handler because has_constant_handler calls as_python_constant
         # internally which realizes LazyVariableTracker for ConstantVariables,
         # unnecessarily putting guards on objects which might not actually be used.
-        has_constant_handler = self.get_constant_handler(args, kwargs)
+        has_constant_handler = self.has_constant_handler(args, kwargs)
         if has_constant_handler:
             # constant fold
             return variables.ConstantVariable.create(
