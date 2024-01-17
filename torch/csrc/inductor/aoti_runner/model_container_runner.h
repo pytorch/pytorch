@@ -27,6 +27,9 @@ class TORCH_API AOTIModelContainerRunner {
       std::vector<at::Tensor>& inputs,
       AOTInductorStreamHandle cuda_stream_handle = nullptr);
 
+  std::unordered_map<std::string, std::string> getConstantNamesToOriginalFQNs()
+      const;
+  std::unordered_map<std::string, int32_t> getConstantNamesToDtypes() const;
   void update_inactive_constant_buffer(const TensorConstantMap& const_map);
   void update_constant_buffer(
       const TensorConstantMap& const_map,
@@ -52,6 +55,14 @@ class TORCH_API AOTIModelContainerRunner {
   decltype(&AOTInductorModelContainerGetNumOutputs) get_num_outputs_func_{
       nullptr};
   decltype(&AOTInductorModelContainerRun) run_func_{nullptr};
+  decltype(&AOTInductorModelContainerGetNumConstants) get_num_constants_func_{
+      nullptr};
+  decltype(&AOTInductorModelContainerGetConstantName) get_constant_name_func_{
+      nullptr};
+  decltype(&AOTInductorModelContainerGetConstantOriginalFQN)
+      get_constant_original_fqn_func_{nullptr};
+  decltype(&AOTInductorModelContainerGetConstantDtype) get_constant_dtype_func_{
+      nullptr};
   decltype(&AOTInductorModelContainerUpdateConstantBuffer)
       update_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerUpdateInactiveConstantBuffer)

@@ -116,6 +116,34 @@ class AOTInductorModelContainer {
     pending_models_available_.notify_one();
   }
 
+  size_t num_constants() const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->num_constants();
+  }
+
+  const char* constant_name(size_t idx) const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->constant_name(idx);
+  }
+
+  const char* constant_original_fqn(size_t idx) const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->constant_original_fqn(idx);
+  }
+
+  int32_t constant_dtype(size_t idx) const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->constant_dtype(idx);
+  }
+
   void run_const_fold(
       bool inactive_buffer,
       DeviceStreamType stream,
@@ -244,7 +272,7 @@ class AOTInductorModelContainer {
           models_[0]->constant_shape(idx),
           stride,
           offset,
-          models_[0]->constant_type(idx),
+          models_[0]->constant_dtype(idx),
           aoti_torch_device_type_cuda(),
           device_idx,
           &tensor_handle));
