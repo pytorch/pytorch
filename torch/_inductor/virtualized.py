@@ -38,6 +38,12 @@ There are a few distinct usage patterns for virtualized global variables:
 It is typically an error to access a virtualized global without having installed
 an appropriate handler (you will get a NullHandler), although in some cases we
 provide a default implementation.
+
+One last thing: although most virtualized globals are accessed via ``V``, ``ops`` is
+ubiquitous enough to have its own top level variable, so you will typically see
+``ops.constant(...)`` rather than ``V.ops.constant(...)``.  In fact, these are not
+equivalent; the former interface supports arithmetic overloads like ``x + y``
+instead of forcing ``ops.add(x, y)``, so it should be preferred.
 """
 
 from __future__ import annotations
