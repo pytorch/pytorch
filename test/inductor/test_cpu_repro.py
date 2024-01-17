@@ -577,6 +577,8 @@ class CPUReproTests(TestCase):
             )
 
     def test_relu_with_inf_value(self):
+        # https://github.com/pytorch/pytorch/issues/117544.
+
         def fn(out):
             out = torch.sinh(input=out)
             out = torch.relu(input=out)
