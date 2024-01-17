@@ -91,9 +91,7 @@ class ConstDictVariable(VariableTracker):
             # TODO Temorarily remove to figure out what keys are we breaking on
             # and add proper support for them
             if not is_hashable(vt):
-                unimplemented(
-                    f"Dict key of type {type(vt)}. Key: {vt}"
-                )
+                unimplemented(f"Dict key of type {type(vt)}. Key: {vt}")
             self.vt = vt
 
         @property
@@ -129,7 +127,7 @@ class ConstDictVariable(VariableTracker):
 
         def __eq__(self, other: "ConstDictVariable._HashableTracker") -> bool:
             Hashable = ConstDictVariable._HashableTracker
-            assert isinstance(other, Hashable)
+            assert isinstance(other, Hashable), type(other)
             return Hashable._eq_impl(self.underlying_value, other.underlying_value)
 
     def __init__(
