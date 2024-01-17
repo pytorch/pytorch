@@ -4246,29 +4246,29 @@ def _avg_poolnd(
 
     new_size = list(batch) + list(h_out)
     dtype = x.get_dtype()
+    # compute in higher-precision until scaling
+    output_dtype = torch.float32 if dtype in (torch.float16, torch.bfloat16) else dtype
 
-    def fn_sum(loader):
-        def fn_inner(idx, reduction_idx):
-            prefix = idx[:-dim]
-            bh = idx[-dim:]
-            ih = reduction_idx
-            ih = [bh[i] * stride[i] + ih[i] - padding[i] for i in range(dim)]
-            return loader([*prefix, *ih])
+    def fn_inner(idx, reduction_idx):
+        prefix = idx[:-dim]
+        bh = idx[-dim:]
+        ih = reduction_idx
+        ih = [bh[i] * stride[i] + ih[i] - padding[i] for i in range(dim)]
+        return x_loader([*prefix, *ih])
 
-        rv = Reduction.create(
-            reduction_type="sum",
-            input_node=x,
-            device=x.get_device(),
-            dst_dtype=dtype,
-            src_dtype=dtype,
-            inner_fn=fn_inner,
-            ranges=new_size,
-            reduction_ranges=kernel_size,
-        )
-        if isinstance(rv.data.data, Reduction):
-            # Only realize if reduction isn't unrolled
-            rv.realize()
-        return rv
+    rv = Reduction.create(
+        reduction_type="sum",
+        input_node=x,
+        device=x.get_device(),
+        dst_dtype=output_dtype,
+        src_dtype=dtype,
+        inner_fn=fn_inner,
+        ranges=new_size,
+        reduction_ranges=kernel_size,
+    )
+    if isinstance(rv.data.data, Reduction):
+        # Only realize if reduction isn't unrolled
+        rv.realize()
 
     if not had_padding or divisor_override:
         if divisor_override:
@@ -4276,7 +4276,7 @@ def _avg_poolnd(
         else:
             scale = 1.0 / functools.reduce(operator.mul, kernel_size)
 
-        result = mul(fn_sum(x_loader), scale)
+        result = mul(rv, scale)
     else:
 
         def fn_count(idx):
@@ -4300,7 +4300,7 @@ def _avg_poolnd(
             inner_fn=fn_count,
             ranges=new_size,
         )
-        result = div(fn_sum(x_loader), divide_factor)
+        result = div(rv, divide_factor)
 
     return to_dtype(result, dtype)
 
