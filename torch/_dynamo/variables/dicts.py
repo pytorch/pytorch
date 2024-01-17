@@ -84,9 +84,7 @@ class ConstDictVariable(VariableTracker):
             # TODO Temorarily remove to figure out what keys are we breaking on
             # and add proper support for them
             if not is_hashable(vt):
-                unimplemented(
-                    f"Dict key of type {type(vt)}. Key: {vt}"
-                )
+                unimplemented(f"Dict key of type {type(vt)}. Key: {vt}")
             self.vt = vt
 
         @property
