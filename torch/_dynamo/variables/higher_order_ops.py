@@ -1350,7 +1350,13 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
         context_fn = None
         if "context_fn" in kwargs and kwargs["context_fn"] != noop_context_fn:
-            context_fn = kwargs.pop("context_fn").fn
+            ctx = kwargs.pop("context_fn")
+            if isinstance(ctx, torch._dynamo.variables.UserFunctionVariable):
+                context_fn = ctx.fn
+            elif isinstance(ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable):
+                context_fn = ctx.as_python_constant()
+            else:
+                raise NotImplementedError(f"checkpoint not implemented for {type(ctx)} context_fn")
 
         checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
 
