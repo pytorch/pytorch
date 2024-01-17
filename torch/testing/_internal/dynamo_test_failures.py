@@ -2842,7 +2842,6 @@ dynamo_skips = {
     "TestMatmulOperator.test_matmul_raises",
     "TestMatmulOperator.test_exceptions",
     "TestMatmulOperator.test_matmul_inplace",
-    "TestMonitorTensorboard.test_event_handler",  # weird
     "TestMethods.test_diagonal",
     "TestMethods.test_searchsorted_complex",
     "TestMethods.test_round",
