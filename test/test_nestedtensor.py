@@ -3380,7 +3380,6 @@ class TestNestedTensorSubclass(TestCase):
         if base is not None:
             self.assertTrue(nt._is_view() and nt._base is base)
 
-    @xfailIfTorchDynamo
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
@@ -3407,7 +3406,6 @@ class TestNestedTensorSubclass(TestCase):
                 t = t if isinstance(t, torch.Tensor) else torch.as_tensor(t)
                 self.assertTrue(t.grad is None)
 
-    @xfailIfTorchDynamo
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("components_require_grad", [False, True])
     def test_jagged_layout_construction_as_nested_tensor(
@@ -3492,12 +3490,13 @@ class TestNestedTensorSubclass(TestCase):
         if requires_grad:
             # Make sure grads flow back
             (nt * 2).backward(torch.ones_like(nt))
-            if values_is_view:
-                self.assertTrue(base.grad is not None)
-                self.assertEqual(base.grad, torch.ones_like(base) * 2)
-            else:
-                self.assertTrue(values.grad is not None)
-                self.assertEqual(values.grad, torch.ones_like(values) * 2)
+
+            @torch.compiler.disable
+            def _check_grad(t):
+                self.assertTrue(t.grad is not None)
+                self.assertEqual(t.grad, torch.ones_like(t) * 2)
+
+            _check_grad(base if values_is_view else values)
 
     @dtypes(torch.double, torch.half)
     @onlyCUDA
