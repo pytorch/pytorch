@@ -1272,6 +1272,7 @@ TestEnvironment.def_flag("TEST_WITH_DEV_DBG_ASAN", env_var="PYTORCH_TEST_WITH_DE
 TestEnvironment.def_flag("TEST_WITH_TSAN", env_var="PYTORCH_TEST_WITH_TSAN")
 TestEnvironment.def_flag("TEST_WITH_UBSAN", env_var="PYTORCH_TEST_WITH_UBSAN")
 TestEnvironment.def_flag("TEST_WITH_ROCM", env_var="PYTORCH_TEST_WITH_ROCM")
+TestEnvironment.def_flag("TEST_WITH_XPU", env_var="PYTORCH_TEST_WITH_XPU")
 
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
@@ -1567,6 +1568,21 @@ def runOnRocm(fn):
         else:
             raise unittest.SkipTest("test currently only works on the ROCm stack")
     return wrapper
+
+def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
+    def dec_fn(fn):
+        reason = f"skipIfXpu: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if TEST_WITH_XPU:  # noqa: F821
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
 
 def skipIfMps(fn):
     @wraps(fn)
@@ -2249,6 +2265,7 @@ def check_if_enable(test: unittest.TestCase):
                     "windows": IS_WINDOWS,
                     "linux": IS_LINUX,
                     "rocm": TEST_WITH_ROCM,  # noqa: F821
+                    "xpu": TEST_WITH_XPU,  # noqa: F821
                     "asan": TEST_WITH_ASAN,  # noqa: F821
                     "dynamo": TEST_WITH_TORCHDYNAMO,  # noqa: F821
                     "inductor": TEST_WITH_TORCHINDUCTOR,  # noqa: F821

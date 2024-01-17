@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
+    TEST_WITH_XPU,
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -301,6 +302,14 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
+]
+
+XPU_BLOCKLIST = [
+    "test_autograd",
+]
+
+XPU_TEST = [
+    "test_xpu",
 ]
 
 # The tests inside these files should never be run in parallel with each other
@@ -1153,6 +1162,12 @@ def parse_args():
         help=("If this flag is present, we will only run test_mps and test_metal"),
     )
     parser.add_argument(
+        "--xpu",
+        "--xpu",
+        action="store_true",
+        help=("If this flag is present, we will only run XPU_TEST"),
+    )
+    parser.add_argument(
         "--cpp",
         "--cpp",
         action="store_true",
@@ -1359,6 +1374,9 @@ def get_selected_tests(options) -> List[str]:
         # Exclude all mps tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
 
+    if options.xpu:
+        selected_tests = XPU_TEST
+
     # Filter to only run onnx tests when --onnx option is specified
     onnx_tests = [tname for tname in selected_tests if tname in ONNX_TESTS]
     if options.onnx:
@@ -1396,6 +1414,9 @@ def get_selected_tests(options) -> List[str]:
 
     elif TEST_WITH_ROCM:
         selected_tests = exclude_tests(ROCM_BLOCKLIST, selected_tests, "on ROCm")
+
+    elif TEST_WITH_XPU:
+        selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
 
     # skip all distributed tests if distributed package is not available.
     if not dist.is_available():
