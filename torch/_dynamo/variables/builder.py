@@ -138,9 +138,10 @@ from .misc import (
     SkipFilesVariable,
     TypingVariable,
 )
-
 from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
 from .optimizer import OptimizerVariable
+
+from .sdpa import SDPAParamsVariable
 from .tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -586,6 +587,13 @@ class VariableBuilder:
                 value.device,
                 source=self.source,
             )
+        elif isinstance(value, torch._C._SDPAParams):
+            proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(value),
+                source=self.source,
+            )
+            return SDPAParamsVariable(value, proxy, None, source=self.source)
         elif isinstance(value, _EventBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EventVariable(
@@ -1543,10 +1551,10 @@ def wrap_fx_proxy_cls(
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable.create(example_value, **options)
     elif isinstance(example_value, torch.backends.cuda.SDPAParams):
-        from .flash_attention import SDPAParamsVariable
+        from .sdpa import SDPAParamsVariable
 
         proxy.node.meta["example_value"] = example_value
-        return SDPAParamsVariable(proxy, **options)
+        return SDPAParamsVariable(example_value, proxy, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "

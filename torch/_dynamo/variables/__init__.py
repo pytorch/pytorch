@@ -18,7 +18,6 @@ from .dicts import (
     DefaultDictVariable,
     SetVariable,
 )
-from .flash_attention import SDPAParamsVariable
 from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
@@ -62,6 +61,7 @@ from .misc import (
     UnknownVariable,
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .sdpa import SDPAParamsVariable
 from .tensor import (
     FakeItemVariable,
     NumpyNdarrayVariable,
