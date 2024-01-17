@@ -92,7 +92,7 @@ from .dicts import (
     DataClassVariable,
     DefaultDictVariable,
     HFPretrainedConfigVariable,
-    is_hashable_python_var,
+    is_hashable,
     PythonSysModulesVariable,
     SetVariable,
 )
@@ -408,21 +408,9 @@ class VariableBuilder:
             return ConstDictVariable(result, type(value))
         elif value is sys.modules:
             return PythonSysModulesVariable(source=self.source)
-        elif istype(
-            value, (dict, collections.defaultdict, collections.OrderedDict)
-        ) and all(is_hashable_python_var(k) for k in value.keys()):
-            if not value and self.get_source().is_nn_module():
-                # It is faster to guard on 'false' property than to guard
-                # on actual dict keys, but we can't do this fast guard in general because
-                # it omits a crucial type check that ensures the value is actually still a dict at runtime.
-
-                # Why is this OK for (specialized) nnmodules? We set up a setattr hook
-                # to check for module property mutations, which does a reasonable,
-                # but not completely secure job ensuring a property wasn't changed.
-                self.install_guards(GuardBuilder.BOOL_FALSE)
-            else:
-                self.install_guards(GuardBuilder.DICT_KEYS)
-
+        elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
+            # We need all the keys to be hashable. To do so, we first wrap them and then
+            # check whether they are hashable
             idx = 0
 
             def build_key_value(k, v):
@@ -441,6 +429,25 @@ class VariableBuilder:
                 return key, value
 
             result = dict(build_key_value(k, v) for k, v in value.items())
+
+            # Maybe break
+            for k in result.keys():
+                if not is_hashable(k):
+                    unimplemented(
+                        f"Wrapping a dict with key of type {type(k)}. Key: {k}"
+                    )
+
+            if not value and self.get_source().is_nn_module():
+                # It is faster to guard on 'false' property than to guard
+                # on actual dict keys, but we can't do this fast guard in general because
+                # it omits a crucial type check that ensures the value is actually still a dict at runtime.
+
+                # Why is this OK for (specialized) nnmodules? We set up a setattr hook
+                # to check for module property mutations, which does a reasonable,
+                # but not completely secure job ensuring a property wasn't changed.
+                self.install_guards(GuardBuilder.BOOL_FALSE)
+            else:
+                self.install_guards(GuardBuilder.DICT_KEYS)
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(
@@ -780,7 +787,6 @@ class VariableBuilder:
                 ),
             )
         else:
-            # breakpoint()
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = UserDefinedObjectVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):

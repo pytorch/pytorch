@@ -1,13 +1,9 @@
 import collections
 import dataclasses
-import enum
 import functools
 import inspect
 import sys
-from types import MethodWrapperType
 from typing import Dict, List, Optional
-
-import torch
 
 from torch._subclasses.fake_tensor import is_fake
 
@@ -28,30 +24,12 @@ from .constant import ConstantVariable
 
 # Note: [Adding a new supported class the keys of ConstDictVarialble]
 # You'll need to add it to:
-# - `is_hashable_python_var` in this file
 # - `is_hashable` in this file
 # - `const_repr` in util.py, and perhaps modify DICT_KEYS in guards.py
-
-
-def is_hashable_python_var(x):
-    # IMPORTANT: Keep me in sync with is_hashable!
-    # Even better, we should have a map of functions connecting the two
-    from torch import Tensor
-    from ..trace_rules import is_builtin_callable, is_numpy
-
-    return (
-        ConstantVariable.is_literal(x)
-        or isinstance(x, (Tensor, enum.Enum, type, torch.nn.Module, MethodWrapperType))
-        or is_builtin_callable(x)
-        or (isinstance(x, tuple) and all(is_hashable_python_var(e) for e in x))
-        or is_numpy(x)
-    )
+#   You'll need to test that the the guards don't raise an exception when triggered
 
 
 def is_hashable(x):
-    # IMPORTANT: Keep me in sync with is_hashable_python_var!
-    # Even better, we should have a map of functions connecting the two
-
     if isinstance(x, variables.TensorVariable):
         # Tensors are hashable if they have an example_value (a fake tensor)
         # Most VT's should have one.
@@ -191,14 +169,11 @@ class ConstDictVariable(VariableTracker):
             return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
     @staticmethod
-    def _wrap_keys_python_var(d):
+    def _wrap_const_keys(d):
         """Wrap the keys of a dictionary with python objs as keys into Hashable objects"""
-        assert all(is_hashable_python_var(k) for k in d.keys())
+        assert all(ConstantVariable.is_literal(k) for k in d.keys())
         Hashable = ConstDictVariable._HashableTracker
-        from .builder import SourcelessBuilder
-
-        build = SourcelessBuilder()
-        return {Hashable(build(k)): v for k, v in d.items()}
+        return {Hashable(ConstantVariable.create(k)): v for k, v in d.items()}
 
     def getitem_const(self, arg: VariableTracker):
         key = ConstDictVariable._HashableTracker(arg)
@@ -278,7 +253,7 @@ class ConstDictVariable(VariableTracker):
                 dict_vt = BuiltinVariable.call_custom_dict(tx, dict, args[0])
             self.items.update(dict_vt.items)
             # all keys in kwargs are valid (`str`s)
-            kwargs = ConstDictVariable._wrap_keys_python_var(kwargs)
+            kwargs = ConstDictVariable._wrap_const_keys(kwargs)
             self.items.update(kwargs)
             return ConstantVariable.create(None)
         elif name in ("get", "__getattr__") and args[0] in self:
