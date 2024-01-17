@@ -112,7 +112,7 @@ def run(multi_kernel_call, {', '.join(get_all_kernel_argdefs(kernels))}, {', '.j
         """  # noqa: B950 line too long
         wrapper.header.splice(
             f"""
-        {multi_kernel_name} = MultiKernelCall([
+        {multi_kernel_name} = async_compile.multi_kernel([
             {", ".join(kernel_names)},
         ],
             '''

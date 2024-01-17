@@ -6,6 +6,7 @@ import sys
 from pprint import pformat
 from typing import Dict, List, Sequence
 from unittest.mock import Mock, patch
+from warnings import warn
 
 from torchgen.api.python import (
     PythonSignatureGroup,
@@ -604,10 +605,16 @@ def gather_docstrs() -> Dict[str, str]:
         sys.modules["torch"] = Mock(name="torch")
         sys.modules["torch._C"] = Mock(_add_docstr=mock_add_docstr)
 
-        # manually import torch._torch_docs and torch._tensor_docs to trigger
-        # the mocked _add_docstr and collect docstrings
-        sys.modules["torch._torch_docs"] = importlib.import_module("_torch_docs")
-        sys.modules["torch._tensor_docs"] = importlib.import_module("_tensor_docs")
+        try:
+            # manually import torch._torch_docs and torch._tensor_docs to trigger
+            # the mocked _add_docstr and collect docstrings
+            sys.modules["torch._torch_docs"] = importlib.import_module("_torch_docs")
+            sys.modules["torch._tensor_docs"] = importlib.import_module("_tensor_docs")
+        except ModuleNotFoundError:
+            # Gracefully fail if these modules are not importable
+            warn(
+                "Failed to import _torch_docs/_tensor_docs, skipping docstring in pyi files."
+            )
 
     return docstrs
 
@@ -1296,6 +1303,9 @@ def gen_pyi(
             "float8_e5m2fnuz",
             "half",
             "uint8",
+            "uint16",
+            "uint32",
+            "uint64",
             "int8",
             "int16",
             "short",
