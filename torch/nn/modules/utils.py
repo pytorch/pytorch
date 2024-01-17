@@ -57,7 +57,7 @@ def consume_prefix_in_state_dict_if_present(
         state_dict (OrderedDict): a state-dict to be loaded to the model.
         prefix (str): prefix.
     """
-    keys_to_move = [key for key in state_dict.keys()]
+    keys_to_move = list(state_dict.keys())
     for key in keys_to_move:
         # Key starts with the prefix
         if key.startswith(prefix):
@@ -67,7 +67,7 @@ def consume_prefix_in_state_dict_if_present(
         # Key corresponds to the metadata
         elif key == "_metadata":
             metadata = state_dict["_metadata"]
-            metadata_keys = [key for key in state_dict["_metadata"].keys()]
+            metadata_keys = list(state_dict["_metadata"].keys())
             for metadata_key in metadata_keys:
                 if len(metadata_key) == 0:
                     continue
