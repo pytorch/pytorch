@@ -102,7 +102,7 @@ PyObject* THXPModule_getCurrentStream_wrap(
     PyObject* self,
     PyObject* device_index) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkLong(device_index), "invalid argument to current_stream");
   int64_t device = THPUtils_unpackLong(device_index);
   auto stream = at::xpu::getCurrentXPUStream(device);
@@ -125,7 +125,7 @@ PyObject* THXPModule_getCurrentStream_raw(
     PyObject* self,
     PyObject* device_index) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkLong(device_index),
       "invalid argument to getCurrentRawStream");
   int64_t device = THPUtils_unpackLong(device_index);
@@ -172,7 +172,7 @@ PyObject* THXPModule_setStream_wrap(
 
 PyObject* THXPModule_xpuSynchronize(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to synchronize");
+  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to synchronize");
   int device = THPUtils_unpackInt(arg);
   {
     pybind11::gil_scoped_release no_gil;
