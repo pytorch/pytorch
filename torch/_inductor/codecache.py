@@ -49,7 +49,11 @@ from torch._dynamo.utils import counters
 from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import cache_dir, developer_warning, is_linux
-from torch._prims_common import suggest_memory_format
+from torch._subclasses.fake_tensor import (
+    extract_tensor_metadata,
+    FakeTensor,
+    TensorMetadata,
+)
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 
 if TYPE_CHECKING:
@@ -388,28 +392,6 @@ def write_atomic(path: str, content: Union[str, bytes]) -> None:
 
 
 @dataclasses.dataclass
-class TensorMetadata:
-    """
-    The Tensor metadata relevant when hashing FxGraph cache keys.
-    """
-
-    dtype: torch.dtype
-    shape: torch.Size
-    stride: Tuple[Any, ...]
-    device: torch.device
-    layout: torch.layout
-    memory_format: Optional[torch.memory_format]
-    storage_offset: int
-    requires_grad: bool
-    is_quantized: bool
-    is_conj: bool
-    is_neg: bool
-    is_coalesced: bool
-    dense_dim: int
-    sparse_dim: int
-
-
-@dataclasses.dataclass
 class TensorMetadataAndValues:
     """
     TensorMetadata plus the elements as a list of raw values.
@@ -418,32 +400,6 @@ class TensorMetadataAndValues:
 
     tensor_metadata: TensorMetadata
     values: List[Any]
-
-
-def extract_tensor_metadata(t: torch.Tensor) -> TensorMetadata:
-    """
-    Extract the TensorMetadata of a tensor.
-    """
-    memory_format: Optional[torch.memory_format] = suggest_memory_format(t)
-    if not t.is_contiguous(memory_format=memory_format):
-        memory_format = None
-
-    return TensorMetadata(
-        dtype=t.dtype,
-        shape=t.shape,
-        stride=t.stride() if t.layout == torch.strided else (),
-        device=t.device,
-        layout=t.layout,
-        memory_format=memory_format,
-        storage_offset=t.storage_offset(),
-        requires_grad=t.requires_grad,
-        is_quantized=t.is_quantized,
-        is_conj=t.is_conj(),
-        is_neg=t.is_neg(),
-        is_coalesced=t.is_coalesced() if t.is_sparse else False,
-        dense_dim=t.dense_dim() if t.is_sparse else False,
-        sparse_dim=t.sparse_dim() if t.is_sparse else False,
-    )
 
 
 def _ident(x: Any) -> Any:
@@ -494,7 +450,7 @@ class FxGraphCachePickler(pickle.Pickler):
     """
 
     dispatch_table = copyreg.dispatch_table.copy()
-    dispatch_table[torch._subclasses.fake_tensor.FakeTensor] = _reduce_fake_tensor
+    dispatch_table[FakeTensor] = _reduce_fake_tensor
     dispatch_table[torch.Tensor] = _reduce_tensor
     dispatch_table[torch.SymInt] = _reduce_symint
 
