@@ -1384,8 +1384,6 @@ class DistributedDataParallelTest(
         # otherwise process will be taken down and we can't check for errors.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
-        # TODO: smaller timeout can fail since PG NCCl does health check in
-        # constructor. Look into reducing this test's runtime.
         store = c10d.FileStore(self.file_name, self.world_size)
         # provide sufficient timeout to initialize NCCL comm.
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timedelta(seconds=15))
@@ -3299,23 +3297,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             expected_tensor = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
             pg.allreduce(t).wait()
             self.assertEqual(expected_tensor, t)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(4)
-    def test_nccl_barrier_timeout(self):
-        os.environ["TORCH_ENABLE_NCCL_HEALTH_CHECK"] = "1"
-        store = c10d.FileStore(self.file_name, self.world_size)
-        if self.rank == 0:
-            with self.assertRaisesRegex(
-                dist.DistBackendError, "Health check failure"
-            ):
-                c10d.init_process_group(
-                    backend="nccl",
-                    rank=self.rank,
-                    world_size=self.world_size,
-                    store=store,
-                    timeout=timedelta(seconds=10),
-                )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

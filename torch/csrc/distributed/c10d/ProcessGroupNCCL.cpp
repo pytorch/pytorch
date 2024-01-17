@@ -375,7 +375,7 @@ std::future<bool> launchAsyncGilCheck() {
 // heuristic is the correct assignment of ranks to GPUs that Python
 // layers use, but in practice it tends to be.  Fortunately we don't
 // rely on this for correctness of any tensor operations, just for
-// ancillary uses like health checks and barriers.
+// ancillary uses like barriers.
 at::Device ProcessGroupNCCL::guessDeviceForRank() const {
   TORCH_CHECK_WITH(ValueError, rank_ >= 0, "Invalid rank ", rank_);
   if (getBoundDeviceId()) {
@@ -818,15 +818,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     }
   }
 
-  if (getCvarBool(TORCH_ENABLE_NCCL_HEALTH_CHECK, false)) {
-    // Perform health check by initializing dummy communicators and destroying
-    // them. This will help indicate any NCCL-related issues prior to the first
-    // collective.
-    // Run it in a separate thread and wait on CV to handle timeouts, since
-    // majority of getNCCLComm failures are hangs.
-    runHealthCheck();
-  }
-
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_ =
       std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
@@ -954,65 +945,6 @@ c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
   return intra_node_comm::IntraNodeComm::rendezvous(
       store_, std::to_string(uid_), rank_, size_);
-}
-
-void ProcessGroupNCCL::runHealthCheck() {
-  // Run health check in a separate thread and wait on CV to handle timeouts,
-  // since majority of getNCCLComm failures are hangs.
-
-  struct HealthCheckData {
-    std::mutex healthCheckMutex;
-    std::condition_variable healthCheckCv;
-    bool healthCheckSuccess = false;
-    std::exception_ptr healthCheckException;
-  };
-
-  HealthCheckData healthCheckData;
-  auto t = std::thread([&healthCheckData, this]() {
-    try {
-      std::vector<at::Device> rankDevice = {guessDeviceForRank()};
-
-      const auto key = getKeyFromDevices(rankDevice);
-      // OpType does not matter, only need to set to not go through send/recv
-      // path.
-      getNCCLComm(key, rankDevice, OpType::ALLREDUCE);
-      // Now destroy the communicators and remove them from cache so we don't
-      // use destroyed communicators.
-      destroyNCCLComms(key);
-      // Notify main thread the health check is complete.
-      {
-        std::lock_guard<std::mutex> lk(healthCheckData.healthCheckMutex);
-        healthCheckData.healthCheckSuccess = true;
-      }
-      healthCheckData.healthCheckCv.notify_one();
-    } catch (const std::exception& e) {
-      // Populate exception ptr.
-      healthCheckData.healthCheckException = std::current_exception();
-      // Unblock waiting main thread which will report exception.
-      healthCheckData.healthCheckCv.notify_one();
-    } // Unknown exceptions will just cause the program to terminate.
-  });
-  // We don't need to join the thread, just need to verify health check via the
-  // CV. Hence we detach the thread here.
-  t.detach(); // NOLINT
-  LOG(INFO) << logPrefix() << "will wait up to " << options_->timeout.count()
-            << " msec for NCCL health check to complete.";
-  std::unique_lock<std::mutex> lock(healthCheckData.healthCheckMutex);
-  healthCheckData.healthCheckCv.wait_for(
-      lock, options_->timeout, [&healthCheckData]() {
-        return healthCheckData.healthCheckSuccess;
-      });
-
-  if (healthCheckData.healthCheckException) {
-    std::rethrow_exception(healthCheckData.healthCheckException);
-  }
-  // If there is no exception, the likely culprit is a timeout/hang which is how
-  // most communicator init issues manifest themselves.
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      healthCheckData.healthCheckSuccess,
-      "ProcessGroupNCCL: Health check failure: Failed to initialize NCCL communicator on rank ",
-      rank_);
 }
 
 void ProcessGroupNCCL::setSequenceNumberForGroup() {
