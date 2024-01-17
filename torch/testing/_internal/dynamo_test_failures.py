@@ -60,6 +60,8 @@ FIXME_default_non_strict = {
     "test_autograd",
     "test_custom_ops",
     "test_jit",
+    "test_jit_fuser_te",
+    "test_jit_llga_fuser",
     "test_modules",
     "test_ops",
     "test_ops_fwd_gradients",
@@ -67,6 +69,8 @@ FIXME_default_non_strict = {
     "test_ops_jit",
     "test_python_dispatch",
     "test_quantization",
+    "test_tensorexpr",
+    "test_tensorexpr_pybind",
     "test_torch",
 }
 
@@ -3325,14 +3329,6 @@ dynamo_expected_failures = {
     "TestExperiment.test_with_buffer_as_submodule",  # export/test_experimental
     "ExampleTests.test_exportdb_supported_case_constrain_as_size_example",  # export/test_db
     "ExampleTests.test_exportdb_supported_case_assume_constant_result",  # export/test_db
-    "TestOpCPU.test_addmm_cpu_bfloat16",  # test_jit_llga_fuser
-    "TestOpCPU.test_cat_cpu_float32",  # test_jit_llga_fuser
-    "TestOpCPU.test_addmm_cpu_float32",  # test_jit_llga_fuser
-    "TestOpCPU.test_add_scalar_cpu_bfloat16",  # test_jit_llga_fuser
-    "TestOpCPU.test_add_scalar_cpu_float32",  # test_jit_llga_fuser
-    "TestOpCPU.test_cat_cpu_bfloat16",  # test_jit_llga_fuser
-    "TestOpCPU.test_identity_binary_cpu_bfloat16",  # test_jit_llga_fuser
-    "TestOpCPU.test_identity_binary_cpu_float32",  # test_jit_llga_fuser
 }
 
 dynamo_skips = {
@@ -7748,13 +7744,6 @@ dynamo_skips = {
     "TestProfiler.test_profiler_disable_fwd_bwd_link",
     "TestProfiler.test_profiler_metadata",
     "TestSerializeCustomClass.test_custom_class",
-    "TestTensorExprPyBind.test_kernel_with_transpose",
-    "TestTensorExprPyBind.test_kernel_with_custom_lowering",
-    "TestTensorExprPyBind.test_kernel_with_expand",
-    "TestTensorExprPyBind.test_kernel_with_permute",
-    "TestTensorExprPyBind.test_kernel_with_scalar_inputs",
-    "TestTensorExprPyBind.test_kernel_with_t",
-    "TestTensorExprPyBind.test_kernel_with_tensor_inputs",
     "TestFX.test_assert",  # known py38 fail
     "TestFX.test_annotations_empty_tuple",  # known py38 fail
     "TestDataLoaderPersistentWorkers.test_early_exit",  # known py38 fail
@@ -7770,7 +7759,6 @@ dynamo_skips = {
     "TestXNNPACKOps.test_conv2d_transpose",  # flaky
     "TestProfilerTree.test_profiler_experimental_tree",  # known py311 fail
     "TestExperiment.test_mark_strict_with_container_type",  # known py311 fail
-    "TestExprHandlePyBind.test_unary_ops",  # known py38 fail
 }
 
 
