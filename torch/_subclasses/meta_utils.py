@@ -531,9 +531,10 @@ class MetaConverter:
                                 out = fake_base._rev_view_func_unsafe(
                                     fake_input_base
                                 ).requires_grad_(t.requires_grad)
-                                if not t.is_leaf:
-                                    out = out.view(out.shape)
                                 mirror_view_meta_to_subclass(out, fake_t)
+                                fake_t.requires_grad_(t.requires_grad)
+                                if not t.is_leaf:
+                                    fake_t = fake_t.view(fake_t.shape)
                                 return fake_t
                             else:
                                 # TODO: Handle dense view of subclass
