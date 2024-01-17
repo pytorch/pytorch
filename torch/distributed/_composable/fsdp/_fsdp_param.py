@@ -1,7 +1,7 @@
 import itertools
 
 from enum import auto, Enum
-from typing import Callable, cast, List, Optional, Tuple
+from typing import cast, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -158,6 +158,7 @@ class FSDPParam:
         """
         Initializes attributes related to the global device mesh for the
         *sharded* parameter.
+        TODO: Simplify with https://github.com/pytorch/pytorch/issues/116101
         """
         is_2d = self.is_dtensor
         assert (
@@ -296,8 +297,6 @@ class FSDPParam:
         self._unsharded_param_view = self._unsharded_param_data[
             : self._unsharded_size.numel()
         ].view(self._unsharded_size)
-        # TODO: Support DTensor + Float8Tensor, where we expect DTensor to wrap
-        # Float8Tensor.
         if self.is_dtensor:
             self._unsharded_param = nn.Parameter(
                 from_local_no_grad(

@@ -11,7 +11,11 @@ from torch.distributed._composable import checkpoint, replicate
 
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._tensor import init_device_mesh
-from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests
@@ -46,7 +50,7 @@ class TestFullyShard2D(FSDPTest):
         )
         dp_mesh = global_mesh["dp"]
         tp_mesh = global_mesh["tp"]
-        dp_pg = dp_mesh.get_dim_groups()[0]  # used for `replicate()`
+        dp_pg = dp_mesh.get_group()  # used for `replicate()`
         if self.rank == 0:
             print(f"global mesh: {global_mesh}")
             print(
@@ -68,7 +72,16 @@ class TestFullyShard2D(FSDPTest):
         model = parallelize_module(
             model,
             device_mesh=tp_mesh,
-            parallelize_plan=PairwiseParallel(),
+            parallelize_plan={
+                # Pass `use_local_output=False` to keep as DTensor to preserve
+                # uneven activation dims
+                "0.in_proj": ColwiseParallel(use_local_output=False),
+                "0.out_proj": RowwiseParallel(use_local_output=False),
+                "1.in_proj": ColwiseParallel(use_local_output=False),
+                "1.out_proj": RowwiseParallel(use_local_output=False),
+                "2.in_proj": ColwiseParallel(use_local_output=False),
+                "2.out_proj": RowwiseParallel(),
+            },
         )
         for mlp in model:
             if use_activation_checkpointing:

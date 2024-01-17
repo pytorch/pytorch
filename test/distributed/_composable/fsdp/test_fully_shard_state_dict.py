@@ -8,7 +8,11 @@ from _test_fully_shard_common import MLP
 from torch.distributed._composable.fsdp import fully_shard
 
 from torch.distributed._tensor import DTensor, init_device_mesh
-from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests
@@ -64,7 +68,14 @@ class TestFullyShardStateDict(FSDPTest):
         model = parallelize_module(
             model,
             device_mesh=tp_mesh,
-            parallelize_plan=PairwiseParallel(),
+            parallelize_plan={
+                "0.in_proj": ColwiseParallel(),
+                "0.out_proj": RowwiseParallel(),
+                "1.in_proj": ColwiseParallel(),
+                "1.out_proj": RowwiseParallel(),
+                "2.in_proj": ColwiseParallel(),
+                "2.out_proj": RowwiseParallel(),
+            },
         )
         for mlp in model:
             fully_shard(mlp, mesh=dp_mesh)
