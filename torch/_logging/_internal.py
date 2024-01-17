@@ -758,10 +758,11 @@ def _default_filter() -> Optional[TorchLogsFilter]:
     if ranks_str is None:
         return None
 
-
     ranks = [int(rank_str) for rank_str in ranks_str.split(",")]
     if not ranks:
-        raise ValueError("Expected comma separated list of int (e.g. 0,1,2,3), received {ranks_str}")
+        raise ValueError(
+            "Expected comma separated list of int (e.g. 0,1,2,3), received {ranks_str}"
+        )
 
     return TorchLogsFilter(ranks)
 
