@@ -1,19 +1,6 @@
 # tests in this list will run without Dynamo strict mode by default.
 FIXME_default_non_strict = {
     "dynamo/test_logging",
-    "export/test_db",
-    "export/test_experimental",
-    "export/test_export",
-    "export/test_export_nonstrict",
-    "export/test_functionalized_assertions",
-    "export/test_pass_infra",
-    "export/test_passes",
-    "export/test_retraceability",
-    "export/test_serdes",
-    "export/test_serialize",
-    "export/test_unflatten",
-    "export/test_upgrade",
-    "export/test_verifier",
     "inductor/test_aot_inductor",
     "inductor/test_aot_inductor_utils",
     "inductor/test_benchmark_fusion",
@@ -3282,6 +3269,66 @@ dynamo_expected_failures = {
     "TestAOTAutograd.test_output_dict",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_op_depending_on_symint",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_mutation_output_view_multiple",  # functorch/test_aotdispatch
+    "TestUnflatten.test_unflatten_container_type",  # export/test_unflatten
+    "TestDeserialize.test_tensor_tensor_list",  # export/test_serialize
+    "SerDesExportTestExport.test_constrain_size_with_constrain_value_serdes",  # export/test_serdes
+    "SerDesExportTestDynamismExpression.test_export_inline_constraints_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_nn_module_stack_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_basic_non_strict_real_tensor_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_external_call_non_strict_real_tensor_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_constrain_size_with_various_cases_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_constrain_size_in_eager_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_non_strict_dynamic_shapes_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_basic_non_strict_fake_tensor_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_non_strict_dynamic_shapes_suggested_fixes_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_cond_with_module_stack_export_with_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_nn_module_stack_shared_submodule_serdes",  # export/test_serdes
+    "RetraceExportTestExport.test_constrain_size_in_eager_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_cond_with_module_stack_export_with_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_non_strict_dynamic_shapes_suggested_fixes_retraceability",  # export/test_retraceability  # noqa: B950
+    "RetraceExportTestExport.test_constrain_size_with_constrain_value_retraceability",  # export/test_retraceability
+    "RetraceExportTestDynamismExpression.test_export_inline_constraints_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_nn_module_stack_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_nn_module_stack_shared_submodule_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_constrain_size_with_various_cases_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_non_strict_dynamic_shapes_retraceability",  # export/test_retraceability
+    "TestPasses.test_views_op_having_view_copy",  # export/test_passes
+    "TestPasses.test_functionalize_inline_contraints",  # export/test_passes
+    "NonStrictExportTestExport.test_non_strict_dynamic_shapes_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_basic_non_strict_fake_tensor_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_nn_module_stack_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_param_util_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_cond_with_module_stack_export_with_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_non_strict_dynamic_shapes_suggested_fixes_non_strict",  # export/test_export_nonstrict  # noqa: B950
+    "NonStrictExportTestExport.test_raise_user_error_when_guard_on_data_dependent_operation_non_strict",  # export/test_export_nonstrict  # noqa: B950
+    "NonStrictExportTestExport.test__scaled_dot_product_flash_attention_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_to_module_with_mutated_buffer_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_basic_non_strict_real_tensor_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_external_call_non_strict_real_tensor_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_export_decomps_dynamic_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_to_module_with_mutated_buffer_multiple_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_export_with_wrong_inputs_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_fqn_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_sym_sqrt_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_nn_module_stack_shared_submodule_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_buffer_util_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_export_decomps_simple_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_to_module_with_mutated_buffer_multiple_update_sub_later_non_strict",  # export/test_export_nonstrict  # noqa: B950
+    "TestExport.test_non_strict_dynamic_shapes",  # export/test_export
+    "TestExport.test_cond_with_module_stack_export_with",  # export/test_export
+    "TestExport.test_constrain_size_in_eager",  # export/test_export
+    "TestExport.test_nn_module_stack",  # export/test_export
+    "TestExport.test_basic_non_strict_fake_tensor",  # export/test_export
+    "TestExport.test_constrain_size_with_various_cases",  # export/test_export
+    "TestExport.test_external_call_non_strict_real_tensor",  # export/test_export
+    "TestDynamismExpression.test_export_inline_constraints",  # export/test_export
+    "TestExport.test_basic_non_strict_real_tensor",  # export/test_export
+    "TestExport.test_constrain_size_with_constrain_value",  # export/test_export
+    "TestExport.test_nn_module_stack_shared_submodule",  # export/test_export
+    "TestExport.test_non_strict_dynamic_shapes_suggested_fixes",  # export/test_export
+    "TestExperiment.test_with_buffer_as_submodule",  # export/test_experimental
+    "ExampleTests.test_exportdb_supported_case_constrain_as_size_example",  # export/test_db
+    "ExampleTests.test_exportdb_supported_case_assume_constant_result",  # export/test_db
 }
 
 dynamo_skips = {
@@ -7696,6 +7743,7 @@ dynamo_skips = {
     "TestProfiler.test_source_multithreaded_close_in_scope_work_in_main_thread_False",
     "TestProfiler.test_profiler_disable_fwd_bwd_link",
     "TestProfiler.test_profiler_metadata",
+    "TestSerializeCustomClass.test_custom_class",
     "TestFX.test_assert",  # known py38 fail
     "TestFX.test_annotations_empty_tuple",  # known py38 fail
     "TestDataLoaderPersistentWorkers.test_early_exit",  # known py38 fail
@@ -7710,6 +7758,7 @@ dynamo_skips = {
     "TestXNNPACKOps.test_conv2d",  # flaky
     "TestXNNPACKOps.test_conv2d_transpose",  # flaky
     "TestProfilerTree.test_profiler_experimental_tree",  # known py311 fail
+    "TestExperiment.test_mark_strict_with_container_type",  # known py311 fail
 }
 
 
