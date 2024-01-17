@@ -6099,6 +6099,26 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(torch.bmm(t_b(Ab_conj), Bb_, out=out_b), torch.bmm(t_b(Ab_conj_physical), Bb_, out=out_b))
 
     @onlyNativeDeviceTypes
+    def test_mm_conjtranspose(self, device):
+        A = torch.randn(3, 3, dtype=torch.cfloat, device=device)
+        B = torch.randn(3, 3, dtype=torch.cfloat, device=device)
+
+        # A conjtranspose
+        out1 = torch.mm(A.t().conj(), B)
+        out1_ref = torch.mm(A.t().conj_physical(), B)
+        self.assertEqual(out1, out1_ref)
+
+        # B conjtranspose
+        out1 = torch.mm(A, B.t().conj())
+        out1_ref = torch.mm(A, B.t().conj_physical())
+        self.assertEqual(out1, out1_ref)
+
+        # A&B conjtranspose
+        out1 = torch.mm(A.t().conj(), B.t().conj())
+        out1_ref = torch.mm(A.t().conj_physical(), B.t().conj_physical())
+        self.assertEqual(out1, out1_ref)
+
+    @onlyNativeDeviceTypes
     def test_mm_empty_inputs_mixed_dtype_errors(self, device):
         a = torch.randint(0, 10, [1, 10], dtype=torch.int16, device=device)
         b = torch.randn(10, 20, dtype=torch.float32, device=device)
