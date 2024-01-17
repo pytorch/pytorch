@@ -42,6 +42,11 @@ the ``parallelize_plan`` of ``parallelize_module``:
   :members:
   :undoc-members:
 
+.. note:: when using the ``Shard(dim)`` as the input/output layouts for the above
+  ParallelStyles, we assume the input/output activation tensors are evenly sharded on
+  the tensor dimension ``dim`` on the DeviceMesh that TP operates on. For instance,
+  ``RowwiseParallel`` accepts input that is sharded on the last dimension, it assumes
+  the input tensor already been evenly sharded on the last dimension.
 
 For models like Transformer, we recommend users to use ``ColwiseParallel``
 and ``RowwiseParallel`` together in the parallelize_plan for achieve the desired
