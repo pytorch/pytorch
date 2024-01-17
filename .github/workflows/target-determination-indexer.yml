@@ -1,0 +1,97 @@
+name: Index PyTorch Tests for Target Determination
+
+on:
+  pull_request: # temporary
+  # TODO: every few hours
+
+jobs:
+  index:
+    runs-on: linux.g5.12xlarge.nvidia.gpu # 4 GPU A10G 24GB each
+    container:
+      image: pytorch/manylinux-builder:cuda12.1
+      options: '--gpus all'
+    steps:
+      - name: Clone PyTorch
+        uses: actions/checkout@v3
+        with:
+          repository: pytorch/pytorch
+          ref: main
+          path: pytorch
+
+      - name: Clone CodeLlama
+        uses: actions/checkout@v3
+        with:
+          repository: osalpekar/codellama
+          ref: main
+          path: codellama
+
+      - name: Fetch CodeLlama Checkpoint
+        shell: bash -l {0}
+        run: |
+          set -euxo pipefail
+
+          conda activate tdenv
+          pip install awscli
+          cd codellama/
+          aws s3 cp "s3://target-determinator-assets/CodeLlama-7b-Python" . --recursive
+          ls
+
+      - name: Clone Target Determination Code
+        uses: actions/checkout@v3
+        with:
+          repository: osalpekar/llm-target-determinator
+          ref: main
+          path: llm-target-determinator
+
+      - name: Setup Conda
+        uses: conda-incubator/setup-miniconda@v2.1.1
+        with:
+          python-version: 3.9
+
+      - name: Install Requirements
+        shell: bash -l {0}
+        run: |
+          set -euxo pipefail
+
+          conda create \
+            --yes \
+            --quiet \
+            --name "tdenv" \
+            "python=3.9"
+
+          conda activate tdenv
+
+          cd "${GITHUB_WORKSPACE}"/llm-target-determinator 
+          pip install -r requirements.txt
+
+      - name: Run Indexer
+        shell: bash -l {0}
+        run: |
+          set -euxo pipefail
+
+          conda activate tdenv
+          cd "${GITHUB_WORKSPACE}"/llm-target-determinator 
+
+          python create_filelist.py \
+            --project-dir "${GITHUB_WORKSPACE}/pytorch"
+
+          torchrun \
+            --standalone \
+            --nnodes=1 \
+            --nproc-per-node=8 \
+            indexer.py \
+            --experiment-name indexer-output
+
+          ls -R assets/indexer-output
+
+      # - name: Upload Index to S3
+      #   shell: bash -l {0}
+      #   run: |
+      #     set -euxo pipefail
+
+      #     conda activate tdenv
+      #     pip install awscli
+      #     # TODO: Need to create subdirectory in bucket and expand "pkg" path
+      #     for pkg in "${GITHUB_WORKSPACE}"/llm-target-determinator/assets/indexer-output/*; do
+      #       aws s3 cp "$pkg" "s3://target-determinator-assets"
+      #     done
