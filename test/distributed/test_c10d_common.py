@@ -133,7 +133,7 @@ class AbstractTimeoutTest:
 class TimeoutTest(TestCase):
     @retry_on_connect_failures
     def test_store_based_barrier(self):
-        f = tempfile.NamedTemporaryFile()
+        f = tempfile.NamedTemporaryFile(delete=False)
         port = common.find_free_port()
 
         def thread_work(timeout, init_type, world_size, rank, error_list):
@@ -1756,7 +1756,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             pass
 
     def test_init_process_group_optional_backend(self):
-        with tempfile.NamedTemporaryFile() as f:
+        with tempfile.NamedTemporaryFile(delete=False) as f:
             store = dist.FileStore(f.name, self.world_size)
             # creates both gloo and nccl backend
             if dist.is_gloo_available() and dist.is_nccl_available():
@@ -1785,7 +1785,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
                 if not dist.is_ucc_available():
                     continue
 
-            with tempfile.NamedTemporaryFile() as f:
+            with tempfile.NamedTemporaryFile(delete=False) as f:
                 store = dist.FileStore(f.name, self.world_size)
                 dist.init_process_group(
                     backend=backend,

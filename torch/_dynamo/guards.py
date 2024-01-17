@@ -57,13 +57,14 @@ from .eval_frame import set_guard_error_hook
 from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
+    common_constant_types,
     dict_keys_getitem,
     dict_keys_repr,
     guard_failures,
     istype,
     orig_code_map,
     tensor_always_has_static_shape,
-    tensor_to_id,
+    tensor_or_module_to_id,
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
@@ -108,7 +109,7 @@ CLOSURE_VARS = {
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
     ),
     "___odict_getitem": collections.OrderedDict.__getitem__,
-    "___tensor_to_id": tensor_to_id,
+    "___tensor_or_module_to_id": tensor_or_module_to_id,
     "___dict_version": dict_version,
     "___dict_contains": lambda a, b: a in b,
     "___dict_keys_getitem": dict_keys_getitem,
@@ -378,23 +379,19 @@ class GuardBuilder(GuardBuilderBase):
             )
         else:
             np_types = ()
-        ok_types = (
-            int,
-            float,
-            bool,
-            type(None),
-            str,
-            type,
-            list,
-            tuple,
-            set,
-            slice,
-            frozenset,
-            range,
-            torch.Size,
-            torch.device,
-            torch.dtype,
-            *np_types,
+        ok_types = tuple(
+            common_constant_types
+            | {
+                type,
+                list,
+                tuple,
+                set,
+                frozenset,
+                slice,
+                range,
+                torch.Size,
+                *np_types,
+            }
         )
         if istype(val, dict):
             assert all(
@@ -404,7 +401,7 @@ class GuardBuilder(GuardBuilderBase):
             assert istype(
                 val,
                 ok_types,
-            ), t.__name__
+            ), f"Unexpected type {type(val)}, not in {ok_types}"
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
@@ -527,12 +524,15 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        any_tensor = any(isinstance(k, torch.Tensor) for k in value.keys())
-        const_keys_repr = dict_keys_repr(
-            tensor_to_id(value), local=is_from_local_source(guard.originating_source)
+        any_tensor_or_module = any(
+            isinstance(k, (torch.Tensor, torch.nn.Module)) for k in value.keys()
         )
-        if any_tensor:
-            code.append(f"___tensor_to_id({ref}) == {const_keys_repr}")
+        const_keys_repr = dict_keys_repr(
+            tensor_or_module_to_id(value),
+            local=is_from_local_source(guard.originating_source),
+        )
+        if any_tensor_or_module:
+            code.append(f"___tensor_or_module_to_id({ref}) == {const_keys_repr}")
         else:
             code.append(f"list({ref}.keys()) == {const_keys_repr}")
 
@@ -971,8 +971,15 @@ class CheckFunctionManager:
             output_graph.global_scope,
             self,
         )
+
+        # Break retain cycle. See test_release_scope_memory
+        def cleanup_builder(weak_b):
+            b = weak_b()
+            if b:
+                b.scope = None
+
         # Break retain cycle. See test_release_input_memory
-        w_builder = weakref.ref(builder)
+        w_builder = weakref.ref(builder, cleanup_builder)
 
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
