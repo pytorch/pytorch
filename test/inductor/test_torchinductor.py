@@ -546,6 +546,8 @@ def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
                 stmt = line.split(".store")[-1]
             elif "[" in line:
                 stmt = line.split("[")[-1].split("]")[0]
+            if "tl.make_block_ptr(" in line:
+                continue
 
             if stmt is None:
                 continue
@@ -2543,6 +2545,29 @@ class CommonTemplate:
             fn,
             (torch.randn([2, 20, 2]),),
         )
+
+    # It's a view so it doens't generate a kernel
+    @expectedFailureCodegenDynamic
+    def test_slice3(self):
+        def fn(a, b):
+            return torch.ops.aten.slice.Tensor(a, 0, 0, -b)
+
+        x = torch.rand(48, 3, 512, 512)
+        self.common(fn, (x, 2))
+
+    @expectedFailureCodegenDynamic
+    def test_slice4(self):
+        # empty slices that require clamping the start or end
+        def fn(a):
+            return (
+                aten.slice.Tensor(a, 0, 2, 0, 1),
+                aten.slice.Tensor(a, 0, a.shape[0], a.shape[0] + 10, 1),
+                aten.slice.Tensor(a, 0, -20, 0, 1),
+                aten.slice.Tensor(a, 0, -20, -16, 1),
+            )
+
+        x = torch.rand(10)
+        self.common(fn, (x,))
 
     def test_split_with_sizes(self):
         def fn(a, sizes):
@@ -5633,6 +5658,20 @@ class CommonTemplate:
             ],
         )
 
+    def test_slice_scatter5(self):
+        # empty slices that require clamping the start or end
+        def fn(a, b):
+            return (
+                aten.slice_scatter.default(a, b, 0, 2, 0, 1),
+                aten.slice_scatter.default(a, b, 0, a.shape[0], a.shape[0] + 10, 1),
+                aten.slice_scatter.default(a, b, 0, -20, 0, 1),
+                aten.slice_scatter.default(a, b, 0, -20, -16, 1),
+            )
+
+        a = torch.arange(10, dtype=torch.float)
+        b = torch.empty(0)
+        self.common(fn, [a, b])
+
     def test_scatter1(self):
         def fn(a, dim, index, b):
             return aten.scatter(a, dim, index, b)
@@ -7770,15 +7809,6 @@ class CommonTemplate:
         x = torch.randn(2, 2)
         self.common(fn, (x,), atol=0, rtol=0)
 
-    # It's a view so it doens't generate a kernel
-    @expectedFailureCodegenDynamic
-    def test_slice(self):
-        def fn(a, b):
-            return torch.ops.aten.slice.Tensor(a, 0, 0, -b)
-
-        x = torch.rand(48, 3, 512, 512)
-        self.common(fn, (x, 2))
-
     def test_inplace_resize_as(self):
         def fn(x, y):
             x.resize_as_(y)
@@ -8627,6 +8657,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
 
                 self.assertEqual(fn_opt(), fn())
 
+        @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
             @torch.compile
             def f(a, b):
@@ -8638,13 +8669,33 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
                 torch.randn(N, N, N, device="cuda").permute(1, 2, 0),
             )
             code = run_and_get_triton_code(f, *inps)
-            self.assertTrue(
-                "tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last'"
-                in code
+            lines = [line for line in code.split("\n") if "tl.load" in line]
+            self.assertExpectedInline(
+                "\n".join(lines),
+                """\
+        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+        tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)""",
             )
-            self.assertTrue(
-                "tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first',"
-                in code
+
+        @skipIfRocm
+        @config.patch("triton.use_block_ptr", True)
+        def test_evict_last_non_coalesced_loads_block_ptr(self):
+            @torch.compile
+            def f(a, b):
+                return (a * b).sum(dim=-1)
+
+            N = 512
+            inps = (
+                torch.randn(N, N, N, device="cuda").permute(2, 1, 0),
+                torch.randn(N, N, N, device="cuda").permute(1, 2, 0),
+            )
+            code = run_and_get_triton_code(f, *inps)
+            lines = [line for line in code.split("\n") if "tl.load" in line]
+            self.assertExpectedInline(
+                "\n".join(lines),
+                """\
+        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+        tmp1 = tl.load(block_ptr0, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",
             )
 
         # Disable index propagation, so the indirect indexing isn't optimized away

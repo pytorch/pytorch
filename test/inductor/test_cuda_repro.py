@@ -1072,6 +1072,48 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(o1, o2)
 
+    @config.patch("triton.use_block_ptr", True)
+    def test_selecsls42b_misaligned_address(self):
+        # https://github.com/openai/triton/issues/2836
+
+        @torch.compile(fullgraph=True)
+        def fn(arg207_1, arg208_1, convert_element_type_40, expand, full, mul_3):
+            div = torch.ops.aten.div.Scalar(expand, 16)
+            where = torch.ops.aten.where.self(arg207_1, full, div)
+            convert_element_type_43 = torch.ops.prims.convert_element_type.default(
+                where, torch.float32
+            )
+            sum_2 = torch.ops.aten.sum.dim_IntList(convert_element_type_43, [0, 2, 3])
+            sub = torch.ops.aten.sub.Tensor(convert_element_type_40, arg208_1)
+            mul = torch.ops.aten.mul.Tensor(convert_element_type_43, sub)
+            sum_3 = torch.ops.aten.sum.dim_IntList(mul, [0, 2, 3])
+            mul_1 = torch.ops.aten.mul.Tensor(sum_2, 0.0078125)
+            unsqueeze = torch.ops.aten.unsqueeze.default(mul_1, 0)
+            unsqueeze_1 = torch.ops.aten.unsqueeze.default(unsqueeze, 2)
+            unsqueeze_2 = torch.ops.aten.unsqueeze.default(unsqueeze_1, 3)
+            mul_2 = torch.ops.aten.mul.Tensor(sum_3, 0.0078125)
+            mul_4 = torch.ops.aten.mul.Tensor(mul_2, mul_3)
+            unsqueeze_3 = torch.ops.aten.unsqueeze.default(mul_4, 0)
+            unsqueeze_4 = torch.ops.aten.unsqueeze.default(unsqueeze_3, 2)
+            unsqueeze_5 = torch.ops.aten.unsqueeze.default(unsqueeze_4, 3)
+            mul_6 = torch.ops.aten.mul.Tensor(sub, unsqueeze_5)
+            sub_1 = torch.ops.aten.sub.Tensor(convert_element_type_43, mul_6)
+            sub_2 = torch.ops.aten.sub.Tensor(sub_1, unsqueeze_2)
+            return (sub_2,)
+
+        args = [
+            torch.randn((8, 1024, 4, 4), device="cuda") > 0,  # torch.bool tensor
+            torch.randn((1, 1024, 1, 1), device="cuda"),
+            torch.randn((8, 1024, 4, 4), device="cuda"),
+            torch.randn((8, 1024, 1, 1), dtype=torch.float16, device="cuda").expand(
+                (8, 1024, 4, 4)
+            ),
+            torch.randn((), device="cuda"),
+            torch.randn((1024,), device="cuda"),
+        ]
+        fn(*args)
+        torch.cuda.synchronize()  # shake out Triton Error [CUDA]: misaligned address
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

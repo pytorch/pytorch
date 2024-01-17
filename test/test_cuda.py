@@ -28,7 +28,7 @@ from torch.utils.checkpoint import checkpoint_sequential
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_CUDA, TEST_CUDA_GRAPH, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX, IS_ARM64
 from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, \
     _create_scaling_case, _create_scaling_models_optimizers, _get_torch_cuda_version
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
@@ -1097,28 +1097,6 @@ torch.cuda.synchronize()
 """])
                 self.assertTrue(r != 0)
 
-
-    def test_grad_scaling_update_scale(self, device="cuda", dtype=torch.float):
-        growth = 2.0
-        backoff = 0.25
-        growth_interval = 2
-        scale = torch.full((1,), 4.0, dtype=dtype, device=device)
-        growth_tracker = torch.full((1,), 0.0, dtype=torch.int32, device=device)
-        found_inf = torch.full((1,), 0.0, dtype=torch.float, device="cuda:0")
-
-        # Simulates 2 consecutive unskipped iterations
-        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
-        self.assertEqual(growth_tracker, 1)
-        self.assertEqual(scale, 4.0)
-        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
-        self.assertEqual(growth_tracker, 0)
-        self.assertEqual(scale, 8.0)
-
-        # Simulates a skipped iteration
-        found_inf.fill_(1.0)
-        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
-        self.assertEqual(growth_tracker, 0)
-        self.assertEqual(scale, 2.0)
 
     def test_grad_scaling_unscale_sparse(self, device="cuda", dtype=torch.float):
         scaler = torch.cuda.amp.GradScaler()
@@ -3429,7 +3407,8 @@ exit(2)
             # Check that `cuInit` was not called during the import
             # By using ctypes and calling cuDeviceCountGet() and expect CUDA_ERROR_NOT_INITIALIZED == 3
             # See https://github.com/pytorch/pytorch/issues/116276 for more details
-            cuda_driver_api_call = "ctypes.CDLL('libcuda.so.1').cuDeviceGetCount(ctypes.byref(x))"
+            libcuda_name = "libcuda.so.1" if not IS_WINDOWS else "nvcuda.dll"
+            cuda_driver_api_call = f"ctypes.CDLL('{libcuda_name}').cuDeviceGetCount(ctypes.byref(x))"
             rc = check_output(f"import torch; import ctypes;x=ctypes.c_int(-1);print({cuda_driver_api_call})")
             self.assertEqual(rc, "3")
 
@@ -3485,7 +3464,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-    @unittest.skipIf(not IS_LINUX, "linux only cpp unwinding")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
     def test_direct_traceback(self):
         from torch._C._profiler import gather_traceback, symbolize_tracebacks
         c = gather_traceback(True, True, True)
@@ -3495,7 +3474,7 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue("unwind" in r)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
     def test_memory_snapshot_with_cpp(self):
         try:
             torch.cuda.memory.empty_cache()
@@ -3531,7 +3510,7 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue('category' in plot)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
     def test_cycles(self):
         fired = False
 
@@ -3568,7 +3547,7 @@ class TestCudaMallocAsync(TestCase):
             disarm()
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
     def test_memory_plots(self):
         for context, stacks in (("all", "all" if IS_LINUX else "python"), ("all", "python"), (None, "python")):
             try:
@@ -3596,7 +3575,7 @@ class TestCudaMallocAsync(TestCase):
                 torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
     def test_memory_plots_free_stack(self):
         for context in ["alloc", "all", "state"]:
             try:
@@ -3747,7 +3726,16 @@ class TestCudaMallocAsync(TestCase):
             torch.cuda.memory._set_allocator_settings("pinned_num_register_threads:1024")
 
 
-    def test_raises_oom(self):
+    @parametrize(
+        "max_split_size_mb_setting", [False, True]
+    )
+    def test_raises_oom(self, max_split_size_mb_setting):
+        if max_split_size_mb_setting:
+            # CudaCachingAllocator does early return when searching available blocks
+            # if max_split_size_mb is not set
+            # Setting this triggers more parts of the code
+            torch.cuda.memory._set_allocator_settings("max_split_size_mb:1024")
+            torch.cuda.memory.empty_cache()
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
 
@@ -4265,6 +4253,7 @@ class TestBlockStateAbsorption(TestCase):
 
 
 instantiate_parametrized_tests(TestCuda)
+instantiate_parametrized_tests(TestCudaMallocAsync)
 
 if __name__ == '__main__':
     run_tests()

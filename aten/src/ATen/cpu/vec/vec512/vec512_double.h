@@ -83,7 +83,7 @@ public:
     if (count == size())
       return _mm512_loadu_pd(reinterpret_cast<const double*>(ptr));
 
-    __mmask8 mask = (1 << count) - 1;
+    __mmask8 mask = (1ULL << count) - 1;
     return _mm512_maskz_loadu_pd(mask, ptr);
   }
   void store(void* ptr, int count = size()) const {
@@ -105,6 +105,10 @@ public:
     auto cmp_mask = _mm512_cmp_pd_mask(values, _mm512_set1_pd(0.0), _CMP_UNORD_Q);
     return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask,
                                                       0xFFFFFFFFFFFFFFFF));
+  }
+  bool has_inf_nan() const {
+    __m512d self_sub  = _mm512_sub_pd(values, values);
+    return (_mm512_movepi8_mask(_mm512_castpd_si512(self_sub)) & 0x7777777777777777) != 0;
   }
   Vectorized<double> map(double (*const f)(double)) const {
     __at_align__ double tmp[size()];

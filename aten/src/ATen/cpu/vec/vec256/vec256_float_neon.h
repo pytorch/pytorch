@@ -307,6 +307,16 @@ public:
     }
     return loadu(res);
   };
+  bool has_inf_nan() const {
+    __at_align__ float tmp[size()];
+    store(tmp);
+    for (const auto i : c10::irange(size())) {
+      if(_isnan(tmp[i]) || _isinf(tmp[i])) {
+        return true;
+      }
+    }
+    return false;
+  }
   Vectorized<float> map(float (*const f)(float)) const {
     __at_align__ float tmp[size()];
     store(tmp);
