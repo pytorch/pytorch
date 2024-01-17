@@ -28,6 +28,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
     is_symbolic,
     StatelessSymbolicContext,
+    statically_known_true,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -632,6 +633,37 @@ class f(torch.nn.Module):
         getitem: "f32[s0 + s2, 2*s1]" = native_dropout[0]
         getitem_1: "b8[s0 + s2, 2*s1]" = native_dropout[1];  native_dropout = None
         return (getitem, getitem_1)""")  # noqa: B950
+
+    def test_statically_known_true(self):
+        shape_env = ShapeEnv()
+        s2, s3, s4 = (create_symint(shape_env, i) for i in range(2, 5))
+
+        # Statically known true
+        self.assertTrue(statically_known_true(True))
+        self.assertTrue(statically_known_true(s2 == s2))
+        self.assertTrue(statically_known_true(s2 * s3 > s3))
+        self.assertTrue(statically_known_true(s3 * s4 > s4))
+        self.assertTrue(statically_known_true((s3 + s3) % 2 == 0))
+
+        # Statically known false
+        self.assertFalse(statically_known_true(False))
+        self.assertFalse(statically_known_true(s3 * s4 <= s4))
+        self.assertFalse(statically_known_true((s3 + s3) % 2 == 1))
+
+        # True for hints, but not known statically
+        self.assertFalse(statically_known_true(s2 + s2 == s4))
+        self.assertFalse(statically_known_true(s4 % s2 == 0))
+        self.assertFalse(statically_known_true(s2 != s3))
+        self.assertFalse(statically_known_true(s3 * s4 > s2))
+
+        # False for hints, but not known statically
+        self.assertFalse(statically_known_true(s2 == s3))
+        self.assertFalse(statically_known_true(s2 > s3))
+        self.assertFalse(statically_known_true(s3 + s3 == s4))
+
+        # No guards should be generated
+        self.assertEqual(len(shape_env.guards), 0)
+
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestSymNumberMagicMethods(TestCase):
