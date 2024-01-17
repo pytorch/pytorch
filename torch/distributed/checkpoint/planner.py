@@ -51,7 +51,12 @@ class WriteItem:
     tensor_data: Optional[TensorWriteData] = None
 
     def tensor_storage_size(self) -> Optional[int]:
-        """Returns the storage size of the underlying tensor, or None if this is not a tensor write."""
+        """
+        Calculates the storage size of the underlying tensor, or None if this is not a tensor write.
+
+        Returns:
+            Optional[int] storage size, in bytes of underlying tensor if any.
+        """
         if self.tensor_data is None:
             return None
 
