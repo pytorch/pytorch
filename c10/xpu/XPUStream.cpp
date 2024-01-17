@@ -211,7 +211,7 @@ XPUStream getStreamFromPool(const int priority, DeviceIndex device) {
   auto priority_idx =
       std::min(-priority, max_compile_time_stream_priorities - 1);
   const auto idx = get_idx(priority_counters[device][priority_idx]);
-  auto id_type = static_cast<StreamIdType>(idx);
+  auto id_type = static_cast<StreamIdType>(priority_idx);
   return XPUStreamForId(device, makeStreamId(id_type, idx));
 }
 
