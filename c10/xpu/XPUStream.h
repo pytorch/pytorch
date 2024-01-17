@@ -9,13 +9,14 @@ namespace c10::xpu {
  * Note [Stream Management]
  *
  * An XPUStream is an abstraction of an actual SYCL queue in which SYCL kernel
- * can execute. Currently, there is one pool per device to manage SYCL queue,
- * and a device's pool is lazily created.
+ * can execute. Currently, there are several pools per device to manage SYCL
+ * queue, and a device's pool is lazily created.
  *
- * There are 32 queues in this pool per device, and when a queue is requested
- * one of these queues is returned round-robin. That is, the first queue
- * requested is at index 0, the second at index 1... to index 31, then index 0
- * again.
+ * There are two pools per device. The first pool contains "normal priority"
+ * queues. The second pool is the "high priority" queues. There are 32 queues in
+ * per pool per device, and when a queue is requested one of these queues is
+ * returned round-robin. That is, the first queue requested is at index 0, the
+ * second at index 1... to index 31, then index 0 again.
  *
  * This means that if 33 queues are requested, the first and last queues
  * requested are actually the same queue (under the covers) and kernels enqueued
@@ -24,6 +25,8 @@ namespace c10::xpu {
  * It is safe to enqueue a kernel on the same queue from two different
  * threads as the SYCL specification described.
  */
+
+static constexpr int max_compile_time_stream_priorities = 2;
 
 /*
  * This serves as a wrapper around c10::Stream and acts as a representation for
@@ -82,6 +85,8 @@ class C10_XPU_API XPUStream {
     queue().wait_and_throw();
   }
 
+  int priority() const;
+
   // Explicit conversion to sycl::queue&.
   sycl::queue& queue() const;
 
@@ -100,6 +105,10 @@ class C10_XPU_API XPUStream {
     return XPUStream(Stream::unpack3(stream_id, device_index, device_type));
   }
 
+  static std::tuple<int, int> priority_range() {
+    return std::make_tuple(0, -max_compile_time_stream_priorities + 1);
+  }
+
  private:
   Stream stream_;
 };
@@ -107,11 +116,15 @@ class C10_XPU_API XPUStream {
 /**
  * Get a stream from the pool in a round-robin fashion.
  *
- * Currently, priority queue property is not supported yet. You can request a
- * stream for a specific device by setting device.
+ * You can request a stream from the high priority pool by setting
+ * isHighPriority to true, or a priority value for a specific device by setting
+ * device.
  */
 C10_XPU_API XPUStream
 getStreamFromPool(const bool isHighPriority = false, DeviceIndex device = -1);
+// The priority number lower, the priority higher.
+C10_XPU_API XPUStream
+getStreamFromPool(const int priority, DeviceIndex device = -1);
 
 /**
  * Get the current XPU stream, for the passed XPU device, or for the current
@@ -129,7 +142,7 @@ C10_XPU_API std::ostream& operator<<(std::ostream& stream, const XPUStream& s);
 
 /**
  * Block all SYCL queues on the device, and wait their synchronizations. We
- * emulate the semantics via a loop through the queue pool of the specified
+ * emulate the semantics via a loop through the queue pools of the specified
  * device and make each command queue synchronization sequentially.
  */
 C10_XPU_API void device_synchronize(DeviceIndex device_index = -1);
