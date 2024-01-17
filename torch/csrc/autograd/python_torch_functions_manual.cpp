@@ -424,9 +424,6 @@ static PyObject* THPVariable__mirror_view_meta_to(
   auto r = parser.parse(args, kwargs, parsed_args);
   auto src_ = r.tensor(0);
   auto dst_ = r.tensor(1);
-  // Here, we unsafely set the grad function on the wrapper to be the same as
-  // the inner. We expect this grad_fn to NEVER be used. It's needed so that
-  // .is_leaf metadata is accurate on the wrapper
   auto src_view_autograd_meta = impl::get_view_autograd_meta(src_);
   if (src_view_autograd_meta) {
     dst_.unsafeGetTensorImpl()->set_autograd_meta(
