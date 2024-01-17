@@ -13,19 +13,33 @@ from torch.backends.cuda import (
     math_sdp_enabled,
     mem_efficient_sdp_enabled,
     SDPAParams,
-    SDPBackend,
 )
 
-__all__: List[str] = ["sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
+__all__: List[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
 
 # Note: [SDPA warnings]
-# TODO: Consider using this to sdpa regardless of subclasses
+# TODO: Consider using this for sdpa regardless of subclasses
 # This only effects users of bias subclasses
 # If this is set to True, we will warn the user if they are not using the fused kernels
 # As well, it will raise warnings for all the reasons why the fused kernels can't be run.
 # To set this to True, run
 # torch.nn.attention.WARN_FOR_UNFUSED_KERNELS = True
 WARN_FOR_UNFUSED_KERNELS = False
+
+
+from torch._C import _SDPBackend as SDPBackend
+
+# Hacks for Sphinx documentation:
+# https://stackoverflow.com/questions/38765577/overriding-sphinx-autodoc-alias-of-for-import-of-private-class
+SDPBackend = SDPBackend
+r"""An enum-like class that contains the different backends for scaled dot product attention.
+    This backend class is designed to be used with the sdpa_kernel context manager.
+    See :func: torch.nn.attention.sdpa_kernel for more details.
+
+    ... warning:: This class is in beta and subject to change.
+"""
+SDPBackend.__module__ = __name__
+SDPBackend.__name__ = "SDPBackend"
 
 
 def _raise_kernel_warnings(params: SDPAParams) -> None:

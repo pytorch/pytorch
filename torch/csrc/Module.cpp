@@ -1771,7 +1771,9 @@ Call this whenever a new thread is created in order to propagate values from
   py::enum_<sdp::SDPBackend>(
       py_module,
       "_SDPBackend",
-      "Enum class for the scaled dot product attention backends\n\n... warning:: This class is in beta and subject to change.")
+      "An enum-like class that contains the different backends for scaled dot product attention.\n\n... warning:: This class is in beta and subject to change.\n\n"
+      "This backend class is designed to be used with the sdpa_kernel context manager."
+      "See :func: torch.nn.attention.sdpa_kernel for more details.")
       .value("ERROR", sdp::SDPBackend::error)
       .value("MATH", sdp::SDPBackend::math)
       .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)

@@ -17,9 +17,6 @@ CausalBias
 
     CausalBias
 
-.. .. autoclass:: CausalBias
-..     :members:
-..     :undoc-members:
 
 .. autosummary::
     :toctree: generated

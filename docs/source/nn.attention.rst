@@ -13,7 +13,7 @@ Utils
     :nosignatures:
 
     sdpa_kernel
-
+    SDPBackend
 
 Submodules
 ----------
