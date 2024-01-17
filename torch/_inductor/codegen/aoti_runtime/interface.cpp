@@ -168,7 +168,7 @@ AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
   return AOTInductorModelContainerUpdateConstantBuffer(container_handle,
           constant_map_handle,
           /*use_inactive*/ true,
-          /*validate_full_update*/ false);
+          /*validate_full_update*/ true);
 }
 
 AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(
