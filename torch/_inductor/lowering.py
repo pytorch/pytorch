@@ -4279,37 +4279,19 @@ def _avg_poolnd(
         result = mul(fn_sum(x_loader), scale)
     else:
 
-        def ones_loader(idx):
-            prefix = idx[:-dim]
-            bh = idx[-dim:]
-            lower = [-padding[i] if count_include_pad else 0 for i in range(dim)]
-            upper = [
-                h[i] + padding[i] if count_include_pad else h[i] for i in range(dim)
-            ]
-            masks = [range_mask(bh[i], upper[i], lower[i]) for i in range(dim)]
-            mask = functools.reduce(ops.and_, masks)
-            return ops.to_dtype(mask, dtype)
-
         def fn_count(idx):
             prefix = idx[:-dim]
             bh = idx[-dim:]
 
             divide_factors = []
             for i in range(dim):
-                stride_h = ops.constant(stride[i], torch.int32)
-                pad_h = ops.constant(padding[i], torch.int32)
-                kernel_h = ops.constant(kernel_size[i], torch.int32)
-                hstart = ops.sub(
-                    ops.mul(ops.index_expr(bh[i], torch.int32), stride_h), pad_h
-                )
-                hend = ops.minimum(
-                    ops.add(hstart, kernel_h),
-                    ops.add(ops.index_expr(h[i], torch.int32), pad_h),
-                )
+                hstart = bh[i] * stride[i] - padding[i]
+                hend = sympy.Min(hstart + kernel_size[i], h[i] + padding[i])
                 if not count_include_pad:
-                    hstart = ops.maximum(hstart, ops.constant(0, torch.int32))
-                    hend = ops.minimum(hend, ops.index_expr(h[i], torch.int32))
-                divide_factors.append(ops.sub(hend, hstart))
+                    hstart = sympy.Max(hstart, 0)
+                    hend = sympy.Min(hend, h[i])
+                factor = ops.index_expr(hend - hstart, torch.int32)
+                divide_factors.append(factor)
             return functools.reduce(ops.mul, divide_factors)
 
         divide_factor = Pointwise.create(
@@ -4318,7 +4300,6 @@ def _avg_poolnd(
             inner_fn=fn_count,
             ranges=new_size,
         )
-        # divide_factor = fn_sum(ones_loader)
         result = div(fn_sum(x_loader), divide_factor)
 
     return to_dtype(result, dtype)
