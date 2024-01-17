@@ -183,6 +183,10 @@ namespace at::cuda {
 using namespace c10::hip;
 } // namespace at::cuda
 
+namespace at::xpu {
+using namespace c10::xpu;
+} // namespace at::xpu
+
 // C10_LIKELY/C10_UNLIKELY
 //
 // These macros provide parentheses, so you can use these macros as:
