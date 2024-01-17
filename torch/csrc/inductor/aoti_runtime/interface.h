@@ -43,13 +43,25 @@ using AOTInductorStreamHandle = AOTInductorStreamOpaque*;
 struct AOTInductorConstantMap;
 using AOTInductorConstantMapHandle = AOTInductorConstantMap*;
 
-// Creates an AOTInductor model container. The parameter num_models
-// specifies the number of model instances that may be run concurrently for
-// the same input model.
+// TODO: Deprecate this API. This was kept for BC compatibility.
+// Please use AOTInductorModelContainerCreateWithDevice instead.
 AOTIRuntimeError AOTInductorModelContainerCreate(
     AOTInductorModelContainerHandle* container_handle,
     size_t num_models,
     bool is_cpu,
+    const char* cubin_dir);
+
+// Creates an AOTInductor model container. The parameter num_models
+// specifies the number of model instances that may be run concurrently for
+// the same input model.
+// `device_str` MUST NOT be nullptr. It must be a valid device string, e.g.
+// "cpu", "cuda", "cuda:0", etc. If the device index is not specified for CUDA
+// device, runtime will use the device index returned by
+// "cudaGetDevice(&device_idx)"
+AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
+    AOTInductorModelContainerHandle* container_handle,
+    size_t num_models,
+    const char* device_str,
     const char* cubin_dir);
 
 // Deletes the AOTInductor model container.
