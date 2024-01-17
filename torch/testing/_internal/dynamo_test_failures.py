@@ -1938,7 +1938,6 @@ dynamo_expected_failures = {
     "TestTensorBoardSummary.test_video",  # test_tensorboard
     "TestTensorProtoSummary.test_int_tensor_proto",  # test_tensorboard
     "TestTensorBoardSummary.test_hparams_number",  # test_tensorboard
-    "TestTensorBoardWriter.test_writer",  # test_tensorboard
     "TestTensorProtoSummary.test_empty_tensor_proto",  # test_tensorboard
     "TestTensorBoardSummary.test_hparams_string",  # test_tensorboard
     "TestTensorBoardSummary.test_hparams_bool",  # test_tensorboard
@@ -2031,7 +2030,6 @@ dynamo_expected_failures = {
     "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int8",  # test_scatter_gather_ops
     "TestScatterGatherCPU.test_scatter__reductions_cpu_complex64",  # test_scatter_gather_ops
     "TestCxxPytree.test_pytree_serialize_spec8",  # test_pytree
-    "TestGenericPytree.test_flatten_unflatten_namedtuple_py",  # test_pytree
     "TestCxxPytree.test_pytree_serialize_spec9",  # test_pytree
     "TestCxxPytree.test_pytree_serialize_spec3",  # test_pytree
     "TestGenericPytree.test_flatten_unflatten_deque_py",  # test_pytree
