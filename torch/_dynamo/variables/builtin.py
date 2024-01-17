@@ -1555,7 +1555,7 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, SetVariable):
             if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
                 _unimplemented()
-            return ConstantVariable.create(op(left.set_items, right._items))
+            return ConstantVariable.create(op(left.set_items, right.set_items))
 
         if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):
             from .builder import wrap_fx_proxy_cls
