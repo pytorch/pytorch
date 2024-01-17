@@ -14,7 +14,6 @@ __all__ = [
     "preferred_linalg_library",
     "cufft_plan_cache",
     "matmul",
-    "SDPBackend",
     "SDPAParams",
     "enable_flash_sdp",
     "flash_sdp_enabled",
@@ -205,10 +204,9 @@ def preferred_linalg_library(
     return torch._C._get_linalg_preferred_backend()
 
 
-from torch._C import _SDPAParams as SDPAParams, _SDPBackend as SDPBackend
+from torch._C import _SDPAParams as SDPAParams
 
 # Set the __module__ attribute
-SDPBackend.__module__ = "torch.backends.cuda"
 SDPAParams.__module__ = "torch.backends.cuda"
 SDPAParams.__name__ = "SDPAParams"
 
@@ -324,22 +322,25 @@ def sdp_kernel(
             "torch.backends.cuda.sdp_kernel() "
             "is deprecated. In the future, this context manager will be removed. "
             "Please see, torch.nn.attention.sdpa_kernel() for the new context manager, with updated "
-            "signature"
+            "signature."
         ),
         FutureWarning,
     )
-    previous_flash: bool = flash_sdp_enabled()
-    previous_mem_efficient: bool = mem_efficient_sdp_enabled()
-    previous_math: bool = math_sdp_enabled()
-    try:
-        enable_flash_sdp(enable_flash)
-        enable_mem_efficient_sdp(enable_mem_efficient)
-        enable_math_sdp(enable_math)
-        yield {}
-    finally:
-        enable_flash_sdp(previous_flash)
-        enable_mem_efficient_sdp(previous_mem_efficient)
-        enable_math_sdp(previous_math)
+    from torch.nn.attention import sdpa_kernel, SDPBackend
+
+    backend_list = []
+    if enable_flash:
+        backend_list.append(SDPBackend.FLASH_ATTENTION)
+    if enable_mem_efficient:
+        backend_list.append(SDPBackend.EFFICIENT_ATTENTION)
+    if enable_math:
+        backend_list.append(SDPBackend.MATH)
+
+    with sdpa_kernel(backend_list) as context:
+        try:
+            yield context
+        finally:
+            pass
 
 
 cufft_plan_cache = cuFFTPlanCacheManager()
