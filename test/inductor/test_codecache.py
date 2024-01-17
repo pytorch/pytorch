@@ -148,7 +148,7 @@ class TestFxGraphCache(TestCase):
         Verify that we can populate and load models from the cache.
         """
         if device == GPU_TYPE and not HAS_GPU:
-            raise unittest.SkipTest("requires GPU")
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         def fn(mod, x):
             mod.zero_grad()
