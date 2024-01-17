@@ -75,9 +75,9 @@ transformer block will contain 0.2B parameters on each rank.
 * The ``forward`` pass will communicate in chunks of ``0.2*4 = 0.8GB`` in all-gather
 * The ``backward`` pass will communicate 2 times ``0.8GB`` each (1x all-gather and 1x reduce-scatter)
 
-or in other words there will be 3 communications with a payload of ``0.8GB` each. If the model was
+In other words there will be 3 communications with a payload of ``0.8GB` each. If the model was
 comprised of 10 transformer blocks there would be a total of 30 communications for a total of
-``30*0.8=24GB`
+``30*0.8=24GB`.
 
 To formalize the payload size per communication per rank is
 ``total_transformer_block_params_in_B*dtype_bytes/num_gpus`` (GBs).
