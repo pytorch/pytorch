@@ -38,8 +38,6 @@ from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.distributed.distributed_c10d import (
     get_world_size,
     _get_default_group,
-    AllreduceOptions,
-    GroupMember,
 )
 from torch.distributed.utils import (
     _verify_param_shape_across_processes,
