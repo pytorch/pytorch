@@ -898,7 +898,11 @@ class PyExprCSEPass:
     def count(self, exprs: List[str]) -> None:
         counter = self.ExprCounter(self._config)
         for e in exprs:
-            counter.visit(ast.parse(e))
+            try:
+                counter.visit(ast.parse(e))
+            except SyntaxError as ex:
+                log.exception("Failed to visit expr at line %s.\n%s", ex.lineno, e)
+                raise
 
     def replace(self, expr: str) -> Tuple[List[str], str]:
         replacer = self.Replacer(self._config, self._new_var)
@@ -1166,9 +1170,7 @@ class CheckFunctionManager:
         try:
             exec(pycode, builder.scope, out)
         except SyntaxError as ex:
-            log.exception(
-                "Failed to exec guard at line %s.\n%s", ex.lineno, pycode
-            )
+            log.exception("Failed to exec guard at line %s.\n%s", ex.lineno, pycode)
             raise
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
