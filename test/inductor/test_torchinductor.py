@@ -114,9 +114,21 @@ skip_if_x86_mac = functools.partial(
 )
 vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
-libfoo = None
-libbar = None
-libbaz = None
+libtest = torch.library.Library("test", "FRAGMENT")
+ids = set()
+
+
+def define_custom_op_for_test(id_, fn_cpu, fn_cuda, fn_meta, tags=()):
+    global libtest
+    global ids
+    if id_ not in ids:
+        libtest.define(f"{id_}(Tensor self) -> Tensor", tags=tags)
+        libtest.impl(id_, fn_cpu, "CPU")
+        libtest.impl(id_, fn_cuda, "CUDA")
+        libtest.impl(id_, fn_meta, "Meta")
+        ids.add(id_)
+
+
 f32 = torch.float32
 
 
@@ -7982,17 +7994,11 @@ class CommonTemplate:
         def foo_meta(x):
             return torch.empty_like(x)
 
-        global libfoo
-        if libfoo is None:
-            libfoo = torch.library.Library("foo", "DEF")
-            libfoo.define("custom(Tensor self) -> Tensor")
-            libfoo.impl("custom", foo_cpu, "CPU")
-            libfoo.impl("custom", foo_cuda, "CUDA")
-            libfoo.impl("custom", foo_meta, "Meta")
+        define_custom_op_for_test("foo", foo_cpu, foo_cuda, foo_meta)
 
         def fn(x):
             a = torch.nn.functional.relu(x)
-            b = torch.ops.foo.custom(a)
+            b = torch.ops.test.foo(a)
             c = torch.cos(b)
             return c
 
@@ -8009,30 +8015,24 @@ class CommonTemplate:
         inp = torch.rand(2, 3, 128, 128, device="cuda")
         expected_stride = mod(inp).stride()
 
-        def foo_cpu(x):
+        def bar_cpu(x):
             self.assertEqual(x.stride(), expected_stride)
             return x.clone()
 
-        def foo_cuda(x):
+        def bar_cuda(x):
             self.assertEqual(x.stride(), expected_stride)
             return x.clone()
 
-        def foo_meta(x):
+        def bar_meta(x):
             return torch.empty_like(x)
 
-        global libbar
-        if libbar is None:
-            libbar = torch.library.Library("bar", "DEF")
-            libbar.define(
-                "custom(Tensor self) -> Tensor", tags=[torch._C.Tag.needs_fixed_layout] # Test fails without this tag
-            )
-            libbar.impl("custom", foo_cpu, "CPU")
-            libbar.impl("custom", foo_cuda, "CUDA")
-            libbar.impl("custom", foo_meta, "Meta")
+        define_custom_op_for_test(
+            "bar", bar_cpu, bar_cuda, bar_meta, tags=[torch._C.Tag.needs_fixed_layout]
+        )
 
         def fn(x):
             z = mod(x)
-            output = torch.ops.bar.custom(z)
+            output = torch.ops.test.bar(z)
             return output
 
         with torch.no_grad():
@@ -8052,6 +8052,7 @@ class CommonTemplate:
                 self.in_layers = nn.Sequential(
                     nn.Dropout(p=0.1),
                 )
+
             def helper(self, x):
                 out = F.gelu(x)
                 out = self.in_layers(out)
@@ -8059,37 +8060,30 @@ class CommonTemplate:
 
             def forward(self, x):
                 out = self.helper(x)
-                out = torch.ops.baz.custom(out)
+                out = torch.ops.test.baz(out)
                 return out
 
         model = Block()
         model = model.to("cuda").to(memory_format=torch.channels_last)
-        input_t = torch.randn([1, 320, 128, 128], dtype=torch.float32, device='cuda', requires_grad=True)
+        input_t = torch.randn([1, 320, 128, 128], dtype=torch.float32, device="cuda")
         input_t = input_t.to(memory_format=torch.channels_last)
+        expected_strides = model.helper(input_t).stride()
 
-        expected = input_t.clone()
-        expected_strides = model.helper(expected).stride()
-
-        def foo_cpu(x):
+        def baz_cpu(x):
             self.assertEqual(expected_strides, x.stride())
             return x.clone()
 
-        def foo_cuda(x):
+        def baz_cuda(x):
             self.assertEqual(expected_strides, x.stride())
             return x.clone()
 
-        def foo_meta(x):
+        def baz_meta(x):
             return torch.empty_like(x)
 
-        global libbaz
-        if libbaz is None:
-            libbaz = torch.library.Library("baz", "DEF")
-            libbaz.define(
-                "custom(Tensor self) -> Tensor", tags=[torch._C.Tag.needs_fixed_layout] # Test fails without this tag
-            )
-            libbaz.impl("custom", foo_cpu, "CPU")
-            libbaz.impl("custom", foo_cuda, "CUDA")
-            libbaz.impl("custom", foo_meta, "Meta")
+        define_custom_op_for_test(
+            "baz", baz_cpu, baz_cuda, baz_meta, tags=[torch._C.Tag.needs_fixed_layout]
+        )
+
         with torch.no_grad():
             net = torch.compile(model)
             out = net(input_t)
