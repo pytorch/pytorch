@@ -474,7 +474,7 @@ def get_reenabled_issues(pr_body: str = "") -> List[str]:
     return parse_reenabled_issues(pr_body) + parse_reenabled_issues(commit_messages)
 
 
-def check_for_setting(labels, body, setting) -> bool:
+def check_for_setting(labels: Set[str], body: str, setting: str) -> bool:
     return setting in labels or f"[{setting}]" in body
 
 
@@ -487,6 +487,9 @@ def perform_misc_tasks(
     """
     set_output("keep-going", check_for_setting(labels, pr_body, "keep-going"))
     set_output("ci-no-pipe-logs", check_for_setting(labels, pr_body, "ci-no-pipe-logs"))
+    set_output(
+        "ci-no-test-timeout", check_for_setting(labels, pr_body, "ci-no-test-timeout")
+    )
 
     # Obviously, if the job name includes unstable, then this is an unstable job
     is_unstable = job_name and IssueType.UNSTABLE.value in job_name

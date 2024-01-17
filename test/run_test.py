@@ -619,7 +619,9 @@ def run_test(
         "BUILD_ENVRIONMENT", ""
     )
     timeout = (
-        THRESHOLD * 6
+        None
+        if not options.set_timeout
+        else THRESHOLD * 6
         if is_slow
         else THRESHOLD * 3
         if should_retry
@@ -1254,6 +1256,12 @@ def parse_args():
         action="store_true",
         help="Print logs to output file while running tests.  True if in CI and env var is not set",
         default=IS_CI and not strtobool(os.environ.get("NO_PIPE_LOGS", "False")),
+    )
+    parser.add_argument(
+        "--set-timeout",
+        type="store_true",
+        help="Set a timeout based on the test times json file.  Only works if there are test times available",
+        default=IS_CI and not strtobool(os.environ.get("NO_TEST_TIMEOUT", "False")),
     )
     parser.add_argument(
         "additional_unittest_args",

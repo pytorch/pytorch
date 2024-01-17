@@ -149,6 +149,7 @@ jobs:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           NO_PIPE_LOGS: ${{ steps.keep-going.outputs.ci-no-pipe-logs }}
+          NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
@@ -198,6 +199,7 @@ jobs:
             -e REENABLED_ISSUES \
             -e CONTINUE_THROUGH_ERROR \
             -e NO_PIPE_LOGS \
+            -e NO_TEST_TIMEOUT \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
