@@ -1526,7 +1526,6 @@ class BuiltinVariable(VariableTracker):
         def _unimplemented():
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
 
-
         if (
             all(
                 isinstance(
@@ -1570,12 +1569,12 @@ class BuiltinVariable(VariableTracker):
 
         if isinstance(left, SetVariable):
             if isinstance(right, ConstantVariable) and right.value is None:
-                return ConstantVariable(op(left._underlying_items(tx), right.value))
+                return ConstantVariable(op(left._underlying_items, right.value))
 
             if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
                 _unimplemented()
             return ConstantVariable.create(
-                op(left._underlying_items(tx), right._underlying_items(tx))
+                op(left._underlying_items, right._underlying_items)
             )
 
         if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):

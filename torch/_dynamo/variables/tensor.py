@@ -527,9 +527,7 @@ class TensorVariable(VariableTracker):
             if len(args) == 1:
                 return constant_result.getitem_const(args[0])
             elif args:
-                return TupleVariable(
-                    [constant_result.getitem_const(a) for a in args]
-                )
+                return TupleVariable([constant_result.getitem_const(a) for a in args])
             return constant_result
         elif name == "numpy":
             if not config.trace_numpy:
