@@ -278,7 +278,7 @@ def split_by_tags(
             kwargs=None,
         )
 
-        if len(outs) == 1 and not return_tuple:
+        if len(outs) == 1:
             main_remapping[comp.orig_outputs[0]] = main_node
         else:
             for i, o in enumerate(comp.orig_outputs):
