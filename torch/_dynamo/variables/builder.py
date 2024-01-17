@@ -92,7 +92,6 @@ from .dicts import (
     DataClassVariable,
     DefaultDictVariable,
     HFPretrainedConfigVariable,
-    is_hashable,
     PythonSysModulesVariable,
     SetVariable,
 )
