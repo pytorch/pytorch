@@ -15,4 +15,5 @@ class WrapperModule(torch.nn.Module):
         self.fn = fn
 
     def forward(self, *args, **kwargs):
+        """Simple forward that just calls the ``fn`` provided to :method:`WrapperModule.__init__`."""
         return self.fn(*args, **kwargs)
