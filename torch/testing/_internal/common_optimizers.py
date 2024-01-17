@@ -704,7 +704,7 @@ def optim_error_inputs_func_rprop(device, dtype):
 def optim_inputs_func_sgd(device=None):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
-        OptimizerInput(params=None, kwargs={"lr": 1e-2}, desc="npn-default lr"),
+        OptimizerInput(params=None, kwargs={"lr": 1e-2}, desc="non-default lr"),
         OptimizerInput(params=None, kwargs={"momentum": 0.9}, desc="momentum"),
         OptimizerInput(
             params=None,
@@ -1525,7 +1525,7 @@ optim_db: List[OptimizerInfo] = [
         SGD,
         optim_inputs_func=optim_inputs_func_sgd,
         optim_error_inputs_func=optim_error_inputs_func_sgd,
-        supported_impls=("foreach", "differentiable"),
+        supported_impls=("foreach", "differentiable", "fused"),
         supports_sparse_on=("cpu", "cuda"),
         skips=(
             DecorateInfo(

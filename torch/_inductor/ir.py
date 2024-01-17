@@ -4309,13 +4309,8 @@ class IndexPutFallback(ExternKernel):
             else:
                 indices.append(V.graph.wrapper_code.none_str)
 
-        indices_str = f"{V.graph.wrapper_code.open_bracket}{', '.join(indices)}{V.graph.wrapper_code.closed_bracket}"
-        args = [x, indices_str, values, *self.codegen_const_args()]
-        wrapper.writeline(
-            wrapper.wrap_kernel_call(
-                self.get_kernel_name(),
-                args,
-            )
+        wrapper.generate_index_put_fallback(
+            self.get_kernel_name(), x, indices, values, *self.codegen_const_args()
         )
 
     def should_allocate(self):
@@ -4338,8 +4333,8 @@ class IndexPutFallback(ExternKernel):
             (accumulate,),
         )
         self.name = V.graph.register_buffer(self)
-        self.cpp_kernel_name = "at::index_put_"
         self.python_kernel_name = "aten.index_put_"
+        self.cpp_kernel_name = "at::index_put_out"
         mark_node_as_mutating(self, x)
 
 
