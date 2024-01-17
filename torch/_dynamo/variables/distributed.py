@@ -14,6 +14,7 @@ class DistributedVariable(VariableTracker):
     The base distributed variable that checks for the distributed existance
     and hold the value for a distributed object.
     """
+
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         if not DistributedVariable.is_available():

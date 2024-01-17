@@ -230,6 +230,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         return str(self)
 
     def python_type(self):
+        """Any variable that have a corresponding python type can override this method to return its python type"""
         raise NotImplementedError(f"{self} has no type")
 
     def as_python_constant(self):
