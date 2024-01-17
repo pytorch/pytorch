@@ -828,6 +828,15 @@ class OpOverloadPacket:
     def overloads(self):
         return [n if n else "default" for n in self._overload_names]
 
+    def overloads_with_kernels(self):
+        def pred(overload_name):
+            opname = self._qualified_op_name
+            if overload_name:
+                opname += "." + overload_name
+            return torch._C._dispatch_has_kernel(opname)
+
+        return [n if n else "default" for n in self._overload_names if pred(n)]
+
 
 # Resolution of torch.fn is different from torch.ops.aten.fn
 # torch.fn uses the Python argparser, matches with the

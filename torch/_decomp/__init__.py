@@ -1,4 +1,5 @@
 import inspect
+import logging
 from collections import defaultdict
 from functools import wraps
 from itertools import chain
@@ -26,6 +27,7 @@ global_decomposition_table: Dict[
     str, Dict[torch._ops.OperatorBase, Callable]
 ] = defaultdict(dict)
 
+log = logging.getLogger(__name__)
 decomposition_table = global_decomposition_table["post_autograd"]
 pre_autograd_decomposition_table = global_decomposition_table["pre_autograd"]
 meta_table = global_decomposition_table["meta"]
@@ -47,7 +49,7 @@ def _add_op_to_registry(registry, op, fn):
         overloads.append(op)
     else:
         assert isinstance(op, OpOverloadPacket)
-        for ol in op.overloads():
+        for ol in op.overloads_with_kernels():
             overloads.append(getattr(op, ol))
 
     for op_overload in overloads:
@@ -58,6 +60,10 @@ def _add_op_to_registry(registry, op, fn):
         # to filter those out, e.g aten.add.float_int
         if torch._C._dispatch_has_kernel(op_overload.name()):
             registry[op_overload] = fn
+        else:
+            log.warning(
+                "Skip registering decomposition %s with no kernel", op_overload.name()
+            )
 
 
 def _convert_out_params(f):

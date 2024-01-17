@@ -1699,6 +1699,9 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 
 def make_fallback(op, layout_constraint=None, warn=True):
+    # Warning: decompositions never contains OpOverloadPacket
+    # instances making the assertion below unmeaningful for ops with
+    # overloads.
     assert op not in decompositions, f"both a fallback and a decomp for same op: {op}"
     if (
         warn
@@ -1736,9 +1739,35 @@ def make_fallback(op, layout_constraint=None, warn=True):
         )
 
     if isinstance(op, torch._ops.OpOverloadPacket):
-        for ol in op.overloads():
+        skip_overloads = []
+        overloads = []
+        for ol in op.overloads_with_kernels():
             op_overload = getattr(op, ol)
-            register_fallback(op_overload)
+            if op_overload in decompositions:
+                skip_overloads.append(op_overload)
+            else:
+                overloads.append(op_overload)
+        if overloads:
+            # Having some overloads in decompositions and others not,
+            # is very untypical. So, we'll be maximally verbose here.
+            for op_overload in skip_overloads:
+                log.warning(
+                    "Skipping to register fallback for %s that is in decompositions.",
+                    op_overload,
+                )
+            for op_overload in overloads:
+                if skip_overloads:
+                    log.warning(
+                        "Registering fallback for %s while there exists other overloads in decompositions.",
+                        op_overload,
+                    )
+                register_fallback(op_overload)
+        else:
+            log.warning(
+                "make_fallback(%s): all operation overloads are in decompositions."
+                " Delete the corresponding `make_fallback` line.",
+                op,
+            )
     elif isinstance(op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
         register_fallback(op)
     else:
