@@ -7,4 +7,3 @@ def dummy_accumulate_grad_(t1, t2):
         t1.grad = t2
     else:
         t1.grad += t2
-

@@ -101,7 +101,7 @@ def should_decompose_torch_op(fn):
     from torch._dynamo import compiled_autograd
 
     # TODO(JackCaoG): we need a better way to tell if a torch function should we decompose
-    allowed_torch_fn = fn.__name__ != "_make_grads"
+    allowed_torch_fn = fn.__name__ not in ["_make_grads"]
     definanilly_not_composite_kernel = type(
         fn
     ) == torch._ops.OpOverload and not torch._C._dispatch_has_kernel_for_dispatch_key(

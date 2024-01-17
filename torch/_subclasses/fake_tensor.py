@@ -1137,7 +1137,7 @@ class FakeTensor(torch.Tensor):
             import traceback
 
             self._debug_trace = traceback.extract_stack()  # type: ignore[attr-defined]
-        print("fake tensor creation with id " + str(id(self)) + " " + str(self))
+        print("fake tensor creation with id " + str(id(self)))
         return self
 
     # In some circumstances, a conventional torch.Tensor constructor
