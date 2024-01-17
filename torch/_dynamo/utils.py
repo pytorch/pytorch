@@ -38,6 +38,7 @@ from typing import (
     Deque,
     Dict,
     Iterator,
+    KeysView,
     List,
     Optional,
     Set,
@@ -421,6 +422,9 @@ def hashable(x):
         hash(x)
         return True
     except TypeError:
+        return False
+    # cannot hash writable memoryview object
+    except ValueError:
         return False
 
 
@@ -914,16 +918,22 @@ def is_safe_constant(v):
     )
 
 
-def guard_if_dyn(arg):
+def specialize_symnode(arg):
     from .variables import ConstantVariable, SymNodeVariable
 
+    # Guard and specialize
     if isinstance(arg, SymNodeVariable):
-        # This is because SymNodeVariable intentionally doesn't define
-        # as_python_constant to avoid shunting down some codepaths
-        # that expect consts.   In this case, we know we definitely
-        # want to specialize though.
-        return arg.evaluate_expr()
-    elif isinstance(arg, ConstantVariable):
+        return ConstantVariable.create(arg.evaluate_expr())
+
+    return arg
+
+
+def guard_if_dyn(arg):
+    from .variables import ConstantVariable
+
+    arg = specialize_symnode(arg)
+
+    if isinstance(arg, ConstantVariable):
         return arg.as_python_constant()
 
     return arg
@@ -958,6 +968,7 @@ def check_numpy_ndarray_args(args, kwargs):
     )
 
 
+dict_keys: Type[KeysView[Any]] = type(dict().keys())
 dict_values: Type[ValuesView[Any]] = type(dict().values())
 odict_values: Type[ValuesView[Any]] = type(collections.OrderedDict().values())
 tuple_iterator: Type[Iterator[Any]] = type(iter(tuple()))
@@ -985,6 +996,10 @@ iter_next = next
 
 def to_subclass(t, cls):
     return t.as_subclass(cls)
+
+
+def dict_keys_getitem(d, n):
+    return next(itertools.islice(iter(d), n, n + 1))
 
 
 def enum_repr(value, local):
@@ -1047,28 +1062,49 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     return found
 
 
-def dict_param_key_ids(value):
-    return {
-        id(k) for k in value.keys() if isinstance(k, (torch.nn.Parameter, torch.Tensor))
-    }
+def tensor_or_module_to_id(value):
+    return [
+        id(k) if isinstance(k, (torch.Tensor, torch.nn.Module)) else k
+        for k in value.keys()
+    ]
 
 
-def dict_const_keys(value):
-    return {
-        k for k in value.keys() if not isinstance(k, (torch.nn.Parameter, torch.Tensor))
-    }
+def const_repr(x, *, local) -> str:
+    from .trace_rules import is_builtin_callable
 
-
-def dict_const_keys_repr(const_keys, *, local):
-    if any(isinstance(k, enum.Enum) for k in const_keys):
+    if isinstance(x, (list, tuple)):
+        elems_repr = ",".join(const_repr(s, local=local) for s in x)
+        if isinstance(x, list):
+            return f"[{elems_repr}]"
+        else:
+            assert isinstance(x, tuple)
+            if len(x) == 1:
+                return f"({elems_repr},)"
+            else:
+                return f"({elems_repr})"
+    elif isinstance(x, enum.Enum):
         # To workaround repr(Enum) returning invalid global reference before python 3.11
         # by calling enum_repr and removing quotes to render enum in guard code.
-        const_keys_str = f"{ {enum_repr(k, local=local) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
-            "'", ""
-        )
+        return enum_repr(x, local=local).replace("'", "")
+    elif is_builtin_callable(x):
+        return x.__name__
+    elif isinstance(x, type):
+
+        def fullname(o):
+            klass = o.__class__
+            module = klass.__module__
+            if module == "builtins":
+                return klass.__qualname__  # avoid outputs like 'builtins.str'
+            return module + "." + klass.__qualname__
+
+        return fullname(x)
     else:
-        const_keys_str = f"{const_keys!r}"
-    return const_keys_str
+        return f"{x!r}"
+
+
+def dict_keys_repr(const_keys, *, local) -> str:
+    keys_str = ",".join(const_repr(s, local=local) for s in const_keys)
+    return "[" + keys_str + "]"
 
 
 def global_key_name(key):
@@ -1555,11 +1591,17 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
-            unimplemented(f"data dependent operator: {cause.func}")
+            unimplemented(
+                f"data dependent operator: {cause.func}; "
+                "to enable, set torch._dynamo.config.capture_scalar_outputs = True"
+            )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
-            unimplemented(f"dynamic shape operator: {cause.func}")
+            unimplemented(
+                f"dynamic shape operator: {cause.func}; "
+                "to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True"
+            )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
         ):
@@ -2387,3 +2429,19 @@ def get_first_attr(obj, *attrs):
             return getattr(obj, attr)
 
     raise AssertionError(f"{obj} does not has any of the attributes: {attrs}")
+
+
+@contextlib.contextmanager
+def maybe_enable_compiled_autograd(should_enable):
+    def compiler_fn(gm):
+        def inner_compiler(gm_, example_inputs_):
+            torch._dynamo.utils.counters["compiled_autograd"]["compiles"] += 1
+            return torch._inductor.compile(gm_, example_inputs_)
+
+        return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
+
+    if should_enable:
+        with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
+            yield ctx
+    else:
+        yield

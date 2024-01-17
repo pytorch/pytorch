@@ -18,6 +18,7 @@ import torch._refs
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._logging import warning_once
 
 from .. import config, polyfill, variables
 from ..device_interface import get_registered_device_interfaces
@@ -175,11 +176,11 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                     {},
                 ),
             )
-        elif self.value in [
+        elif self.value in (
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
-        ]:
+        ):
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
             torch.profiler.profile,
@@ -187,7 +188,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
         ):
-            log.warning("Profiler function %s will be ignored", self.value)
+            warning_once(log, "Profiler function %s will be ignored", self.value)
             return NullContextVariable()
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
@@ -230,10 +231,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         elif self.value in tracing_state_functions:
             assert not args and not kwargs
             # See: https://github.com/pytorch/pytorch/issues/110765
-            if self.value in [
+            if self.value in (
                 torch._utils.is_compiling,
                 torch._dynamo.external_utils.is_compiling,
-            ]:
+            ):
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions[self.value])
         elif self.value in (
@@ -403,7 +404,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         # TODO: These special cases shouldn't be necessary; we should
         # generically support torch.ops that return int
         elif (
-            self.value in [torch.ops.aten.sym_size, torch.ops.aten.sym_size.int]
+            self.value in (torch.ops.aten.sym_size, torch.ops.aten.sym_size.int)
             and len(args) == 2
             and len(kwargs) == 0
             and isinstance(args[0], TensorVariable)
@@ -411,7 +412,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # we see this when retracing already traced code
             return args[0].call_method(tx, "size", [args[1]], {})
         elif (
-            self.value is [torch.ops.aten.sym_stride, torch.ops.aten.sym_stride.int]
+            self.value in (torch.ops.aten.sym_stride, torch.ops.aten.sym_stride.int)
             and len(args) == 2
             and len(kwargs) == 0
             and isinstance(args[0], TensorVariable)
@@ -524,10 +525,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # of value + args to determine this.
             fn_ = self.value
             if any(isinstance(x, SymNodeVariable) for x in args):
-                if self.value == math.sqrt:
-                    from torch.fx.experimental.sym_node import sym_sqrt
-
-                    fn_ = sym_sqrt
+                torch_sym_op = f"_sym_{self.value.__name__}"
+                if getattr(self.value, "__module__", None) == "math" and hasattr(
+                    torch, torch_sym_op
+                ):
+                    fn_ = getattr(torch, torch_sym_op)
 
             if fn_ is torch.tensor:
 
