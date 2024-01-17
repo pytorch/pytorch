@@ -47,7 +47,7 @@ class BatchDataset {
   virtual ~BatchDataset() = default;
 
   /// Returns a batch of data given an index.
-  virtual Batch get_batch(BatchRequest request) = 0;
+  virtual Batch get_batch(BatchRequest request) const = 0;
 
   /// Returns the size of the dataset, or an empty optional if it is unsized.
   virtual optional<size_t> size() const = 0;
@@ -80,13 +80,16 @@ class Dataset : public BatchDataset<Self, std::vector<SingleExample>> {
   /// Returns the example at the given index.
   virtual ExampleType get(size_t index) = 0;
 
-  /// Returns the example at the given index (const version).
-  virtual ExampleType get(size_t index) const = 0;
+  /// Returns the example at the given index.
+  virtual ExampleType get(size_t index) const {
+    // Cast away constness and call the non-const version of get
+    return const_cast<Dataset*>(this)->get(index);
+  }
 
   /// Returns a batch of data.
   /// The default implementation calls `get()` for every requested index
   /// in the batch.
-  std::vector<ExampleType> get_batch(ArrayRef<size_t> indices) override {
+  std::vector<ExampleType> get_batch(ArrayRef<size_t> indices) const override {
     std::vector<ExampleType> batch;
     batch.reserve(indices.size());
     for (const auto i : indices) {
