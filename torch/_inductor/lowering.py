@@ -4290,7 +4290,36 @@ def _avg_poolnd(
             mask = functools.reduce(ops.and_, masks)
             return ops.to_dtype(mask, dtype)
 
-        result = div(fn_sum(x_loader), fn_sum(ones_loader))
+        def fn_count(idx):
+            prefix = idx[:-dim]
+            bh = idx[-dim:]
+
+            divide_factors = []
+            for i in range(dim):
+                stride_h = ops.constant(stride[i], torch.int32)
+                pad_h = ops.constant(padding[i], torch.int32)
+                kernel_h = ops.constant(kernel_size[i], torch.int32)
+                hstart = ops.sub(
+                    ops.mul(ops.index_expr(bh[i], torch.int32), stride_h), pad_h
+                )
+                hend = ops.minimum(
+                    ops.add(hstart, kernel_h),
+                    ops.add(ops.index_expr(h[i], torch.int32), pad_h),
+                )
+                if not count_include_pad:
+                    hstart = ops.maximum(hstart, ops.constant(0, torch.int32))
+                    hend = ops.minimum(hend, ops.index_expr(h[i], torch.int32))
+                divide_factors.append(ops.sub(hend, hstart))
+            return functools.reduce(ops.mul, divide_factors)
+
+        divide_factor = Pointwise.create(
+            device=x.get_device(),
+            dtype=dtype,
+            inner_fn=fn_count,
+            ranges=new_size,
+        )
+        # divide_factor = fn_sum(ones_loader)
+        result = div(fn_sum(x_loader), divide_factor)
 
     return to_dtype(result, dtype)
 
