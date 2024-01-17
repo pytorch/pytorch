@@ -18,14 +18,18 @@ constexpr int kStreamsPerPoolBits = 5;
 constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
 constexpr int kStreamTypeBits = 3;
 
-// The SYCL queue pool is lazily initialized when the first queue is requested
+// The SYCL queue pools are lazily initialized when the first queue is requested
 // for a device. The device flags track the initialization of each device. When
 // a queue is requested, the next queue in the pool to be returned in a
 // round-robin fashion, see Note [Stream Management].
 std::deque<c10::once_flag> device_flags;
-std::vector<std::array<std::unique_ptr<sycl::queue>, kStreamsPerPool>>
-    reserved_streams;
-std::deque<std::atomic<uint32_t>> reserved_counters;
+std::vector<std::array<
+    std::array<std::unique_ptr<sycl::queue>, kStreamsPerPool>,
+    max_compile_time_stream_priorities>>
+    streams;
+std::deque<
+    std::array<std::atomic<uint32_t>, max_compile_time_stream_priorities>>
+    priority_counters;
 
 thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 
@@ -37,20 +41,26 @@ thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 //     zeros      StreamIdIndex    StreamIdType
 //
 // Where StreamIdType:
-//  000 = reserved queue
+//  000 = normal priority queue
+//  001 = high priority queue
 //
 // StreamId is 64-bit, so we can just rely on regular promotion rules.
 // We rely on StreamIdIndex and StreamIdType being non-negative;
 
 using StreamIdIndex = uint8_t;
 enum class StreamIdType : uint8_t {
-  RESERVED = 0x0,
+  // The type number higher, the priority higher
+  NORMAL = 0x0,
+  HIGH = 0X1,
 };
 
 inline std::ostream& operator<<(std::ostream& stream, StreamIdType q) {
   switch (q) {
-    case StreamIdType::RESERVED:
-      stream << "RESERVED";
+    case StreamIdType::NORMAL:
+      stream << "NORMAL";
+      break;
+    case StreamIdType::HIGH:
+      stream << "HIGH";
       break;
     default:
       stream << static_cast<int16_t>(q);
@@ -62,7 +72,10 @@ inline std::ostream& operator<<(std::ostream& stream, StreamIdType q) {
 inline StreamIdType streamIdType(StreamId s) {
   int mask_for_type = (1 << kStreamTypeBits) - 1;
   auto st = static_cast<StreamIdType>(s & mask_for_type);
-  TORCH_CHECK(st == StreamIdType::RESERVED, "invalid StreamId: ", s);
+  TORCH_CHECK(
+      st == StreamIdType::NORMAL || st == StreamIdType::HIGH,
+      "invalid StreamId: ",
+      s);
   return st;
 }
 
@@ -79,23 +92,28 @@ inline StreamId makeStreamId(StreamIdType st, StreamIdIndex si) {
 void initGlobalStreamState() {
   num_gpus = c10::xpu::device_count();
   device_flags.resize(num_gpus);
-  reserved_streams.resize(num_gpus);
-  reserved_counters.resize(num_gpus);
+  streams.resize(num_gpus);
+  priority_counters.resize(num_gpus);
 }
 
-// Creates the reserved SYCL queue pool for the specified device. It should be
+// Creates the reserved SYCL queue pools for the specified device. It should be
 // call only once.
 void initDeviceStreamState(DeviceIndex device) {
-  // Switches to the requested device so streams are properly associated
-  // with it.
-  for (const auto i : c10::irange(kStreamsPerPool)) {
-    reserved_streams[device][i] = std::make_unique<sycl::queue>(sycl::queue(
-        c10::xpu::get_device_context(),
-        c10::xpu::get_raw_device(device),
-        c10::xpu::asyncHandler,
-        {sycl::property::queue::in_order()}));
+  using namespace sycl::ext::oneapi::property;
+  // Need to align with StreamIdType.
+  const std::vector<sycl::property_list> properties = {
+      {sycl::property::queue::in_order(), queue::priority_normal()},
+      {sycl::property::queue::in_order(), queue::priority_high()}};
+  for (const auto p : c10::irange(max_compile_time_stream_priorities)) {
+    for (const auto i : c10::irange(kStreamsPerPool)) {
+      streams[device][p][i] = std::make_unique<sycl::queue>(sycl::queue(
+          c10::xpu::get_device_context(),
+          c10::xpu::get_raw_device(device),
+          c10::xpu::asyncHandler,
+          properties[p]));
+    }
+    priority_counters[device][p] = 0;
   }
-  reserved_counters[device] = 0;
 }
 
 void initXPUStreamsOnce() {
@@ -105,16 +123,16 @@ void initXPUStreamsOnce() {
     return;
   }
 
-  // Inits current streams (thread local) to the first queue in the queue pool.
-  // Note: the queue pool have not been initialized yet. It will be initialized
-  // in initDeviceStreamState for the specified device.
+  // Inits current streams (thread local) to the first queue in the "normal
+  // priority" queue pool. Note: the queue pool have not been initialized yet.
+  // It will be initialized in initDeviceStreamState for the specified device.
   current_streams = std::make_unique<StreamId[]>(num_gpus);
   for (const auto i : c10::irange(num_gpus)) {
-    current_streams[i] = makeStreamId(StreamIdType::RESERVED, 0);
+    current_streams[i] = makeStreamId(StreamIdType::NORMAL, 0);
   }
 }
 
-// Creates the reserved sycl queue pool for the specified device to ensure
+// Creates the reserved sycl queue pools for the specified device to ensure
 // initialization only occurs once.
 inline void initDeviceStreamOnce(DeviceIndex device) {
   c10::call_once(device_flags[device], initDeviceStreamState, device);
@@ -146,6 +164,13 @@ XPUStream XPUStreamForId(DeviceIndex device_index, StreamId stream_id) {
 
 } // anonymous namespace
 
+int XPUStream::priority() const {
+  StreamId stream_id = stream_.id();
+  StreamIdType st = streamIdType(stream_id);
+  // StreamIdType and priority number are inversely related.
+  return -static_cast<int>(st);
+}
+
 // See Note [StreamId assignment]
 sycl::queue& XPUStream::queue() const {
   DeviceIndex device_index = stream_.device_index();
@@ -153,8 +178,9 @@ sycl::queue& XPUStream::queue() const {
   StreamIdType st = streamIdType(stream_id);
   StreamIdIndex si = streamIdIndex(stream_id);
   switch (st) {
-    case StreamIdType::RESERVED:
-      return *reserved_streams[device_index][si];
+    case StreamIdType::NORMAL:
+    case StreamIdType::HIGH:
+      return *streams[device_index][static_cast<uint8_t>(st)][si];
     default:
       TORCH_CHECK(
           false,
@@ -169,26 +195,28 @@ sycl::queue& XPUStream::queue() const {
 
 // Returns a stream from the requested pool
 // Note: when called the first time on a device, this will create the stream
-// pool for that device.
-XPUStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
+// pools for that device.
+XPUStream getStreamFromPool(const int priority, DeviceIndex device) {
   initXPUStreamsOnce();
   if (device == -1) {
     device = c10::xpu::current_device();
   }
   check_device(device);
-  // TODO: support high priority stream.
   TORCH_CHECK(
-      !isHighPriority,
-      "Currently, high priority stream is not supported in XPU backend.");
-
-  // Initializes the stream pool (once)
+      priority <= 0,
+      "Expected XPU stream priority to be less than or equal to 0, got ",
+      priority);
+  // Initializes the stream pools (once)
   initDeviceStreamOnce(device);
-  const auto idx = get_idx(reserved_counters[device]);
-  return XPUStreamForId(device, makeStreamId(StreamIdType::RESERVED, idx));
+  auto priority_idx =
+      std::min(-priority, max_compile_time_stream_priorities - 1);
+  const auto idx = get_idx(priority_counters[device][priority_idx]);
+  auto id_type = static_cast<StreamIdType>(idx);
+  return XPUStreamForId(device, makeStreamId(id_type, idx));
 }
 
 // Note: when called the first time on a device, this will create the stream
-// pool for that device.
+// pools for that device.
 XPUStream getCurrentXPUStream(DeviceIndex device) {
   initXPUStreamsOnce();
   if (device == -1) {
@@ -198,6 +226,12 @@ XPUStream getCurrentXPUStream(DeviceIndex device) {
   // Initializes the stream pool (once)
   initDeviceStreamOnce(device);
   return XPUStreamForId(device, current_streams[device]);
+}
+
+XPUStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
+  initXPUStreamsOnce();
+  int priority = isHighPriority ? -max_compile_time_stream_priorities + 1 : 0;
+  return getStreamFromPool(priority, device);
 }
 
 void setCurrentXPUStream(XPUStream stream) {
@@ -210,19 +244,21 @@ std::ostream& operator<<(std::ostream& stream, const XPUStream& s) {
 }
 
 // Note: when called the first time on a device, this will create the stream
-// pool for that device.
+// pools for that device.
 void device_synchronize(DeviceIndex device) {
   initXPUStreamsOnce();
   if (device == -1) {
     device = c10::xpu::current_device();
   }
   check_device(device);
-  // Initializes the stream pool (once)
+  // Initializes the stream pools (once)
   initDeviceStreamOnce(device);
 
-  // For each device, we have kStreamsPerPool (32) reserved queues.
-  for (const auto i : c10::irange(kStreamsPerPool)) {
-    reserved_streams[device][i]->wait();
+  // For each device, we have kStreamsPerPool (32) reserved queues per priority.
+  for (const auto p : c10::irange(max_compile_time_stream_priorities)) {
+    for (const auto i : c10::irange(kStreamsPerPool)) {
+      streams[device][p][i]->wait();
+    }
   }
 }
 
