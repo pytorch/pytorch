@@ -825,6 +825,34 @@ def forward(self, x_1, output_1):
         compiled_out = torch.compile(f)(inp)
         self.assertEqual(compiled_out, eager_out)
 
+    @requires_cuda()
+    def test_triton_kernel_slice_and_view_input(self):
+        def f(inp):
+            # left has strides [256, 1]
+            left = inp[:, :128]
+            left = left.view(64, 4, 32)
+            out = torch.empty_like(left)
+            X_BLOCK_SIZE, Y_BLOCK_SIZE = 32, 16
+            grid = (
+                (left.size(1) * left.size(2)) // X_BLOCK_SIZE,
+                left.size(0) // Y_BLOCK_SIZE,
+            )
+            double_strided_kernel[grid](
+                in_ptr=left,
+                out_ptr=out,
+                in_y_stride=left.stride(0),
+                out_y_stride=out.stride(0),
+                X_BLOCK_SIZE=X_BLOCK_SIZE,
+                Y_BLOCK_SIZE=Y_BLOCK_SIZE,
+            )
+            return out + left
+
+        inp = torch.randn(64, 256, device="cuda")
+
+        eager_out = f(inp)
+        compiled_out = torch.compile(f)(inp)
+        self.assertEqual(compiled_out, eager_out)
+
 
 class MutationTests(torch._dynamo.test_case.TestCase):
     @requires_cuda()

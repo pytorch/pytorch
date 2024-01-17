@@ -2547,6 +2547,29 @@ class CommonTemplate:
             (torch.randn([2, 20, 2]),),
         )
 
+    # It's a view so it doens't generate a kernel
+    @expectedFailureCodegenDynamic
+    def test_slice3(self):
+        def fn(a, b):
+            return torch.ops.aten.slice.Tensor(a, 0, 0, -b)
+
+        x = torch.rand(48, 3, 512, 512)
+        self.common(fn, (x, 2))
+
+    @expectedFailureCodegenDynamic
+    def test_slice4(self):
+        # empty slices that require clamping the start or end
+        def fn(a):
+            return (
+                aten.slice.Tensor(a, 0, 2, 0, 1),
+                aten.slice.Tensor(a, 0, a.shape[0], a.shape[0] + 10, 1),
+                aten.slice.Tensor(a, 0, -20, 0, 1),
+                aten.slice.Tensor(a, 0, -20, -16, 1),
+            )
+
+        x = torch.rand(10)
+        self.common(fn, (x,))
+
     def test_split_with_sizes(self):
         def fn(a, sizes):
             return [t + 1.0 for t in torch.split(a * 2.0, sizes, -1)]
@@ -5636,6 +5659,20 @@ class CommonTemplate:
             ],
         )
 
+    def test_slice_scatter5(self):
+        # empty slices that require clamping the start or end
+        def fn(a, b):
+            return (
+                aten.slice_scatter.default(a, b, 0, 2, 0, 1),
+                aten.slice_scatter.default(a, b, 0, a.shape[0], a.shape[0] + 10, 1),
+                aten.slice_scatter.default(a, b, 0, -20, 0, 1),
+                aten.slice_scatter.default(a, b, 0, -20, -16, 1),
+            )
+
+        a = torch.arange(10, dtype=torch.float)
+        b = torch.empty(0)
+        self.common(fn, [a, b])
+
     def test_scatter1(self):
         def fn(a, dim, index, b):
             return aten.scatter(a, dim, index, b)
@@ -7773,15 +7810,6 @@ class CommonTemplate:
         x = torch.randn(2, 2)
         self.common(fn, (x,), atol=0, rtol=0)
 
-    # It's a view so it doens't generate a kernel
-    @expectedFailureCodegenDynamic
-    def test_slice(self):
-        def fn(a, b):
-            return torch.ops.aten.slice.Tensor(a, 0, 0, -b)
-
-        x = torch.rand(48, 3, 512, 512)
-        self.common(fn, (x, 2))
-
     def test_inplace_resize_as(self):
         def fn(x, y):
             x.resize_as_(y)
@@ -7974,7 +8002,7 @@ class CommonTemplate:
     @torch._inductor.config.patch("layout_optimization", True)
     @torch._inductor.config.patch("keep_output_stride", False)
     @config.patch(implicit_fallbacks=True)
-    def test_custom_op_fixed_layout(self):
+    def test_custom_op_fixed_layout_sequential(self):
         import torch.library
 
         mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).cuda()
@@ -7996,7 +8024,7 @@ class CommonTemplate:
         if libbar is None:
             libbar = torch.library.Library("bar", "DEF")
             libbar.define(
-                "custom(Tensor self) -> Tensor", tags=[torch._C.Tag.needs_fixed_layout]
+                "custom(Tensor self) -> Tensor", tags=[torch._C.Tag.needs_fixed_layout] # Test fails without this tag
             )
             libbar.impl("custom", foo_cpu, "CPU")
             libbar.impl("custom", foo_cuda, "CUDA")
@@ -8011,6 +8039,60 @@ class CommonTemplate:
             # With keep_output_stride False, inductor would normally have different layout from eager execution
             # But because our custom op needs fixed layout, the assertions in the custom op will pass
             self.common(fn, (inp,), check_lowp=False)
+
+    @requires_cuda()
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_fixed_layout_channels_last(self):
+        class Block(nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+
+                self.in_layers = nn.Sequential(
+                    nn.Dropout(p=0.1),
+                )
+            def helper(self, x):
+                out = F.gelu(x)
+                out = self.in_layers(out)
+                return out
+
+            def forward(self, x):
+                out = self.helper(x)
+                out = torch.ops.baz.custom(out)
+                return out
+
+        model = Block()
+        model = model.to("cuda").to(memory_format=torch.channels_last)
+        input_t = torch.randn([1, 320, 128, 128], dtype=torch.float32, device='cuda', requires_grad=True)
+        input_t = input_t.to(memory_format=torch.channels_last)
+
+        expected = input_t.clone()
+        expected_strides = model.helper(expected).stride()
+
+        def foo_cpu(x):
+            self.assertEqual(expected_strides, x.stride())
+            return x.clone()
+
+        def foo_cuda(x):
+            self.assertEqual(expected_strides, x.stride())
+            return x.clone()
+
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        global libbaz
+        if libbaz is None:
+            libbaz = torch.library.Library("baz", "DEF")
+            libbaz.define(
+                "custom(Tensor self) -> Tensor", tags=[torch._C.Tag.needs_fixed_layout] # Test fails without this tag
+            )
+            libbaz.impl("custom", foo_cpu, "CPU")
+            libbaz.impl("custom", foo_cuda, "CUDA")
+            libbaz.impl("custom", foo_meta, "Meta")
+
+        net = torch.compile(model)
+        out = net(input_t)
 
     def test_buffer_use_after_remove(self):
         # https://github.com/pytorch/pytorch/issues/102857
