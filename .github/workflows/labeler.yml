@@ -1,7 +1,7 @@
 name: Labeler
 
 on:
-  # We need pull_request_target to be able to add lables to PRs from forks.
+  # We need pull_request_target to be able to add labels to PRs from forks.
   # Only allow pull_request_target when targeting main, not some historical branch.
   #
   # Make sure to don't introduce explicit checking out and installing/running
