@@ -3621,7 +3621,7 @@ class SparseCollective(MultiProcessTestCase):
 class NCCLTraceTestBase(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
-        os.environ["TORCH_NCCL_ENABLE_TIMING"] = '0'
+        os.environ["TORCH_NCCL_ENABLE_TIMING"] = '0'  # see 'timing_enabled' parametrized tests
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '10'
         os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = '1'
         self.tempdir = tempfile.TemporaryDirectory()
@@ -3697,16 +3697,23 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_short(self):
+    @parametrize("timing_enabled", [True, False])
+    def test_short(self, timing_enabled):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
         device = self.local_device
         a = torch.full((3, 4), float(self.rank), device=device)
         for i in range(2):
             f = pg.allreduce(a)
         f.wait()
         torch.cuda.synchronize(device=device)
+
+        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
+        time.sleep(1)
+
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t), 2)
         last = t[-1]
@@ -3719,6 +3726,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
         event_created_time = datetime.fromtimestamp(last['time_created_us'] / 1000000)
         before_test = now - timedelta(minutes=1)
         self.assertTrue(before_test < event_created_time < now)
+        if timing_enabled:
+            # very loose bounds, measured 0.036 ms on devgpu
+            self.assertTrue(0 < last['duration_ms'] < 100)
+        else:
+            self.assertTrue("duration_ms" not in last)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
