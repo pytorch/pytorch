@@ -413,7 +413,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail(
-        error_message="zeros() received an invalid combination of arguments - got (FakeTensor, FakeTensor)"
+        error_message="Unsupported FX nodes: {'call_function': ['aten._assert_async.msg']}."
     )
     def test_squeeze_runtime_dim(self):
         class Squeeze(torch.nn.Module):
