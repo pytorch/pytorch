@@ -25,6 +25,11 @@ jobs:
           ref: main
           path: codellama
 
+      - name: Setup Conda
+        uses: conda-incubator/setup-miniconda@v2.1.1
+        with:
+          python-version: 3.9
+
       - name: Fetch CodeLlama Checkpoint
         shell: bash -l {0}
         run: |
@@ -42,11 +47,6 @@ jobs:
           repository: osalpekar/llm-target-determinator
           ref: main
           path: llm-target-determinator
-
-      - name: Setup Conda
-        uses: conda-incubator/setup-miniconda@v2.1.1
-        with:
-          python-version: 3.9
 
       - name: Install Requirements
         shell: bash -l {0}
