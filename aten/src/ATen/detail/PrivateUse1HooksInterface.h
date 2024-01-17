@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/Allocator.h>
 #include <ATen/core/Generator.h>
 #include <c10/core/Device.h>
 #include <c10/util/Exception.h>
@@ -17,6 +18,11 @@ struct TORCH_API PrivateUse1HooksInterface {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getDeviceFromPtr`.");
+  }
+
+  virtual Allocator* getPinnedMemoryAllocator() const {
+    TORCH_CHECK(false,
+        "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getPinnedMemoryAllocator`.");
   }
 
   virtual void initPrivateUse1() const {}
