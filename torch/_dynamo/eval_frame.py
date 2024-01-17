@@ -1531,6 +1531,13 @@ class TorchPatcher:
             # disable future hooking
             opt.step.hooked = True  # type: ignore[attr-defined]
 
+        # annoying - we cannot annotate these functions directly due to
+        # torch.package issues, see https://github.com/pytorch/pytorch/pull/116229
+        if config.trace_distributed and torch.distributed.is_available():
+            import torch.distributed.fsdp._flat_param as flat_param
+
+            torch._dynamo.allow_in_graph(flat_param._same_storage_size)
+
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
         def inner_fn(*args, **kwargs):
