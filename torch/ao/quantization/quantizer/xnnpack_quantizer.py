@@ -260,7 +260,9 @@ class XNNPACKQuantizer(Quantizer):
     ]
 
     # static quantization ops (both PTQ and QAT)
+    # Preserve the order that fusions come before singular ops
     STATIC_OPS = [
+        "linear_relu",
         "linear",
         "conv_relu",
         "conv",

@@ -87,6 +87,12 @@ class GenCompositeViewCopyKernel:
     def __call__(self, g: NativeFunctionsViewGroup) -> Optional[str]:
         if g.view_copy is None:
             return None
+        elif g.view_copy.func.name.name.base != f"{g.view.func.name.name}_copy":
+            # If the view_copy doesn't match the standard naming scheme of <op>_copy,
+            # assume it already exists and doesn't need to be generated.
+            # Example: slice_inverse() with the copy variant named slice_scatter()
+            # instead of slice_inverse_copy()
+            return None
 
         metadata = self.backend_index.get_kernel(g.view_copy)
         assert metadata is not None
@@ -686,8 +692,8 @@ def gen_functionalization_view_inverse_declaration(
     def emit_decl_helper(g: NativeFunctionsViewGroup) -> Optional[str]:
         if g.view.has_composite_implicit_autograd_kernel:
             return None
-        view_copy_inverse_sig = ViewInverseSignature(g)
-        return view_copy_inverse_sig.decl()
+        view_inverse_sig = ViewInverseSignature(g)
+        return view_inverse_sig.decl()
 
     return emit_decl_helper(g)
 

@@ -2,11 +2,13 @@
 # flake8: noqa
 import copy
 import dataclasses
+import io
 import unittest
 from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
+import torch.nn.functional as F
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
@@ -35,6 +37,13 @@ from torch._subclasses import FakeTensorMode
 from torch.export import Constraint, Dim
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+)
+from torch.testing._internal.common_device_type import (
+    onlyCPU,
+    onlyCUDA,
+)
 from torch.testing._internal.common_utils import run_tests
 from torch._dynamo.test_case import TestCase
 from torch.utils._pytree import (
@@ -1583,18 +1592,6 @@ def forward(self, arg_0):
         ):
             _ = Constraint()
 
-    def test_predispatch_export_with_autograd_op(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                with torch.enable_grad():
-                    return x + x
-
-        with torch.no_grad():
-            ep = _export(Foo(), (torch.ones(10),), pre_dispatch=True)
-
     def test_train_eval_on_exported_preautograd_module(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2216,7 +2213,7 @@ def forward(self, l_x_):
     def test__scaled_dot_product_flash_attention(self):
         class Module(torch.nn.Module):
             def forward(self, q, k, v):
-                res = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v)
+                res = torch.nn.functional.scaled_dot_product_attention(q, k, v)
                 return res[0]
 
         m = Module()
@@ -2235,7 +2232,7 @@ def forward(self, l_x_):
         ep = export(M(), (torch.ones(16, 4),), dynamic_shapes={'x': {0: Dim("dim")}})
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
         FileCheck().check_count(
-            "torch.sym_sqrt", 1, exactly=True
+            "torch._sym_sqrt", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_check_specialized_int(self):
@@ -2370,8 +2367,8 @@ def forward(self, l_x_):
             str(gm_unflat_non_strict.bar.leaf.linear.graph).strip(), """\
 graph():
     %arg3_1 : [num_users=1] = placeholder[target=arg3_1]
-    %bias : [num_users=1] = get_attr[target=bias]
     %weight : [num_users=1] = get_attr[target=weight]
+    %bias : [num_users=1] = get_attr[target=bias]
     %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
     %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %arg3_1, %t), kwargs = {})
     return addmm"""
@@ -2438,8 +2435,8 @@ graph():
             str(gm_unflat_non_strict.bar.leaf.linear.graph).strip(), """\
 graph():
     %arg5_1 : [num_users=1] = placeholder[target=arg5_1]
-    %bias : [num_users=1] = get_attr[target=bias]
     %weight : [num_users=1] = get_attr[target=weight]
+    %bias : [num_users=1] = get_attr[target=bias]
     %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
     %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %arg5_1, %t), kwargs = {})
     return addmm"""
@@ -2448,8 +2445,8 @@ graph():
             str(gm_unflat_non_strict.bar_different.leaf.linear.graph).strip(), """\
 graph():
     %add_2 : [num_users=1] = placeholder[target=add_2]
-    %bias : [num_users=1] = get_attr[target=bias]
     %weight : [num_users=1] = get_attr[target=weight]
+    %bias : [num_users=1] = get_attr[target=bias]
     %t_1 : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
     %addmm_1 : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %add_2, %t_1), kwargs = {})
     return addmm_1"""
@@ -2539,6 +2536,74 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         # this doesn't work today
         gm_unflat_strict = unflatten(ep)
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestOneOffModelExportResult(TestCase):
+    def test_scaled_dot_product_attention_cpu(self):
+        """
+        This test makes sure we are always getting the same decomposition result for SDPA.
+        As of now _scaled_dot_product_flash_attention_for_cpu is expected to show up in
+        export() result. Some downstream backend then further decompose it into core ATen
+        ops in torch/_decomp/decompositions.py (search for
+        _scaled_dot_product_flash_attention_for_cpu).
+
+        Export is decomposing based on the CompositeImplicitAutograd kernel implementation
+        of SDPA. If this test fails, it means the kernel is being modified. In this case
+        we strongly encourage you to change the decomposition rule under
+        torch/_decomp/decompositions.py along with the kernel changes, so all of the
+        downstream backends are not being affected.
+        """
+        class ScaledDotProductAttention(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, q, k, v):
+                attn_output = F.scaled_dot_product_attention(
+                    q, k, v, None, dropout_p=0.0, is_causal=True
+                )
+                return attn_output
+        q = torch.randn(1, 1, 8, 8, device="cpu")
+        k = torch.randn(1, 1, 8, 8, device="cpu")
+        v = torch.randn(1, 1, 8, 8, device="cpu")
+
+        ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
+        self.assertExpectedInline(ep.graph_module.code.strip(), """\
+def forward(self, l_q_, l_k_, l_v_):
+    _scaled_dot_product_flash_attention_for_cpu = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(l_q_, l_k_, l_v_, 0.0, True);  l_q_ = l_k_ = l_v_ = None
+    getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
+    return (getitem,)""")
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Can't run fused SDPA on this platform",
+    )
+    def test_scaled_dot_product_attention_cuda(self):
+        """
+        This test makes sure we are always getting the same decomposition result for SDPA.
+        As of now _scaled_dot_product_flash_attention is expected to show up in
+        export() result (GPU tensors are given). Currently there's no downstream
+        backend relies on this export result so if this test fails, feel free to
+        change it to the latest export() result.
+        """
+        class ScaledDotProductAttention(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, q, k, v):
+                attn_output = F.scaled_dot_product_attention(
+                    q, k, v, None, dropout_p=0.0, is_causal=True
+                )
+                return attn_output
+        q = torch.randn(1, 16, 16, 64, dtype = torch.bfloat16, device="cuda")
+        k = torch.randn(1, 16, 16, 64, dtype = torch.bfloat16, device="cuda")
+        v = torch.randn(1, 16, 16, 64, dtype = torch.bfloat16, device="cuda")
+
+        ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
+        self.assertExpectedInline(ep.graph_module.code.strip(), """\
+def forward(self, l_q_, l_k_, l_v_):
+    _scaled_dot_product_flash_attention = torch.ops.aten._scaled_dot_product_flash_attention.default(l_q_, l_k_, l_v_, 0.0, True, scale = 0.125);  l_q_ = l_k_ = l_v_ = None
+    getitem = _scaled_dot_product_flash_attention[0];  _scaled_dot_product_flash_attention = None
+    return (getitem,)""")
 
 
 if __name__ == '__main__':
