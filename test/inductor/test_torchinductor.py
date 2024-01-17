@@ -8090,9 +8090,9 @@ class CommonTemplate:
             libbaz.impl("custom", foo_cpu, "CPU")
             libbaz.impl("custom", foo_cuda, "CUDA")
             libbaz.impl("custom", foo_meta, "Meta")
-
-        net = torch.compile(model)
-        out = net(input_t)
+        with torch.no_grad():
+            net = torch.compile(model)
+            out = net(input_t)
 
     def test_buffer_use_after_remove(self):
         # https://github.com/pytorch/pytorch/issues/102857
