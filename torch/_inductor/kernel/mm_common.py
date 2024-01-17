@@ -155,21 +155,17 @@ def mm_grid(m, n, meta):
 
 
 def acc_type(dtype):
-    mm_cfg = torch.backends.cuda.matmul
-    cast_fp16 = dtype == torch.float16 and mm_cfg.allow_fp16_reduced_precision_reduction
-    cast_bf16 = dtype == torch.bfloat16
-    cast_fp32 = (
-        dtype == torch.float16 or dtype == torch.bfloat16
-    ) and not mm_cfg.allow_fp16_reduced_precision_reduction
-
-    if cast_fp16:
+    if dtype == torch.float16:
+        if not torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction:
+            return "tl.float32"
+        elif torch.version.hip:
+            # ROCm fails precision test
+            return "tl.float32"
         return "tl.float16"
-    elif cast_bf16:
+    elif dtype == torch.bfloat16:
         # BF16 dot acc is currently neither supported in NVIDIA Tensor Cores
         # nor in Triton (via wmma/wgmma)
         # https://github.com/openai/triton/issues/2302
-        return "tl.float32"
-    elif cast_fp32:
         return "tl.float32"
     return f"tl.{dtype}".replace("torch.", "")
 
