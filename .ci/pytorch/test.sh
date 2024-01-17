@@ -284,6 +284,7 @@ test_dynamo_shard() {
       profiler/test_profiler_tree \
       test_python_dispatch \
       test_fx \
+      test_package \
       test_custom_ops \
       export/test_db \
       functorch/test_dims \
