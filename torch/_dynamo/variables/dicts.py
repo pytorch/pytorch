@@ -84,7 +84,12 @@ class ConstDictVariable(VariableTracker):
         def __init__(self, vt):
             # We specialize SymNodes
             vt = specialize_symnode(vt)
-            assert is_hashable(vt), type(vt)
+            # TODO Temorarily remove to figure out what keys are we breaking on
+            # and add proper support for them
+            if not is_hashable(vt):
+                unimplemented(
+                    f"Dict key of type {type(vt)}. Key: {vt}"
+                )
             self.vt = vt
 
         @property
