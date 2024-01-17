@@ -10,10 +10,18 @@ from .constant import ConstantVariable
 
 
 class DistributedVariable(VariableTracker):
-    def __init__(self, **kwargs):
+    """
+    The base distributed variable that checks for the distributed existance
+    and hold the value for a distributed object.
+    """
+    def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         if not DistributedVariable.is_available():
             unimplemented("torch.distributed package is not available!")
+        self.value = value
+
+    def python_type(self):
+        return type(self.value)
 
     @staticmethod
     def is_available():
@@ -47,10 +55,6 @@ def is_constant_pg_functions(value):
 
 
 class PlacementClassVariable(DistributedVariable):
-    def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-
     @staticmethod
     def is_placement_type(value):
         # we can't rely on importing/accessing torch distributed, it is not always built.
@@ -80,10 +84,6 @@ class PlacementClassVariable(DistributedVariable):
 
 
 class PlacementVariable(DistributedVariable):
-    def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-
     @staticmethod
     def is_placement(value):
         # we can't rely on importing/accessing torch distributed, it is not always built.
@@ -130,10 +130,6 @@ class PlacementVariable(DistributedVariable):
 
 
 class DeviceMeshVariable(DistributedVariable):
-    def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-
     @staticmethod
     def is_device_mesh(value):
         # we can't rely on importing/accessing torch distributed, it is not always built.
@@ -172,15 +168,8 @@ class ProcessGroupVariable(DistributedVariable):
           or just graph-break whenever one of our special cases is not hit?
     """
 
-    def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-
     def as_python_constant(self):
         return self.value
-
-    def python_type(self):
-        return type(self.value)
 
     def call_method(
         self,
