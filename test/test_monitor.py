@@ -120,6 +120,7 @@ class TestMonitorTensorboard(TestCase):
         for temp_dir in self.temp_dirs:
             temp_dir.cleanup()
 
+    @skipIfTorchDynamo("Really weird error")
     def test_event_handler(self):
         with self.create_summary_writer() as w:
             handle = register_event_handler(TensorboardEventHandler(w))
