@@ -1259,7 +1259,7 @@ def parse_args():
     )
     parser.add_argument(
         "--set-timeout",
-        type="store_true",
+        action="store_true",
         help="Set a timeout based on the test times json file.  Only works if there are test times available",
         default=IS_CI and not strtobool(os.environ.get("NO_TEST_TIMEOUT", "False")),
     )
