@@ -326,14 +326,14 @@ class GetItemSource(ChainedSource):
 
     def name(self):
         # Index can be of following types
-        # 1) GlobalWeakRefSource - for parameters
+        # 1) ConstDictKeySource
         # 2) enum.Enum
         # 3) index is a slice - example 1:4
         # 4) index is a constant - example string, integer
         if isinstance(self.index, Source):
-            if not isinstance(self.index, GlobalWeakRefSource):
+            if not isinstance(self.index, ConstDictKeySource):
                 raise ValueError(
-                    "GetItemSource index must be a constant,enum or a GlobalWeakRefSource"
+                    "GetItemSource index must be a constant, enum or ConstDictKeySource"
                 )
             return f"{self.base.name()}[{self.index.name()}]"
         elif self.index_is_slice:
