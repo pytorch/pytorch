@@ -1170,7 +1170,13 @@ class Exporter:
             self._assert_fake_tensor_mode()
 
     def export(self) -> ONNXProgram:
-        with self.options.diagnostic_context:
+        # TODO: Defer `import onnxscript` out of `import torch` path
+        # https://github.com/pytorch/pytorch/issues/103764
+        from torch.onnx._internal.fx import decomposition_skip
+
+        with self.options.diagnostic_context, decomposition_skip.enable_decomposition_skips(
+            self.options
+        ):
             graph_module = self.options.fx_tracer.generate_fx(
                 self.options, self.model, self.model_args, self.model_kwargs
             )
