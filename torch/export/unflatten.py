@@ -255,10 +255,10 @@ def unflatten(
     hierachy instead of the flat graph that :mod:`torch.export` usually produces.
 
     .. note:: The args/kwargs of unflattened modules will not necessarily match
-    the eager module, so doing a module swap (e.g. :code:`self.submod =
-    new_mod`) will not necessarily work. If you need to swap a module out, you
-    need to set the :code:`preserve_module_call_signature` parameter of
-    :func:`torch.export.export`.
+        the eager module, so doing a module swap (e.g. :code:`self.submod =
+        new_mod`) will not necessarily work. If you need to swap a module out, you
+        need to set the :code:`preserve_module_call_signature` parameter of
+        :func:`torch.export.export`.
 
     Args:
         module (ExportedProgram): The ExportedProgram to unflatten.
