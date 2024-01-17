@@ -5,27 +5,27 @@ with test_functionalization_with_native_python_assertion)
 
 # Owner(s): ["module: dynamo"]
 import math
+import operator
 import unittest
 from typing import List, Set
-import operator
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.testing import FileCheck
+from functorch.experimental.control_flow import cond
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch.export import export
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
-from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
-    is_view_op,
-    get_view_copy_of_view_op,
-    ReplaceViewOpsWithViewCopyOpsPass,
-)
 from torch._export.passes.functionalize_side_effectful_ops_pass import (
     _FunctionalizeSideEffectfulOpsPass,
 )
-from functorch.experimental.control_flow import cond
-from torch.fx.passes.operator_support import OperatorSupport
+from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
+    get_view_copy_of_view_op,
+    is_view_op,
+    ReplaceViewOpsWithViewCopyOpsPass,
+)
+from torch.export import export, WrapperModule
 from torch.fx.passes.infra.partitioner import Partition
+from torch.fx.passes.operator_support import OperatorSupport
+from torch.testing import FileCheck
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils import _pytree as pytree
 
 
@@ -193,7 +193,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
 
-        ep = export(foo, (x,))._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
+        ep = export(WrapperModule(foo), (x,))._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
         # After this pass, there shouldn't be any view nodes in the graph
         self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view.default) == 0)
         self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view_copy.default) > 0)
@@ -344,7 +344,7 @@ class TestPasses(TestCase):
             )
 
         x = torch.randn(1, dtype=torch.float32)
-        ep = torch.export.export(func, args=(x,))
+        ep = torch.export.export(WrapperModule(func), args=(x,))
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
 
 
