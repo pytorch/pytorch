@@ -720,8 +720,11 @@ class TestSerializeCustomClass(TestCase):
     def test_custom_class(self):
         custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
-        def f(x):
-            return x + x
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        f = Foo()
 
         inputs = (torch.zeros(4, 4),)
         ep = export(f, inputs)
