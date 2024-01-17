@@ -523,15 +523,6 @@ class BuiltinVariable(VariableTracker):
         ):
             tensor_args = False
 
-        # Constant fold for constant tensor and python constants
-        if tensor_args and self.python_and_tensor_constant_only(*args, **kwargs):
-            from ..bytecode_transformation import unique_id
-            from .functions import invoke_and_store_as_constant
-
-            return invoke_and_store_as_constant(
-                tx, self.fn, unique_id(self.fn.__name__), args, kwargs
-            )
-
         if (
             self.can_insert_in_graph()
             and tensor_args
@@ -543,6 +534,17 @@ class BuiltinVariable(VariableTracker):
         ):
             try:
                 fn = self.fn
+
+                # Constant fold for constant tensor and python constants
+                if tensor_args and self.python_and_tensor_constant_only(
+                    *args, **kwargs
+                ):
+                    from ..bytecode_transformation import unique_id
+                    from .functions import invoke_and_store_as_constant
+
+                    return invoke_and_store_as_constant(
+                        tx, fn, unique_id(fn.__name__), args, kwargs
+                    )
 
                 if self.fn in IN_PLACE_DESUGARING_MAP and isinstance(
                     args[0], variables.ConstantVariable
