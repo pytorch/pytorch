@@ -11,11 +11,10 @@ on:
     branches: [main]
     paths-ignore: [.github]
 
-  # To allow testing PRs that change workflows.
+  # To add labels on ghstack PRs and to allow testing PRs that change workflows.
   # May be triggered together with pull_request_target, it's OK.
   pull_request:
     types: [opened, synchronize, reopened]
-    paths: [.github]
 
 jobs:
   triage:
