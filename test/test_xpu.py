@@ -72,6 +72,17 @@ if __name__ == "__main__":
         )
         self.assertRegex(stderr, "Cannot re-initialize XPU in forked subprocess.")
 
+    def test_streams(self):
+        s0 = torch.xpu.Stream()
+        s1 = torch.xpu.current_stream()
+        self.assertEqual(s0, s1)
+        s2 = torch.xpu.Stream()
+        self.assertFalse(s0 == s2)
+        torch.xpu.set_stream(s2)
+        with torch.xpu.stream(s0):
+            self.assertTrue(s0, torch.xpu.current_stream())
+        self.assertTrue(s2, torch.xpu.current_stream())
+
 
 if __name__ == "__main__":
     run_tests()

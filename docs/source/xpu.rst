@@ -7,7 +7,9 @@ torch.xpu
     :toctree: generated
     :nosignatures:
 
+    StreamContext
     current_device
+    current_stream
     device
     device_count
     device_of
@@ -18,3 +20,6 @@ torch.xpu
     is_available
     is_initialized
     set_device
+    set_stream
+    stream
+    synchronize
