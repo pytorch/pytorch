@@ -550,6 +550,21 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
+    @patch.object(config, "optimize_ddp", False)
+    def test_ddp_baseline_compiled_autograd(self):
+        from torch.nn.parallel import DistributedDataParallel as DDP
+        from torch._dynamo.utils import maybe_enable_compiled_autograd
+
+        m, inputs, correct_outputs = self.get_model()
+        ddp_m = DDP(m, device_ids=self.device_ids)
+        ddp_m = torch._dynamo.optimize("aot_eager")(ddp_m)
+        with maybe_enable_compiled_autograd(True):
+            outputs = ddp_m(inputs)
+            outputs.sum().backward()
+
+        breakpoint()
+        self.assertTrue(same(correct_outputs, outputs))
+
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_inductor(self):
