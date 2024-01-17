@@ -1784,10 +1784,7 @@ def forward(self, l_x_):
 
         mod = Module()
         xs = torch.randn(0, 2)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Got invalid inputs for map",
-        ):
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
             out_graph, _ = torch._dynamo.export(mod)(xs)
 
     def test_export_meta_val(self):
@@ -3919,7 +3916,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         mod = Module()
         xs = torch.randn(0, 2)
         with self.assertRaises(
-            torch._dynamo.exc.Unsupported,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
         ):
             out_graph, _ = torch._dynamo.export(mod, xs)
 
