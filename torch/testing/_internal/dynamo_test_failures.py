@@ -15,8 +15,8 @@ FIXME_default_non_strict = {
     "export/test_upgrade",
     "export/test_verifier",
     "functorch/test_aotdispatch",
+    "functorch/test_ops",
     "functorch/test_vmap",
-    "functorch/test_vmap_registrations",
     "inductor/test_aot_inductor",
     "inductor/test_aot_inductor_utils",
     "inductor/test_benchmark_fusion",
@@ -86,8 +86,6 @@ FIXME_default_non_strict = {
     "test_ops_fwd_gradients",
     "test_ops_gradients",
     "test_ops_jit",
-    "test_legacy_vmap",
-    "test_package",
     "test_python_dispatch",
     "test_quantization",
     "test_tensorexpr",
@@ -95,6 +93,15 @@ FIXME_default_non_strict = {
     "test_torch",
     "test_vulkan",
     "test_xnnpack_integration",
+}
+
+# Tests that run without strict mode in PYTORCH_TEST_WITH_INDUCTOR=1.
+# Please don't add anything to this list.
+FIXME_inductor_non_strict = {
+    "test_modules",
+    "test_ops",
+    "test_ops_gradients",
+    "test_torch",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -146,7 +153,6 @@ dynamo_expected_failures = {
     "TestIndexingCPU.test_index_limits_cpu",
     "NumpyTestsCPU.test_boolean_indexing_weirdness_cpu",
     "TestLinalgCPU.test_inverse_cpu_float32",
-    "TestLinalgCPU.test_matrix_rank_cpu_complex64",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_float32",
     "TestLinalgCPU.test_inverse_cpu_complex128",
     "TestLinalgCPU.test_norm_dtype_cpu_complex128",
@@ -167,7 +173,6 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_addr_integral_cpu_int8",
     "TestLinalgCPU.test_einsum_random_cpu_float64",
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_complex64",
-    "TestLinalgCPU.test_matrix_rank_cpu_float32",
     "TestLinalgCPU.test_pinv_cpu_float32",
     "TestLinalgCPU.test_addr_integral_cpu_uint8",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_complex128",
@@ -184,12 +189,10 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_pinv_cpu_complex64",
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",
     "TestLinalgCPU.test_geqrf_cpu_complex128",
-    "TestLinalgCPU.test_matrix_rank_cpu_complex128",
     "TestLinalgCPU.test_einsum_sublist_format_cpu_complex128",
     "TestLinalgCPU.test_geqrf_cpu_complex64",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_float64",
     "TestLinalgCPU.test_linalg_lu_family_cpu_complex64",
-    "TestLinalgCPU.test_matrix_rank_cpu_float64",
     "TestLinalgCPU.test_geqrf_cpu_float64",
     "TestLinalgCPU.test_householder_product_cpu_complex128",
     "TestLinalgCPU.test_geqrf_cpu_float32",
@@ -586,10 +589,6 @@ dynamo_expected_failures = {
     "TestGenericReductions.test_bad_axis_func1",
     "TestGenericCumSumProd.test_bad_axis_func0",
     "TestGenericReductions.test_bad_axis_func9",
-    "TestShuffle.test_1d_use_numpy_True",
-    "TestShuffle.test_1d_use_numpy_False",
-    "TestShuffle.test_2d_use_numpy_True",
-    "TestShuffle.test_2d_use_numpy_False",
     "TestWritebackIfCopy.test_take_mode_raise",
     "TestArange.test_infinite",
     "TestArrayConstruction.test_array_empty",
@@ -637,434 +636,10 @@ dynamo_expected_failures = {
     "TestFlag.test_writeable_from_readonly",
     "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmax_np_method0",
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmin",
-    "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmax_np_method0",
-    "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmin_np_method1",
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmax",
     "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmin_np_method1",
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmax",
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmin",
-    "TestConvertDType.test_convert_np_dtypes_'int64'",
-    "TestConvertDType.test_convert_np_dtypes_'uint8'",
-    "TestConvertDType.test_convert_np_dtypes_bool",
-    "TestConvertDType.test_convert_np_dtypes_'complex128'",
-    "TestConvertDType.test_convert_np_dtypes_'float16'",
-    "TestConvertDType.test_convert_np_dtypes_'int16'",
-    "TestConvertDType.test_convert_np_dtypes_'int32'",
-    "TestConvertDType.test_convert_np_dtypes_'int8'",
-    "TestConvertDType.test_convert_np_dtypes_'float64'",
-    "TestConvertDType.test_convert_np_dtypes_'float32'",
-    "TestConvertDType.test_convert_np_dtypes_'complex64'",
-    "TestConvertDType.test_convert_np_dtypes_'bool_'",
-    "TestOneArr.test_asarray_list_func55",
-    "TestOneArr.test_asarray_tensor_func65",
-    "TestOneArr.test_asarray_tensor_func44",
-    "TestOneArr.test_asarray_array_func59",
-    "TestOneArr.test_asarray_array_func45",
-    "TestOneArr.test_asarray_list_func70",
-    "TestOneArrAndAxis.test_andaxis_list_func7_axis_0",
-    "TestSequenceOfArrays.test_single_array_func1",
-    "TestOneArrAndAxis.test_andaxis_array_func1_axis_1",
-    "TestSequenceOfArraysToSingle.test_several_func6",
-    "TestOneArr.test_asarray_list_func0",
-    "TestOneArrAndAxis.test_andaxis_list_func9_axis_1",
-    "TestOneArrAndAxis.test_andaxis_list_func8_axis_0",
-    "TestOneArr.test_asarray_list_func36",
-    "TestOneArrAndAxis.test_andaxis_array_func3_axis_0",
-    "TestOneArr.test_asarray_tensor_func15",
-    "TestOneArr.test_asarray_array_func51",
-    "TestOneArr.test_asarray_list_func16",
-    "TestOneArrAndAxis.test_andaxis_tensor_func5_axis_0",
-    "TestOneArrAndAxis.test_andaxis_tensor_func1_axis_1",
-    "TestOneArr.test_asarray_tensor_func1",
-    "TestOneArrAndAxesTuple.test_andtuple_list_func0_axes2",
-    "TestOneArrAndAxis.test_andaxis_list_func6_axis_1",
-    "TestOneArrAndAxis.test_andaxis_tensor_func10_axis_-1",
-    "TestSequenceOfArraysToSingle.test_several_func2",
-    "TestOneArrAndAxis.test_andaxis_array_func5_axis_1",
-    "TestOneArrAndAxis.test_andaxis_list_func10_axis_1",
-    "TestOneArr.test_asarray_array_func72",
-    "TestOneArrAndShape.test_andshape_list_func0",
-    "TestCtorNested.test_arrays_in_lists",
-    "TestOneArr.test_asarray_tensor_func51",
-    "TestOneArr.test_asarray_array_func0",
-    "TestOneArr.test_asarray_array_func10",
-    "TestOneArr.test_asarray_array_func43",
-    "TestOneArrToScalar.test_toscalar_array_func2_np_func2",
-    "TestOneArr.test_asarray_list_func3",
-    "TestOneArr.test_asarray_array_func56",
-    "TestArrayToSequence.test_asarray_array_func1",
-    "TestOneArrAndShape.test_andshape_tensor_func4",
-    "TestOneArr.test_asarray_list_func60",
-    "TestDivmod.test_divmod_out",
-    "TestOneArrAndAxis.test_andaxis_list_func7_axis3",
-    "TestOneArrAndAxis.test_andaxis_array_func6_axis_0",
-    "TestOneArrAndAxis.test_andaxis_list_func5_axis_0",
-    "TestOneArr.test_asarray_tensor_func53",
-    "TestOneArrAndAxis.test_andaxis_array_func6_axis3",
-    "TestOneArr.test_asarray_tensor_func73",
-    "TestDivmod.test_divmod_no_out",
-    "TestOneArrAndAxis.test_andaxis_array_func9_axis_1",
-    "TestOneArr.test_asarray_list_func58",
-    "TestOneArrAndAxis.test_andaxis_tensor_func8_axis_0",
-    "TestOneArr.test_asarray_array_func49",
-    "TestOneArr.test_asarray_array_func60",
-    "TestOneArr.test_asarray_tensor_func62",
-    "TestOneArrAndAxesTuple.test_andtuple_tensor_func0_axes0",
-    "TestOneArr.test_asarray_array_func22",
-    "TestOneArr.test_asarray_list_func24",
-    "TestOneArr.test_asarray_list_func15",
-    "TestSequenceOfArrays.test_several_func2",
-    "TestOneArr.test_asarray_tensor_func66",
-    "TestOneArrAndAxis.test_andaxis_tensor_func7_axis3",
-    "TestOneArrAndAxis.test_andaxis_tensor_func10_axis_0",
-    "TestOneArrAndAxis.test_andaxis_list_func1_axis_-1",
-    "TestOneArr.test_asarray_list_func32",
-    "TestOneArr.test_asarray_list_func48",
-    "TestOneArrToScalar.test_toscalar_array_func1_np_func1",
-    "TestOneArr.test_asarray_list_func23",
-    "TestOneArr.test_asarray_list_func65",
-    "TestOneArr.test_asarray_tensor_func34",
-    "TestOneArr.test_asarray_array_func57",
-    "TestOneArr.test_asarray_list_func31",
-    "TestOneArrAndAxis.test_andaxis_array_func9_axis_0",
-    "TestOneArr.test_asarray_array_func63",
-    "TestOneArrAndAxis.test_andaxis_tensor_func9_axis_1",
-    "TestOneArr.test_asarray_tensor_func0",
-    "TestOneArr.test_asarray_list_func43",
-    "TestOneArr.test_asarray_list_func62",
-    "TestOneArrAndShape.test_andshape_array_func0",
-    "TestSequenceOfArrays.test_several_func0",
-    "TestOneArrAndAxis.test_andaxis_array_func8_axis_-1",
-    "TestOneArr.test_asarray_tensor_func29",
-    "TestArrayToSequence.test_asarray_array_func0",
-    "TestOneArrAndAxis.test_andaxis_array_func5_axis3",
-    "TestOneArr.test_asarray_array_func16",
-    "TestOneArr.test_asarray_array_func68",
-    "TestOneArr.test_asarray_list_func21",
-    "TestOneArrAndAxis.test_andaxis_list_func7_axis_1",
-    "TestOneArr.test_asarray_array_func33",
-    "TestOneArr.test_asarray_list_func13",
-    "TestOneArr.test_asarray_list_func40",
-    "TestOneArrAndAxis.test_andaxis_array_func1_axis_0",
-    "TestOneArrAndAxesTuple.test_andtuple_list_func0_axes0",
-    "TestOneArr.test_asarray_list_func52",
-    "TestOneArr.test_asarray_array_func42",
-    "TestOneArr.test_asarray_list_func73",
-    "TestOneArr.test_asarray_array_func24",
-    "TestOneArr.test_asarray_list_func45",
-    "TestOneArr.test_asarray_array_func38",
-    "TestOneArr.test_asarray_array_func20",
-    "TestOneArr.test_asarray_tensor_func45",
-    "TestOneArr.test_asarray_array_func66",
-    "TestOneArrAndAxis.test_andaxis_list_func2_axis_0",
-    "TestOneArr.test_asarray_array_func11",
-    "TestOneArrAndAxis.test_andaxis_array_func9_axis3",
-    "TestOneArrAndAxis.test_andaxis_list_func5_axis_-1",
-    "TestOneArrAndShape.test_andshape_list_func1",
-    "TestPythonArgsToArray.test_argstoarray_simple_func4_args4",
-    "TestOneArr.test_asarray_tensor_func14",
-    "TestOneArr.test_asarray_array_func48",
-    "TestOneArr.test_asarray_list_func53",
-    "TestOneArr.test_asarray_tensor_func24",
-    "TestOneArr.test_asarray_list_func54",
-    "TestOneArr.test_asarray_tensor_func33",
-    "TestPythonArgsToArray.test_argstoarray_simple_func7_args7",
-    "TestOneArrAndAxesTuple.test_andtuple_array_func0_axes1",
-    "TestOneArrAndAxis.test_andaxis_list_func2_axis_1",
-    "TestSequenceOfArrays.test_single_array_func0",
-    "TestOneArr.test_asarray_tensor_func69",
-    "TestSequenceOfArraysToSingle.test_several_func3",
-    "TestOneArr.test_asarray_array_func36",
-    "TestOneArr.test_asarray_list_func11",
-    "TestCopyTo.test_copyto_typecast",
-    "TestOneArrAndShape.test_andshape_tensor_func1",
-    "TestOneArr.test_asarray_array_func71",
-    "TestOneArrAndAxis.test_andaxis_list_func6_axis_0",
-    "TestOneArrAndAxis.test_andaxis_tensor_func9_axis_0",
-    "TestOneArrAndAxis.test_andaxis_array_func2_axis_0",
-    "TestOneArr.test_asarray_list_func72",
-    "TestSequenceOfArraysToSingle.test_several_func4",
-    "TestOneArrAndAxis.test_andaxis_tensor_func2_axis_0",
-    "TestOneArrAndAxis.test_andaxis_list_func2_axis_-1",
-    "TestOneArr.test_asarray_array_func34",
-    "TestOneArr.test_asarray_array_func23",
-    "TestOneArr.test_asarray_list_func20",
-    "TestOneArrAndAxis.test_andaxis_array_func6_axis_1",
-    "TestOneArr.test_asarray_array_func41",
-    "TestOneArr.test_asarray_list_func38",
-    "TestOneArrAndAxis.test_andaxis_list_func5_axis_1",
-    "TestOneArrAndAxis.test_andaxis_array_func3_axis_-1",
-    "TestOneArrAndAxis.test_andaxis_array_func3_axis3",
-    "TestOneArrToScalar.test_toscalar_array_func0_np_func0",
-    "TestOneArr.test_asarray_tensor_func37",
-    "TestOneArr.test_asarray_tensor_func20",
-    "TestOneArr.test_asarray_tensor_func42",
-    "TestOneArr.test_asarray_list_func67",
-    "TestOneArr.test_asarray_list_func30",
-    "TestOneArrAndAxis.test_andaxis_list_func4_axis_1",
-    "TestSequenceOfArrays.test_several_func3",
-    "TestOneArr.test_asarray_array_func54",
-    "TestOneArrAndShape.test_andshape_list_func4",
-    "TestOneArr.test_asarray_tensor_func2",
-    "TestOneArr.test_asarray_tensor_func57",
-    "TestOneArrAndAxis.test_andaxis_list_func9_axis_-1",
-    "TestOneArrAndAxis.test_andaxis_array_func0_axis_1",
-    "TestOneArrAndAxis.test_andaxis_list_func4_axis_-1",
-    "TestOneArr.test_asarray_array_func55",
-    "TestOneArrAndAxis.test_andaxis_tensor_func3_axis_-1",
-    "TestOneArrAndAxis.test_andaxis_tensor_func5_axis_-1",
-    "TestOneArr.test_asarray_list_func14",
-    "TestOneArr.test_asarray_list_func29",
-    "TestOneArrAndAxis.test_andaxis_array_func7_axis_1",
-    "TestOneArrAndShape.test_andshape_list_func3",
-    "TestOneArr.test_asarray_tensor_func5",
-    "TestOneArr.test_asarray_list_func68",
-    "TestOneArr.test_asarray_tensor_func61",
-    "TestSequenceOfArrays.test_single_list_func3",
-    "TestOneArr.test_asarray_array_func21",
-    "TestOneArr.test_asarray_list_func61",
-    "TestOneArr.test_asarray_tensor_func55",
-    "TestOneArr.test_asarray_tensor_func18",
-    "TestOneArr.test_asarray_list_func50",
-    "TestOneArrAndAxis.test_andaxis_array_func7_axis_0",
-    "TestOneArr.test_asarray_array_func62",
-    "TestOneArr.test_asarray_tensor_func50",
-    "TestOneArr.test_asarray_array_func6",
-    "TestOneArr.test_asarray_list_func66",
-    "TestOneArr.test_asarray_list_func59",
-    "TestOneArr.test_asarray_tensor_func28",
-    "TestShapeLikeToArray.test_shape_func3",
-    "TestOneArr.test_asarray_array_func9",
-    "TestOneArrAndAxis.test_andaxis_array_func0_axis_0",
-    "TestOneArrAndShape.test_andshape_array_func2",
-    "TestPythonArgsToArray.test_argstoarray_simple_func2_args2",
-    "TestOneArrAndShape.test_andshape_tensor_func0",
-    "TestPythonArgsToArray.test_argstoarray_simple_func0_args0",
-    "TestOneArr.test_asarray_array_func19",
-    "TestOneArr.test_asarray_tensor_func39",
-    "TestOneArr.test_asarray_array_func65",
-    "TestSequenceOfArrays.test_single_list_func2",
-    "TestOneArr.test_asarray_array_func31",
-    "TestOneArrAndAxis.test_andaxis_list_func10_axis_0",
-    "TestOneArr.test_asarray_list_func2",
-    "TestOneArrAndAxis.test_andaxis_array_func10_axis3",
-    "TestOneArrAndAxis.test_andaxis_array_func4_axis_1",
-    "TestDivmod.test_divmod_out_list",
-    "TestOneArr.test_asarray_list_func19",
-    "TestOneArrAndAxesTuple.test_andtuple_array_func0_axes2",
-    "TestOneArr.test_asarray_array_func1",
-    "TestOneArrAndAxis.test_andaxis_tensor_func4_axis_1",
-    "TestOneArr.test_asarray_tensor_func43",
-    "TestOneArrAndAxis.test_andaxis_array_func5_axis_0",
-    "TestOneArrAndAxesTuple.test_andtuple_tensor_func0_axes2",
-    "TestOneArr.test_asarray_list_func10",
-    "TestSequenceOfArrays.test_single_array_func3",
-    "TestOneArr.test_asarray_tensor_func40",
-    "TestSequenceOfArraysToSingle.test_several_func0",
-    "TestOneArrAndAxis.test_andaxis_array_func7_axis3",
-    "TestOneArrAndAxis.test_andaxis_array_func6_axis_-1",
-    "TestOneArr.test_asarray_tensor_func35",
-    "TestOneArr.test_asarray_tensor_func72",
-    "TestOneArr.test_asarray_list_func18",
-    "TestOneArr.test_asarray_tensor_func60",
-    "TestOneArrAndAxis.test_andaxis_list_func3_axis_0",
-    "TestOneArr.test_asarray_array_func37",
-    "TestOneArr.test_asarray_array_func74",
-    "TestNormalizations.test_unknown_args",
-    "TestOneArr.test_asarray_array_func4",
-    "TestOneArr.test_asarray_array_func58",
-    "TestOneArrAndAxis.test_andaxis_list_func9_axis_0",
-    "TestOneArr.test_asarray_tensor_func22",
-    "TestOneArr.test_asarray_list_func56",
-    "TestOneArrAndAxis.test_andaxis_list_func3_axis_1",
-    "TestOneArrAndAxis.test_andaxis_array_func0_axis_-1",
-    "TestOneArr.test_asarray_tensor_func4",
-    "TestPythonArgsToArray.test_argstoarray_simple_func6_args6",
-    "TestOneArrAndAxis.test_andaxis_tensor_func9_axis_-1",
-    "TestOneArr.test_asarray_tensor_func68",
-    "TestOneArr.test_asarray_list_func27",
-    "TestOneArrAndAxis.test_andaxis_array_func4_axis_-1",
-    "TestOneArr.test_asarray_array_func13",
-    "TestOneArr.test_asarray_list_func6",
-    "TestOneArr.test_asarray_array_func39",
-    "TestOneArr.test_asarray_array_func73",
-    "TestOneArr.test_asarray_tensor_func12",
-    "TestOneArrAndAxis.test_andaxis_array_func7_axis_-1",
-    "TestOneArr.test_asarray_list_func17",
-    "TestShapeLikeToArray.test_shape_func2",
-    "TestOneArrAndAxis.test_andaxis_list_func4_axis_0",
-    "TestOneArrAndAxis.test_andaxis_array_func3_axis_1",
-    "TestOneArrAndAxis.test_andaxis_tensor_func10_axis_1",
-    "TestOneArrAndAxis.test_andaxis_list_func8_axis_1",
-    "TestOneArr.test_asarray_list_func33",
-    "TestOneArrAndAxis.test_andaxis_tensor_func1_axis_-1",
-    "TestOneArr.test_asarray_array_func18",
-    "TestOneArr.test_asarray_tensor_func3",
-    "TestOneArrAndShape.test_andshape_tensor_func2",
-    "TestOneArr.test_asarray_list_func35",
-    "TestOneArrAndAxis.test_andaxis_tensor_func3_axis_0",
-    "TestOneArr.test_asarray_array_func70",
-    "TestOneArrAndAxesTuple.test_andtuple_list_func0_axes1",
-    "TestOneArrAndAxis.test_andaxis_list_func8_axis_-1",
-    "TestOneArr.test_asarray_tensor_func59",
-    "TestOneArr.test_asarray_array_func15",
-    "TestOneArrAndAxis.test_andaxis_tensor_func6_axis_1",
-    "TestOneArr.test_asarray_tensor_func38",
-    "TestPythonArgsToArray.test_argstoarray_simple_func8_args8",
-    "TestPythonArgsToArray.test_argstoarray_simple_func3_args3",
-    "TestOneArr.test_asarray_array_func14",
-    "TestPythonArgsToArray.test_argstoarray_simple_func5_args5",
-    "TestOneArr.test_asarray_list_func26",
-    "TestOneArr.test_asarray_list_func34",
-    "TestOneArr.test_asarray_list_func4",
-    "TestOneArr.test_asarray_tensor_func67",
-    "TestOneArr.test_asarray_array_func3",
-    "TestOneArr.test_asarray_array_func5",
-    "TestOneArr.test_asarray_array_func52",
-    "TestOneArr.test_asarray_tensor_func58",
-    "TestOneArr.test_asarray_tensor_func48",
-    "TestOneArr.test_asarray_array_func50",
-    "TestOneArr.test_asarray_tensor_func47",
-    "TestOneArrAndAxis.test_andaxis_array_func4_axis3",
-    "TestOneArrAndAxis.test_andaxis_tensor_func2_axis_1",
-    "TestOneArrAndAxis.test_andaxis_array_func0_axis3",
-    "TestShapeLikeToArray.test_shape_func1",
-    "TestOneArrAndAxis.test_andaxis_tensor_func4_axis_-1",
-    "TestOneArrAndAxis.test_andaxis_tensor_func8_axis_-1",
-    "TestDefaultDtype.test_defaultdtype_defaults",
-    "TestOneArr.test_asarray_list_func63",
-    "TestOneArrAndShape.test_andshape_list_func2",
-    "TestOneArr.test_asarray_array_func27",
-    "TestOneArrAndAxis.test_andaxis_array_func4_axis_0",
-    "TestOneArr.test_asarray_list_func41",
-    "TestSequenceOfArrays.test_single_tensor_func2",
-    "TestOneArr.test_asarray_list_func39",
-    "TestOneArr.test_asarray_tensor_func6",
-    "TestOneArr.test_asarray_tensor_func25",
-    "TestOneArr.test_asarray_array_func2",
-    "TestOneArrAndAxis.test_andaxis_array_func8_axis_1",
-    "TestOneArr.test_asarray_tensor_func56",
-    "TestOneArr.test_asarray_array_func69",
-    "TestOneArr.test_asarray_list_func28",
-    "TestOneArr.test_asarray_tensor_func26",
-    "TestArrayToSequence.test_asarray_tensor_func1",
-    "TestOneArr.test_asarray_array_func28",
-    "TestPythonArgsToArray.test_argstoarray_simple_func1_args1",
-    "TestOneArrAndAxis.test_andaxis_list_func10_axis3",
-    "TestOneArr.test_asarray_list_func44",
-    "TestOneArr.test_asarray_array_func46",
-    "TestOneArrAndAxis.test_andaxis_array_func10_axis_1",
-    "TestOneArr.test_asarray_tensor_func30",
-    "TestOneArr.test_asarray_tensor_func16",
-    "TestOneArrAndAxis.test_andaxis_array_func1_axis3",
-    "TestOneArr.test_asarray_tensor_func46",
-    "TestOneArr.test_asarray_tensor_func10",
-    "TestOneArrAndAxis.test_andaxis_array_func2_axis_-1",
-    "TestOneArr.test_asarray_list_func47",
-    "TestSequenceOfArrays.test_single_tensor_func0",
-    "TestOneArrAndAxesTuple.test_andtuple_array_func0_axes0",
-    "TestOneArr.test_asarray_list_func12",
-    "TestOneArrAndAxis.test_andaxis_array_func8_axis3",
-    "TestShapeLikeToArray.test_shape_func0",
-    "TestOneArr.test_asarray_array_func61",
-    "TestOneArrAndAxis.test_andaxis_tensor_func7_axis_-1",
-    "TestOneArrAndAxis.test_andaxis_list_func0_axis_0",
-    "TestOneArr.test_asarray_tensor_func31",
-    "TestOneArr.test_asarray_array_func67",
-    "TestOneArr.test_asarray_list_func64",
-    "TestOneArrAndAxis.test_andaxis_array_func5_axis_-1",
-    "TestOneArrAndAxis.test_andaxis_array_func2_axis_1",
-    "TestOneArr.test_asarray_array_func32",
-    "TestOneArr.test_asarray_array_func8",
-    "TestOneArr.test_asarray_list_func5",
-    "TestOneArr.test_asarray_array_func17",
-    "TestOneArrAndAxis.test_andaxis_list_func7_axis_-1",
-    "TestOneArrAndAxis.test_andaxis_tensor_func5_axis_1",
-    "TestOneArrAndAxis.test_andaxis_list_func0_axis_-1",
-    "TestOneArrAndAxis.test_andaxis_array_func8_axis_0",
-    "TestOneArr.test_asarray_array_func64",
-    "TestArrayToSequence.test_asarray_tensor_func0",
-    "TestSequenceOfArrays.test_single_array_func2",
-    "TestOneArrAndAxis.test_andaxis_list_func10_axis_-1",
-    "TestOneArr.test_asarray_list_func71",
-    "TestOneArrAndAxesTuple.test_andtuple_tensor_func0_axes1",
-    "TestOneArrAndAxis.test_andaxis_tensor_func1_axis_0",
-    "TestOneArr.test_asarray_array_func44",
-    "TestCopyTo.test_copyto_basic",
-    "TestSequenceOfArrays.test_single_tensor_func1",
-    "TestOneArr.test_asarray_tensor_func11",
-    "TestSequenceOfArrays.test_several_func1",
-    "TestOneArr.test_asarray_tensor_func74",
-    "TestOneArr.test_asarray_tensor_func36",
-    "TestOneArr.test_asarray_array_func53",
-    "TestOneArr.test_asarray_tensor_func63",
-    "TestOneArrAndShape.test_andshape_array_func3",
-    "TestOneArr.test_asarray_list_func74",
-    "TestOneArr.test_asarray_tensor_func49",
-    "TestOneArrAndAxis.test_andaxis_tensor_func3_axis_1",
-    "TestOneArr.test_asarray_tensor_func32",
-    "TestOneArrAndAxis.test_andaxis_list_func1_axis_1",
-    "TestOneArrAndAxis.test_andaxis_tensor_func4_axis_0",
-    "TestOneArrAndShape.test_andshape_tensor_func3",
-    "TestOneArr.test_asarray_tensor_func27",
-    "TestOneArr.test_asarray_list_func22",
-    "TestOneArr.test_asarray_list_func69",
-    "TestOneArr.test_asarray_array_func26",
-    "TestOneArrAndAxis.test_andaxis_array_func9_axis_-1",
-    "TestOneArrAndAxis.test_andaxis_tensor_func6_axis_-1",
-    "TestSequenceOfArrays.test_single_tensor_func3",
-    "TestOneArrAndShape.test_andshape_array_func1",
-    "TestOneArr.test_asarray_array_func25",
-    "TestOneArrAndAxis.test_andaxis_tensor_func2_axis_-1",
-    "TestOneArrAndAxis.test_andaxis_array_func2_axis3",
-    "TestOneArr.test_asarray_tensor_func41",
-    "TestOneArrAndAxis.test_andaxis_tensor_func0_axis_1",
-    "TestOneArr.test_asarray_list_func49",
-    "TestOneArr.test_asarray_list_func57",
-    "TestOneArrAndAxis.test_andaxis_tensor_func8_axis_1",
-    "TestOneArr.test_asarray_tensor_func71",
-    "TestSequenceOfArrays.test_single_list_func1",
-    "TestPythonArgsToArray.test_argstoarray_simple_func9_args9",
-    "TestOneArr.test_asarray_list_func37",
-    "TestOneArrAndAxis.test_andaxis_tensor_func0_axis_0",
-    "TestOneArr.test_asarray_array_func30",
-    "TestOneArr.test_asarray_tensor_func21",
-    "TestOneArr.test_asarray_array_func35",
-    "TestOneArr.test_asarray_tensor_func64",
-    "TestOneArr.test_asarray_list_func51",
-    "TestOneArr.test_asarray_array_func47",
-    "TestOneArrAndAxis.test_andaxis_tensor_func7_axis_1",
-    "TestOneArr.test_asarray_array_func29",
-    "TestOneArrAndAxis.test_andaxis_array_func1_axis_-1",
-    "TestOneArr.test_asarray_tensor_func19",
-    "TestOneArrAndAxis.test_andaxis_list_func1_axis_0",
-    "TestOneArr.test_asarray_tensor_func17",
-    "TestOneArrAndAxis.test_andaxis_list_func0_axis_1",
-    "TestOneArr.test_asarray_tensor_func70",
-    "TestOneArr.test_asarray_tensor_func54",
-    "TestOneArr.test_asarray_tensor_func23",
-    "TestOneArr.test_asarray_array_func7",
-    "TestOneArr.test_asarray_array_func12",
-    "TestOneArrAndAxis.test_andaxis_list_func3_axis_-1",
-    "TestOneArrAndAxis.test_andaxis_array_func10_axis_0",
-    "TestOneArr.test_asarray_tensor_func13",
-    "TestOneArrAndAxis.test_andaxis_tensor_func6_axis_0",
-    "TestOneArrAndShape.test_andshape_array_func4",
-    "TestOneArrAndAxis.test_andaxis_tensor_func10_axis3",
-    "TestOneArr.test_asarray_array_func40",
-    "TestOneArrAndAxis.test_andaxis_tensor_func7_axis_0",
-    "TestOneArr.test_asarray_list_func42",
-    "TestOneArrAndAxis.test_andaxis_tensor_func0_axis_-1",
-    "TestOneArr.test_asarray_list_func25",
-    "TestOneArr.test_asarray_tensor_func52",
-    "TestOneArrAndAxis.test_andaxis_list_func6_axis_-1",
-    "TestSequenceOfArraysToSingle.test_several_func1",
-    "TestCopyTo.test_copytobcast",
-    "TestOneArrAndAxis.test_andaxis_array_func10_axis_-1",
-    "TestSequenceOfArraysToSingle.test_several_func5",
-    "TestOneArr.test_asarray_list_func1",
-    "TestOneArr.test_asarray_list_func46",
-    "TestSequenceOfArrays.test_single_list_func0",
     "TestCond.test_sq_cases",
     "TestNormInt64.test_bad_args",
     "TestQR.test_qr_empty_m_0_n_3",
@@ -1282,33 +857,9 @@ dynamo_expected_failures = {
     "TestIndexing.test_slicing_no_floats",  # torch_np/numpy_tests/core/test_indexing
     "TestBroadcastedAssignments.test_prepend_not_one",  # torch_np/numpy_tests/core/test_indexing
     "TestFloatNonIntegerArgument.test_reduce_axis_float_index",  # torch_np/numpy_tests/core/test_indexing
-    "TestEinsum.test_different_paths_dtype_f",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_different_paths_dtype_D",  # torch_np/numpy_tests/core/test_einsum
     "TestEinsum.test_different_paths_dtype_e",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_einsum_fixed_collapsingbug",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_combined_views_mapping",  # torch_np/numpy_tests/core/test_einsum
     "TestEinsum.test_different_paths_dtype_B",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_einsum_sums_cfloat64",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_einsum_broadcast",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_einsum_sums_int32",  # torch_np/numpy_tests/core/test_einsum
     "TestEinsum.test_different_paths_dtype_b",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_einsum_fixedstridebug",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_out_is_res",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_subscript_range",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_einsum_sums_float64",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_einsum_sums_float32",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_einsum_sums_cfloat128",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_small_boolean_arrays",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_different_paths_dtype_i",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_different_paths_dtype_d",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_different_paths_dtype_l",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_different_paths_dtype_h",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_einsum_misc",  # torch_np/numpy_tests/core/test_einsum
-    "TestMisc.test_f16_on_cuda",
-    "TestMisc.test_overlap",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_einsum_sums_int64",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_einsum_failed_on_p9_and_s390x",  # torch_np/numpy_tests/core/test_einsum
-    "TestEinsum.test_different_paths_dtype_F",  # torch_np/numpy_tests/core/test_einsum
     "TestDLPack.test_dtype_passthrough_dtype4",  # torch_np/numpy_tests/core/test_dlpack
     "TestDLPack.test_higher_dims_ndim_23",  # torch_np/numpy_tests/core/test_dlpack
     "TestDLPack.test_higher_dims_ndim_12",  # torch_np/numpy_tests/core/test_dlpack
@@ -2522,12 +2073,14 @@ dynamo_expected_failures = {
     "TestNNDeviceTypeCPU.test_triplet_margin_with_distance_loss_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_sum_use_module_form_False_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_sum_cpu",  # test_nn
-    "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format0_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format1_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_False_mode_bicubic_memory_format1_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_batchnorm_grad_cpu",  # test_nn
     "TestNN.test_interpolate",  # test_nn
     "TestNN.test_register_state_dict_pre_hook",  # test_nn
-    "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_True_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_True_memory_format0_cpu",  # test_nn
+    "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_True_memory_format1_cpu",  # test_nn
     "TestNN.test_fb_fc_packed",  # test_nn
     "TestFusionEval.test_fuse_module_eval_numerics",  # test_nn
     "TestNNDeviceTypeCPU.test_invalid_reduction_strings_cpu",  # test_nn
@@ -2563,72 +2116,29 @@ dynamo_expected_failures = {
     "TestMkldnnCPU.test_tanh_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_conv2d_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_batch_norm_3d_cpu",  # test_mkldnn
-    "TestFunctionalAutogradBenchmark.test_fast_tasks",  # test_functional_autograd_benchmark
     "TestFunctionSchema.test_serialize_and_deserialize",  # test_function_schema
     "FakeTensorOperatorInvariants.test_like_ops",  # test_fake_tensor
     "FakeTensorConverterTest.test_memoized_conversion_from_meta",  # test_fake_tensor
     "FakeTensorOperatorInvariants.test_non_kwarg_only_device",  # test_fake_tensor
     "FakeTensorOperatorInvariants.test_tensor_constructors_all_have_kwarg_device",  # test_fake_tensor
-    "TestExpandedWeightModuleCPU.test_Conv1d_reflect_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv2d_zeros_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Embedding_discontiguous_multiple_inputs_cpu",  # test_expanded_weights
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_conv1d_cpu_float64",  # test_expanded_weights  # noqa: B950
     "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_instance_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestExpandedWeightModuleCPU.test_Conv2d_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv2d_reflect_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv2d_replicate_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_conv3d_cpu_float64",  # test_expanded_weights  # noqa: B950
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_instance_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestExpandedWeightHelperFunctionCPU.test_unpack_expanded_weight_or_tensor_with_custom_function_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv1d_pad2_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightHelperFunctionCPU.test_unpack_expanded_weight_or_tensor_cpu",  # test_expanded_weights
     "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_conv1d_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestExpandedWeightModuleCPU.test_Conv1d_pad1_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_per_sample_api_compute_batch_size_not_pytreeable_cpu",  # test_expanded_weights
-    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_linear_cpu_float64",  # test_expanded_weights  # noqa: B950
     "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_group_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_group_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_conv3d_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestExpandedWeightModuleCPU.test_Conv2d_dilated_multiple_inputs_cpu",  # test_expanded_weights
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_conv2d_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestExpandedWeightModuleCPU.test_Conv1d_replicate_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv3d_replicate_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv1d_pad2size1_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv1d_stride_multiple_inputs_cpu",  # test_expanded_weights
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_conv2d_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_embedding_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestExpandedWeightModuleCPU.test_per_sample_api_compute_batch_size_cpu",  # test_expanded_weights
     "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_layer_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_linear_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_embedding_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_linear_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestExpandedWeightModuleCPU.test_Conv2d_padding_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv3d_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv3d_zeros_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv3d_1x1x1_no_bias_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv3d_no_bias_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightHelperFunctionCPU.test_set_grad_sample_if_exists_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Linear_multiple_inputs_cpu",  # test_expanded_weights
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_group_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestExpandedWeightModuleCPU.test_Linear_no_bias_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Embedding_multiple_inputs_cpu",  # test_expanded_weights
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_layer_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
     "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_conv3d_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_embedding_cpu_float64",  # test_expanded_weights  # noqa: B950
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_sum_nn_functional_instance_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_conv1d_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestExpandedWeightModuleCPU.test_Conv1d_circular_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv1d_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv1d_pad1size1_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv2d_strided_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv3d_circular_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv3d_stride_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv2d_no_bias_multiple_inputs_cpu",  # test_expanded_weights
-    "TestExpandedWeightModuleCPU.test_Conv3d_stride_padding_multiple_inputs_cpu",  # test_expanded_weights  # noqa: B950
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_layer_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestExpandedWeightModuleCPU.test_Conv1d_zeros_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
     "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_conv2d_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestExpandedWeightModuleCPU.test_Conv2d_circular_stride2_pad2_multiple_inputs_cpu",  # test_expanded_weights
     "TestTorchDlPackCPU.test_dlpack_export_non_strided_cpu",  # test_dlpack
     "TestIterDataPipeGraphFastForward.test_simple_snapshot_custom_self_next",  # test_datapipe
     "TestIterDataPipeGraphFastForward.test_simple_snapshot_custom_non_generator",  # test_datapipe
@@ -2680,7 +2190,6 @@ dynamo_expected_failures = {
     "TestLazyModules.test_lazy_batchnorm3d_state",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv_transpose1d_pickle",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_instancenorm2d",  # nn/test_lazy_modules
-    "TestLazyModules.test_invalid_functions",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_instancenorm2d_state",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv3d_pickle",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_batchnorm2d",  # nn/test_lazy_modules
@@ -2869,13 +2378,6 @@ dynamo_expected_failures = {
     "TestDistributionShapes.test_mixture_same_family_shape",  # distributions/test_distributions
     "TestFunctors.test_cat_transform",  # distributions/test_distributions
     "TestFunctors.test_cat_transform_non_uniform",  # distributions/test_distributions
-    "TestRearrange.test_ellipsis_ops",  # functorch/test_rearrange
-    "TestRearrange.test_concatenations_and_stacking",  # functorch/test_rearrange
-    "TestRearrange.test_rearrange_permutations",  # functorch/test_rearrange
-    "TestRearrange.test_collapsed_ellipsis_errors_out",  # functorch/test_rearrange
-    "TestRearrange.test_rearrange_consistency",  # functorch/test_rearrange
-    "TestRearrange.test_unsqueeze",  # functorch/test_rearrange
-    "TestRearrange.test_squeeze",  # functorch/test_rearrange
     "TestMin.test_manual_stuff",  # functorch/test_dims
     "TestMin.test_dim_args",  # functorch/test_dims
     "TestMin.test_dims_with_size",  # functorch/test_dims
@@ -3318,761 +2820,364 @@ dynamo_expected_failures = {
     "AutogradFunctionTests.test_print_in_bwd",  # dynamo/test_autograd_function
     "AutogradFunctionTests.test_graph_break_if_lifted_free_variable",  # dynamo/test_autograd_function
     "AotAutogradFallbackTests.test_aot_sequence_nr",  # dynamo/test_aot_autograd
-    "TestTorchFunctionOverride.test_Tensor_log",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_prod",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___iand__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_orgqr",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___isub__",  # test_overrides
     "TestTorchFunctionOverride.test_tensor_subclass_propagation",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_detach_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_gcd_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_addmv_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_matmul",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_copysign",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_index_add",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_chalf",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___rfloordiv__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sign",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_tolist",  # test_overrides
-    "TestRNN.test_rnn",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_retains_grad___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_squeeze_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_aminmax",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___lt__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_isclose",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase__backward_hooks___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_inverse",  # test_overrides
     "TestNamedTuple.test_max",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___ror__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_hypot",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_max",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_arccos",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase__cdata___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor__update_names",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sinc_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___div__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_q_per_channel_scales",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_tan_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_as_strided_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_lgamma",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_is_shared",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_logdet",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_scatter_reduce",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_erf",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_equal",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sinh",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_split",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_addmv",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_kthvalue",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_relu",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_select",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___contains__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_mm",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_det",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_igammac_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_atanh_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_int_repr",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_log_",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_is_nested___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_digamma",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_ormqr",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sparse_dim",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___irshift__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___imul__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_nanmean",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_to",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_index_add_",  # test_overrides
-    "TestBroadcastAllOverride.test_broadcast_all",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_div",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_slice_scatter",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_remainder_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_baddbmm_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_renorm",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_igamma_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_is_same_size",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_add_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sort",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_clone",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_crow_indices",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_log10",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_atan2_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_resize_as_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_subtract",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_ne_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___index__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sparse_resize_and_clear_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_dot",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___reversed__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_msort",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_to_mkldnn",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_addcmul_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_ndimension",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_rsqrt_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor__dimV",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_logical_and_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_share_memory_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_rad2deg",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_greater_equal",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_is_coalesced",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_clamp_min_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_swapaxes",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cosh_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___array__",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_is_mkldnn___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_short",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_le_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_var",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_hsplit",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___deepcopy__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_fmin",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_expm1_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_slogdet",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_conj_physical_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_logical_or_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_clamp_max",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_erf_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sub_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_nonzero",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_inner",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase__base___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_fliplr",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_unsafe_split",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_nelement",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase__post_accumulate_grad_hooks___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___setstate__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_logical_xor_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_allclose",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_log1p",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_pow_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_lerp_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_vdot",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_requires_grad___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_indices",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_lgamma_",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_mT___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor__values",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_is_distributed",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_is_mtia___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_histc",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_logical_or",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_svd",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cfloat",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_flipud",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___and__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_index_fill_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_swapdims_",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_names___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_resolve_neg",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_output_nr___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cross",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_add",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_isposinf",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_tile",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_nan_to_num",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_trace",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___long__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_set_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_arcsin_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_random_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_index_put",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_uniform_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_frac_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sigmoid_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_signbit",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_repeat_interleave",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bernoulli_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_fill_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___lshift__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_map_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_isnan",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_long",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_subtract_",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_ndim___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_data_ptr",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_i0",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_qscheme",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_logcumsumexp",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_ldexp_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_is_neg",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sign_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_unsqueeze_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_arctan2_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_clip_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cumprod_",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_data___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_mode",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_layout___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_atan_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_xpu",  # test_overrides
     "TestTorchFunctionMode.test_mode_notimplemented_loop",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_baddbmm",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_index_reduce_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_requires_grad_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_minimum",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_erfinv",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_detach",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_dequantize",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bitwise_or_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_acos_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_trunc",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_quantile",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___mod__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor__nested_tensor_storage_offsets",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_xlogy_",  # test_overrides
-    "TestTorchFunctionOverride.test_mm_semantics",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_multiply",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_expand",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___xor__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cholesky_inverse",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_storage_type",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___idiv__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_dim_order",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___rrshift__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_is_contiguous",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_contiguous",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_isreal",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_min",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_col_indices",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_register_post_accumulate_grad_hook",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_floor",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___invert__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bitwise_left_shift_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_flip",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_logit_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_div_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_resize_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_view_as",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_gather",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___mul__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_flatten",  # test_overrides
     "TestTorchFunctionMode.test_disable_enable_subclass",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_numpy",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cumsum_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_fmod",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_has_names",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_is_xpu___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_tanh",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_eq_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_ipu",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_logsumexp",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_expand_as",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_split_with_sizes",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cumprod",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_fix_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_igamma",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_median",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_nextafter_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_polygamma_",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase__version___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_less_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_lt_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_put_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_nanmedian",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_half",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_logaddexp2",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_logit",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___dlpack__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_nan_to_num_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cumsum",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_hardshrink",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_squeeze",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___add__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bernoulli",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sparse_resize_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_deg2rad_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_corrcoef",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_isfinite",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_fmax",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_lu_solve",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_rename_",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_real___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_transpose",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor__autocast_to_reduced_precision",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_any",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sinh_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_dsplit",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor___setitem__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_amax",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_smm",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_stft",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_asin_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_ne",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_rad2deg_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_scatter_reduce_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bincount",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_chunk",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_floor_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_renorm_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_asinh_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sspaddmm",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_reshape",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_logical_xor",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_put",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_is_ort___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sgn_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___bool__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_q_scale",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bitwise_right_shift",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_refine_names",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_map2_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_negative_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_element_size",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_index_reduce",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bmm",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_mean",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_is_leaf___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_size",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_q_zero_point",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_is_meta___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_tan",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_log2_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_scatter_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor__to_dense",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_divide",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_asin",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_is_quantized___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_exp_",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_imag___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_swapaxes_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_std",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___len__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_not_equal",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___ifloordiv__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_fill_diagonal_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___rmatmul__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_acosh",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_arctanh_",  # test_overrides
     "TestTorchFunctionOverride.test_mean_semantics",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_rot90",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_diag",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_tril_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_softmax",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sparse_mask",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_double",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_erfc",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_tensor_split",  # test_overrides
     "TestGradCheckOverride.test_gradcheck",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_device___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bitwise_or",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___repr__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_less",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor___cuda_array_interface_____get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_clamp_max_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_nansum",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cummin",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cauchy_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_igammac",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_mvlgamma_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_addmm_",  # test_overrides
     "TestTorchFunctionMode.test_modes_return_notimplemented",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_atan",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_acosh_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___dlpack_device__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_q_per_channel_zero_points",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_ceil",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_histogram",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_lcm_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_i0_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_atan2",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_narrow",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sinc",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sigmoid",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_ldexp",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_logical_and",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_mvlgamma",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_diff",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_resize",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sum",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor__nested_tensor_strides",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_movedim",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_unsafe_chunk",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_resize_as_sparse_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_expm1",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_gcd",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_swapdims",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___rmul__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_logical_not",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_lerp",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_zero_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_addcdiv",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_is_sparse___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_round_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_exp2_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_register_hook",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_diag_embed",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___array_wrap__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___radd__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_absolute_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_ge_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___ge__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_type",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_T___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_dtype___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_less_equal",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_grad___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_volatile___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_clamp",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_clip",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_index_put_",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase__grad_fn___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_shape___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_permute",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_resolve_conj",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sqrt",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_true_divide_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_get_device",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_diagonal_scatter",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sub",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___ior__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_greater",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase__grad___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_apply_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_argsort",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_matrix_power",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cos_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_log_softmax",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_erfinv_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor__autocast_to_full_precision",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_untyped_storage",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_where",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_angle",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_coalesce",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___rdiv__",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_nbytes___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_masked_fill_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bfloat16",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_hypot_",  # test_overrides
-    "TestEinsumOverride.test_wrapper",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sgn",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_char",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_triangular_solve",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_float",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___gt__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_scatter_add_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_exp",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_scatter_add",  # test_overrides
     "TestIterator.test_iterator",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___eq__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_masked_scatter_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_tril",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_nanquantile",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_masked_select",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_mv",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_negative",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_argwhere",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_matrix_exp",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_unique_consecutive",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_unfold",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___format__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_round",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_deg2rad",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_grad_fn___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_align_as",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_is_complex",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cosh",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_align_to",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_square",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_arcsinh_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_unsqueeze",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bitwise_not",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_rename",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___reduce_ex__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_t_",  # test_overrides
-    "TestTorchFunctionMode.test_modes_handle_first",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___ne__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_item",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___le__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_ccol_indices",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_is_nonzero",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_copy_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_broadcast_to",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bitwise_right_shift_",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_is_cpu___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_arccosh",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_arcsin",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_as_strided",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_nextafter",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_q_per_channel_axis",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_trunc_",  # test_overrides
     "TestTorchFunctionMode.test_nested_modes_with_python_has_torch_function",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_arctan",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_t",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_diagonal",  # test_overrides
-    "TestTorchFunctionMode.test_subclass_hash",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_isinf",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_ger",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor__coalesced_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_not_equal_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_multiply_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_ge",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_abs",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___int__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_argmin",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_is_inference",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor__is_view",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___rmod__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_amin",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_select_scatter",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_index_fill",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_square_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_addr",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_asinh",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_heaviside_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_adjoint",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_float_power",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_gt_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_xlogy",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor__dimI",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_gt",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_index_copy_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___ixor__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_to_dense",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___complex__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bitwise_and_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_neg",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_norm",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___float__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor__sparse_mask_projection",  # test_overrides
     "TestPickle.test_pickle",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___iadd__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_divide_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_geqrf",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_index_select",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___ilshift__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_frexp",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_int",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_maximum",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_storage_offset",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_byte",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_unbind",  # test_overrides
-    "TestIndexing.test_getitem_subclass",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_is_floating_point",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_log10_",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_is_xla___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cos",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_positive",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_resize_as",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_storage",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_pow",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_type_as",  # test_overrides
     "TestGradNewOnesOverride.test_newones",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor__indices",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_tanh_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_masked_scatter",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bitwise_not_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cholesky",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_all",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_heaviside",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_lcm",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_reshape_as",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_greater_equal_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_backward",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_greater_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_logaddexp",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bitwise_xor",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_transpose_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_polygamma",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_row_indices",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_addbmm_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_triu_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_atanh",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___rxor__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_normal_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_index_copy",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_logical_not_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_log1p_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_absolute",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_abs_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_count_nonzero",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_qr",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_relu_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_is_conj",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_fmod_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_unique",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___nonzero__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_geometric_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_topk",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___rlshift__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_diagflat",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cummax",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cov",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_istft",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_arctanh",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_name___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_nonzero_static",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_pin_memory",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_arctan2",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_retain_grad",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_repeat",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_reciprocal_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_lt",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_record_stream",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___truediv__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___rand__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_fix",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_multinomial",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___imod__",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_itemsize___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_copysign_",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_is_vulkan___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_dense_dim",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_prelu",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sin_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_reciprocal",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_is_sparse_csr___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_arccosh_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_dist",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_narrow_copy",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_conj_physical",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_arctan_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sin",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cdouble",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_masked_fill",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_log2",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sqrt_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_clamp_min",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_addr_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___rshift__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_mul",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_roll",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_is_signed",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_addcdiv_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_true_divide",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_is_pinned",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_is_cuda___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bitwise_xor_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_floor_divide_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_eq",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_neg_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_view",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_as_strided_scatter",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_pinverse",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_vsplit",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___matmul__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_unsafe_split_with_sizes",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_is_ipu___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bitwise_and",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_arcsinh",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_float_power_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_values",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor__nnz",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_outer",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_log_normal_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___sub__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_addbmm",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_mul_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor__nested_tensor_size",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bitwise_left_shift",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_digamma_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_isneginf",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_le",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_erfc_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_scatter",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_exp2",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_sum_to_size",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_take",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_take_along_dim",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___rsub__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cholesky_solve",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_remainder",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_dim",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_triu",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_numel",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_acos",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_is_mps___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_ravel",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_frac",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_moveaxis",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_lu",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_exponential_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___floordiv__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___getitem__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_rsqrt",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cpu",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_kron",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_cuda",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_less_equal_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_bool",  # test_overrides
-    "TestTorchFunctionOverride.test_TensorBase_mH___get__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_arccos_",  # test_overrides
     "TestTorchFunctionOverride.test_precedence_semantics",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___or__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___rpow__",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_addcmul",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_addmm",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_conj",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_is_set_to",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_to_sparse",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_argmax",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_clamp_",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_floor_divide",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor_ceil_",  # test_overrides
     "TestNamedTupleAPI.test_namedtuple_return",  # test_namedtuple_return_api
-    "TestNamedTensor.test_bmm",  # test_namedtensor
+    "TestAnalyze.test_trace_dependencies",  # test_package
+    "TestVmapOperatorsLegacy.test_contiguous",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_accepts_nested_inputs",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_nested_out_dims",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_add_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_inplace_manyview_cpu",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_functools_partial",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_unrelated_output_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_index_cpu",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_non_zero_in_dims",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_single_input",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_chunk",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_mul_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_reshape_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_unrelated_output_multiple_grad_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_stack",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_select",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_binary_pointwise_ops",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_non_tensor_output_raises",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_max_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_binary_cross_entropy_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_diagonal",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_select_cpu",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_nonzero_out_dims",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_unsupported_op_err_msg",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_batched_gradient_basic",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_slice",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_min_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_expand_as",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_unfold",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_sigmoid_cpu",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_out_dims_and_num_outputs_mismatch_err_msg",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_reshape_as",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_noop_in_inner_vmap",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_new_empty_strided",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_is_floating_point",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_split",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_stack_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_fill_and_zero_inplace",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_is_complex",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_expand_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_as_strided",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_slice_cpu",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_nested_with_different_map_dim",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_new_zeros",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_trace_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_permute_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_view_as",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_logsumexp_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_log1p_cpu",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_grad_unsupported_interaction",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_transpose",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_clamp",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_stride",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_multiple_outputs_error_cases",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_log_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_reshape",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_inplace_on_view_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_new_empty",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_lgamma_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_threshold_cpu",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_multiple_out_dims",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_result_type",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_sum_dim",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_to",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_diagonal_cpu",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_sub_cpu",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_backward_unsupported_interaction",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_comparison_ops",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_is_contiguous",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_cat",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_multiple_outputs",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_inplace_fallback_unary",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_out_dim_out_of_bounds_err_msg",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_view",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_div_cpu",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_out_dims_edge_case",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_inplace_fallback_nary_different_levels",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_clone",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_in_dim_not_in_tensor_err_msg",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_fallback_with_undefined_grad",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_inplace_fallback_nary_same_levels",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_no_random_op_support",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_unbind",  # test_legacy_vmap
+    "TestVmapAPILegacy.test_non_default_in_dims_out_dims",  # test_legacy_vmap
+    "TestVmapBatchedGradientLegacyCPU.test_median_cpu",  # test_legacy_vmap
+    "TestVmapOperatorsLegacy.test_T_numpy",  # test_legacy_vmap
     "TestNamedTensor.test_addmv",  # test_namedtensor
-    "TestNamedTensor.test_masked_select",  # test_namedtensor
-    "TestNamedTensor.test_index_fill",  # test_namedtensor
-    "TestNamedTensor.test_unary_propagate_names_fns",  # test_namedtensor
-    "TestNamedTensor.test_as_strided",  # test_namedtensor
-    "TestNamedTensor.test_factory_edge_cases",  # test_namedtensor
-    "TestNamedTensor.test_logical_ops",  # test_namedtensor
-    "TestNamedTensor.test_reduction_fns",  # test_namedtensor
-    "TestNamedTensor.test_factory_coverage",  # test_namedtensor
-    "TestNamedTensor.test_no_multiprocessing_support",  # test_namedtensor
-    "TestNamedTensor.test_rename_globber",  # test_namedtensor
-    "TestNamedTensor.test_set_names_property",  # test_namedtensor
-    "TestNamedTensor.test_copy_transpose",  # test_namedtensor
     "TestNamedTensor.test_cummax_cummin",  # test_namedtensor
-    "TestNamedTensor.test_info_smoke",  # test_namedtensor
-    "TestNamedTensor.test_mv",  # test_namedtensor
-    "TestNamedTensor.test_rename_",  # test_namedtensor
-    "TestNamedTensor.test_unsupported_op_error_msg",  # test_namedtensor
-    "TestNamedTensor.test_flatten",  # test_namedtensor
-    "TestNamedTensor.test_any_all",  # test_namedtensor
-    "TestNamedTensor.test_max_pooling",  # test_namedtensor
-    "TestNamedTensor.test_resize",  # test_namedtensor
-    "TestNamedTensor.test_autograd_smoke",  # test_namedtensor
-    "TestNamedTensor.test_no_pickle_support",  # test_namedtensor
-    "TestNamedTensor.test_rename",  # test_namedtensor
-    "TestNamedTensor.test_size",  # test_namedtensor
-    "TestNamedTensor.test_transpose_variants",  # test_namedtensor
-    "TestNamedTensor.test_big_tensor_repr_has_names",  # test_namedtensor
-    "TestNamedTensor.test_using_unseen_interned_string_bumps_refcount_permanently",  # test_namedtensor
-    "TestNamedTensor.test_split_fns_propagates_names",  # test_namedtensor
-    "TestNamedTensor.test_using_unseen_uninterned_string_refcounts",  # test_namedtensor
-    "TestNamedTensor.test_bernoulli",  # test_namedtensor
-    "TestNamedTensor.test_logcumsumexp",  # test_namedtensor
-    "TestNamedTensor.test_addcmul_addcdiv",  # test_namedtensor
-    "TestNamedTensor.test_cdist",  # test_namedtensor
-    "TestNamedTensor.test_autograd_warns_named_grad",  # test_namedtensor
-    "TestNamedTensor.test_cat",  # test_namedtensor
-    "TestNamedTensor.test_none_names_refcount",  # test_namedtensor
-    "TestNamedTensor.test_has_names",  # test_namedtensor
-    "TestNamedTensor.test_bitwise_not",  # test_namedtensor
-    "TestNamedTensor.test_dot",  # test_namedtensor
-    "TestNamedTensor.test_no_save_support",  # test_namedtensor
-    "TestNamedTensor.test_matmul",  # test_namedtensor
-    "TestNamedTensor.test_detach",  # test_namedtensor
-    "TestNamedTensor.test_stride",  # test_namedtensor
-    "TestNamedTensor.test_logical_not",  # test_namedtensor
-    "TestNamedTensor.test_tensor_grad_is_unnamed",  # test_namedtensor
-    "TestNamedTensor.test_select",  # test_namedtensor
-    "TestNamedTensor.test_rename_rename_map",  # test_namedtensor
-    "TestNamedTensor.test_unflatten",  # test_namedtensor
-    "TestNamedTensor.test_equal",  # test_namedtensor
-    "TestNamedTensor.test_tensor_from_named_tensor",  # test_namedtensor
-    "TestNamedTensor.test_binary_ops",  # test_namedtensor
-    "TestNamedTensor.test_autograd_ignores_names",  # test_namedtensor
-    "TestNamedTensor.test_diagonal",  # test_namedtensor
-    "TestNamedTensor.test_noncontig_contiguous",  # test_namedtensor
-    "TestNamedTensor.test_pow_special",  # test_namedtensor
     "TestNamedTensor.test_no_jit_script_support",  # test_namedtensor
     "TestNamedTensor.test_no_jit_tracer_support",  # test_namedtensor
-    "TestNamedTensor.test_using_seen_interned_string_doesnt_bump_refcount",  # test_namedtensor
-    "TestNamedTensor.test_addmm",  # test_namedtensor
-    "TestNamedTensor.test_out_fn_semantics",  # test_namedtensor
+    "TestNamedTensor.test_rename_rename_map",  # test_namedtensor
     "TestNamedTensor.test_mm",  # test_namedtensor
+    "TestNamedTensor.test_no_save_support",  # test_namedtensor
+    "TestNamedTensor.test_dot",  # test_namedtensor
+    "TestNamedTensor.test_using_unseen_uninterned_string_refcounts",  # test_namedtensor
+    "TestNamedTensor.test_has_names",  # test_namedtensor
+    "TestNamedTensor.test_unflatten",  # test_namedtensor
+    "TestNamedTensor.test_rename_",  # test_namedtensor
+    "TestNamedTensor.test_binary_ops",  # test_namedtensor
+    "TestNamedTensor.test_set_names_property",  # test_namedtensor
+    "TestNamedTensor.test_info_smoke",  # test_namedtensor
+    "TestNamedTensor.test_logcumsumexp",  # test_namedtensor
+    "TestNamedTensor.test_tensor_grad_is_unnamed",  # test_namedtensor
+    "TestNamedTensor.test_logical_not",  # test_namedtensor
+    "TestNamedTensor.test_as_strided",  # test_namedtensor
+    "TestNamedTensor.test_rename_globber",  # test_namedtensor
+    "TestNamedTensor.test_bmm",  # test_namedtensor
+    "TestNamedTensor.test_flatten",  # test_namedtensor
+    "TestNamedTensor.test_reduction_fns",  # test_namedtensor
+    "TestNamedTensor.test_unary_propagate_names_fns",  # test_namedtensor
+    "TestNamedTensor.test_detach",  # test_namedtensor
+    "TestNamedTensor.test_size",  # test_namedtensor
+    "TestNamedTensor.test_addcmul_addcdiv",  # test_namedtensor
+    "TestNamedTensor.test_big_tensor_repr_has_names",  # test_namedtensor
+    "TestNamedTensor.test_unsupported_op_error_msg",  # test_namedtensor
+    "TestNamedTensor.test_none_names_refcount",  # test_namedtensor
+    "TestNamedTensor.test_addmm",  # test_namedtensor
+    "TestNamedTensor.test_pow_special",  # test_namedtensor
+    "TestNamedTensor.test_autograd_ignores_names",  # test_namedtensor
+    "TestNamedTensor.test_index_fill",  # test_namedtensor
+    "TestNamedTensor.test_masked_select",  # test_namedtensor
     "TestNamedTensor.test_comparison_ops",  # test_namedtensor
+    "TestNamedTensor.test_diagonal",  # test_namedtensor
+    "TestNamedTensor.test_bitwise_not",  # test_namedtensor
+    "TestNamedTensor.test_equal",  # test_namedtensor
+    "TestNamedTensor.test_rename",  # test_namedtensor
+    "TestNamedTensor.test_select",  # test_namedtensor
+    "TestNamedTensor.test_no_pickle_support",  # test_namedtensor
+    "TestNamedTensor.test_factory_coverage",  # test_namedtensor
+    "TestNamedTensor.test_split_fns_propagates_names",  # test_namedtensor
+    "TestNamedTensor.test_matmul",  # test_namedtensor
+    "TestNamedTensor.test_autograd_smoke",  # test_namedtensor
+    "TestNamedTensor.test_tensor_from_named_tensor",  # test_namedtensor
+    "TestNamedTensor.test_copy_transpose",  # test_namedtensor
+    "TestNamedTensor.test_using_seen_interned_string_doesnt_bump_refcount",  # test_namedtensor
+    "TestNamedTensor.test_factory_edge_cases",  # test_namedtensor
+    "TestNamedTensor.test_max_pooling",  # test_namedtensor
+    "TestNamedTensor.test_autograd_warns_named_grad",  # test_namedtensor
+    "TestNamedTensor.test_cdist",  # test_namedtensor
+    "TestNamedTensor.test_transpose_variants",  # test_namedtensor
+    "TestNamedTensor.test_bernoulli",  # test_namedtensor
+    "TestNamedTensor.test_no_multiprocessing_support",  # test_namedtensor
+    "TestNamedTensor.test_any_all",  # test_namedtensor
+    "TestNamedTensor.test_out_fn_semantics",  # test_namedtensor
+    "TestNamedTensor.test_cat",  # test_namedtensor
+    "TestNamedTensor.test_noncontig_contiguous",  # test_namedtensor
+    "TestNamedTensor.test_stride",  # test_namedtensor
+    "TestNamedTensor.test_logical_ops",  # test_namedtensor
+    "TestNamedTensor.test_mv",  # test_namedtensor
+    "TestNamedTensor.test_using_unseen_interned_string_bumps_refcount_permanently",  # test_namedtensor
+    "TestNamedTensor.test_resize",  # test_namedtensor
+    "TestFX.test_graph_edit_with_proxy",  # test_fx
+    "TestFX.test_native_callable",  # test_fx
+    "TestFX.test_interpreter_default_args",  # test_fx
+    "TestFX.test_tuple_no_subscript",  # test_fx
+    "TestFX.test_symbolic_trace_assert",  # test_fx
+    "TestFX.test_layout",  # test_fx
+    "TestFX.test_interpreter_onthefly_swap",  # test_fx
+    "TestFX.test_pytree_concrete",  # test_fx
+    "TestFX.test_wrapped_retrace",  # test_fx
+    "TestFX.test_wrong_target_type",  # test_fx
+    "TestFX.test_delete_unused_submodules_leaf",  # test_fx
+    "TestFX.test_trace_fn_constant",  # test_fx
+    "TestFX.test_interpreter_not_enough_args",  # test_fx
+    "TestFX.test_ast_rewriter_wrap_fn_directly",  # test_fx
+    "TestFX.test_module_deepcopy_edit_nodes",  # test_fx
+    "TestFX.test_stack_traces_with_transformer",  # test_fx
+    "TestFX.test_trace_multiple_funcs",  # test_fx
+    "TestFX.test_string_literal_return",  # test_fx
+    "TestFX.test_interpreter",  # test_fx
+    "TestFX.test_graph_module",  # test_fx
+    "TestFX.test_pretty_print_targets",  # test_fx
+    "TestFX.test_tensor_constant",  # test_fx
+    "TestFX.test_erase_node_error",  # test_fx
+    "TestFX.test_node_tagging",  # test_fx
+    "TestFX.test_transformer_preserves_nn_module_stack_for_get_attr",  # test_fx
+    "TestFX.test_trace_return_dataclass_nested",  # test_fx
+    "TestFX.test_find_uses",  # test_fx
+    "TestFX.test_varargs_concrete",  # test_fx
+    "TestCommonPass.test_correctness_CSEPass_Mutation_cpu",  # test_fx
+    "TestFX.test_deepcopy_graph_with_tracer_cls",  # test_fx
+    "TestFX.test_submodule_manipulation_API",  # test_fx
+    "TestFX.test_annotations_with_non_torch_reference_and_no_internal_forward_references",  # test_fx
+    "TestFX.test_custom_traceback_raised_when_exception_source_is_graphmodule",  # test_fx
+    "TestFX.test_single_default_arg",  # test_fx
+    "TestFX.test_partial_trace",  # test_fx
+    "TestFX.test_prepend_self",  # test_fx
+    "TestFX.test_transformer_noop",  # test_fx
+    "TestFX.test_enum",  # test_fx
+    "TestConstFold.test_check_skip_folding_quant_dequant_pattern",  # test_fx
+    "TestFX.test_nonetype_annotation",  # test_fx
+    "TestFX.test_profiler_ranges_side_effect",  # test_fx
+    "TestFX.test_unpack_dict_better_error",  # test_fx
+    "TestFX.test_custom_import",  # test_fx
+    "TestFX.test_custom_proxy_type_literal",  # test_fx
+    "TestFX.test_pretty_print_node",  # test_fx
+    "TestFX.test_interpreter_other_graph",  # test_fx
+    "TestFX.test_trace_function",  # test_fx
+    "TestFX.test_custom_proxy_type",  # test_fx
+    "TestFX.test_immutable_list_pytree_ops",  # test_fx
+    "TestFX.test_throw_out_variant",  # test_fx
+    "TestFX.test_no_mutation",  # test_fx
+    "TestFX.test_fx_and_or",  # test_fx
+    "TestFX.test_interpreter_star_args",  # test_fx
+    "TestFX.test_pickle_nonetype_annotation",  # test_fx
+    "TestFX.test_all_input_nodes",  # test_fx
+    "TestFX.test_script_tensor_constant",  # test_fx
+    "TestFX.test_pickle_torch_custom_ops",  # test_fx
+    "TestFX.test_deepcopy_no_recursion",  # test_fx
+    "TestFX.test_torch_custom_ops",  # test_fx
+    "TestFX.test_ast_rewriter_wrap_with_submodule",  # test_fx
+    "TestFX.test_torch_fx_len",  # test_fx
+    "TestFX.test_construct_root_dict",  # test_fx
+    "TestFX.test_fx_shifts",  # test_fx
+    "TestFX.test_inf_nan",  # test_fx
+    "TestFX.test_lineno_map",  # test_fx
+    "TestFX.test_pretty_print",  # test_fx
+    "TestFX.test_trace_dict_proxy_keys",  # test_fx
+    "TestFX.test_ast_rewriter_wrapped_via_decorator_and_transformed",  # test_fx
+    "TestFX.test_wrap_decorated_function",  # test_fx
+    "TestFX.test_tensor_attribute",  # test_fx
+    "TestFX.test_user_friendly_call_provenance_with_module",  # test_fx
+    "TestFX.test_pickle_custom_import",  # test_fx
+    "TestFX.test_informative_co_filename",  # test_fx
+    "TestFX.test_remove_uses",  # test_fx
+    "TestFX.test_deepcopy_with_submods_params",  # test_fx
+    "TestFX.test_custom_codegen_with_transformer",  # test_fx
+    "TestFX.test_annotation_with_future",  # test_fx
+    "TestFX.test_copy_it",  # test_fx
+    "TestFX.test_getitem_subproc",  # test_fx
+    "TestFX.test_leaf_module",  # test_fx
+    "TestFX.test_update_kwargs_api",  # test_fx
+    "TestCommonPass.test_correctness_CSEPass_TakeList_cpu",  # test_fx
+    "TestPassManager.test_pass_manager",  # test_fx
+    "TestFX.test_control_flow_tracing",  # test_fx
+    "TestFX.test_pytree",  # test_fx
+    "TestFX.test_user_friendly_call_provenance_with_function",  # test_fx
+    "TestFX.test_wrap_with_submodule",  # test_fx
+    "TestFX.test_example_shape_prop",  # test_fx
+    "TestFX.test_stack_traces",  # test_fx
+    "TestFX.test_tracing_graphmodules_as_leaf_submodules",  # test_fx
+    "TestFX.test_symbolic_trace_sequential",  # test_fx
+    "TestFX.test_script_method_trace",  # test_fx
+    "TestFX.test_return_type_exists",  # test_fx
+    "TestFX.test_transformer_multi_outputs",  # test_fx
+    "TestFX.test_unpack",  # test_fx
+    "TestCommonPass.test_correctness_CSEPass_MutationMetadata_cpu",  # test_fx
+    "TestCommonPass.test_correctness_CSEPass_MutationTorchTensorCall_cpu",  # test_fx
+    "TestCommonPass.test_correctness_CSEPass_MutationInput_cpu",  # test_fx
+    "TestFX.test_metadata_on_ph",  # test_fx
+    "TestFX.test_shape_prop_aggregate",  # test_fx
+    "TestFX.test_custom_codegen",  # test_fx
+    "TestFX.test_namedtuple_return_trace",  # test_fx
+    "TestFX.test_interpreter_partial_eval",  # test_fx
+    "TestFX.test_reserved_getattr",  # test_fx
+    "TestFX.test_deepcopy_graphmodule_with_transform",  # test_fx
+    "TestFX.test_multi_insert_point",  # test_fx
+    "TestFX.test_pretty_print_graph",  # test_fx
+    "TestFX.test_graph_module_replicate_for_dp",  # test_fx
+    "TestFX.test_fn_type_annotation_empty",  # test_fx
+    "TestFX.test_immutable_dict_pytree_ops",  # test_fx
+    "TestFX.test_reassign_args_kwargs_uses",  # test_fx
+    "TestFX.test_fn_type_annotations",  # test_fx
+    "TestFX.test_custom_proxy_input_dependent_control_flow",  # test_fx
+    "TestFX.test_interpreter_run_node_override",  # test_fx
+    "TestFX.test_ctx_mgr",  # test_fx
+    "TestFX.test_wrap",  # test_fx
+    "TestFX.test_deepcopy_recursion_depth",  # test_fx
+    "TestFX.test_wrapped_method",  # test_fx
+    "TestFX.test_wrong_topo",  # test_fx
+    "TestFX.test_autowrap_functions",  # test_fx
+    "TestFX.test_fx_create_arg",  # test_fx
+    "TestFX.test_regular_and_default_args",  # test_fx
+    "TestFX.test_inf_nan_kwds",  # test_fx
+    "TestFX.test_wrapped_via_decorator_and_transformed",  # test_fx
+    "TestFX.test_ast_rewriter_reassigns_submodules",  # test_fx
+    "TestFX.test_ast_rewriter_rewrites_assert",  # test_fx
+    "TestFX.test_annotations_with_forward_references",  # test_fx
+    "TestFX.test_ast_rewriter_rewrites_assert_with_message",  # test_fx
+    "TestFX.test_matmul_tracing",  # test_fx
+    "TestFX.test_torch_op_overloads",  # test_fx
+    "TestFX.test_args_kwargs_no_self",  # test_fx
+    "TestFX.test_custom_traceback_not_raised_when_exception_source_is_submodule",  # test_fx
+    "TestFX.test_imul_code_print",  # test_fx
+    "TestCommonPass.test_correctness_factory_CSEPass_MutationFactory_cpu",  # test_fx
+    "TestFX.test_inline_graph",  # test_fx
+    "TestFX.test_trace_return_dataclass",  # test_fx
+    "TestFX.test_get_torch_func_signature",  # test_fx
+    "TestCommonPass.test_correctness_factory_CSEPass_FactoryFunctionCall_cpu",  # test_fx
+    "TestFX.test_direct_param_use",  # test_fx
+    "TestFX.test_multiple_default_args",  # test_fx
+    "TestFX.test_tensor_attribute_coalseced",  # test_fx
+    "TestFX.test_insertion_point",  # test_fx
+    "TestFX.test_namedtuple_return_qualname",  # test_fx
+    "TestFX.test_annotations_with_non_torch_reference_and_internal_forward_references",  # test_fx
+    "TestFX.test_concrete_arg_none_assert",  # test_fx
+    "TestFX.test_torch_fx_getattr",  # test_fx
+    "TestFX.test_named_tuple_inlined",  # test_fx
+    "TestFX.test_wrap_fn_directly",  # test_fx
+    "TestFX.test_graph_fns",  # test_fx
+    "TestFX.test_args_kwargs",  # test_fx
+    "TestFX.test_return_tuple",  # test_fx
+    "TestFX.test_trace_return_namedtuple",  # test_fx
+    "TestFX.test_ast_rewriter_wrapped_via_decorator",  # test_fx
+    "TestCommonPass.test_correctness_CSEPass_ReturnList_cpu",  # test_fx
+    "TestFX.test_replace_input",  # test_fx
+    "TestFX.test_sqrt",  # test_fx
+    "TestFX.test_remove_uses_with_custom_filter",  # test_fx
+    "TestFX.test_empty_graph_codegen",  # test_fx
+    "TestFX.test_deepcopy_tracer",  # test_fx
+    "TestFX.test_insert_arg",  # test_fx
+    "TestFX.test_interpreter_with_codegen",  # test_fx
+    "TestFX.test_torchbind_class_attribute_in_fx",  # test_fx
+    "TestFX.test_pickle_graphmodule",  # test_fx
+    "TestFX.test_graph_module_init_buffer_param_copied_mod_init",  # test_fx
+    "TestFX.test_update_args_api",  # test_fx
+    "TestFX.test_nn_module_stack",  # test_fx
+    "TestFX.test_graph_unique_names",  # test_fx
+    "TestFX.test_trace_dict_int_keys",  # test_fx
+    "TestFX.test_custom_proxy_dynamic_value",  # test_fx
+    "TestFX.test_typename_print",  # test_fx
+    "TestFX.test_move_before",  # test_fx
+    "TestFXAPIBackwardCompatibility.test_public_api_surface",  # test_fx
+    "TestFX.test_copy_no_remap",  # test_fx
+    "TestFX.test_shape_prop_layout",  # test_fx
+    "TestFX.test_shape_prop_layout_3d",  # test_fx
+    "TestFX.test_update_args_kwargs_yells_at_you",  # test_fx
+    "TestFX.test_transformer_op_swap",  # test_fx
+    "TestFX.test_unpack_list_better_error",  # test_fx
+    "TestFX.test_graph_module_init_buffer_param_copied_dict_init",  # test_fx
+    "TestFX.test_disallow_override",  # test_fx
+    "TestFX.test_fx_stateless",  # test_fx
+    "TestFX.test_sequential",  # test_fx
+    "TestFX.test_dict",  # test_fx
+    "TestFX.test_snake_case",  # test_fx
+    "TestFX.test_deepcopy_graphmodule",  # test_fx
+    "TestFX.test_annotations_with_no_forward_references",  # test_fx
+    "TestFX.test_wrapped_via_decorator",  # test_fx
+    "TestFX.test_graph_unique_names_manual",  # test_fx
+    "TestFX.test_ast_rewriter_wrap",  # test_fx
+    "TestFX.test_torchbind_class_attribute_in_fx_tensor_arg",  # test_fx
+    "TestFX.test_ellipsis",  # test_fx
     "TestContentStoreCPU.test_repeated_hash_cpu",  # test_content_store
     "TestLazyTensor.test_tensor_ctr",  # lazy/test_ts_opinfo
 }
@@ -4101,10 +3206,6 @@ dynamo_skips = {
     "TestMethods.test_compress",
     "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmax_np_method0",
     "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmin_np_method1",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmin",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmax",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmax",
-    "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmin",
     "TestIsreal.test_fail",  # known py311 fail
     "TestIscomplexobj.test_basic",  # known py311 fail
     "TestIsrealobj.test_basic",  # known py311 fail
@@ -4482,9 +3583,9 @@ dynamo_skips = {
     "ExportTests.test_predispatch_with_for_out_dtype",  # weird
     "ExportTests.test_predispatch_with_for_out_dtype_nested",  # weird
     "MiscTests.test_auto_functionalize_on_view",  # weird
-    "MiscTests::test_auto_functionalize_optional",  # weird
-    "MiscTests::test_auto_functionalize_with_returns",  # weird
-    "MiscTests::test_generate_trivial_abstract_impl",  # weird
+    "MiscTests.test_auto_functionalize_optional",  # weird
+    "MiscTests.::test_auto_functionalize_with_returns",  # weird
+    "MiscTests.test_generate_trivial_abstract_impl",  # weird
     "RecompileUxTests.test_drop_cache_on_skip",  # weird
     "ReproTests.test_optim_state_references_cleared",  # weird
     "ReproTests.test_reformer_train",  # weird
@@ -8482,15 +7583,31 @@ dynamo_skips = {
     "TestBinaryUfuncsCPU.test_long_tensor_pow_floats_cpu",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_float32_int32",  # known py38 fail
     "TestFXExperimental.test_optimize_for_inference_cpu",  # known py38 fail
-    "TestFXExperimental.test_optimize_for_inference_cpu_torchvision",
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int32",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int64",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int16",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int8",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_uint8",  # known py38 fail
+    "TestRepackage.test_repackage_import_indirectly_via_parent_module",  # known py311 fail
+    "TestPackageScript.test_load_shared_tensors_repackaged",  # known py311 fail
+    "TestFX.test_assert",  # known py38 fail
+    "TestFX.test_annotations_empty_tuple",  # known py38 fail
     "TestDataLoaderPersistentWorkers.test_early_exit",  # known py38 fail
     "TestDataLoader.test_fd_limit_exceeded",  # known py38 fail
     "TestDataLoaderPersistentWorkers.test_fd_limit_exceeded",  # known py38 fail
     "TestLazyDynamicOps.test_nonzero_dynamic",  # known py311 fail
     "TestLazyTensor.test_view_mark_step_preserved",  # known py311 fail
 }
+
+
+# verify some invariants
+for test in dynamo_expected_failures.union(dynamo_skips):
+    if len(test.split(".")) != 2:
+        raise AssertionError(f'Invalid test name: "{test}"')
+
+intersection = dynamo_expected_failures.intersection(dynamo_skips)
+if len(intersection) > 0:
+    raise AssertionError(
+        "there should be no overlap between dynamo_expected_failures "
+        "and dynamo_skips, got " + str(intersection)
+    )
