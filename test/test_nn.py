@@ -10007,31 +10007,41 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(expected_out, t_out)
 
     @parametrize_test("align_corners", [True, False])
-    def test_upsamplingTrilinear3d(self, device, align_corners):
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last_3d])
+    def test_upsamplingTrilinear3d(self, device, align_corners, memory_format):
         kwargs = dict(mode='trilinear', align_corners=align_corners)
 
-        for memory_format in [torch.contiguous_format, torch.channels_last_3d]:
-            # test float scale factor up & downsampling
-            for scale_factor in [0.5, 1.5, 2]:
-                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
-                in_t = torch.ones(1, 2, 2, 2, 2, device=device, dtype=torch.double)
-                in_t = in_t.contiguous(memory_format=memory_format).requires_grad_()
-                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                with warnings.catch_warnings(record=True) as w:
-                    out_t = m(in_t)
-                expected_out = torch.ones(1, 2, out_size, out_size, out_size, device=device, dtype=torch.double)
-                self.assertEqual(expected_out, out_t)
-                # Assert that memory format is carried through to the output
-                self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
-                out_t.backward(torch.randn_like(out_t))
-                self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
+        # test float scale factor up & downsampling
+        for scale_factor in [0.5, 1.5, 2]:
+            m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+            in_t = torch.ones(1, 2, 4, 4, 4, device=device, dtype=torch.double)
+            in_t = in_t.contiguous(memory_format=memory_format).requires_grad_()
+            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+            with warnings.catch_warnings(record=True) as w:
+                out_t = m(in_t)
+            expected_out = torch.ones(1, 2, out_size, out_size, out_size, device=device, dtype=torch.double)
+            self.assertEqual(expected_out, out_t)
+            # Assert that memory format is carried through to the output
+            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
-                input = torch.randn(1, 2, 2, 2, 2, requires_grad=True, dtype=torch.double)
-                self.assertEqual(
-                    F.interpolate(input, (out_size, out_size, out_size), **kwargs),
-                    F.interpolate(input, scale_factor=scale_factor, **kwargs))
-                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
-                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+            grad_out = torch.randn_like(out_t).contiguous(memory_format=memory_format)
+            in_t.grad = None
+            out_t.backward(grad_out)
+            grad_in = in_t.grad
+            self.assertTrue(grad_in.is_contiguous(memory_format=memory_format))
+
+            if memory_format == torch.channels_last_3d:
+                # check if grad inputs CF and CL match
+                in_t.grad = None
+                out_t.backward(grad_out.contiguous())
+                self.assertEqual(in_t.grad, grad_in)
+
+            input = torch.randn(1, 2, 4, 4, 4, requires_grad=True, dtype=torch.double)
+            self.assertEqual(
+                F.interpolate(input, (out_size, out_size, out_size), **kwargs),
+                F.interpolate(input, scale_factor=scale_factor, **kwargs))
+            gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+            gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     @onlyCUDA
     @dtypes(torch.half)
