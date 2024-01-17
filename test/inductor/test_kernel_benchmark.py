@@ -60,7 +60,7 @@ class TestKernelBenchmark(TestCase):
         def f(x):
             return torch.sin(x) + torch.cos(x)
 
-        inp = torch.rand(2, 3).to(GPU_TYPE)
+        inp = torch.rand(2, 3).to(device=GPU_TYPE)
         out = f(inp)
         self.verify_compiled_kernels()
 
