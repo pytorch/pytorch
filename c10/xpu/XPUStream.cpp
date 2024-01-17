@@ -37,28 +37,23 @@ thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 //     zeros      StreamIdIndex    StreamIdType
 //
 // Where StreamIdType:
-//  000 = UNUSED
-//  001 = reserved queue
+//  000 = reserved queue
 //
 // StreamId is 64-bit, so we can just rely on regular promotion rules.
 // We rely on StreamIdIndex and StreamIdType being non-negative;
 
 using StreamIdIndex = uint8_t;
 enum class StreamIdType : uint8_t {
-  UNUSED = 0x0,
-  RESERVED = 0x1,
+  RESERVED = 0x0,
 };
 
 inline std::ostream& operator<<(std::ostream& stream, StreamIdType q) {
   switch (q) {
-    case StreamIdType::UNUSED:
-      stream << "UNUSED";
-      break;
     case StreamIdType::RESERVED:
       stream << "RESERVED";
       break;
     default:
-      stream << static_cast<uint8_t>(q);
+      stream << static_cast<int16_t>(q);
       break;
   }
   return stream;
@@ -67,7 +62,7 @@ inline std::ostream& operator<<(std::ostream& stream, StreamIdType q) {
 inline StreamIdType streamIdType(StreamId s) {
   int mask_for_type = (1 << kStreamTypeBits) - 1;
   auto st = static_cast<StreamIdType>(s & mask_for_type);
-  TORCH_INTERNAL_ASSERT(st == StreamIdType::RESERVED, "invalid StreamId", s);
+  TORCH_CHECK(st == StreamIdType::RESERVED, "invalid StreamId: ", s);
   return st;
 }
 
@@ -126,7 +121,13 @@ inline void initDeviceStreamOnce(DeviceIndex device) {
 }
 
 inline void check_device(DeviceIndex device) {
-  TORCH_INTERNAL_ASSERT(device >= 0 && device < num_gpus);
+  TORCH_CHECK(
+      device >= 0 && device < num_gpus,
+      "device is out of range, device is ",
+      static_cast<int16_t>(device),
+      ", total number of device is ",
+      static_cast<int16_t>(num_gpus),
+      ".");
 }
 
 uint32_t get_idx(std::atomic<uint32_t>& counter) {
@@ -152,25 +153,17 @@ sycl::queue& XPUStream::queue() const {
   StreamIdType st = streamIdType(stream_id);
   StreamIdIndex si = streamIdIndex(stream_id);
   switch (st) {
-    case StreamIdType::UNUSED:
-      TORCH_INTERNAL_ASSERT(
-          0,
+    case StreamIdType::RESERVED:
+      return *reserved_streams[device_index][si];
+    default:
+      TORCH_CHECK(
+          false,
           "Unrecognized stream ",
           stream_,
           " (I didn't recognize the stream type, ",
           st,
           ").",
           " Did you manufacture the StreamId yourself?  Don't do that;");
-    case StreamIdType::RESERVED:
-      return *reserved_streams[device_index][si];
-    default:
-      TORCH_INTERNAL_ASSERT(
-          0,
-          "Unrecognized stream ",
-          stream_,
-          " (I didn't recognize the stream type, ",
-          st,
-          ")");
   }
 }
 
@@ -183,6 +176,7 @@ XPUStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
     device = c10::xpu::current_device();
   }
   check_device(device);
+  // TODO: support high priority stream.
   TORCH_CHECK(
       !isHighPriority,
       "Currently, high priority stream is not supported in XPU backend.");
