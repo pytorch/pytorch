@@ -91,8 +91,6 @@ FIXME_default_non_strict = {
     "test_tensorexpr",
     "test_tensorexpr_pybind",
     "test_torch",
-    "test_vulkan",
-    "test_xnnpack_integration",
 }
 
 # Tests that run without strict mode in PYTORCH_TEST_WITH_INDUCTOR=1.
@@ -2820,7 +2818,6 @@ dynamo_expected_failures = {
     "TestGradNewOnesOverride.test_newones",  # test_overrides
     "TestTorchFunctionOverride.test_precedence_semantics",  # test_overrides
     "TestNamedTupleAPI.test_namedtuple_return",  # test_namedtuple_return_api
-    "TestAnalyze.test_trace_dependencies",  # test_package
     "TestVmapOperatorsLegacy.test_contiguous",  # test_legacy_vmap
     "TestVmapAPILegacy.test_accepts_nested_inputs",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nested_out_dims",  # test_legacy_vmap
@@ -3165,6 +3162,7 @@ dynamo_expected_failures = {
     "TestFX.test_ellipsis",  # test_fx
     "TestContentStoreCPU.test_repeated_hash_cpu",  # test_content_store
     "TestLazyTensor.test_tensor_ctr",  # lazy/test_ts_opinfo
+    "TestAnalyze.test_trace_dependencies",  # test_package
 }
 
 dynamo_skips = {
@@ -7572,8 +7570,6 @@ dynamo_skips = {
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int16",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int8",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_uint8",  # known py38 fail
-    "TestRepackage.test_repackage_import_indirectly_via_parent_module",  # known py311 fail
-    "TestPackageScript.test_load_shared_tensors_repackaged",  # known py311 fail
     "TestFX.test_assert",  # known py38 fail
     "TestFX.test_annotations_empty_tuple",  # known py38 fail
     "TestDataLoaderPersistentWorkers.test_early_exit",  # known py38 fail
@@ -7581,6 +7577,12 @@ dynamo_skips = {
     "TestDataLoaderPersistentWorkers.test_fd_limit_exceeded",  # known py38 fail
     "TestLazyDynamicOps.test_nonzero_dynamic",  # known py311 fail
     "TestLazyTensor.test_view_mark_step_preserved",  # known py311 fail
+    "TestRepackage.test_repackage_import_indirectly_via_parent_module",  # known py311 fail
+    "TestPackageScript.test_load_shared_tensors_repackaged",  # known py311 fail
+    "TestFXExperimental.test_optimize_for_inference_cpu_torchvision",
+    "TestXNNPACKOps.test_linear_1d_input",  # flaky
+    "TestXNNPACKOps.test_conv2d",  # flaky
+    "TestXNNPACKOps.test_conv2d_transpose",  # flaky
 }
 
 
