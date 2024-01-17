@@ -1428,7 +1428,7 @@ def wrap_fx_proxy_cls(
     ):
         sizes = [ConstantVariable.create(x) for x in example_value]
         return SizeVariable(sizes, **options)
-    elif isinstance(example_value, (tuple, list, set)):
+    elif isinstance(example_value, (tuple, list)):
         proxy.node.meta["example_value"] = example_value
         unpacked = []
         for i, val in enumerate(example_value):
@@ -1457,8 +1457,6 @@ def wrap_fx_proxy_cls(
             return TupleVariable(unpacked, **options)
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, mutable_local=MutableLocal(), **options)
-        elif istype(example_value, set):
-            return SetVariable(unpacked, mutable_local=MutableLocal(), **options)
         else:
             assert example_value.__class__.__module__ == "torch.return_types" or hasattr(
                 example_value, "_fields"
@@ -1849,6 +1847,7 @@ class SourcelessBuilder:
             items = {self(tx, k): self(tx, v) for k, v in value.items()}
             return ConstDictVariable(items, mutable_local=MutableLocal())
         elif isinstance(value, set):
+            # Nb. value is a set here so the iteration below is non-deterministic!
             return SetVariable(
                 [self(tx, x) for x in value], mutable_local=MutableLocal()
             )

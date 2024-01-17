@@ -2779,7 +2779,6 @@ dynamo_expected_failures = {
     "TestNamedTuple.test_max",  # test_overrides
     "TestTorchFunctionMode.test_mode_notimplemented_loop",  # test_overrides
     "TestTorchFunctionMode.test_disable_enable_subclass",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___setitem__",  # test_overrides
     "TestTorchFunctionOverride.test_mean_semantics",  # test_overrides
     "TestGradCheckOverride.test_gradcheck",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor___cuda_array_interface_____get__",  # test_overrides
