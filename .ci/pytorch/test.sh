@@ -128,6 +128,8 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # mainly used so that we're not spending extra cycles testing cpu
   # devices on expensive gpu machines
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
+elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
@@ -138,6 +140,15 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+  # Source Intel oneAPI envrioment script to enable xpu runtime related libraries
+  # refer to https://www.intel.com/content/www/us/en/docs/oneapi/programming-guide/2024-0/use-the-setvars-and-oneapi-vars-scripts-with-linux.html
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/compiler/latest/env/vars.sh
+  # Check XPU status before testing
+  xpu-smi discovery
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
@@ -266,22 +277,15 @@ test_dynamo_shard() {
       test_ao_sparsity \
       test_autograd \
       test_jit \
-      test_proxy_tensor \
       test_quantization \
-      test_public_bindings \
       test_dataloader \
       test_reductions \
-      test_namedtensor \
-      test_namedtuple_return_api \
       profiler/test_profiler \
       profiler/test_profiler_tree \
-      test_overrides \
       test_python_dispatch \
       test_fx \
       test_package \
-      test_legacy_vmap \
       test_custom_ops \
-      test_content_store \
       export/test_db \
       functorch/test_dims \
       functorch/test_aotdispatch \
@@ -678,6 +682,19 @@ test_libtorch_api() {
   fi
 }
 
+test_xpu_bin(){
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  for xpu_case in "${BUILD_BIN_DIR}"/*{xpu,sycl}*; do
+    if [[ "$xpu_case" != *"*"* && "$xpu_case" != *.so && "$xpu_case" != *.a ]]; then
+      case_name=$(basename "$xpu_case")
+      echo "Testing ${case_name} ..."
+      "$xpu_case" --gtest_output=xml:"$TEST_REPORTS_DIR"/"$case_name".xml
+    fi
+  done
+}
+
 test_aot_compilation() {
   echo "Testing Ahead of Time compilation"
   ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
@@ -1013,14 +1030,17 @@ test_docs_test() {
 }
 
 test_executorch() {
+  echo "Install torchvision and torchaudio"
+  install_torchvision
+  install_torchaudio
+
   pushd /executorch
 
-  echo "Install torchvision and torchaudio"
-  # TODO(huydhn): Switch this to the pinned commits on ExecuTorch once they are
-  # there.  These libraries need to be built here, and not part of the Docker
-  # image because they require the target version of torch to be installed first
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git"
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git"
+  # NB: We need to build ExecuTorch runner here and not inside the Docker image
+  # because it depends on PyTorch
+  # shellcheck disable=SC1091
+  source .ci/scripts/utils.sh
+  build_executorch_runner "cmake"
 
   echo "Run ExecuTorch regression tests for some models"
   # NB: This is a sample model, more can be added here
@@ -1115,6 +1135,9 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_python_shard 1
   test_aten
   test_libtorch 1
+  if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
+    test_xpu_bin
+  fi
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 2
@@ -1139,10 +1162,11 @@ elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   install_torchvision
   test_python
   test_aten
-elif [[ "${BUILD_ENVIRONMENT}" == *xpu* && -n "$TESTS_TO_INCLUDE" ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
   install_torchvision
   test_python
   test_aten
+  test_xpu_bin
 else
   install_torchvision
   install_monkeytype
