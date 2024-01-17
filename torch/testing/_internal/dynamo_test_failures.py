@@ -1934,7 +1934,6 @@ dynamo_expected_failures = {
     "TestTensorBoardSummary.test_image_with_one_channel",  # test_tensorboard
     "TestTensorBoardEmbedding.test_embedding_64",  # test_tensorboard
     "TestTensorBoardSummary.test_hparams_domain_discrete",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_wrong_parameter",  # test_tensorboard
     "TestTensorBoardSummary.test_video",  # test_tensorboard
     "TestTensorProtoSummary.test_int_tensor_proto",  # test_tensorboard
     "TestTensorBoardSummary.test_hparams_number",  # test_tensorboard
