@@ -160,7 +160,11 @@ def is_boolean_type(x):
         return isinstance(x, bool)
 
 
-def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
+def get_promoted_dtype(
+    *args,
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
+    return_compute_dtype: bool = False,
+):
     def construct_input(inp):
         if isinstance(inp, (Number, sympy.Symbol)):
             return inp
@@ -171,8 +175,10 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
             return torch.zeros([1] * dim, dtype=inp.get_dtype())
 
     inps = [construct_input(arg) for arg in args]
-    _, dtype = elementwise_dtypes(*inps, type_promotion_kind=type_promotion_kind)
-    return dtype
+    compute_dtype, result_dtype = elementwise_dtypes(
+        *inps, type_promotion_kind=type_promotion_kind
+    )
+    return compute_dtype if return_compute_dtype else result_dtype
 
 
 def get_overloads(aten_fn):
@@ -4247,7 +4253,11 @@ def _avg_poolnd(
     new_size = list(batch) + list(h_out)
     dtype = x.get_dtype()
     # compute in higher-precision until scaling
-    output_dtype = torch.float32 if dtype in (torch.float16, torch.bfloat16) else dtype
+    output_dtype = get_promoted_dtype(
+        x,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        return_compute_dtype=True,
+    )
 
     def fn_inner(idx, reduction_idx):
         prefix = idx[:-dim]
