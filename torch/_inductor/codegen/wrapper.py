@@ -481,6 +481,17 @@ class WrapperCodeGen(CodeGen):
             stride = self.codegen_shape_tuple(buf.get_stride())
             self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
 
+    def codegen_input_nan_asserts(self):
+        self.prefix.writeline("# make sure graph inputs are not nan/inf")
+        for name, buf in V.graph.graph_inputs.items():
+            if isinstance(buf, sympy.Expr):
+                continue
+
+            line = f"assert not {name}.isnan().any().item()"
+            self.prefix.writeline(line)
+            line = f"assert not {name}.isinf().any().item()"
+            self.prefix.writeline(line)
+
     def write_prefix(self):
         self.prefix.splice(
             """
@@ -503,6 +514,8 @@ class WrapperCodeGen(CodeGen):
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
             if config.size_asserts:
                 self.codegen_input_size_asserts()
+            if config.nan_asserts:
+                self.codegen_input_nan_asserts()
 
     def write_get_raw_stream(self, index):
         self.write_triton_header_once()
@@ -588,6 +601,11 @@ class WrapperCodeGen(CodeGen):
             line += ", ".join([""] + kwargs)
         line += f"){self.ending}"
         self.writeline(line)
+
+    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+        indices_str = f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
+        args = [x, indices_str, values, accumulate]
+        self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
@@ -2148,6 +2166,33 @@ class CppWrapperCodeGen(WrapperCodeGen):
             line += f", {','.join(kwargs)}"
         line += f"){self.ending}"
         self.writeline(line)
+
+    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+        if (
+            V.graph.aot_mode
+            and V.graph.cpp_wrapper
+            and config.aot_inductor.abi_compatible
+        ):
+            # Make the fallback call ABI-compatible in the C++ wrapper file.
+            kernel = kernel.replace("at::", "aoti_torch_")
+            num_indices = str(
+                len(indices)
+            )  # num_indices for indexing into indices array
+            tensor_handle_array_var = (
+                f"tensor_handle_array_{next(self.kernel_callsite_id)}"
+            )
+            self.writeline(
+                f"AtenTensorHandle {tensor_handle_array_var}[] = {{{', '.join(indices)}}};"
+            )
+            args = [x, tensor_handle_array_var, num_indices, values, accumulate]
+        else:
+            indices_str = (
+                f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
+            )
+            args = [x, indices_str, values, accumulate]
+
+        args.insert(0, x)  # set x as the output tensor, this fallback mutates x.
+        self.writeline(self.wrap_kernel_call(kernel, args))
 
     def add_benchmark_harness(self, output):
         if V.graph.aot_mode:
