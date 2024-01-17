@@ -409,8 +409,8 @@ class VariableBuilder:
         elif value is sys.modules:
             return PythonSysModulesVariable(source=self.source)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
-            # We need all the keys to be hashable. To do so, we first wrap them and then
-            # check whether they are hashable
+            # We need all the keys to be hashable. We do this within the
+            # _HashableTracker class in dicts.py
             idx = 0
 
             def build_key_value(k, v):
@@ -429,13 +429,6 @@ class VariableBuilder:
                 return key, value
 
             result = dict(build_key_value(k, v) for k, v in value.items())
-
-            # Maybe break
-            for k in result.keys():
-                if not is_hashable(k):
-                    unimplemented(
-                        f"Wrapping a dict with key of type {type(k)}. Key: {k}"
-                    )
 
             if not value and self.get_source().is_nn_module():
                 # It is faster to guard on 'false' property than to guard
