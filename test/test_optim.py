@@ -338,7 +338,28 @@ class TestOptimRenewed(TestCase):
 
             weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
             bias = Parameter(torch.randn((10), device=device, dtype=dtype))
+            input = torch.randn(5, device=device, dtype=dtype)
 
+            optimizer = optim_cls([dict(params=[weight], **weight_kwargs), dict(params=[bias], **bias_kwargs)])
+
+            loss = (weight.mv(input) + bias).pow(2).sum()
+            initial_value = loss.item()
+            for _ in range(200):
+                optimizer.zero_grad()
+                loss = (weight.mv(input) + bias).pow(2).sum()
+                loss.backward()
+                if optim_cls.__name__ == "SparseAdam":
+                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
+                    # which we know does NOT represent the expected use case!
+                    weight.grad = weight.grad.to_sparse()
+                    bias.grad = bias.grad.to_sparse()
+                optimizer.step()
+
+            # Test that the direction of loss moved appropriately
+            if optim_input.kwargs.get("maximize", False):
+                self.assertGreater(loss.item(), initial_value)
+            else:
+                self.assertLess(loss.item(), initial_value)
 
 
     @optims(optim_db, dtypes=[torch.float32])
