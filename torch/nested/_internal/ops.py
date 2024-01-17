@@ -1115,3 +1115,16 @@ def _nested_get_offsets(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     return inp._offsets
+
+
+@register_jagged_func(torch.ops.aten._nested_get_lengths.default, "self: jt_all")
+def _nested_get_lengths(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    # if inp._lengths is None:
+    #     raise RuntimeError("no lengths metadata set for given nested tensor")
+
+    return inp._lengths
