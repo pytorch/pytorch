@@ -18,6 +18,12 @@ def signature_of(arg: Union[TensorArg, SizeArg], *, size_dtype: str) -> str:
             tye = "*fp8e4nv"
         elif arg.dtype == torch.float8_e5m2:
             tye = "*fp8e5"
+        # Complex arguments are passed in as float-view arguments, see
+        # aten.angle lowering for an example.
+        elif arg.dtype == torch.complex64:
+            tye = "*fp32"
+        elif arg.dtype == torch.complex128:
+            tye = "*fp64"
         else:
             tye = JITFunction._type_of(arg.dtype)
         if V.graph.is_unspec_arg(arg.buffer):

@@ -2531,6 +2531,15 @@ class FixedLayout(Layout):
 
         return indexer
 
+    def view(self, dtype):
+        if self.dtype.itemsize == dtype.itemsize:
+            size = self.size[:]
+        else:
+            size = self.size[:-1] + [
+                (self.size[-1] * self.dtype.itemsize) // dtype.itemsize
+            ]
+        return type(self)(self.device, dtype, size, self.stride[:], self.offset)
+
 
 class FlexibleLayout(Layout):
     """A Tensor layout we are allowed to change"""
