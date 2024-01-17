@@ -1291,8 +1291,11 @@ class BuiltinVariable(VariableTracker):
             if isinstance(obj, variables.TensorVariable):
                 from .builder import wrap_fx_proxy
 
-                if name == "requires_grad":
-                    # TODO(voz): Make it work properly
+                # Note - this distributed check is a hack - we rely on the fact that we know
+                # in our current distributed approaches (DDP, FSDP, etc) that we never do this
+                # mutation in a way that introduce a new leaf from a non leaf or vice versa.
+                # TODO(voz): Teach aot_autograd to handle this case properly.
+                if name == "requires_grad" and not config.trace_distributed:
                     unimplemented(
                         "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
                         "the middle of the graph, which aot_autograd does not currently know how to handle. "
@@ -1341,8 +1344,23 @@ class BuiltinVariable(VariableTracker):
                     )
                     _lower_version_count_by_1(obj.as_proxy().node.meta["example_value"])
                     # This handles options prop, guards and ends with a clone
-                    # Step 4 - replace all reference to the current object with the new one
-                    return out
+                    # Step 4 - Annoying metadata transfer - this used to replace_all
+                    # but as that is gone, we need to remap from the output result to the new obj
+                    # in-place on the VT.
+                    obj.proxy = out.proxy
+                    obj.dtype = out.dtype
+                    obj.device = out.device
+                    obj.layout = out.layout
+                    obj.ndim = out.ndim
+                    obj.size = out.size
+                    obj.stride = out.stride
+                    obj.requires_grad = out.requires_grad
+                    obj.is_quantized = out.is_quantized
+                    obj.is_contiguous = out.is_contiguous
+                    obj.is_sparse = out.is_sparse
+                    obj.class_type = out.class_type
+                    obj.specialized_value = out.specialized_value
+                    return obj
 
             tx.output.side_effects.store_attr(obj, name, val)
             return val
