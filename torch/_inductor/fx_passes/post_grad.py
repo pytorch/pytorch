@@ -796,15 +796,12 @@ def reinplace_inplaceable_ops(graph):
 
                 node.target = inplaceable_op.inplace_op
 
-    def get_replacement(node):
-        ori_node = node
-        while node in replace_dict:
-            node = replace_dict[node]
-        replace_dict[ori_node] = node
-        return node
+    for node, replacement in replace_dict.items():
+        while replacement in replace_dict:
+            replacement = replace_dict[replacement]
+        replace_dict[node] = replacement
 
-    for node in replace_dict.keys():
-        node.replace_all_uses_with(get_replacement(node))
+        node.replace_all_uses_with(replacement)
         graph.erase_node(node)
 
 
