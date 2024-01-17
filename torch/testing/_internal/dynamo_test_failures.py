@@ -1927,18 +1927,13 @@ dynamo_expected_failures = {
     "TestTensorBoardEmbedding.test_embedding",  # test_tensorboard
     "TestTensorProtoSummary.test_float_tensor_proto",  # test_tensorboard
     "TestTensorBoardSummary.test_image_without_channel",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_smoke",  # test_tensorboard
     "TestTensorBoardUtils.test_numpy_vid_uint8",  # test_tensorboard
     "TestTensorProtoSummary.test_complex_tensor_proto",  # test_tensorboard
     "TestTensorBoardSummary.test_image_with_one_channel",  # test_tensorboard
     "TestTensorBoardEmbedding.test_embedding_64",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_domain_discrete",  # test_tensorboard
     "TestTensorBoardSummary.test_video",  # test_tensorboard
     "TestTensorProtoSummary.test_int_tensor_proto",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_number",  # test_tensorboard
     "TestTensorProtoSummary.test_empty_tensor_proto",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_string",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_bool",  # test_tensorboard
     "TestTensorBoardSummary.test_uint8_image",  # test_tensorboard
     "TestAsArrayCPU.test_copy_list_cpu_float64",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int64",  # test_tensor_creation_ops
