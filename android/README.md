@@ -181,7 +181,7 @@ The added task will unpack them to gradle build directory.
 In your native build you can link to them adding these lines to your CMakeLists.txt:
 
 
-```cmake 
+```cmake
 # Relative path of gradle build directory to CMakeLists.txt
 set(build_DIR ${CMAKE_SOURCE_DIR}/build)
 
