@@ -17,6 +17,8 @@ from ._sfdp_pattern_12 import (_sfdp_pattern_12_training, _sfdp_pattern_12_infer
 from ._sfdp_pattern_13 import (_sfdp_pattern_13_training, _sfdp_pattern_13_inference, _sfdp_pattern_13_training_half, _sfdp_pattern_13_inference_half)
 from ._sfdp_pattern_14 import (_sfdp_pattern_14_training, _sfdp_pattern_14_inference, _sfdp_pattern_14_training_half, _sfdp_pattern_14_inference_half)
 from ._sfdp_pattern_15 import (_sfdp_pattern_15_training, _sfdp_pattern_15_inference, _sfdp_pattern_15_training_half, _sfdp_pattern_15_inference_half)
+from ._sfdp_pattern_16 import (_sfdp_pattern_16_training, _sfdp_pattern_16_inference, _sfdp_pattern_16_training_half, _sfdp_pattern_16_inference_half)
+from ._sfdp_pattern_17 import (_sfdp_pattern_17_training, _sfdp_pattern_17_inference, _sfdp_pattern_17_training_half, _sfdp_pattern_17_inference_half)
 
 central_index = {
     '_sfdp_pattern_1_training': _sfdp_pattern_1_training,
@@ -49,6 +51,10 @@ central_index = {
     '_sfdp_pattern_14_inference': _sfdp_pattern_14_inference,
     '_sfdp_pattern_15_training': _sfdp_pattern_15_training,
     '_sfdp_pattern_15_inference': _sfdp_pattern_15_inference,
+    '_sfdp_pattern_16_training': _sfdp_pattern_16_training,
+    '_sfdp_pattern_16_inference': _sfdp_pattern_16_inference,
+    '_sfdp_pattern_17_training': _sfdp_pattern_17_training,
+    '_sfdp_pattern_17_inference': _sfdp_pattern_17_inference,
     '_sfdp_pattern_1_training_half': _sfdp_pattern_1_training_half,
     '_sfdp_pattern_1_inference_half': _sfdp_pattern_1_inference_half,
     '_sfdp_pattern_2_training_half': _sfdp_pattern_2_training_half,
@@ -79,6 +85,10 @@ central_index = {
     '_sfdp_pattern_14_inference_half': _sfdp_pattern_14_inference_half,
     '_sfdp_pattern_15_training_half': _sfdp_pattern_15_training_half,
     '_sfdp_pattern_15_inference_half': _sfdp_pattern_15_inference_half,
+    '_sfdp_pattern_16_training_half': _sfdp_pattern_16_training_half,
+    '_sfdp_pattern_16_inference_half': _sfdp_pattern_16_inference_half,
+    '_sfdp_pattern_17_training_half': _sfdp_pattern_17_training_half,
+    '_sfdp_pattern_17_inference_half': _sfdp_pattern_17_inference_half,
 }
 
 

@@ -355,9 +355,9 @@ def _sfdp_pattern_15(query, key, value, attn_mask, inv_scale):
     v = value.permute([0, 2, 1, 3])
     bs = q.size(0)
     k_len = k.size(-2)
-    fill_value = torch.full((), -float("inf"), dtype=query.dtype, device=query.device)
-    q = q.div(inv_scale)
     scores = q @ k.transpose(-2, -1)
+    scores = scores.div(inv_scale)
+    fill_value = torch.full((), -float("inf"), dtype=query.dtype, device=query.device)
     attn_mask = (attn_mask == 0).view((bs, 1, 1, k_len)).expand_as(scores)
     return torch.softmax(scores.masked_fill(attn_mask, fill_value), dim=-1) @ v
 
@@ -378,6 +378,72 @@ def _sfdp_replacement_15(query, key, value, attn_mask, inv_scale):
         value.transpose(1, 2),
         attn_mask=attn_mask.to(dtype=torch.bool),
         dropout_p=0.0,
+        is_causal=False,
+        scale=1.0 / inv_scale,
+    )
+
+
+def _sfdp_pattern_16(query, key, value, attn_mask, inv_scale, dropout_p):
+    # for BertLarge with dropout
+    q = query.permute([0, 2, 1, 3])
+    k = key.permute([0, 2, 1, 3])
+    v = value.permute([0, 2, 1, 3])
+    return torch.nn.functional.dropout(
+        (torch.matmul(q, k.transpose(-2, -1)).div(inv_scale) + attn_mask).softmax(
+            dim=-1
+        ),
+        dropout_p,
+    ).matmul(v)
+
+
+def _sfdp_replacement_16(query, key, value, attn_mask, inv_scale, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    return aten.scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=attn_mask.to(dtype=query.dtype),
+        dropout_p=dropout_p,
+        is_causal=False,
+        scale=1.0 / inv_scale,
+    )
+
+
+def _sfdp_pattern_17(query, key, value, attn_mask, inv_scale, dropout_p):
+    # for DistilBert with dropout
+    q = query.permute([0, 2, 1, 3])
+    k = key.permute([0, 2, 1, 3])
+    v = value.permute([0, 2, 1, 3])
+    bs = q.size(0)
+    k_len = k.size(-2)
+    scores = q @ k.transpose(-2, -1)
+    scores = scores.div(inv_scale)
+    fill_value = torch.full((), -float("inf"), dtype=query.dtype, device=query.device)
+    attn_mask = (attn_mask == 0).view((bs, 1, 1, k_len)).expand_as(scores)
+    return (
+        torch.nn.functional.dropout(
+            torch.softmax(scores.masked_fill(attn_mask, fill_value), dim=-1), dropout_p
+        )
+        @ v
+    )
+
+
+def _sfdp_replacement_17(query, key, value, attn_mask, inv_scale, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    bs = query.size(0)
+    n_head = query.size(2)
+    q_len = query.size(1)
+    k_len = key.size(1)
+    # do attn_mask->logical_not() in aten.scaled_dot_product_attention
+    attn_mask = (
+        (attn_mask == 1).view((bs, 1, 1, k_len)).expand((bs, n_head, q_len, k_len))
+    )
+    return aten.scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=attn_mask.to(dtype=torch.bool),
+        dropout_p=dropout_p,
         is_causal=False,
         scale=1.0 / inv_scale,
     )
@@ -587,6 +653,20 @@ def _get_sfdp_patterns():
                 _sfdp_replacement_15,
                 [g(), g(), g(), m(), c()],
                 {},
+                _sfdp_scale_factor_check(aten.div.Tensor),
+            ),
+            (
+                _sfdp_pattern_16,
+                _sfdp_replacement_16,
+                [g(), g(), g(), m(), c()],
+                d,
+                _sfdp_scale_factor_check(aten.div.Tensor),
+            ),
+            (
+                _sfdp_pattern_17,
+                _sfdp_replacement_17,
+                [g(), g(), g(), m(), c()],
+                d,
                 _sfdp_scale_factor_check(aten.div.Tensor),
             ),
         ]:
