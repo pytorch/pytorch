@@ -414,6 +414,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return z
 
     @make_test
+    def test_dict_keys(x):
+        d = {3: x}
+        keys = d.keys()
+        d[4] = x + 1
+        d2 = {3: 2, 4: "aa"}
+        return 3 in keys, 4 in keys, 5 in keys, d2.keys() == keys
+
+    @make_test
+    def test_dict_values(x):
+        d = {3: x}
+        values = d.values()
+        d[3] = x + 1
+        d[4] = x + 2
+        return len(values)
+
+    @make_test
     def test_callable_lambda(x):
         if callable(lambda x: True):
             return x + 1

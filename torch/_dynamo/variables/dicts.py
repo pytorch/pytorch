@@ -12,13 +12,17 @@ import torch
 from torch._subclasses.fake_tensor import is_fake
 
 from .. import variables
-from ..bytecode_transformation import create_call_function, create_instruction
+from ..bytecode_transformation import (
+    create_call_function,
+    create_call_method,
+    create_instruction,
+)
 from ..eval_frame import skip_code
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource
-from ..utils import istype, specialize_symnode
+from ..utils import dict_keys, dict_values, istype, specialize_symnode
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
@@ -232,10 +236,10 @@ class ConstDictVariable(VariableTracker):
             )
         elif name == "keys":
             assert not (args or kwargs)
-            return SetVariable(self.items.keys(), mutable_local=MutableLocal())
+            return DictKeys(self)
         elif name == "values":
             assert not (args or kwargs)
-            return TupleVariable(list(self.items.values()))
+            return DictValues(self)
         elif name == "copy":
             assert not (args or kwargs)
             return self.clone(items=self.items.copy(), mutable_local=MutableLocal())
@@ -393,6 +397,95 @@ class SetVariable(ConstDictVariable):
 
     def getitem_const(self, arg: VariableTracker):
         raise RuntimeError("Illegal to getitem on a set")
+
+
+class DictView(VariableTracker):
+    """
+    Models _PyDictViewObject
+
+    This is an "abstract" class. Subclasses will override kv and the items method
+    """
+
+    kv: Optional[str] = None
+
+    def __init__(self, dv_dict: ConstDictVariable, **kwargs):
+        super().__init__(**kwargs)
+        assert self.kv in ("keys", "values")
+        assert isinstance(dv_dict, ConstDictVariable)
+        self.dv_dict = dv_dict
+
+    @property
+    def view_items(self):
+        return getattr(self.dv_dict.items, self.kv)()
+
+    @property
+    def view_items_vt(self):
+        # Returns an iterable of the unpacked items
+        # Implement in the subclasses
+        raise NotImplementedError()
+
+    def unpack_var_sequence(self, tx):
+        def unwrap(x):
+            return x.vt if self.kv == "keys" else x
+
+        return [unwrap(x) for x in self.view_items]
+
+    def reconstruct(self, codegen):
+        codegen(self.dv_dict)
+        return [
+            create_instruction("LOAD_METHOD", argval=self.kv),
+            *create_call_method(0),
+        ]
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
+    ) -> "VariableTracker":
+        if name == "__len__":
+            return self.dv_dict.call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+
+class DictKeys(DictView):
+    kv = "keys"
+
+    @property
+    def set_items(self):
+        return set(self.view_items)
+
+    @property
+    def view_items_vt(self):
+        # Returns an iterable of the unpacked items
+        return [x.vt for x in self.view_items]
+
+    def python_type(self):
+        return dict_keys
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
+    ) -> "VariableTracker":
+        if name == "__contains__":
+            return self.dv_dict.call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+
+class DictValues(DictView):
+    # DictValues is an iterable but cannot be compared.
+    kv = "values"
+
+    @property
+    def view_items_vt(self):
+        return list(self.view_items)
+
+    def python_type(self):
+        return dict_values
 
 
 def _is_matching_transformers_cls(cls) -> bool:
