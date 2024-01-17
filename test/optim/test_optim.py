@@ -1290,7 +1290,7 @@ class TestOptim(TestCase):
         if not torch.cuda.is_available():
             self.skipTest("CUDA is required.")
 
-        from torch.optim import adam, adamw
+        from torch.optim import adam, adamw, sgd
 
         num_tensors = 5
         for functional_optim, amsgrad, no_grad_scale in itertools.product((adam.adam, adamw.adamw), (False, True), (False, True)):
@@ -1331,6 +1331,31 @@ class TestOptim(TestCase):
                 ],
             )
             self.assertEqual(params, prev_params)
+        else:
+            for momentum in (0.0, 0.1):
+                params, d_p_list, momentum_buffer_list = (
+                    [torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(3))
+                if momentum == 0.0:
+                    momentum_buffer_list = [None for _ in range(num_tensors)]
+                prev_params = [t.clone().detach() for t in params]
+                grad_scale = None if no_grad_scale else torch.ones((1,), dtype=torch.float32, device="cuda")
+                found_inf = torch.ones((), dtype=torch.float32, device="cuda")
+                sgd.sgd(
+                    params,
+                    d_p_list,
+                    momentum_buffer_list,
+                    has_sparse_grad=False,
+                    foreach=False,
+                    fused=True,
+                    grad_scale=grad_scale,
+                    found_inf=found_inf,
+                    weight_decay=0.0,
+                    momentum=momentum,
+                    lr=0.01,
+                    dampening=0.0,
+                    nesterov=False,
+                    maximize=False,
+                )
 
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required.")
@@ -1340,7 +1365,7 @@ class TestOptim(TestCase):
         # store checkpoints on CPU as CUDA memory is limited with torch.load(...map_location="cpu").
         # Since this is a unit test, it is more expedient to simulate what the state_dict
         # would look like, which is basically CPU tensors with fused/capturable flag = True.
-        for optimC, kwarg in itertools.product((Adam, AdamW), ("fused", "capturable")):
+        for optimC, kwarg in list(itertools.product((Adam, AdamW), ("fused", "capturable"))) + [(SGD, "fused")]:
             input = torch.tensor([0.1, 0.2], dtype=torch.float32, device="cpu")
             optimizer = optimC([input])
             optimizer.zero_grad()
