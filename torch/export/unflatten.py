@@ -112,7 +112,7 @@ class InterpreterModule(torch.nn.Module):
 
 class FlatArgsAdapter(abc.ABC):
     """
-    Adapts input arguments with `input_spec` to align `target_spec`.
+    Adapts input arguments with ``input_spec`` to align ``target_spec``.
     """
 
     @abc.abstractmethod
@@ -122,7 +122,7 @@ class FlatArgsAdapter(abc.ABC):
         input_spec: pytree.TreeSpec,
         input_args: List[Any],
     ) -> List[Any]:
-        """NOTE: This adapter may mutate given `flat_args`."""
+        """NOTE: This adapter may mutate given ``flat_args``."""
         ...
 
 
