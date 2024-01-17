@@ -120,7 +120,7 @@ namespace {
 WarningHandler* getBaseHandler() {
   static WarningHandler base_warning_handler_ = WarningHandler();
   return &base_warning_handler_;
-};
+}
 
 class ThreadWarningHandler {
  public:
@@ -191,7 +191,7 @@ Warning::Warning(
 Warning::Warning(
     warning_variant_t type,
     SourceLocation source_location,
-    detail::CompileTimeEmptyString msg,
+    detail::CompileTimeEmptyString /*msg*/,
     const bool verbatim)
     : Warning(type, source_location, "", verbatim) {}
 
