@@ -760,7 +760,8 @@ def _sink_params(
         return
 
     graph = module.graph
-    inputs = filter(lambda n: n.op == "placeholder", graph.nodes)
+    inputs = list(filter(lambda n: n.op == "placeholder", graph.nodes))
+    the_last_input = inputs[-1]
 
     # Also remove from call_module nodes
     call_module_nodes = filter(lambda n: n.op == "call_module", graph.nodes)
@@ -786,7 +787,8 @@ def _sink_params(
             state_attr = _recursive_getattr(module, attr_path)
             assert isinstance(state_attr, torch.Tensor)
 
-            with graph.inserting_after(node):
+            # Make sure the newly created get_attr node is placed after the last placeholder node
+            with graph.inserting_after(the_last_input):
                 new_node = graph.create_node("get_attr", ".".join(attr_path))
 
             node.replace_all_uses_with(new_node, propagate_meta=True)
