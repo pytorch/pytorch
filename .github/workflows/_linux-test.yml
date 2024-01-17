@@ -169,6 +169,7 @@ jobs:
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          NO_PIPE_LOGS: ${{ steps.keep-going.outputs.ci-no-pipe-logs }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
@@ -218,6 +219,7 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e REENABLED_ISSUES \
             -e CONTINUE_THROUGH_ERROR \
+            -e NO_PIPE_LOGS \
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \

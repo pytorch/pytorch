@@ -95,6 +95,7 @@ jobs:
           PY_VERS: 3.9
           PR_BODY: ${{ github.event.pull_request.body }}
           CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
+          NO_PIPE_LOGS: ${{ steps.keep-going.outputs.ci-no-pipe-logs }}
           PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
           REENABLED_ISSUES: ${{ needs.filter.outputs.reenabled-issues }}
         run: |
