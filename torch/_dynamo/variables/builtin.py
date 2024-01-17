@@ -487,7 +487,8 @@ class BuiltinVariable(VariableTracker):
             else:
                 non_tensor_args.append(i)
         return all(
-            is_constant_source(t.source) for t in tensor_args
+            is_constant_source(t.source) if t.source is not None else False
+            for t in tensor_args
         ) and self.constant_args(*non_tensor_args)
 
     def unspec_python_args(self, *args, **kwargs):
@@ -521,6 +522,15 @@ class BuiltinVariable(VariableTracker):
             args[0], variables.TensorVariable
         ):
             tensor_args = False
+
+        # Constant fold for constant tensor and python constants
+        if tensor_args and self.python_and_tensor_constant_only(*args, **kwargs):
+            from ..bytecode_transformation import unique_id
+            from .functions import invoke_and_store_as_constant
+
+            return invoke_and_store_as_constant(
+                tx, self.fn, unique_id(self.fn.__name__), args, kwargs
+            )
 
         if (
             self.can_insert_in_graph()
@@ -567,14 +577,6 @@ class BuiltinVariable(VariableTracker):
                     )
 
                     return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
-
-                if self.python_and_tensor_constant_only(*args, **kwargs):
-                    from ..bytecode_transformation import unique_id
-                    from .functions import invoke_and_store_as_constant
-
-                    return invoke_and_store_as_constant(
-                        tx, self.fn, unique_id(self.fn.__name__), args, kwargs
-                    )
 
                 proxy = tx.output.create_proxy(
                     "call_function",
