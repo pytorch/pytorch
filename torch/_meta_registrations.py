@@ -6049,8 +6049,10 @@ def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
     ).contiguous()
 
 
-@register_meta(aten._upsample_bilinear2d_aa.default)
-def meta_upsample_bilinear2d_aa(
+@register_meta(
+    [aten._upsample_bilinear2d_aa.default, aten._upsample_bicubic2d_aa.default]
+)
+def meta_upsample_bimode2d_aa(
     input, output_size, align_corners, scales_h=None, scales_w=None
 ):
     full_output_size = upsample_common_check(
