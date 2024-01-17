@@ -673,7 +673,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 x,
                 y,
                 use_reentrant=False,
-                context_fn=functools.partial(selective_checkpointing_context_fn, [torch.ops.aten.mm.default]),
+                context_fn=functools.partial(
+                    selective_checkpointing_context_fn, [torch.ops.aten.mm.default]
+                ),
             )
 
         x = torch.randn(4, 4, requires_grad=True, device="cuda")
