@@ -650,3 +650,13 @@ PyObject* torch_c_dynamo_guards_init() {
 
   return m;
 }
+
+extern "C" void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
+  if (C10_UNLIKELY(
+          obj == nullptr ||
+          (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)))) {
+    throw std::runtime_error(
+        "_torchinductor_pyobject_tensor_data_ptr: non-tensor input");
+  }
+  return THPVariable_Unpack(obj).data_ptr();
+}
