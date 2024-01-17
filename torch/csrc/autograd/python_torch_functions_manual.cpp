@@ -411,6 +411,36 @@ static PyObject* THPVariable__mirror_autograd_meta_to(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable__mirror_view_meta_to(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_mirror_view_meta_to(Tensor source, Tensor dest)"},
+      /*traceable=*/true);
+
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto src_ = r.tensor(0);
+  auto dst_ = r.tensor(1);
+  // Here, we unsafely set the grad function on the wrapper to be the same as
+  // the inner. We expect this grad_fn to NEVER be used. It's needed so that
+  // .is_leaf metadata is accurate on the wrapper
+  auto src_view_autograd_meta = impl::get_view_autograd_meta(src_);
+  if (src_view_autograd_meta) {
+    dst_.unsafeGetTensorImpl()->set_autograd_meta(
+        std::make_unique<torch::autograd::DifferentiableViewMeta>(
+            dst_.unsafeGetTensorImpl(),
+            src_view_autograd_meta->get_backward_view(),
+            src_view_autograd_meta->get_forward_view(),
+            /*shared_view_info=*/false,
+            src_view_autograd_meta->get_creation_meta()));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable__from_functional_tensor(
     PyObject* self,
     PyObject* args,
@@ -755,6 +785,10 @@ static PyMethodDef torch_functions_manual[] = {
      nullptr},
     {"_mirror_autograd_meta_to",
      castPyCFunctionWithKeywords(THPVariable__mirror_autograd_meta_to),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_mirror_view_meta_to",
+     castPyCFunctionWithKeywords(THPVariable__mirror_view_meta_to),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_from_functional_tensor",
