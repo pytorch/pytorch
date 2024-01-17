@@ -495,6 +495,26 @@ print("arf")
         )
         self.assertIn("[rank0]:", stderr.decode("utf-8"))
 
+    @requires_distributed()
+    def test_distributed_rank_filter(self):
+        env = dict(os.environ)
+        env["TORCH_LOGS"] = "dynamo"
+        env["TORCH_LOGS_RANKS"] = "1"
+        stdout, stderr = self.run_process_no_exception(
+            """\
+import torch.distributed as dist
+import logging
+from torch.testing._internal.distributed.fake_pg import FakeStore
+store = FakeStore()
+dist.init_process_group("fake", rank=0, world_size=2, store=store)
+dynamo_log = logging.getLogger("torch._dynamo")
+dynamo_log.info("woof")
+print("arf")
+""",
+            env=env,
+        )
+        self.assertNotIn("[rank0]:", stderr.decode("utf-8"))
+
     @skipIfNotPy311
     @make_logging_test(trace_call=True)
     def test_trace_call(self, records):
