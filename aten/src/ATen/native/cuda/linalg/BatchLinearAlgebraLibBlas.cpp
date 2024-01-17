@@ -221,7 +221,8 @@ void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left
   // Workaround the following a bug on CUDA < 12.1
   // RuntimeError: CUDA error: CUBLAS_STATUS_EXECUTION_FAILED when calling `cublasStrsmBatched
   // See https://github.com/pytorch/pytorch/issues/79191#issuecomment-1154222580
-  if (CUSOLVER_VERSION < 12100 && B.size(-1) > 524280) {
+#if defined(CUSOLVER_VERSION) && CUSOLVER_VERSION < 12100
+  if ( && B.size(-1) > 524280) {
     auto n_chunks = (B.size(-1) + 524280 - 1) / 524280; // ceildiv
     auto splits = B.split(n_chunks, /*dim=*/-1);
     for (const Tensor& b : splits) {
@@ -229,6 +230,7 @@ void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left
     }
     return;
   }
+#endif
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cuda", [&]{
     apply_triangular_solve_batched<scalar_t>(A, B, left, upper, transpose, unitriangular);
   });
