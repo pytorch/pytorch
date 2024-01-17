@@ -34,8 +34,8 @@ class TestTritonWrapper(TestCase):
             return z + y
 
         N = 10
-        x = torch.rand(N).to(GPU_TYPE)
-        y = torch.rand(N).to(GPU_TYPE)
+        x = torch.rand(N).to(device=GPU_TYPE)
+        y = torch.rand(N).to(device=GPU_TYPE)
         out = f(x, y)
         compiled_module = self.get_compiled_module()
 

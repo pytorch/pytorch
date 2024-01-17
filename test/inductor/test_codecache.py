@@ -48,7 +48,7 @@ def _run_codecache_test(start_method):
 
         model = MyModel().to(device=GPU_TYPE)
         model = torch.compile(model)
-        inp = torch.rand(10, 10).to(GPU_TYPE)
+        inp = torch.rand(10, 10).to(device=GPU_TYPE)
         model(inp).sum().backward()
 
 
@@ -107,7 +107,7 @@ class TestFxGraphCache(TestCase):
         Verify that we can populate and load functions from the cache.
         """
         if device == GPU_TYPE and not HAS_GPU:
-            raise unittest.SkipTest("requires GPU")
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires SM80 or later")
 
@@ -234,8 +234,8 @@ class TestFxGraphCache(TestCase):
         Test caching the same graph, but under conditions that introduce guards
         for static bounds.
         """
-        if device in GPU_TYPE and not HAS_GPU:
-            raise unittest.SkipTest("requires CUDA")
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires SM80 or later")
 

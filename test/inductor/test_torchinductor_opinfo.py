@@ -42,7 +42,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, GPUS, HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
@@ -448,7 +448,7 @@ class TestInductorOpInfo(TestCase):
     def test_comprehensive(self, device, dtype, op):
         torch._dynamo.reset()
         with torch.no_grad():
-            # Need comment: should we move empty_cache to common device interface
+            # TODO: should we move empty_cache to the common device interface
             if device == "cuda":
                 torch.cuda.empty_cache()
         op_name = op.name
@@ -589,7 +589,7 @@ class TestInductorOpInfo(TestCase):
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 rtol, atol = _get_tolerances(dtype)
-                if device_type in GPUS:
+                if device_type == GPU_TYPE:
                     # opinfo test case have already place the input on the correct device
                     # so we don't need do additional copy by setting copy_to_gpu=False
 

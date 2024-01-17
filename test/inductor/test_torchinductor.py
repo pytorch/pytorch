@@ -94,7 +94,6 @@ from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
-    HAS_CUDA,
     HAS_GPU,
     HAS_MULTIGPU,
     skipCPUIf,
@@ -107,11 +106,10 @@ RUN_CPU = any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_base
 RUN_GPU = any(getattr(x, "device_type", "") == GPU_TYPE for x in _desired_test_bases)
 
 aten = torch.ops.aten
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
 
 requires_multigpu = functools.partial(
-    unittest.skipIf, not HAS_MULTIGPU, "requires multiple gpu devices"
+    unittest.skipIf, not HAS_MULTIGPU, f"requires multiple {GPU_TYPE} devices"
 )
 skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
@@ -480,7 +478,7 @@ def check_model_gpu(
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
-        model = model.to(GPU_TYPE)
+        model = model.to(device=GPU_TYPE)
 
     if copy_to_gpu:
         example_inputs = tuple(
@@ -1112,7 +1110,7 @@ class CommonTemplate:
     def test_multilayer_sum_low_prec(self):
         # fp16 nyi for cpu
         if self.device == "cpu":
-            raise unittest.SkipTest("requires GPU")
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         def fn(a):
             return torch.mean(a)
@@ -1145,7 +1143,7 @@ class CommonTemplate:
 
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":
-            raise unittest.SkipTest("No GPU implementation (it returns empty)")
+            raise unittest.SkipTest(f"No {GPU_TYPE} implementation (it returns empty)")
 
         def fn(a):
             return torch.ops.quantized.embedding_bag_byte_unpack(a)
@@ -2381,7 +2379,7 @@ class CommonTemplate:
     @skipIfRocm
     def test_conv_inference_heuristics(self):
         if self.device != GPU_TYPE:
-            raise unittest.SkipTest("gpu only test")
+            raise unittest.SkipTest(f"{GPU_TYPE} only test")
 
         in_channels = 6
         out_channels = 6
@@ -2695,13 +2693,13 @@ class CommonTemplate:
         def fn(x):
             x = x + 1
             x = x + 2
-            x = x.to(GPU_TYPE)
+            x = x.to(device=GPU_TYPE)
             x = x + 3
             x = x + 4
             x = x.cpu()
             x = x + 5
             x = x + 6
-            x = x.to(GPU_TYPE)
+            x = x.to(device=GPU_TYPE)
             x = x + 7
             x = x + 8
             x = x.cpu()
@@ -3567,7 +3565,7 @@ class CommonTemplate:
     @with_tf32_off
     def test_batch_norm_2d_2(self):
         if self.device == "cpu":
-            raise unittest.SkipTest("requires GPU")
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -3596,7 +3594,7 @@ class CommonTemplate:
                 return (self_2,)
 
         inp = torch.randn((4, 64, 192, 256), dtype=torch.float32, device=GPU_TYPE)
-        mod = Repro().to(GPU_TYPE)
+        mod = Repro().to(device=GPU_TYPE)
         o1 = mod(inp)
         o2 = torch.compile(mod)(inp)
         self.assertEqual(o1, o2)
@@ -4514,7 +4512,7 @@ class CommonTemplate:
     @skipIfRocm
     def test_cudnn_rnn(self):
         if self.device == "cpu":
-            raise unittest.SkipTest("requires GPU")
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         def fn(
             a0,
@@ -6071,7 +6069,7 @@ class CommonTemplate:
     def test_philox_rand(self):
         if self.device == "cpu":
             raise unittest.SkipTest(
-                "functionalization of rng ops supported only on GPU"
+                f"functionalization of rng ops supported only on {GPU_TYPE}"
             )
 
         @torch._dynamo.optimize("inductor")
@@ -7882,7 +7880,7 @@ class CommonTemplate:
     @skipIfRocm
     def test_scaled_dot_product_efficient_attention(self):
         if self.device == "cpu":
-            raise unittest.SkipTest("requires GPU")
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         # The first two values should be the same, attention output
         # and logsumexp since dropout is not being set
@@ -8737,7 +8735,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                 nn.Linear(4, 4),
                 nn.LayerNorm(4),
                 nn.ReLU(),
-            ).to(GPU_TYPE)
+            ).to(device=GPU_TYPE)
 
             @torch._dynamo.optimize("inductor")
             def fn3(x):
@@ -8898,7 +8896,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             x = torch.rand(100, 16, 32, 32, requires_grad=True, device=GPU_TYPE)
             target = torch.rand(1, device=GPU_TYPE)
             args = [x, target]
-            model = Model().to(GPU_TYPE)
+            model = Model().to(device=GPU_TYPE)
             opt_model = torch.compile(model)
             fwd_code, bwd_code = get_triton_codegen(opt_model, args)
 

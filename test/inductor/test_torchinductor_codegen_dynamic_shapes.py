@@ -56,7 +56,7 @@ def check_codegen(
 
     if is_cpp_code is False:
         if hasattr(model, "to"):
-            model = model.to(GPU_TYPE)
+            model = model.to(device=GPU_TYPE)
 
         def copy_fn(x):
             # preserve strides of the input on the device

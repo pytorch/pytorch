@@ -103,8 +103,8 @@ class TestKernelBenchmark(TestCase):
             return w
 
         M, N, K = 1000, 1000, 10
-        x = torch.rand(M, K).to(GPU_TYPE)
-        y = torch.rand(K, N).to(GPU_TYPE)
+        x = torch.rand(M, K).to(device=GPU_TYPE)
+        y = torch.rand(K, N).to(device=GPU_TYPE)
         out = f(x, y)
 
         compiled_module = self.get_compiled_module()
