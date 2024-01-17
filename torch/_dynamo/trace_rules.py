@@ -2,6 +2,7 @@ import builtins
 import copy
 import functools
 import importlib
+import inspect
 import itertools
 import operator
 import sys
@@ -3007,7 +3008,7 @@ def lookup(obj):
             hasattr(obj, "__qualname__")
             and str(obj.__qualname__).startswith("_VariableFunctionsClass")
         ):
-            obj = obj.__wrapped__
+            obj = inspect.getattr_static(obj, "__wrapped__")
     rule = get_torch_obj_rule_map().get(obj, None)
     if rule is None and is_aten_op_or_tensor_method(obj):
         return TorchInGraphFunctionVariable
