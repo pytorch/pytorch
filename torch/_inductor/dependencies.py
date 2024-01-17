@@ -13,7 +13,7 @@ from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
 from .codegen.common import index_prevent_reordering
 from .utils import get_dtype_size, sympy_str, sympy_subs, sympy_symbol, VarRanges
-from .virtualized import V
+from .virtualized import V, TrivialOpsHandler
 
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
@@ -209,7 +209,7 @@ class ReadWrites:
         return itertools.chain(self.reads, self.writes)
 
 
-class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
+class _RecordLoadStoreInner(TrivialOpsHandler):  # type: ignore[name-defined]
     def __init__(self, var_ranges: VarRanges, normalize: bool):
         super().__init__()
         self._reads: Set[Dep] = set()
@@ -265,7 +265,6 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
     def load(self, name: str, index: sympy.Expr) -> str:
         self._reads.add(MemoryDep(name, *self.canonicalize(index)))
-        return f"load({name}, {sympy_str(index)})"
 
     def load_seed(self, name: str, index: int):
         assert isinstance(index, int)
@@ -273,14 +272,12 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
         self._writes.add(MemoryDep(name, *self.canonicalize(index)))
-        return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
     def store_reduction(self, name: str, index, value) -> str:
         return self.store(name, index, f"store_reduction({value})")
 
     def index_expr(self, index: sympy.Expr, dtype) -> str:
         self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
-        return f"index_expr({sympy_str(index)}, {dtype})"
 
     def bucketize(
         self,
@@ -291,7 +288,6 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         right: bool,
     ):
         self._reads.add(StarDep(offsets_name))
-        return f"bucketize({values}, {offsets_name}, {sympy_str(offsets_size)}, {indexing_dtype}, {right})"
 
 
 class _OpCounter:
@@ -305,15 +301,6 @@ class _OpCounter:
     def __getattr__(self, name):
         self._op_counts[name] += 1
         return getattr(self.parent_handler, name)
-
-
-class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
-    def __init__(self, var_ranges: VarRanges, normalize: bool):
-        parent_handler = _RecordLoadStoreInner(
-            var_ranges=var_ranges, normalize=normalize
-        )
-        parent_handler = _OpCounter(parent_handler)
-        super().__init__(parent_handler=parent_handler)
 
 
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
@@ -356,7 +343,8 @@ def extract_read_writes(
     prefix: str = "d",
 ):
     args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
-    rw = RecordLoadStore(var_ranges, normalize=normalize)
+    inner = _RecordLoadStoreInner(var_ranges=var_ranges, normalize=normalize)
+    rw = _OpCounter(inner)
     with V.set_ops_handler(rw):
         fn(*args)
 
@@ -365,14 +353,13 @@ def extract_read_writes(
     else:
         range_vars = list(itertools.chain.from_iterable(args))
 
-    inner = rw.parent_handler.parent_handler
     return ReadWrites(
         set(inner._reads),
         set(inner._writes),
         inner._index_exprs,
         range_vars,
         var_ranges,
-        rw.parent_handler._op_counts,
+        rw._op_counts,
     )
 
 

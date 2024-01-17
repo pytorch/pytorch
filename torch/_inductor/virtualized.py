@@ -161,6 +161,13 @@ class MockHandler:
 
         return inner
 
+    def reduction(
+        self, dtype, src_dtype, reduction_type, value
+    ) -> Union[tuple[str, ...], str]:
+        r = self.__getattr__("reduction")(dtype, src_dtype, reduction_type, value)
+        num_values = reduction_num_outputs(reduction_type)
+        return [f"{r}[{i}]" for i in range(num_values)] if num_values > 1 else r
+
     @staticmethod
     def masked(mask, body, other) -> str:
         return f"ops.masked({mask}, {body()}, {other})"
@@ -182,6 +189,42 @@ class MockHandler:
             magic_methods.items(), inplace_methods.items()
         ):
             setattr(cls, name, make_handler(format_string))
+
+
+class TrivialOpsHandler:
+    """
+    This is intended to be used as a superclass for ops handlers which do not
+    need to do forward dataflow analysis.  This always returns None for
+    any operation; the intention is you override it and have various operations
+    perform side effects.
+    """
+    def __getattr__(self, name):
+        if name == "name":
+            return "TrivialOpsHandler"
+
+        def inner(*args, **kwargs):
+            return None
+
+        return inner
+
+    def reduction(
+        self, dtype, src_dtype, reduction_type, value
+    ) -> Union[tuple[str, ...], str]:
+        num_values = reduction_num_outputs(reduction_type)
+        return [None] * num_values if num_values > 1 else r
+
+    @staticmethod
+    def masked(mask, body, other) -> str:
+        # NB: body is a nested function, so call it so we run analysis on it
+        body()
+        return None
+
+    @staticmethod
+    def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
+        # The sympy.Symbol here is meaningless, we just return something to
+        # ensure subsequent computation with sympy expressions doesn't choke
+        # (as we don't control sympy IR functions)
+        return sympy_symbol(f"({str(index_var)})")
 
 
 class KernelFormatterHandler:
