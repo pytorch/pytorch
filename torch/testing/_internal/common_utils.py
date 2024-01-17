@@ -77,12 +77,7 @@ from torch.nn import (
     ParameterList,
     Sequential,
 )
-from .dynamo_test_failures import (
-    dynamo_expected_failures,
-    dynamo_skips,
-    FIXME_default_non_strict,
-    FIXME_inductor_non_strict,
-)
+from .dynamo_test_failures import dynamo_expected_failures, dynamo_skips, FIXME_default_non_strict
 from torch.onnx import (
     register_custom_op_symbolic,
     unregister_custom_op_symbolic,
@@ -2708,10 +2703,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 match = re.match(r".*/test/(.*).py", full_path)
                 if match is not None:
                     filename = match.group(1)
-                    if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
-                        strict_default = filename not in FIXME_inductor_non_strict
-                    else:
-                        strict_default = filename not in FIXME_default_non_strict
+                    strict_default = filename not in FIXME_default_non_strict
             # inspect.getfile can fail with these
             except (OSError, TypeError):
                 pass
@@ -2749,12 +2741,34 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 # TorchDynamo optimize annotation
                 super_run = torch._dynamo.optimize("eager", nopython=nopython)(super_run)
                 key = f"{self.__class__.__name__}.{self._testMethodName}"
+
+                def expect_failure(f):
+                    @wraps(f)
+                    def wrapper(*args, **kwargs):
+                        try:
+                            f(*args, **kwargs)
+                        except BaseException as e:
+                            self.skipTest(e)
+                        raise RuntimeError("Unexpected success, please remove test from dynamo_test_failures.py")
+                    return wrapper
+
                 if key in dynamo_expected_failures:
                     method = getattr(self, self._testMethodName)
-                    unittest.expectedFailure(self)
+                    setattr(self, self._testMethodName, expect_failure(method))
+
+                def ignore_failure(f):
+                    @wraps(f)
+                    def wrapper(*args, **kwargs):
+                        try:
+                            f(*args, **kwargs)
+                        except BaseException as e:
+                            self.skipTest(e)
+                        self.skipTest("This test passed, maybe we can remove the skip from dynamo_test_failures.py")
+                    return wrapper
+
                 if key in dynamo_skips:
                     method = getattr(self, self._testMethodName)
-                    setattr(self, self._testMethodName, unittest.skip("marked skip in dynamo_test_failures.py")(method))
+                    setattr(self, self._testMethodName, ignore_failure(method))
 
             super_run(result=result)
 
