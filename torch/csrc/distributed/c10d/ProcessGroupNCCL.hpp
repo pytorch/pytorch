@@ -322,28 +322,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     friend class ProcessGroupNCCL;
   };
 
-  class CoalescedWorkNCCL
-      : public Work,
-        public std::enable_shared_from_this<CoalescedWorkNCCL> {
-   public:
-    // Constructor takes a list of WorkNCCL works
-    CoalescedWorkNCCL(
-        std::vector<ProcessGroupNCCL::WorkNCCL> works,
-        int rank,
-        OpType opType);
-
-    ~CoalescedWorkNCCL() override;
-
-    // Same as calling synchronize() for NCCL work.
-    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
-
-   protected:
-    // The cached list of CUDA devices to operate on
-    std::vector<ProcessGroupNCCL::WorkNCCL> works_;
-
-    friend class ProcessGroupNCCL;
-  };
-
   struct Options : Backend::Options {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
@@ -599,12 +577,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const char* profilingTitle = nullptr,
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {});
-
-  virtual c10::intrusive_ptr<ProcessGroupNCCL::CoalescedWorkNCCL>
-  initCoalescedWork(
-      const std::vector<c10::intrusive_ptr<Work>>& works,
-      int rank,
-      OpType opType);
 
  private:
   int globalRankStart;
