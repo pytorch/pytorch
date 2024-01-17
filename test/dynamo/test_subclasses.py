@@ -1019,10 +1019,9 @@ class GraphModule(torch.nn.Module):
             tmp_subclass = torch.add(x, 1)
             return torch.mul(tmp_subclass._scale, tmp_subclass._constant)
 
-        # should recompile for different scale size when dynamic=False
         x = ScaledTensor(torch.randn(2, 4), torch.randn(3), constant=2)
         out_ref = f(x)
-        out_test = torch.compile(f, backend="aot_eager")(x)
+        out_test = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(out_ref, out_test)
 
     def test_support_bases(self):
