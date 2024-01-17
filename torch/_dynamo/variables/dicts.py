@@ -353,7 +353,6 @@ class SetVariable(VariableTracker):
 
     def __init__(
         self,
-        tx,
         items: List[VariableTracker],
         **kwargs,
     ):
