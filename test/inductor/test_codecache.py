@@ -46,7 +46,7 @@ def _run_codecache_test(start_method):
     ):
         AsyncCompile.warm_pool()
 
-        model = MyModel().to(GPU_TYPE)
+        model = MyModel().to(device=GPU_TYPE)
         model = torch.compile(model)
         inp = torch.rand(10, 10).to(GPU_TYPE)
         model(inp).sum().backward()
