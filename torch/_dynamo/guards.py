@@ -1163,7 +1163,13 @@ class CheckFunctionManager:
             print("GUARDS\n", guard_body)
 
         out: Dict[str, Any] = dict()
-        exec(pycode, builder.scope, out)
+        try:
+            exec(pycode, builder.scope, out)
+        except SyntaxError as ex:
+            log.exception(
+                "Failed to exec guard at line %s.\n%s", ex.lineno, pycode
+            )
+            raise
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
