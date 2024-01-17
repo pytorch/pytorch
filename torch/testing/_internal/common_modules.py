@@ -22,7 +22,8 @@ from torch.testing._internal.common_nn import (
     marginrankingloss_reference, multimarginloss_reference, multilabelmarginloss_reference,
     nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS)
+    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
+    skipIfTorchDynamo)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 
@@ -70,10 +71,12 @@ TrainEvalMode = Enum('TrainEvalMode', ('train_only', 'eval_only', 'train_and_eva
 class modules(_TestParametrizer):
     """ PROTOTYPE: Decorator for specifying a list of modules over which to run a test. """
 
-    def __init__(self, module_info_iterable, allowed_dtypes=None, train_eval_mode=TrainEvalMode.train_and_eval):
+    def __init__(self, module_info_iterable, allowed_dtypes=None,
+                 train_eval_mode=TrainEvalMode.train_and_eval, skip_if_dynamo=True):
         self.module_info_list = list(module_info_iterable)
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
         self.train_eval_mode = train_eval_mode
+        self.skip_if_dynamo = skip_if_dynamo
 
     def _get_training_flags(self, module_info):
         training_flags = []
@@ -120,6 +123,9 @@ class modules(_TestParametrizer):
                     @wraps(test)
                     def test_wrapper(*args, **kwargs):
                         return test(*args, **kwargs)
+
+                    if self.skip_if_dynamo:
+                        test_wrapper = skipIfTorchDynamo("Policy: we don't run ModuleInfo tests w/ Dynamo")(test_wrapper)
 
                     decorator_fn = partial(module_info.get_decorators, generic_cls.__name__,
                                            test.__name__, device_cls.device_type, dtype)
@@ -2374,52 +2380,57 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
                 make_input((2, 3, 4))
             ),
             desc='gelu_activation'
-        ), ]
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(4, 2, 8, 0.0, bias=False),
+            forward_input=FunctionInput(
+                make_input((2, 3, 4))
+            ),
+            desc='no_bias'
+        ),]
 
     # Samples below are for validating the no-batch-dim support.
     key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
     attn_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool).expand((3, 3)))
-    for src_mask, src_key_padding_mask, norm_first in itertools.product(attn_masks, key_padding_masks, (True, False)):
+    for src_mask, src_key_padding_mask, norm_first, batch_first, bias in \
+            itertools.product(attn_masks, key_padding_masks, (True, False), (True, False), (True, False)):
         samples.append(
             ModuleInput(
                 constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
-                                                dropout=0.0, batch_first=True, norm_first=norm_first),
+                                                dropout=0.0, batch_first=batch_first,
+                                                norm_first=norm_first, bias=bias),
                 forward_input=FunctionInput(
                     make_input((3, 4)), src_mask=src_mask, src_key_padding_mask=src_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
-                                     batch_first=True, kwargs_to_batchify={'src_key_padding_mask': 0}),
-                desc='no_batch_dim_batch_first'
+                                     batch_first=batch_first, kwargs_to_batchify={'src_key_padding_mask': 0}),
+                desc=f'no_batch_dim_batch_first_{batch_first}'
             ))
 
-        samples.append(
-            ModuleInput(
-                constructor_input=FunctionInput(4, 2, 8, dropout=0.0, batch_first=False, norm_first=norm_first),
-                forward_input=FunctionInput(
-                    make_input((3, 4)), src_mask=src_mask, src_key_padding_mask=src_key_padding_mask
-                ),
-                reference_fn=partial(no_batch_dim_reference_fn,
-                                     batch_first=False, kwargs_to_batchify={'src_key_padding_mask': 0}),
-                desc='no_batch_dim'
-            ))
-
+    # Samples below where we pass reference_fn are for validating the fast path,
+    # since the fast path requires no_grad mode, we run the fast path in .eval()
+    # and no_grad() in the reference_fn and verify that against the results in train mode.
     def fast_path_reference_fn(module, parameters, *args, **kwargs):
-        assert not module.training
-        module = module.train(True)
-        output = module(*args, **kwargs)
-        module = module.train(False)
+        assert module.training
+        module.train(False)
+        with torch.no_grad():
+            output = module(*args, **kwargs)
+        module.train(True)
         return output
 
-    if not training:
-        for norm_first in (True, False):
+    if training:
+        for norm_first, bias in itertools.product((True, False), (True, False)):
             samples.append(
                 ModuleInput(
-                    constructor_input=FunctionInput(4, 2, 8, dropout=0.0, batch_first=True, norm_first=norm_first),
+                    constructor_input=FunctionInput(
+                        4, 2, 8, dropout=0.0, batch_first=True, norm_first=norm_first, bias=bias
+                    ),
                     forward_input=FunctionInput(
                         make_input((2, 3, 4)),
                     ),
-                    reference_fn=fast_path_reference_fn,
-                    desc="fast_path_norm_first" if norm_first else "fast_path"
+                    # fastpath doesn't run when bias=False
+                    reference_fn=fast_path_reference_fn if bias else None,
+                    desc=f'fastpath_{bias}_norm_first_{norm_first}'
                 )
             )
 
@@ -2443,40 +2454,51 @@ def module_inputs_torch_nn_TransformerDecoderLayer(module_info, device, dtype, r
                 make_input((2, 3, 4)), make_input((2, 3, 4))
             ),
             desc='gelu_activation'
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput(4, 2, 8, 0.0, bias=False),
+            forward_input=FunctionInput(
+                make_input((2, 3, 4)), make_input((2, 3, 4))
+            ),
+            desc='no_bias'
         ), ]
 
-    # Samples below are for validating the no-batch-dim support.
     key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
     attn_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool).expand((3, 3)))
-    for tgt_mask, tgt_key_padding_mask, norm_first in itertools.product(attn_masks, key_padding_masks, (True, False)):
+    for tgt_mask, tgt_key_padding_mask, norm_first, bias, batch_first in \
+            itertools.product(attn_masks, key_padding_masks, (True, False), (True, False), (True, False)):
         # Using same mask for tgt and memory
         memory_mask = tgt_mask
         memory_key_padding_mask = tgt_key_padding_mask
         samples.append(
             ModuleInput(
                 constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
-                                                dropout=0.0, batch_first=True, norm_first=norm_first),
+                                                dropout=0.0, batch_first=batch_first,
+                                                norm_first=norm_first, bias=bias),
                 forward_input=FunctionInput(
                     make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, memory_mask=memory_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, memory_key_padding_mask=memory_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
-                                     batch_first=True,
+                                     batch_first=batch_first,
                                      kwargs_to_batchify={'tgt_key_padding_mask': 0, 'memory_key_padding_mask': 0}),
-                desc='no_batch_dim_batch_first'
+                desc=f'no_batch_dim_batch_first_{batch_first}'
             ))
-
+        src, tgt = make_input((2, 3, 4)), make_input((2, 3, 4))
+        if not batch_first:
+            src, tgt = src.transpose(0, 1), tgt.transpose(0, 1)
+        if tgt_key_padding_mask is not None:
+            memory_key_padding_mask, tgt_key_padding_mask = (tgt_key_padding_mask.expand(2, 3),) * 2
         samples.append(
             ModuleInput(
-                constructor_input=FunctionInput(4, 2, 8, dropout=0.0, batch_first=False, norm_first=norm_first),
+                constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
+                                                dropout=0.0, batch_first=batch_first,
+                                                norm_first=norm_first, bias=bias),
                 forward_input=FunctionInput(
-                    make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, memory_mask=memory_mask,
+                    src, tgt, tgt_mask=tgt_mask, memory_mask=memory_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, memory_key_padding_mask=memory_key_padding_mask
                 ),
-                reference_fn=partial(no_batch_dim_reference_fn,
-                                     batch_first=False,
-                                     kwargs_to_batchify={'tgt_key_padding_mask': 0, 'memory_key_padding_mask': 0}),
-                desc='no_batch_dim'
+                desc=f'norm_first_{norm_first}_batch_first_{batch_first}_bias_{bias}'
             ))
 
     return samples
@@ -2488,8 +2510,8 @@ def module_inputs_torch_nn_Transformer(module_info, device, dtype, requires_grad
     # Samples below are for validating the no-batch-dim support.
     key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
     attn_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool).expand((3, 3)))
-    for mask, key_padding_mask, norm_first, bias in \
-            itertools.product(attn_masks, key_padding_masks, (True, False), (True, False)):
+    for mask, key_padding_mask, norm_first, bias, batch_first in \
+            itertools.product(attn_masks, key_padding_masks, (True, False), (True, False), (True, False)):
         # Using same mask for tgt and memory
         src_mask , tgt_mask = (mask,) * 2
         src_key_padding_mask, tgt_key_padding_mask = (key_padding_mask,) * 2
@@ -2497,32 +2519,34 @@ def module_inputs_torch_nn_Transformer(module_info, device, dtype, requires_grad
             ModuleInput(
                 constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
                                                 num_encoder_layers=1, num_decoder_layers=1,
-                                                dropout=0.0, batch_first=True, norm_first=norm_first, bias=bias),
+                                                dropout=0.0, batch_first=batch_first, norm_first=norm_first, bias=bias),
                 forward_input=FunctionInput(
                     make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, src_mask=src_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, src_key_padding_mask=src_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
-                                     batch_first=True,
+                                     batch_first=batch_first,
                                      kwargs_to_batchify={'tgt_key_padding_mask': 0, 'src_key_padding_mask': 0}),
-                desc='no_batch_dim_batch_first'
+                desc=f'no_batch_dim_batch_first_{batch_first}'
             ))
+
+        src, tgt = make_input((2, 3, 4)), make_input((2, 3, 4))
+        if not batch_first:
+            src = src.transpose(0, 1)
+            tgt = tgt.transpose(0, 1)
+        if key_padding_mask is not None:
+            src_key_padding_mask, tgt_key_padding_mask = (key_padding_mask.expand(2, 3),) * 2
 
         samples.append(
             ModuleInput(
                 constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
                                                 num_encoder_layers=1, num_decoder_layers=1,
-                                                dropout=0.0, batch_first=False, norm_first=norm_first),
+                                                dropout=0.0, batch_first=batch_first, norm_first=norm_first, bias=bias),
                 forward_input=FunctionInput(
-                    make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, src_mask=src_mask,
+                    src, tgt, tgt_mask=tgt_mask, src_mask=src_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, src_key_padding_mask=src_key_padding_mask
                 ),
-                reference_fn=partial(no_batch_dim_reference_fn,
-                                     batch_first=False,
-                                     kwargs_to_batchify={'tgt_key_padding_mask': 0, 'src_key_padding_mask': 0}),
-                desc='no_batch_dim'
             ))
-
     return samples
 
 
@@ -3895,10 +3919,23 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.CrossEntropyLoss,
                module_inputs_func=module_inputs_torch_nn_CrossEntropyLoss,
-               skips=(
+               dtypes=get_all_fp_dtypes(include_half=True, include_bfloat16=False),
+               decorators=(
                    # No channels_last support for loss functions.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format'),
+                   # Expect failures for tests that rely on torch.half implementation on CPU
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward", dtypes=[torch.float16], device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_if_train_and_eval_modes_differ",
+                                dtypes=[torch.float16], device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_pickle", dtypes=[torch.float16], device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", dtypes=[torch.float16],
+                                device_type='cpu'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_multiple_device_transfer", dtypes=[torch.float16],
+                                device_type='cuda'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
+                                device_type='cuda'),
+                   # MPS does not support double, so expect failures on MPS for torch.double
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', dtypes=[torch.float64], device_type='mps'),),
                ),
     ModuleInfo(torch.nn.CTCLoss,
                module_inputs_func=module_inputs_torch_nn_CTCLoss,

@@ -187,6 +187,7 @@ class TritonTemplateKernel(TritonKernel):
                     "from torch._inductor.triton_heuristics import template",
                     "from torch._inductor.utils import instance_descriptor",
                     "from torch._inductor import triton_helpers",
+                    TritonKernel.gen_attr_descriptor_import(),
                     "",
                     self.jit_line(),
                     f"def {self.kernel_name}({', '.join(arg_defs)}):",
@@ -325,21 +326,22 @@ class TritonTemplateKernel(TritonKernel):
         self,
         index: sympy.Expr,
         *,
-        copy_shape=None,
         dense_indexing=False,
+        copy_shape=None,
         override_mask=None,
+        block_ptr=False,
     ):
         """
         Override the default indexing to use our custom mask and force
         dense indexing.
         """
-        result, *mask = super().indexing(
+        return super().indexing(
             index,
             dense_indexing=False,
             copy_shape=self.template_mask,
             override_mask=self.template_mask,
+            block_ptr=block_ptr,
         )
-        return (result, *mask)
 
     def initialize_range_tree(self, pid_cache):
         super().initialize_range_tree(pid_cache)

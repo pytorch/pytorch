@@ -25,7 +25,6 @@ import torch._logging
 from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import config, exc, logging as torchdynamo_logging, skipfiles, variables
-from .allowed_functions import is_allowed, is_builtin_constant, is_forbidden
 from .bytecode_analysis import (
     get_indexof,
     JUMP_OPNAMES,
@@ -58,6 +57,7 @@ from .source import (
     LocalSource,
     Source,
 )
+from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     counters,
     get_fake_value,
@@ -111,7 +111,6 @@ from .variables.tensor import (
     SymNodeVariable,
     TensorVariable,
 )
-from .variables.torch import TorchVariable
 from .variables.user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -462,14 +461,6 @@ def break_graph_if_unsupported(*, push):
                 )
                 return inner_fn(self, inst)
             except Unsupported as excp:
-                if self.should_compile_partial_graph() and self.has_backedge():
-                    msg = (
-                        "Skipping frame because there is a graph break in a for/while loop\n"
-                        f"{self.frame_summary()}"
-                    )
-                    log.info(msg)
-                    raise exc.SkipFrame(msg) from excp
-
                 if self.generic_context_manager_depth > 0:
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
@@ -500,6 +491,14 @@ def break_graph_if_unsupported(*, push):
                         excp,
                         user_stack_formatted,
                     )
+
+                if self.has_backedge():
+                    msg = (
+                        "Skipping frame because there is a graph break in a for/while loop\n"
+                        f"{self.frame_summary()}"
+                    )
+                    log.info(msg)
+                    raise exc.SkipFrame(msg) from excp
 
                 excp.remove_from_stats()
                 excp.add_to_stats("graph_break")
@@ -816,7 +815,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def LOAD_FAST(self, inst):
         name = inst.argval
-
         if name in self.f_locals and config.replay_record_enabled:
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
@@ -1022,9 +1020,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if config.replay_record_enabled:
             self.exec_recorder.add_local_mod(recorded_name, value)
 
-        if is_allowed(value):
-            self.push(TorchVariable(value, source=source))
-        elif istype(value, (types.ModuleType, DummyModule)):
+        if istype(value, (types.ModuleType, DummyModule)):
             self.push(PythonModuleVariable(value, source=source))
         else:
             unimplemented(f"IMPORT_NAME {typestr(value)}")
@@ -1085,15 +1081,32 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.popn(2)
         self.push(None)
 
+    def CALL_FINALLY(self, inst):
+        """
+        pushes the address of the next instruction onto the stack and increments
+        bytecode counter by delta
+        """
+        # Python 3.8 only
+        assert self.next_instruction is not None
+        addr = self.indexof[self.next_instruction]
+        self.push(ConstantVariable.create(addr))
+        self.instruction_pointer = self.indexof[inst.target]
+
     def END_FINALLY(self, inst):
+        # Python 3.8 only
+        # https://docs.python.org/3.8/library/dis.html#opcode-END_FINALLY
         tos = self.pop()
-        assert tos is None
+        if isinstance(tos, ConstantVariable):
+            self.instruction_pointer = tos.as_python_constant()
+        else:
+            pass
 
     def POP_FINALLY(self, inst):
+        # Python 3.8 only
         preserve_tos = inst.argval
         if preserve_tos:
             tos = self.pop()
-        assert self.pop() is None
+        _ = self.pop()
         if preserve_tos:
             self.push(tos)
 
@@ -1615,7 +1628,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def DICT_MERGE(self, inst):
         v = self.pop()
         assert inst.argval > 0
-        obj = self.stack[-inst.arg]
+        obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ConstDictVariable)
         assert obj.mutable_local
         obj.call_method(self, "update", [v], {})
@@ -2225,18 +2238,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         result = skipfiles.check_verbose(func, is_inlined_call=True)
         if result.skipped:
-            from torch._dynamo.variables.misc import (
-                produce_trampoline_autograd_apply,
-                produce_trampoline_autograd_bwd,
-                produce_trampoline_autograd_fwd,
-            )
+            from torch._dynamo.variables.misc import produce_trampoline_autograd_apply
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
             if hasattr(func.fn, "_origin") and func.fn._origin in [
-                produce_trampoline_autograd_fwd,
                 produce_trampoline_autograd_apply,
-                produce_trampoline_autograd_bwd,
             ]:
                 # Known sound
                 return skipfiles.SkipResult(False, "allowlist in dynamo known function")

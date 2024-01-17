@@ -464,7 +464,8 @@ lazy_tensor_core_python_sources = [
 ]
 
 inductor_core_resources = [
-    "torch/csrc/inductor/aoti_model_container_runner.cpp",
+    "torch/csrc/inductor/aoti_runner/model_container_runner.cpp",
+    "torch/csrc/inductor/aoti_runner/model_container_runner_cpu.cpp",
     "torch/csrc/inductor/aoti_torch/shim_common.cpp",
     "torch/csrc/inductor/aoti_torch/tensor_converter.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
@@ -652,7 +653,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/memory_snapshot.cpp",
-    "torch/csrc/inductor/aoti_model_container_runner_cuda.cpp",
+    "torch/csrc/inductor/aoti_runner/model_container_runner_cuda.cpp",
     "torch/csrc/inductor/aoti_torch/shim_cuda.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/profiler/stubs/cuda.cpp",
@@ -808,6 +809,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/init.cpp",
     "torch/csrc/functorch/init.cpp",
     "torch/csrc/mps/Module.cpp",
+    "torch/csrc/inductor/aoti_runner/pybind.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
@@ -1140,6 +1142,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/batch_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/group_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/layer_norm_kernel.cpp",
+    "aten/src/ATen/native/cpu/AmpGradScalerKernels.cpp",
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k0.cpp",
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k1.cpp",
     "aten/src/ATen/native/cpu/spherical_bessel_j0.cpp",
@@ -1340,6 +1343,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/WeightNorm.cpp",
     "aten/src/ATen/native/group_norm.cpp",
     "aten/src/ATen/native/layer_norm.cpp",
+    "aten/src/ATen/native/AmpKernels.cpp",
     "aten/src/ATen/native/mkl/LinearAlgebra.cpp",
     "aten/src/ATen/native/mkl/SparseBlasImpl.cpp",
     "aten/src/ATen/native/mkl/SparseCsrLinearAlgebra.cpp",

@@ -62,10 +62,12 @@ def parallelize_module(  # type: ignore[return]
     Example::
         >>> # xdoctest: +SKIP("distributed")
         >>> from torch.distributed.tensor.parallel import parallelize_module, ColwiseParallel
+        >>> from torch.distributed.device_mesh import init_device_mesh
         >>>
         >>> # Define the module.
         >>> m = Model(...)
-        >>> m = parallelize_module(m, ColwiseParallel())
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>> m = parallelize_module(m, tp_mesh, {"w1": ColwiseParallel(), "w2": RowwiseParallel()})
         >>>
 
     .. note:: For complex module architecture like Attention, MLP layers, we recommend composing

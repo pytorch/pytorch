@@ -13,6 +13,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
+#include <ATen/ops/dequantize.h>
 #include <ATen/ops/pad.h>
 #include <ATen/ops/permute.h>
 #include <ATen/ops/quantize_per_tensor.h>
@@ -324,12 +325,12 @@ static api::ShaderInfo get_shader(
       if (kernel_size.size() == 4 && kernel_size[2] == 3 &&
           kernel_size[3] == 3) {
         // 1x1 refers to the output tile size
-        shader = VK_KERNEL(conv2d_dw_3x3);
+        shader = VK_KERNEL(conv2d_dw_output_tile_3x3);
       }
       if (kernel_size.size() == 4 && kernel_size[2] == 5 &&
           kernel_size[3] == 5) {
         // 1x1 refers to the output tile size
-        shader = VK_KERNEL(conv2d_dw_5x5);
+        shader = VK_KERNEL(conv2d_dw_output_tile_5x5);
       }
       break;
     case Conv2dPointwise:
@@ -382,11 +383,11 @@ void record_op(
       0u,
       api::utils::make_ivec3(v_input.extents()),
       0u,
-      api::utils::make_ivec4(overlay_region, /*reverse=*/true),
-      api::utils::make_ivec2({kernel_size[3], kernel_size[2]}),
-      api::utils::make_ivec2(stride, /*reverse=*/true),
-      api::utils::make_ivec2(padding, /*reverse=*/true),
-      api::utils::make_ivec2(dilation, /*reverse=*/true),
+      utils::make_ivec4(overlay_region, /*reverse=*/true),
+      utils::make_ivec2({kernel_size[3], kernel_size[2]}),
+      utils::make_ivec2(stride, /*reverse=*/true),
+      utils::make_ivec2(padding, /*reverse=*/true),
+      utils::make_ivec2(dilation, /*reverse=*/true),
       {output_min, output_max},
   };
   api::UniformParamsBuffer params(context, block);
@@ -467,11 +468,11 @@ void record_quantized_op(
       0u,
       api::utils::make_ivec3(v_input.extents()),
       0u,
-      api::utils::make_ivec4(overlay_region, /*reverse=*/true),
-      api::utils::make_ivec2({kernel_size[3], kernel_size[2]}),
-      api::utils::make_ivec2(stride, /*reverse=*/true),
-      api::utils::make_ivec2(padding, /*reverse=*/true),
-      api::utils::make_ivec2(dilation, /*reverse=*/true),
+      utils::make_ivec4(overlay_region, /*reverse=*/true),
+      utils::make_ivec2({kernel_size[3], kernel_size[2]}),
+      utils::make_ivec2(stride, /*reverse=*/true),
+      utils::make_ivec2(padding, /*reverse=*/true),
+      utils::make_ivec2(dilation, /*reverse=*/true),
       {output_min, output_max},
   };
   api::UniformParamsBuffer params(context, block);
@@ -506,13 +507,15 @@ namespace {
 using namespace api::utils;
 
 vTensor pack_weights(
-    const Tensor& weight_arg,
+    const Tensor& weight_inp,
     const bool transposed,
     const bool quantized,
     const Conv2dMethod conv_method) {
-  if (weight_arg.is_vulkan()) {
-    return convert(weight_arg);
+  if (weight_inp.is_vulkan()) {
+    return convert(weight_inp);
   }
+
+  const Tensor weight_arg = quantized ? at::dequantize(weight_inp) : weight_inp;
 
   const Tensor weight = transposed
       ? at::permute(weight_arg, {1, 0, 2, 3}).contiguous()
@@ -527,16 +530,10 @@ vTensor pack_weights(
 
   vTensor v_weight{
       api::context(),
-      weight_rearranged.sizes(),
-      weight_arg.scalar_type(),
+      weight_rearranged.sizes().vec(),
+      convert_dtype(weight_rearranged.scalar_type()),
       api::StorageType::TEXTURE_2D,
   };
-
-  if (quantized) {
-    v_weight.set_is_quantized();
-    v_weight.set_scale(weight_arg.q_scale());
-    v_weight.set_zero_point(weight_arg.q_zero_point());
-  }
 
   pack_cpu_to_vulkan(weight_rearranged, v_weight);
 
@@ -549,22 +546,19 @@ vTensor pack_biases(
     const bool transposed,
     const bool quantized) {
   at::Tensor bias_arg = conv2d::rearrange_bias(bias, weight, transposed);
-  at::Tensor bias_rearranged = (quantized && bias_arg.scalar_type() == kFloat)
-      ? at::quantize_per_tensor(bias_arg, weight.q_scale(), 0, c10::kQInt32)
+  at::Tensor bias_rearranged =
+      (quantized &&
+       (bias_arg.scalar_type() == kQUInt8 || bias_arg.scalar_type() == kQInt8 ||
+        bias_arg.scalar_type() == kQInt32))
+      ? at::dequantize(bias_arg)
       : bias_arg;
 
   vTensor v_bias{
       api::context(),
-      bias_rearranged.sizes(),
-      bias_rearranged.scalar_type(),
+      bias_rearranged.sizes().vec(),
+      convert_dtype(bias_rearranged.scalar_type()),
       api::StorageType::TEXTURE_2D,
   };
-
-  if (quantized) {
-    v_bias.set_is_quantized();
-    v_bias.set_scale(bias_rearranged.q_scale());
-    v_bias.set_zero_point(bias_rearranged.q_zero_point());
-  }
 
   pack_cpu_to_vulkan(bias_rearranged, v_bias);
 
@@ -909,7 +903,7 @@ Tensor conv1d(
           weight_out_channels,
           v_input_sizes[2] - kernel_size + 1,
       },
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
 
   const struct Block final {
@@ -1192,7 +1186,7 @@ Tensor run_conv2d_context_impl(
   vTensor v_output{
       context,
       output_size,
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
 
   if (quantized) {
