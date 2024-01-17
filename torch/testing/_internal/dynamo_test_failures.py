@@ -1034,7 +1034,6 @@ dynamo_expected_failures = {
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_0_bfloat16_cpu_bfloat16",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float32_batch_size_12_seq_len_1030_n_head_1_head_dim_16_causal_True_train_True_cpu_float32",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float64_batch_size_12_seq_len_267_n_head_1_head_dim_16_causal_True_train_True_cpu_float64",
-    "TestSDPAFailureModesCPU.test_invalid_inputs_1_dimensional_inputs_kernel0_cpu",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float32_batch_size_12_seq_len_1030_n_head_1_head_dim_8_causal_True_train_False_cpu_float32",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float64_batch_size_12_seq_len_1030_n_head_1_head_dim_16_causal_True_train_True_cpu_float64",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_seq_len_267_n_head_1_head_dim_8_causal_True_train_True_cpu_bfloat16",
@@ -1934,7 +1933,6 @@ dynamo_expected_failures = {
     "TestTensorBoardSummary.test_image_with_one_channel",  # test_tensorboard
     "TestTensorBoardEmbedding.test_embedding_64",  # test_tensorboard
     "TestTensorBoardSummary.test_hparams_domain_discrete",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_wrong_parameter",  # test_tensorboard
     "TestTensorBoardSummary.test_video",  # test_tensorboard
     "TestTensorProtoSummary.test_int_tensor_proto",  # test_tensorboard
     "TestTensorBoardSummary.test_hparams_number",  # test_tensorboard
