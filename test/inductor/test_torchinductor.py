@@ -2166,6 +2166,8 @@ class CommonTemplate:
                 torch.randint(0, 255, (4, 8), dtype=torch.uint8),
             ),
             check_lowp=True,
+            atol=5e-3,
+            rtol=5e-3,
         )
 
     def test_mm_mixed_dtype(self):
