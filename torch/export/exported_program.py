@@ -37,6 +37,7 @@ from .graph_signature import (  # noqa: F401
     _sig_to_specs,
     ArgumentSpec,
     ConstantArgument,
+    CustomObjArgument,
     ExportGraphSignature,
     InputKind,
     InputSpec,

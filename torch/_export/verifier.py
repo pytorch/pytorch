@@ -43,6 +43,8 @@ def _check_val(node: torch.fx.Node) -> None:
             return True
         elif isinstance(val, (SymInt, SymFloat, SymBool)):
             return True
+        elif isinstance(val, torch.ScriptObject):
+            return True
         elif isinstance(val, Iterable):
             return all(_check_correct_val(x) for x in val)
         return False

@@ -35,7 +35,7 @@ def lift_constant_tensor_pass(gm, graph_signature) -> Dict[str, torch.Tensor]:
     for node in gm.graph.nodes:
         if node.op == "get_attr":
             constant_tensor = getattr(gm, node.target)
-            if not isinstance(constant_tensor, torch.Tensor):
+            if not isinstance(constant_tensor, (torch.ScriptObject, torch.Tensor)):
                 continue
 
             constant_tensor_fqn = f"_lifted_tensor_constant{num_tensor_constants}"
@@ -46,10 +46,14 @@ def lift_constant_tensor_pass(gm, graph_signature) -> Dict[str, torch.Tensor]:
                 const_placeholder_node = gm.graph.placeholder(constant_tensor_fqn)
                 for k, v in node.meta.items():
                     const_placeholder_node.meta[k] = v
-                const_placeholder_node.meta["val"] = fake_mode.from_tensor(
-                    constant_tensor, static_shapes=True
-                )
-                const_placeholder_node.meta["val"].constant = constant_tensor
+                if isinstance(constant_tensor, torch.Tensor):
+                    const_placeholder_node.meta["val"] = fake_mode.from_tensor(
+                        constant_tensor, static_shapes=True
+                    )
+                    const_placeholder_node.meta["val"].constant = constant_tensor
+                else:
+                    const_placeholder_node.meta["val"] = constant_tensor
+
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
 

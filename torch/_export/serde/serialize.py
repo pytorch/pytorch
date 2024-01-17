@@ -94,6 +94,7 @@ from torch.export.exported_program import (
     ConstantArgument as PyConstantArgument,
     SymIntArgument as PySymIntArgument,
     TensorArgument as PyTensorArgument,
+    CustomObjArgument as PyCustomObjArgument,
 )
 
 from .upgrade import GraphModuleOpUpgrader
@@ -349,6 +350,9 @@ class GraphModuleSerializer:
             raise AssertionError("SymInt graph input is not implemented yet.")
         elif isinstance(node.meta['val'], (int, bool, str, float, type(None))):
             graph_input = self.serialize_input(node.meta['val'])
+        elif isinstance(node.meta['val'], torch.ScriptObject):
+            self.custom_objs[node.name] = node.meta['val']
+            graph_input = Argument.create(as_custom_obj=CustomObjArgument(name=node.name))
         else:
             raise AssertionError(f"Unimplemented graph input type: {node.meta['val']}")
         self.graph_state.inputs.append(graph_input)
@@ -545,6 +549,9 @@ class GraphModuleSerializer:
             elif self.is_sym_bool_arg(arg):
                 return Argument.create(as_sym_bool=SymBoolArgument.create(as_name=arg.name))
             else:
+                if isinstance(arg.meta["val"], torch.ScriptObject):
+                    assert arg.name in self.custom_objs
+                    return Argument.create(as_custom_obj=CustomObjArgument(name=arg.name))
                 return Argument.create(as_tensor=TensorArgument(name=arg.name))
         elif isinstance(arg, inductor_tensor_buffers):
             # Other branches are for arguments in fx node.
@@ -781,6 +788,8 @@ class GraphModuleSerializer:
             return Argument.create(as_sym_int=SymIntArgument.create(as_name=x.name))
         elif isinstance(x, PyConstantArgument):
             return self.serialize_input(x.value)
+        elif isinstance(x, PyCustomObjArgument):
+            return Argument.create(as_custom_obj=CustomObjArgument(name=x.name))
         else:
             raise AssertionError("TODO")
 
