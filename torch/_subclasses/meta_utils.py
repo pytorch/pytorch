@@ -85,19 +85,16 @@ def assert_metadata_eq(assert_eq, m1, m2, *, skip_symbolic=False):
     return go(m1, m2)
 
 
-# hacks t's size / stride / offset metadata to match other's shape
-def match_subclass_shape(t, other):
-    assert is_traceable_wrapper_subclass(t) and type(t) == type(other)
-    attrs, ctx = other.__tensor_flatten__()
+def mirror_view_meta_to_subclass(src, dst):
+    assert is_traceable_wrapper_subclass(src) and type(src) == type(dst)
+    torch._mirror_view_meta_to(src, dst)  # type: ignore[attr-defined]
+    attrs, ctx = src.__tensor_flatten__()
     for attr in attrs:
-        inner = getattr(t, attr)
-        other_inner = getattr(other, attr)
-        inner._set_sizes_strides_offset_unsafe(
-            other_inner.shape, other_inner.stride(), other_inner.storage_offset()
-        )
-    t._set_sizes_strides_offset_unsafe(
-        other.shape, other.stride(), other.storage_offset()
-    )
+        src_inner = getattr(src, attr)
+        if src_inner is None:
+            continue
+        dst_inner = getattr(dst, attr)
+        torch._mirror_view_meta_to(src_inner, dst_inner)  # type: ignore[attr-defined]
 
 
 # This is a class for converting multiple tensors into meta tensors which
@@ -534,10 +531,10 @@ class MetaConverter:
                                 out = fake_base._rev_view_func_unsafe(
                                     fake_input_base
                                 ).requires_grad_(t.requires_grad)
-                                match_subclass_shape(out, fake_t)
                                 if not t.is_leaf:
                                     out = out.view(out.shape)
-                                return out
+                                mirror_view_meta_to_subclass(out, fake_t)
+                                return fake_t
                             else:
                                 # TODO: Handle dense view of subclass
                                 (

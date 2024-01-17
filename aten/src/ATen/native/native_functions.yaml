@@ -6192,6 +6192,12 @@
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: _nested_get_offsets
 
+- func: _nested_get_lengths(Tensor self) -> Tensor
+  variants: function
+  device_check: NoCheck
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: _nested_get_lengths
+
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   dispatch:
     # calls unsqueeze
