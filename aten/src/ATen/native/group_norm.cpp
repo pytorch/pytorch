@@ -118,9 +118,6 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
       at::borrow_from_optional_tensor(gamma_opt);
   const Tensor& gamma = *gamma_maybe_owned;
   TORCH_CHECK(
-      X.suggest_memory_format() == dY.suggest_memory_format(),
-      "Expected memory formats of X and dY are same.");
-  TORCH_CHECK(
       X.scalar_type() == dY.scalar_type(),
       "Expected scalar types of X and dY are same.");
   bool mixed_type = is_mixed_type(X, mean, rstd);

@@ -45,6 +45,7 @@ from .utils import (
 )
 from torch.distributed.remote_device import _remote_device
 from torch.utils import _pytree as pytree
+import operator
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -394,7 +395,7 @@ class ShardedTensor(ShardedTensorBase):
                 Default: ``None``
         """
         def shard_size(shard_md):
-            return reduce((lambda x, y: x * y), shard_md.shard_sizes)  # type: ignore[attr-defined]
+            return reduce(operator.mul, shard_md.shard_sizes)  # type: ignore[attr-defined]
 
         if enforce_dtype:
             warnings.warn("enforce_dtype is deprecated.  Please use dtype instead.")

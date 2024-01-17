@@ -2,11 +2,15 @@
 
 #include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#include <cstdint>
+#include <iterator>
 #include <numeric>
+#include <ostream>
 #include <type_traits>
 
 namespace c10 {

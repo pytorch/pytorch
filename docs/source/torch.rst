@@ -18,6 +18,7 @@ Tensors
     set_default_dtype
     get_default_dtype
     set_default_device
+    get_default_device
     set_default_tensor_type
     numel
     set_printoptions

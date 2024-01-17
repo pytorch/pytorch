@@ -23,6 +23,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import textwrap
 import threading
 import warnings
 import weakref
@@ -1167,7 +1168,13 @@ def get_compile_only(compile_only: bool = True) -> str:
 
 
 def get_shared(shared: bool = True) -> str:
-    return "-shared -fPIC" if shared else ""
+    if not shared:
+        return ""
+    if platform.system() == "Darwin" and "clang" in cpp_compiler():
+        # This causes undefined symbols to behave the same as linux
+        return "-shared -fPIC -undefined dynamic_lookup"
+    else:
+        return "-shared -fPIC"
 
 
 def get_warning_all_flag(warning_all: bool = True) -> str:
@@ -1194,6 +1201,8 @@ def optimization_flags() -> str:
     base_flags += " -ffast-math -fno-finite-math-only"
     if not config.cpp.enable_unsafe_math_opt_flag:
         base_flags += " -fno-unsafe-math-optimizations"
+    if not config.cpp.enable_floating_point_contract_flag:
+        base_flags += " -ffp-contract=off"
 
     if config.is_fbcode():
         # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
@@ -1344,11 +1353,12 @@ def get_include_and_linking_paths(
         if aot_mode and cuda:
             if macros is None:
                 macros = ""
-            macros += " -D USE_CUDA"
+            macros += " -D USE_ROCM" if torch.version.hip else " -D USE_CUDA"
 
         if cuda:
             if torch.version.hip is not None:
                 libs += ["c10_hip", "torch_hip"]
+                macros += " -D __HIP_PLATFORM_AMD__"
             else:
                 if config.is_fbcode():
                     libs += ["cuda"]
@@ -1535,10 +1545,7 @@ class CudaKernelParamCache:
         return cls.cache.get(key, None)
 
 
-class AotCodeCache:
-    cache: Dict[str, str] = dict()
-    clear = staticmethod(cache.clear)
-
+class AotCodeCompiler:
     @classmethod
     def compile(
         cls,
@@ -1578,139 +1585,124 @@ class AotCodeCache:
             specified_dir=specified_output_path,
         )
 
-        if key not in cls.cache or (
-            specified_output_path
-            and os.path.dirname(cls.cache[key]) != specified_output_path
-            or specified_so_name
-            and os.path.basename(cls.cache[key]) != specified_so_name
-        ):
-            from filelock import FileLock
+        from filelock import FileLock
 
-            lock_dir = get_lock_dir()
-            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-            with lock:
-                # Currently, this only support serializing extern nodes in fbcode
-                # Eventually, we should also have a serializer for OSS.
-                if config.is_fbcode() and serialized_extern_kernel_nodes:
-                    output_json = os.path.splitext(input_path)[0] + ".json"
-                    with open(output_json, "w") as f:
-                        f.write(serialized_extern_kernel_nodes)
+        lock_dir = get_lock_dir()
+        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+        with lock:
+            # Currently, this only support serializing extern nodes in fbcode
+            # Eventually, we should also have a serializer for OSS.
+            if config.is_fbcode() and serialized_extern_kernel_nodes:
+                output_json = os.path.splitext(input_path)[0] + ".json"
+                with open(output_json, "w") as f:
+                    f.write(serialized_extern_kernel_nodes)
 
-                output_so = (
-                    config.aot_inductor.output_path
-                    if specified_so_name
-                    else os.path.splitext(input_path)[0] + ".so"
+            output_so = (
+                config.aot_inductor.output_path
+                if specified_so_name
+                else os.path.splitext(input_path)[0] + ".so"
+            )
+
+            output_o = os.path.splitext(input_path)[0] + ".o"
+            cmd = cpp_compile_command(
+                input=input_path,
+                output=output_o,
+                vec_isa=picked_vec_isa,
+                cuda=cuda,
+                aot_mode=graph.aot_mode,
+                compile_only=True,
+                use_absolute_path=use_absolute_path,
+            )
+            log.debug("aot compilation command: %s", cmd)
+            if fbcode_aot_cpu_re:
+                compile_file(input_path, output_o, cmd.split())
+                os.chmod(output_o, 0o644)
+            else:
+                run_command_and_check(cmd)
+
+            def _to_bytes(t: torch.Tensor) -> bytes:
+                # This serializes the tensor's untyped_storage to bytes by accessing
+                # the raw data of the underlying structure.
+                import ctypes
+
+                if t.numel() == 0:
+                    return b""
+
+                t_cpu = t.untyped_storage().cpu()
+                raw_array = ctypes.cast(
+                    t_cpu.data_ptr(),
+                    ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes()),
                 )
 
-                if not os.path.exists(output_so):
-                    output_o = os.path.splitext(input_path)[0] + ".o"
-                    cmd = cpp_compile_command(
-                        input=input_path,
-                        output=output_o,
-                        vec_isa=picked_vec_isa,
-                        cuda=cuda,
-                        aot_mode=graph.aot_mode,
-                        compile_only=True,
-                        use_absolute_path=use_absolute_path,
-                    )
-                    log.debug("aot compilation command: %s", cmd)
-                    if fbcode_aot_cpu_re:
-                        compile_file(input_path, output_o, cmd.split())
-                        os.chmod(output_o, 0o644)
-                    else:
-                        run_command_and_check(cmd)
+                return bytes(raw_array.contents)
 
-                    def _to_bytes(t: torch.Tensor) -> bytes:
-                        # This serializes the tensor's untyped_storage to bytes by accessing
-                        # the raw data of the underlying structure.
-                        import ctypes
+            aot_constants = b"".join(
+                _to_bytes(tensor) for tensor in graph.constants.values()
+            )
 
-                        if t.numel() == 0:
-                            return b""
+            _, consts_path = write(
+                aot_constants,
+                "bin",
+                specified_dir=specified_output_path,
+            )
 
-                        t_cpu = t.untyped_storage().cpu()
-                        raw_array = ctypes.cast(
-                            t_cpu.data_ptr(),
-                            ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes()),
-                        )
+            consts_o = os.path.splitext(consts_path)[0] + ".o"
+            if fbcode_aot_cpu_re:
+                cmd = f"{ld_command} -r -b binary -o {os.path.basename(consts_o)} {os.path.basename(consts_path)}"
+                compile_file(consts_path, consts_o, cmd.split())
+                os.chmod(consts_o, 0o644)
+            else:
+                cmd = f"{ld_command} -r -b binary -o {consts_o} {consts_path}"
+                run_command_and_check(cmd)
+            log.debug("aot constant binary command: %s", cmd)
 
-                        return bytes(raw_array.contents)
+            cmd = (
+                f"{objcopy_command} --rename-section"
+                " .data=.lrodata,alloc,load,readonly,data,contents"
+                f" {consts_o} {consts_o}"
+            )
+            log.debug("aot constant obj command: %s", cmd)
+            run_command_and_check(cmd)
 
-                    aot_constants = b"".join(
-                        _to_bytes(tensor) for tensor in graph.constants.values()
-                    )
+            cmd = f"rm {consts_path}"
+            log.debug("aot constant bin removal command: %s", cmd)
+            run_command_and_check(cmd)
 
-                    consts_key, consts_path = write(
-                        aot_constants,
-                        "bin",
-                        specified_dir=specified_output_path,
-                    )
+            if fbcode_aot_cpu_re:
+                body = re.sub(r"[\W]", "_", os.path.basename(consts_path))
+            else:
+                body = re.sub(r"[\W]", "_", consts_path)
 
-                    consts_o = os.path.splitext(consts_path)[0] + ".o"
-                    if fbcode_aot_cpu_re:
-                        cmd = f"{ld_command} -r -b binary -o {os.path.basename(consts_o)} {os.path.basename(consts_path)}"
-                        compile_file(consts_path, consts_o, cmd.split())
-                        os.chmod(consts_o, 0o644)
-                    else:
-                        cmd = f"{ld_command} -r -b binary -o {consts_o} {consts_path}"
-                        run_command_and_check(cmd)
-                    log.debug("aot constant binary command: %s", cmd)
+            symbol_list = []
+            symbol_list.append(
+                f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"
+            )
+            symbol_list.append(
+                f"{objcopy_command} --redefine-sym _binary_{body}_size=_binary_constants_bin_size {consts_o}"
+            )
+            symbol_list.append(
+                f"{objcopy_command} --redefine-sym _binary_{body}_end=_binary_constants_bin_end {consts_o}"
+            )
+            log.debug("aot constant binary redefine symbol: %s", " ".join(symbol_list))
+            for cmd in symbol_list:
+                run_command_and_check(cmd)
 
-                    cmd = (
-                        f"{objcopy_command} --rename-section"
-                        " .data=.lrodata,alloc,load,readonly,data,contents"
-                        f" {consts_o} {consts_o}"
-                    )
-                    log.debug("aot constant obj command: %s", cmd)
-                    run_command_and_check(cmd)
+            cmd = cpp_compile_command(
+                input=[output_o, consts_o],
+                output=output_so,
+                vec_isa=picked_vec_isa,
+                cuda=cuda,
+                aot_mode=graph.aot_mode,
+                use_absolute_path=use_absolute_path,
+            )
+            log.debug("aot linkage command: %s", cmd)
+            if fbcode_aot_cpu_re:
+                compile_file([output_o, consts_o], output_so, cmd.split())
+                os.chmod(output_so, 0o755)
+            else:
+                run_command_and_check(cmd)
 
-                    cmd = f"rm {consts_path}"
-                    log.debug("aot constant bin removal command: %s", cmd)
-                    run_command_and_check(cmd)
-
-                    if fbcode_aot_cpu_re:
-                        body = re.sub(r"[\W]", "_", os.path.basename(consts_path))
-                    else:
-                        body = re.sub(r"[\W]", "_", consts_path)
-
-                    symbol_list = []
-                    symbol_list.append(
-                        f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"
-                    )
-                    symbol_list.append(
-                        f"{objcopy_command} --redefine-sym _binary_{body}_size=_binary_constants_bin_size {consts_o}"
-                    )
-                    symbol_list.append(
-                        f"{objcopy_command} --redefine-sym _binary_{body}_end=_binary_constants_bin_end {consts_o}"
-                    )
-                    log.debug(
-                        "aot constant binary redefine symbol: %s", " ".join(symbol_list)
-                    )
-                    for cmd in symbol_list:
-                        run_command_and_check(cmd)
-
-                    cmd = cpp_compile_command(
-                        input=[output_o, consts_o],
-                        output=output_so,
-                        vec_isa=picked_vec_isa,
-                        cuda=cuda,
-                        aot_mode=graph.aot_mode,
-                        use_absolute_path=use_absolute_path,
-                    )
-                    log.debug("aot linkage command: %s", cmd)
-                    if fbcode_aot_cpu_re:
-                        compile_file([output_o, consts_o], output_so, cmd.split())
-                        os.chmod(output_so, 0o755)
-                    else:
-                        run_command_and_check(cmd)
-                else:
-                    log.debug(
-                        "aot_inductor dynamic library already exist: %s", output_so
-                    )
-
-                cls.cache[key] = output_so
-
-        return cls.cache[key]
+        return output_so
 
 
 # Putting this fn in cpp.py (unfortunately) causes a deadlock, which is why it's in codecache.py.
@@ -1800,19 +1792,24 @@ _libgomp: Optional[CDLL] = None
 
 
 class CppCodeCache:
-    cache: Dict[str, CDLL] = dict()
+    cache: Dict[str, Union[CDLL, ModuleType]] = {}
     clear = staticmethod(cache.clear)
+    cpp_compile_command_flags: Dict[str, Any] = {}
 
     @staticmethod
-    def _load_library(path: str) -> CDLL:
+    def _load_library_inner(path: str, key: str) -> Union[CDLL, ModuleType]:
+        return cdll.LoadLibrary(path)
+
+    @classmethod
+    def _load_library(cls, path: str, key: str) -> Union[CDLL, ModuleType]:
         try:
-            return cdll.LoadLibrary(path)
-        except OSError as e:
+            return cls._load_library_inner(path, key)
+        except (ImportError, OSError) as e:
             if "gomp" in str(e) and os.path.exists("/usr/lib64/libgomp.so.1"):
                 # hacky workaround for fbcode/buck
                 global _libgomp
                 _libgomp = cdll.LoadLibrary("/usr/lib64/libgomp.so.1")
-                return cdll.LoadLibrary(path)
+                return cls._load_library_inner(path, key)
             if "failed to map segment from shared object" in str(e):
                 raise OSError(
                     f"{e}.  The most common reason this may occur is if the {tempfile.gettempdir()} folder "
@@ -1823,9 +1820,13 @@ class CppCodeCache:
             raise
 
     @classmethod
-    def load(cls, source_code: str) -> CDLL:
+    def load(cls, source_code: str) -> Union[CDLL, ModuleType]:
         picked_vec_isa = pick_vec_isa()
-        cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
+        cpp_command = repr(
+            cpp_compile_command(
+                "i", "o", vec_isa=picked_vec_isa, **cls.cpp_compile_command_flags
+            )
+        )
         key, input_path = write(source_code, "cpp", extra=cpp_command)
         if key not in cls.cache:
             from filelock import FileLock
@@ -1837,14 +1838,99 @@ class CppCodeCache:
                 if not os.path.exists(output_path):
                     cmd = shlex.split(
                         cpp_compile_command(
-                            input=input_path, output=output_path, vec_isa=picked_vec_isa
+                            input=input_path,
+                            output=output_path,
+                            vec_isa=picked_vec_isa,
+                            **cls.cpp_compile_command_flags,
                         )
                     )
                     compile_file(input_path, output_path, cmd)
-                cls.cache[key] = cls._load_library(output_path)
-                cls.cache[key].key = key  # type: ignore[attr-defined]
+                cls.cache[key] = cls._load_library(output_path, key)
+                cls.cache[key].key = key  # type: ignore[union-attr]
 
         return cls.cache[key]
+
+
+class CppPythonBindingsCodeCache(CppCodeCache):
+    cache: Dict[str, Union[CDLL, ModuleType]] = {}
+    clear = staticmethod(cache.clear)
+    cpp_compile_command_flags = {
+        "include_pytorch": True,
+        "shared": True,
+    }
+    suffix_template = textwrap.dedent(
+        """
+        // Python bindings to call kernel():
+        #define PY_SSIZE_T_CLEAN
+        #include <Python.h>
+
+        // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow
+        extern "C" void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj);
+
+        template <typename T> static inline T parse_arg(PyObject* args, size_t n) {
+            static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
+            return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
+        }
+        template <> inline long parse_arg<long>(PyObject* args, size_t n) {
+            auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
+            if(result == -1 && PyErr_Occurred())
+                [[unlikely]] throw std::runtime_error("expected int arg");
+            return result;
+        }
+
+        static PyObject* kernel_py(PyObject* self, PyObject* args) {
+            try {
+                if(!PyTuple_CheckExact(args))
+                    [[unlikely]] throw std::runtime_error("tuple args required");
+                if(PyTuple_GET_SIZE(args) != %s)
+                    [[unlikely]] throw std::runtime_error("requires %s args");
+                kernel(%s);
+                Py_RETURN_NONE;
+            } catch(std::exception const& e) {
+                PyErr_SetString(PyExc_RuntimeError, e.what());
+                return nullptr;
+            }
+        }
+
+        static PyMethodDef py_methods[] = {
+            {"kernel", kernel_py, METH_VARARGS, ""},
+            {NULL, NULL, 0, NULL}};
+
+        static struct PyModuleDef py_module =
+            {PyModuleDef_HEAD_INIT, "kernel", NULL, -1, py_methods};
+
+        PyMODINIT_FUNC PyInit_kernel(void) {
+            return PyModule_Create(&py_module);
+        }
+        """
+    )
+
+    @classmethod
+    def _load_library_inner(cls, path: str, key: str) -> ModuleType:
+        return importlib.machinery.ExtensionFileLoader(
+            f"{key}.kernel", path
+        ).load_module()  # type: ignore[call-arg]
+
+    @classmethod
+    def load_pybinding(cls, argtypes: List[str], source_code: str) -> Any:
+        """
+        Wrap a C++ function in fast Python bindings.
+
+        Args:
+            argtypes: The types of args to kernel(), e.g. ["float*", "long"]
+            source_code: C++ source code containing a kernel() function
+
+        Returns:
+            A python version of kernel()
+        """
+        parseargs = ", ".join(
+            f"parse_arg<{argtype.replace('const ', '')}>(args, {n})"
+            for n, argtype in enumerate(argtypes)
+        )
+        suffix = cls.suffix_template % (len(argtypes), len(argtypes), parseargs)
+        result = cls.load(source_code + suffix)
+        assert isinstance(result, ModuleType)
+        return result.kernel
 
 
 class PyCodeCache:
@@ -1938,8 +2024,7 @@ class CppWrapperCodeCache:
     def load(cls, source_code: str, func_name: str, key: str, cuda: bool) -> CDLL:
         name = f"inline_extension_{key}"
         cpp_wrapper_dir = cpp_wrapper_cache_dir(name)
-        if not os.path.exists(cpp_wrapper_dir):
-            os.makedirs(cpp_wrapper_dir)
+        os.makedirs(cpp_wrapper_dir, exist_ok=True)
 
         ext = "so"
         filepath = os.path.join(cpp_wrapper_dir, f"{name}.{ext}")
@@ -2341,6 +2426,8 @@ def _async_compile_initializer(orig_ppid) -> None:
     global _watchdog_thread
     _watchdog_thread = Thread(target=run, daemon=True)
     _watchdog_thread.start()
+    # Ignore Ctrl-C (i.e. SIGINT) sent to pool workers to avoid meaningless log spam.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 _watchdog_thread: Optional[Thread] = None
@@ -2441,6 +2528,13 @@ class AsyncCompile:
             return CppCodeCache.load(source_code).kernel
 
         return self.submit(task)
+
+    def cpp_pybinding(self, argtypes: List[str], source_code: str) -> ModuleType:
+        return self.submit(
+            functools.partial(
+                CppPythonBindingsCodeCache.load_pybinding, argtypes, source_code
+            )
+        )
 
     def cuda(self, source_code, dst_file_ext):
         def task():
