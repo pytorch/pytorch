@@ -54,10 +54,10 @@ CONSTANT_NUMEL_LIMIT = 1
 # This could plausibly be handled at the Dynamo level.
 pytree.register_pytree_node(
     torch.Size,
-    lambda x: (list(x), None),
+    lambda xs: (list(xs), None),
     lambda xs, _: tuple(xs),
-    flatten_with_keys_fn=lambda x: (
-        list(zip(tuple(pytree.SequenceKey(i) for i in range(len(x))), x)),
+    flatten_with_keys_fn=lambda xs: (
+        [(pytree.SequenceKey(i), x) for i, x in enumerate(xs)],
         None,
     ),
 )
