@@ -49,7 +49,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     TEST_CUDNN,
-    TEST_MULTIGPU,
     with_tf32_off,
 )
 
@@ -93,8 +92,10 @@ from torch._inductor.utils import has_torchvision_roi_align
 
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
     HAS_CPU,
-    HAS_CUDA,
+    HAS_GPU,
+    HAS_MULTIGPU,
     skipCPUIf,
     skipCUDAIf,
 )
@@ -102,12 +103,13 @@ from torch.testing._internal.inductor_utils import (
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
 _desired_test_bases = get_desired_device_type_test_bases()
 RUN_CPU = any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
-RUN_CUDA = any(getattr(x, "device_type", "") == "cuda" for x in _desired_test_bases)
+RUN_GPU = any(getattr(x, "device_type", "") == GPU_TYPE for x in _desired_test_bases)
 
 aten = torch.ops.aten
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
+
 requires_multigpu = functools.partial(
-    unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
+    unittest.skipIf, not HAS_MULTIGPU, f"requires multiple {GPU_TYPE} devices"
 )
 skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
@@ -273,7 +275,7 @@ def check_model(
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
-    copy_to_cuda=True,
+    copy_to_gpu=True,
     reference_in_float=True,
     assert_equal=True,
     check_gradient=False,
@@ -456,7 +458,7 @@ def check_model(
 
 
 @torch._inductor.config.patch("triton.cudagraphs", False)
-def check_model_cuda(
+def check_model_gpu(
     self: TestCase,
     model,
     example_inputs,
@@ -467,7 +469,7 @@ def check_model_cuda(
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
-    copy_to_cuda=True,
+    copy_to_gpu=True,
     reference_in_float=True,
     assert_equal=True,
     check_gradient=False,
@@ -476,11 +478,11 @@ def check_model_cuda(
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
-        model = model.to("cuda")
+        model = model.to(device=GPU_TYPE)
 
-    if copy_to_cuda:
+    if copy_to_gpu:
         example_inputs = tuple(
-            clone_preserve_strides(x, device="cuda") for x in example_inputs
+            clone_preserve_strides(x, device=GPU_TYPE) for x in example_inputs
         )
 
     check_model(
@@ -505,7 +507,7 @@ def check_model_cuda(
             if not isinstance(x, torch.Tensor) or not x.dtype == torch.float:
                 return x
             return torch.empty_strided(
-                x.size(), x.stride(), device="cuda", dtype=torch.half
+                x.size(), x.stride(), device=GPU_TYPE, dtype=torch.half
             ).copy_(x)
 
         example_inputs = list(map(downcast_fn, example_inputs))
@@ -528,6 +530,9 @@ def check_model_cuda(
             check_has_compiled=check_has_compiled,
             output_process_fn_grad=output_process_fn_grad,
         )
+
+
+check_model_cuda = check_model_gpu
 
 
 def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
@@ -851,7 +856,7 @@ class CommonTemplate:
             ),
         )
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 5)
-        assertGeneratedKernelCountEqual(self, 1 if self.device == "cuda" else 3)
+        assertGeneratedKernelCountEqual(self, 1 if self.device == GPU_TYPE else 3)
 
     def test_index_propagation(self):
         def flip(x):
@@ -1105,7 +1110,7 @@ class CommonTemplate:
     def test_multilayer_sum_low_prec(self):
         # fp16 nyi for cpu
         if self.device == "cpu":
-            raise unittest.SkipTest("requires CUDA")
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         def fn(a):
             return torch.mean(a)
@@ -1138,7 +1143,7 @@ class CommonTemplate:
 
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":
-            raise unittest.SkipTest("No CUDA implementation (it returns empty)")
+            raise unittest.SkipTest(f"No {GPU_TYPE} implementation (it returns empty)")
 
         def fn(a):
             return torch.ops.quantized.embedding_bag_byte_unpack(a)
@@ -2234,7 +2239,7 @@ class CommonTemplate:
     @config.patch({"freezing": True})
     def test_conv_bn_fuse(self):
         # For gpu path, there is an accuracy issue
-        if self.device == "cuda":
+        if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv bn test")
 
         # fails dynamic check which bn is fused, and there will not have loops vars.
@@ -2276,7 +2281,7 @@ class CommonTemplate:
             ).eval()
             test_memory_format = [torch.contiguous_format]
             # TODO: GPU path doesn't support channels_last now.
-            if not HAS_CUDA and dim > 1:
+            if not HAS_GPU and dim > 1:
                 channels_last = (
                     torch.channels_last if dim == 2 else torch.channels_last_3d
                 )
@@ -2293,7 +2298,7 @@ class CommonTemplate:
 
     def test_conv_functional_bn_fuse(self):
         # For gpu path, there is an accuracy issue
-        if self.device == "cuda":
+        if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv bn test")
 
         # Define a BatchNorm using functional BN.
@@ -2377,8 +2382,8 @@ class CommonTemplate:
 
     @skipIfRocm
     def test_conv_inference_heuristics(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("cuda only test")
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest(f"{GPU_TYPE} only test")
 
         in_channels = 6
         out_channels = 6
@@ -2417,7 +2422,7 @@ class CommonTemplate:
             FileCheck().check(".run(").check(".convolution(").run(code[0])
 
     def test_upsample_cat_conv(self):
-        if self.device == "cuda":
+        if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu upsample_cat_conv test")
 
         class M(torch.nn.Module):
@@ -2635,11 +2640,13 @@ class CommonTemplate:
             ),
         )
 
-    @requires_cuda()
+    @requires_gpu()
     def test_to_device(self):
         def fn(a):
             if a.device.type == "cpu":
-                return aten._to_copy(a, device=torch.device("cuda"), dtype=6, layout=0)
+                return aten._to_copy(
+                    a, device=torch.device(GPU_TYPE), dtype=6, layout=0
+                )
             else:
                 return aten._to_copy(a, device=torch.device("cpu"), dtype=6, layout=0)
 
@@ -2664,12 +2671,12 @@ class CommonTemplate:
             ),
         )
 
-    @requires_cuda()
+    @requires_gpu()
     def test_to_device_constant(self):
         def fn(a):
             d1 = a.device.type
             if d1 == "cpu":
-                d2 = "cuda"
+                d2 = GPU_TYPE
             else:
                 d2 = "cpu"
 
@@ -2685,18 +2692,18 @@ class CommonTemplate:
             (torch.randn([10]),),
         )
 
-    @requires_cuda()
+    @requires_gpu()
     def test_multi_device(self):
         def fn(x):
             x = x + 1
             x = x + 2
-            x = x.cuda()
+            x = x.to(device=GPU_TYPE)
             x = x + 3
             x = x + 4
             x = x.cpu()
             x = x + 5
             x = x + 6
-            x = x.cuda()
+            x = x.to(device=GPU_TYPE)
             x = x + 7
             x = x + 8
             x = x.cpu()
@@ -2714,11 +2721,11 @@ class CommonTemplate:
     @requires_multigpu()
     def test_multi_gpu_device(self):
         # TODO: https://github.com/pytorch/pytorch/issues/92627
-        x = torch.rand([4], device="cuda")
+        x = torch.rand([4], device=GPU_TYPE)
 
         def fn(x, y):
             r = torch.ops.aten.div(x, y)
-            r = r.to("cuda:1")
+            r = r.to(f"{GPU_TYPE}:1")
             return 2 * r
 
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
@@ -2738,13 +2745,13 @@ class CommonTemplate:
 
         gemm_opt = torch._dynamo.optimize("inductor", guard_fail_fn=fail)(gemm)
 
-        x0 = torch.randn(1024, 1024, device="cuda:0")
-        y0 = torch.randn(1024, 1024, device="cuda:0")
+        x0 = torch.randn(1024, 1024, device=f"{GPU_TYPE}:0")
+        y0 = torch.randn(1024, 1024, device=f"{GPU_TYPE}:0")
 
         gemm_opt(x0, y0)
 
-        x1 = torch.randn(1024, 1024, device="cuda:1")
-        y1 = torch.randn(1024, 1024, device="cuda:1")
+        x1 = torch.randn(1024, 1024, device=f"{GPU_TYPE}:1")
+        y1 = torch.randn(1024, 1024, device=f"{GPU_TYPE}:1")
 
         gemm_opt(x1, y1)
         self.assertTrue(failed_guard is not None)
@@ -2826,7 +2833,7 @@ class CommonTemplate:
         )
 
     def test_conv2d_channels_last(self):
-        if self.device == "cuda":
+        if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv2d channels_last")
 
         m = torch.nn.Sequential(
@@ -2881,7 +2888,7 @@ class CommonTemplate:
         )
 
     def test_conv3d_channels_last(self):
-        if self.device == "cuda":
+        if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv3d channels_last")
 
         m = torch.nn.Sequential(
@@ -3439,7 +3446,7 @@ class CommonTemplate:
 
     @config.patch(fallback_random=True)
     def test_randn_with_dtype_and_device(self):
-        if self.device == "cuda":
+        if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu randn_with_dtype_and_device test")
 
         def fn(vectors):
@@ -3562,7 +3569,7 @@ class CommonTemplate:
     @with_tf32_off
     def test_batch_norm_2d_2(self):
         if self.device == "cpu":
-            raise unittest.SkipTest("requires CUDA")
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -3590,8 +3597,8 @@ class CommonTemplate:
                 self_2 = self.self_2(self_1)
                 return (self_2,)
 
-        inp = torch.randn((4, 64, 192, 256), dtype=torch.float32, device="cuda")
-        mod = Repro().cuda()
+        inp = torch.randn((4, 64, 192, 256), dtype=torch.float32, device=GPU_TYPE)
+        mod = Repro().to(device=GPU_TYPE)
         o1 = mod(inp)
         o2 = torch.compile(mod)(inp)
         self.assertEqual(o1, o2)
@@ -3816,7 +3823,7 @@ class CommonTemplate:
         for inp in (
             torch.randn(
                 [16, 16],
-                dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                dtype=torch.float16 if self.device == GPU_TYPE else torch.float32,
                 device=self.device,
             ),
             torch.randint(16, (16, 16), device=self.device),
@@ -4509,7 +4516,7 @@ class CommonTemplate:
     @skipIfRocm
     def test_cudnn_rnn(self):
         if self.device == "cpu":
-            raise unittest.SkipTest("requires CUDA")
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         def fn(
             a0,
@@ -4892,7 +4899,7 @@ class CommonTemplate:
 
     # The following 2 tests are meant to check the logic that drops
     # xmask from triton load/store if xnumel = 1
-    @requires_cuda()
+    @requires_gpu()
     def test_single_elem(self):
         def fn(a):
             b = a + 1
@@ -4900,7 +4907,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1),))
 
-    @requires_cuda()
+    @requires_gpu()
     def test_single_elem_indirect(self):
         def fn(a, b):
             c = a[b] + 1
@@ -4914,7 +4921,7 @@ class CommonTemplate:
     # This test is meant to check for issues from the logic
     # that drops xmask from trito load/store if XBLOCK divides xnumel
 
-    @requires_cuda()
+    @requires_gpu()
     def test_xblock_divides_xnumel(self):
         def fn(a):
             b = a + 1
@@ -6066,7 +6073,7 @@ class CommonTemplate:
     def test_philox_rand(self):
         if self.device == "cpu":
             raise unittest.SkipTest(
-                "functionalization of rng ops supported only on CUDA"
+                f"functionalization of rng ops supported only on {GPU_TYPE}"
             )
 
         @torch._dynamo.optimize("inductor")
@@ -6092,10 +6099,11 @@ class CommonTemplate:
             self.assertFalse(torch.allclose(a, b))
 
         check(torch.ones(1024, device=self.device, dtype=torch.float32))
-        self.assertEqual(torch.cuda._get_rng_state_offset(), 2048)
+        # Need comment: should we add "_get_rng_state_offset" to common device interface?
+        self.assertEqual(getattr(torch, self.device)._get_rng_state_offset(), 2048)
         # Check non-multiple of 4 numel
         check(torch.ones(3, device=self.device, dtype=torch.float32))
-        self.assertEqual(torch.cuda._get_rng_state_offset(), 8)
+        self.assertEqual(getattr(torch, self.device)._get_rng_state_offset(), 8)
 
     def test_randn_like_empty(self):
         class Model(torch.nn.Module):
@@ -6165,7 +6173,7 @@ class CommonTemplate:
         a1 = fn(x).clone()
         self.assertFalse(torch.allclose(a0, a1))
 
-    @requires_cuda()
+    @requires_gpu()
     def test_like_rands3(self):
         # rand_like with `device` which is different from `x.device`
         def test_like_rands_on_different_device(device1, device2):
@@ -6176,9 +6184,9 @@ class CommonTemplate:
             x = torch.ones(10, device=device1, dtype=torch.float32)
             return fn(x, device2).clone()
 
-        a0 = test_like_rands_on_different_device("cpu", "cuda")
-        a1 = test_like_rands_on_different_device("cuda", "cpu")
-        self.assertTrue(a0.device.type == "cuda")
+        a0 = test_like_rands_on_different_device("cpu", GPU_TYPE)
+        a1 = test_like_rands_on_different_device(GPU_TYPE, "cpu")
+        self.assertTrue(a0.device.type == GPU_TYPE)
         self.assertTrue(a1.device.type == "cpu")
 
     def test_max_pool2d_with_indices_backward(self):
@@ -6507,7 +6515,7 @@ class CommonTemplate:
         torch.manual_seed(1234)
         weight.grad.zero_()
         r2, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(ones))
-        if self.device == "cuda":
+        if self.device == GPU_TYPE:
             self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         g2 = weight.grad.clone()
@@ -6543,7 +6551,7 @@ class CommonTemplate:
             lambda: run(torch.randn([8, 32], device=self.device))
         )
 
-        if self.device == "cuda":
+        if self.device == GPU_TYPE:
             self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         expected_kernel = 4
@@ -6561,7 +6569,7 @@ class CommonTemplate:
             return random_tensor1, random_tensor2, random_tensor3
 
         _, source_codes = run_and_get_code(fn1)
-        if self.device == "cuda":
+        if self.device == GPU_TYPE:
             self.assertEqual(len(source_codes), 1)
             self.assertEqual(source_codes[0].count("async_compile.triton"), 1)
 
@@ -6965,7 +6973,7 @@ class CommonTemplate:
 
         for d in dtypes:
             inputs = (
-                rand_strided((2, 3), (3, 1), dtype=torch.float32, device="cuda"),
+                rand_strided((2, 3), (3, 1), dtype=torch.float32, device=GPU_TYPE),
                 rand_strided((), (), dtype=d, device="cpu"),
             )
             self.assertTrue(same(opt(*inputs), fn(*inputs)))
@@ -7024,7 +7032,7 @@ class CommonTemplate:
                     fn_compiled(inps)
 
                 # do an extra run to make sure we are deallocating on warmup and record
-                if self.device == "cuda":
+                if self.device == GPU_TYPE:
                     inps.extend(
                         [
                             torch.rand([5, 5]).to(self.device),
@@ -7053,7 +7061,7 @@ class CommonTemplate:
         self.common(fn, (x,))
 
     def test_kwargs(self):
-        if self.device == "cuda":
+        if self.device == GPU_TYPE:
             raise unittest.SkipTest("histogramdd only supports cpu")
 
         def fn(x, y):
@@ -7071,7 +7079,7 @@ class CommonTemplate:
     # Shape padding causes the inputs to all get specialized, so the codegen
     # test fails
     @expectedFailureCodegenDynamic
-    @requires_cuda()
+    @requires_gpu()
     @torch._inductor.config.patch("shape_padding", True)
     def test_shape_padding(self):
         dtypes = [
@@ -7082,7 +7090,7 @@ class CommonTemplate:
         b, m, n, k = 7, 11, 13, 15
 
         def gen(*shape, dtype=torch.float32):
-            return torch.randn(*shape, device="cuda", dtype=dtype) / k + 1.0
+            return torch.randn(*shape, device=GPU_TYPE, dtype=dtype) / k + 1.0
 
         for dtype in dtypes:
             x = gen(m, k, dtype=dtype)
@@ -7100,11 +7108,11 @@ class CommonTemplate:
             self.common(lambda x, y: torch.matmul(x, y), (x, y))
             self.common(lambda x, y, z: torch.baddbmm(z, x, y), (x, y, z))
 
-    @requires_cuda()
+    @requires_gpu()
     @torch._inductor.config.patch("layout_optimization", True)
     def test_inductor_layout_optimization_input_mutations(self):
         # channel dim must be > 64 for inductor to do layout optimization and use NHWC
-        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).cuda()
+        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(GPU_TYPE)
 
         def f(x):
             x.mul_(2)
@@ -7112,7 +7120,7 @@ class CommonTemplate:
             return out
 
         f_compiled = torch.compile(f)
-        x_ref = torch.rand(2, 3, 128, 128, device="cuda")
+        x_ref = torch.rand(2, 3, 128, 128, device=GPU_TYPE)
         x_test = x_ref.clone().detach()
         with torch.no_grad():
             out_ref = f(x_ref)
@@ -7136,7 +7144,7 @@ class CommonTemplate:
     def test_sqrt_dynamic_shapes(self):
         # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
         # TODO: support cuda path.
-        if self.device == "cuda":
+        if self.device == GPU_TYPE:
             raise unittest.SkipTest("sqrt dynamic shapes only supports cpu")
 
         class Model(torch.nn.Module):
@@ -7369,7 +7377,7 @@ class CommonTemplate:
         # expanded dim should not cause copy in require_stride_order
         assertGeneratedKernelCountEqual(self, 0)
 
-    @requires_cuda()
+    @requires_gpu()
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
@@ -7407,7 +7415,7 @@ class CommonTemplate:
             _scaled_dot_product_efficient_attention = None
             return (getitem,)
 
-        DEVICE = torch.device("cuda:0")
+        DEVICE = torch.device(f"{GPU_TYPE}:0")
         DTYPE = torch.float16
         B = 3
         H = 8
@@ -7430,7 +7438,7 @@ class CommonTemplate:
             rtol=1e4,
         )
 
-    @requires_cuda()
+    @requires_gpu()
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Does not support mem_eff_attention",
@@ -7465,10 +7473,10 @@ class CommonTemplate:
             _scaled_dot_product_efficient_attention = None
             return (getitem,)
 
-        query = torch.rand(8, 8, 16, 16, device="cuda")
-        key = torch.rand(8, 8, 15, 16, device="cuda")
-        value = torch.rand(8, 8, 15, 16, device="cuda")
-        bias = torch.rand(1, 1, 16, 15, device="cuda")
+        query = torch.rand(8, 8, 16, 16, device=GPU_TYPE)
+        key = torch.rand(8, 8, 15, 16, device=GPU_TYPE)
+        value = torch.rand(8, 8, 15, 16, device=GPU_TYPE)
+        bias = torch.rand(1, 1, 16, 15, device=GPU_TYPE)
         self.common(
             foo,
             (query, key, value, bias),
@@ -7476,7 +7484,7 @@ class CommonTemplate:
             rtol=1e4,
         )
 
-    @requires_cuda()
+    @requires_gpu()
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Does not support mem_eff_attention",
@@ -7487,7 +7495,7 @@ class CommonTemplate:
         class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.arg3_1 = torch.rand(1, 1, 16, 15, device="cuda")
+                self.arg3_1 = torch.rand(1, 1, 16, 15, device=GPU_TYPE)
 
             def forward(
                 self,
@@ -7520,9 +7528,9 @@ class CommonTemplate:
                 _scaled_dot_product_efficient_attention = None
                 return (getitem,)
 
-        query = torch.rand(8, 8, 16, 16, device="cuda")
-        key = torch.rand(8, 8, 15, 16, device="cuda")
-        value = torch.rand(8, 8, 15, 16, device="cuda")
+        query = torch.rand(8, 8, 16, 16, device=GPU_TYPE)
+        key = torch.rand(8, 8, 15, 16, device=GPU_TYPE)
+        value = torch.rand(8, 8, 15, 16, device=GPU_TYPE)
 
         mod = Mod()
         out_eager = mod(query, key, value)
@@ -7876,7 +7884,7 @@ class CommonTemplate:
     @skipIfRocm
     def test_scaled_dot_product_efficient_attention(self):
         if self.device == "cpu":
-            raise unittest.SkipTest("requires CUDA")
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         # The first two values should be the same, attention output
         # and logsumexp since dropout is not being set
@@ -8259,18 +8267,18 @@ if HAS_CPU and RUN_CPU and not torch.backends.mps.is_available():
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
-if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
+if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
 
-    class SweepInputsCudaTest(SweepInputs2, TestCase):
-        gen = InputGen(10, "cuda")
+    class SweepInputsGPUTest(SweepInputs2, TestCase):
+        gen = InputGen(10, GPU_TYPE)
 
-    SweepInputsCudaTest.populate()
+    SweepInputsGPUTest.populate()
 
-    class CudaTests(TestCase):
-        common = check_model_cuda
-        device = "cuda"
+    class GPUTests(TestCase):
+        common = check_model_gpu
+        device = GPU_TYPE
 
-    copy_tests(CommonTemplate, CudaTests, "cuda")
+    copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
     class TritonCodeGenTests(TestCase):
         from torch._inductor.triton_heuristics import CachingAutotuner
@@ -8337,7 +8345,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
             def fn(a: torch.Tensor) -> torch.Tensor:
                 return torch.sum(a)
 
-            kernels = self.get_kernels(fn, [torch.randn([256, 256], device="cuda")])
+            kernels = self.get_kernels(fn, [torch.randn([256, 256], device=GPU_TYPE)])
             self.assertTrue(len(kernels) == 2, "SUM should result in two kernels")
 
             # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
@@ -8360,7 +8368,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
                 return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
 
             fn_opt = torch._dynamo.optimize("inductor")(fn)
-            inps = [torch.randn(2, 4, 16, 16, device="cuda")]
+            inps = [torch.randn(2, 4, 16, 16, device=GPU_TYPE)]
             code = run_and_get_triton_code(fn_opt, *inps)
             self.assertTrue("to(tl.int32)" in code)
             self.assertFalse("to(tl.int64)" in code)
@@ -8369,7 +8377,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
 
         def test_optimize_indexing_dtype_with_constraint(self):
             def fn1(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-                x = torch.arange(0, b.shape[0], device="cuda")
+                x = torch.arange(0, b.shape[0], device=GPU_TYPE)
                 y = ((x + x) / 3).int()
                 return a[y.to(torch.int64)]
 
@@ -8380,8 +8388,8 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
             fn1_opt = torch._dynamo.optimize("inductor")(fn1)
             fn2_opt = torch._dynamo.optimize("inductor")(fn2)
 
-            a = torch.rand([100, 100], device="cuda")
-            b = torch.rand([100], device="cuda")
+            a = torch.rand([100, 100], device=GPU_TYPE)
+            b = torch.rand([100], device=GPU_TYPE)
             torch._dynamo.mark_dynamic(b, 0)
             inps = [a, b]
 
@@ -8448,7 +8456,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
                 return a, a.detach()
 
             fn_opt = torch._dynamo.optimize("inductor")(fn)
-            inp = torch.ones(2, 2, requires_grad=True, device="cuda")
+            inp = torch.ones(2, 2, requires_grad=True, device=GPU_TYPE)
             inp_ref = inp.clone().detach().requires_grad_(True)
             out_ref = fn(inp_ref)
             out = fn_opt(inp)
@@ -8495,7 +8503,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
             for dynamic in (False, True):
                 fn_opt = torch.compile(fn, dynamic=dynamic)
 
-                x = torch.randn(8, device="cuda")
+                x = torch.randn(8, device=GPU_TYPE)
                 code = run_and_get_triton_code(fn_opt, x)
                 self.assertEqual(fn_opt(x), fn(x), msg=f"{dynamic=}")
 
@@ -8516,11 +8524,11 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
             # aten.index_put
             for dynamic in (False, True):
                 fn_opt = torch.compile(fn, dynamic=dynamic)
-                a = torch.randn(1, 32, 32, 4, device="cuda")
-                z = torch.zeros((), dtype=torch.int64, device="cuda")
-                b = torch.randn(33, 1, device="cuda")
-                idx0 = torch.randint(32, (33,), device="cuda").view(33, 1, 1)
-                idx1 = torch.randint(32, (33,), device="cuda").view(33, 1)
+                a = torch.randn(1, 32, 32, 4, device=GPU_TYPE)
+                z = torch.zeros((), dtype=torch.int64, device=GPU_TYPE)
+                b = torch.randn(33, 1, device=GPU_TYPE)
+                idx0 = torch.randint(32, (33,), device=GPU_TYPE).view(33, 1, 1)
+                idx1 = torch.randint(32, (33,), device=GPU_TYPE).view(33, 1)
                 inps = (a.clone(), z, b, idx0, idx1)
                 code = run_and_get_triton_code(fn_opt, *inps)
 
@@ -8542,8 +8550,8 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
             K = 7
             fn_opt = torch._dynamo.optimize("inductor")(fn)
             inps = [
-                torch.randn(N, 1, K, device="cuda"),
-                torch.randn(1, N, K, device="cuda"),
+                torch.randn(N, 1, K, device=GPU_TYPE),
+                torch.randn(1, N, K, device=GPU_TYPE),
             ]
             code = run_and_get_triton_code(fn_opt, *inps)
             self.assertEqual(code.count("tl.store"), 1)
@@ -8551,19 +8559,19 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
-        def test_numpy_on_cuda(self):
+        def test_numpy_on_gpu(self):
             x = np.arange(10, dtype=np.float32)
 
             @torch.compile
             def fn(x):
                 return np.sin(x)
 
-            def fn_cuda(x):
-                with torch.device("cuda"):
+            def fn_gpu(x):
+                with torch.device(GPU_TYPE):
                     return fn(x)
 
-            r = fn_cuda(x)
-            code = run_and_get_triton_code(fn_cuda, x)
+            r = fn_gpu(x)
+            code = run_and_get_triton_code(fn_gpu, x)
             self.assertIn("tl.sin", code)
             self.assertEqual(type(r), np.ndarray)
             self.assertEqual(r, np.sin(x))
@@ -8609,12 +8617,12 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
         @patch.object(config, "joint_graph_constant_folding", False)
         def test_cant_optimize_compute(self):
             def ones():
-                return torch.ones([4], device="cuda")
+                return torch.ones([4], device=GPU_TYPE)
 
             def suffix(inp):
                 return (inp.to(torch.int64) + 1).to(torch.float64)
 
-            ten = torch.rand([4], device="cuda")
+            ten = torch.rand([4], device=GPU_TYPE)
 
             for foo in (
                 lambda x: x + 2147483657,
@@ -8638,7 +8646,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
         @patch.object(config, "joint_graph_constant_folding", False)
         def test_optimize_compute(self):
             def ones():
-                return torch.ones([4], device="cuda")
+                return torch.ones([4], device=GPU_TYPE)
 
             def suffix(inp):
                 return (inp.to(torch.int64) + 1).to(torch.float64)
@@ -8669,8 +8677,8 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
 
             N = 512
             inps = (
-                torch.randn(N, N, N, device="cuda").permute(2, 1, 0),
-                torch.randn(N, N, N, device="cuda").permute(1, 2, 0),
+                torch.randn(N, N, N, device=GPU_TYPE).permute(2, 1, 0),
+                torch.randn(N, N, N, device=GPU_TYPE).permute(1, 2, 0),
             )
             code = run_and_get_triton_code(f, *inps)
             lines = [line for line in code.split("\n") if "tl.load" in line]
@@ -8690,8 +8698,8 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
 
             N = 512
             inps = (
-                torch.randn(N, N, N, device="cuda").permute(2, 1, 0),
-                torch.randn(N, N, N, device="cuda").permute(1, 2, 0),
+                torch.randn(N, N, N, device=GPU_TYPE).permute(2, 1, 0),
+                torch.randn(N, N, N, device=GPU_TYPE).permute(1, 2, 0),
             )
             code = run_and_get_triton_code(f, *inps)
             lines = [line for line in code.split("\n") if "tl.load" in line]
@@ -8709,7 +8717,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
                 tmp = torch.arange(n, device=x.device)
                 return x[tmp] + 1
 
-            x = torch.randn(8, device="cuda")
+            x = torch.randn(8, device=GPU_TYPE)
             fn_opt = torch.compile(fn)
             code = run_and_get_triton_code(fn_opt, x, 8)
             # load should be masked
@@ -8731,28 +8739,36 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
                 nn.Linear(4, 4),
                 nn.LayerNorm(4),
                 nn.ReLU(),
-            ).cuda()
+            ).to(device=GPU_TYPE)
 
             @torch._dynamo.optimize("inductor")
             def fn3(x):
                 return mod(x)
 
             func_and_kernel_aten = [
-                (fn1, "triton_poi_fused_cos_sin", (torch.randn(8, device="cuda"),)),
-                (fn2, "triton_poi_fused__softmax", (torch.randn(4, 4, device="cuda"),)),
+                (fn1, "triton_poi_fused_cos_sin", (torch.randn(8, device=GPU_TYPE),)),
+                (
+                    fn2,
+                    "triton_poi_fused__softmax",
+                    (torch.randn(4, 4, device=GPU_TYPE),),
+                ),
                 (
                     fn3,
                     "triton_poi_fused_native_layer_norm_relu",
-                    (torch.randn(4, 4, device="cuda"),),
+                    (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]
             func_and_kernel_torch = [
-                (fn1, "triton_poi_fused_cos_sin", (torch.randn(8, device="cuda"),)),
-                (fn2, "triton_poi_fused_softmax", (torch.randn(4, 4, device="cuda"),)),
+                (fn1, "triton_poi_fused_cos_sin", (torch.randn(8, device=GPU_TYPE),)),
+                (
+                    fn2,
+                    "triton_poi_fused_softmax",
+                    (torch.randn(4, 4, device=GPU_TYPE),),
+                ),
                 (
                     fn3,
                     "triton_poi_fused_LayerNorm_ReLU",
-                    (torch.randn(4, 4, device="cuda"),),
+                    (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]
 
@@ -8780,7 +8796,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
                 x = x.relu()
                 return x
 
-            inp = torch.randn(4, 4, device="cuda")
+            inp = torch.randn(4, 4, device=GPU_TYPE)
             code = run_and_get_triton_code(fn, inp)
             fn(inp)
             self.assertTrue("start_graph" in code)
@@ -8881,10 +8897,10 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
                 res, (fwd_code, bwd_code) = run_and_get_code(run_with_backward)
                 return fwd_code, bwd_code
 
-            x = torch.rand(100, 16, 32, 32, requires_grad=True, device="cuda")
-            target = torch.rand(1, device="cuda")
+            x = torch.rand(100, 16, 32, 32, requires_grad=True, device=GPU_TYPE)
+            target = torch.rand(1, device=GPU_TYPE)
             args = [x, target]
-            model = Model().cuda()
+            model = Model().to(device=GPU_TYPE)
             opt_model = torch.compile(model)
             fwd_code, bwd_code = get_triton_codegen(opt_model, args)
 
@@ -8911,7 +8927,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
                 return self.gru(x)
 
         def test_rnn_compile_safe(self):
-            device = torch.device("cuda")
+            device = torch.device(GPU_TYPE)
             model = RNNTest.Model().to(device)
             model = torch._dynamo.optimize("inductor")(model)
             x = torch.rand(1024, 20, 16).to(device)
@@ -8923,7 +8939,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
             def f(x):
                 return torch.softmax(x, dim=-1)
 
-            x = torch.randn(2, 1024, device="cuda")
+            x = torch.randn(2, 1024, device=GPU_TYPE)
             ref = f(x)
             actual, (code,) = run_and_get_code(torch.compile(f), x)
             self.assertTrue(torch.allclose(ref, actual))
@@ -8942,7 +8958,7 @@ if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
             def f(x):
                 return torch.softmax(x, dim=-1)
 
-            x = torch.randn(2, 1024, device="cuda")
+            x = torch.randn(2, 1024, device=GPU_TYPE)
             x[0, 0] = float("nan")
             with self.assertRaises(AssertionError):
                 torch.compile(f)(x)
@@ -8998,5 +9014,5 @@ if HAS_CPU and RUN_CPU:
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")
