@@ -4333,7 +4333,14 @@ def scaled_dot_product_flash_attention_for_cpu(
     )
 
     output, attn = aten._scaled_dot_product_attention_math.default(
-        query, key, value, None, dropout_p, is_causal, None, scale=scale
+        query,
+        key,
+        value,
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        dropout_mask=None,
+        scale=scale,
     )
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via
