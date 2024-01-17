@@ -580,8 +580,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(onnx_program.model_proto)
 
     @pytorch_test_common.xfail(
-        "This is addressed in main branch of transformers."
-        "https://github.com/huggingface/transformers/pull/24941"
+        error_message="aten._local_scalar_dense.default",
+        reason="This is addressed in main branch of transformers."
+        "https://github.com/huggingface/transformers/pull/24941",
     )
     def test_fake_tensor_mode_huggingface_databricks_dolly_v2_3b(self):
         config = transformers.GPTNeoXConfig(
@@ -608,9 +609,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(onnx_program.model_proto)
 
     @pytorch_test_common.xfail(
-        "Not decorated with xfail because CI doesn't have enough memory to run and then fail."
-        "AssertionError: Mutating module attribute seq_len_cached during export."
-        "self.seq_len_cached = seq_len"
+        error_message="Mutating module attribute seq_len_cached during export."
     )
     def test_fake_tensor_mode_huggingface_tiiuae_falcon(self):
         config = transformers.FalconConfig()
