@@ -3,7 +3,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict, namedtuple
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 from sympy import Expr
 
@@ -748,7 +748,7 @@ def reinplace_inplaceable_ops(graph):
                 node, shared_view_nodes, copy_node=None
             )
 
-    replace_list: List[Tuple[Any, Any]] = []
+    replace_dict: Dict[torch.fx.Node, torch.fx.Node] = {}
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
             mutated_arg = node.args[inplaceable_op.mutated_arg]
@@ -775,7 +775,7 @@ def reinplace_inplaceable_ops(graph):
                         graph.erase_node(copy_node)
                     for user in node.users:
                         if user.target == operator.getitem and user.args[1] == arg:
-                            replace_list.append((user, mutated_arg))
+                            replace_dict[user] = mutated_arg
                 else:
                     tensors_to_clone.append(arg)
             kwargs = dict(node.kwargs)
@@ -795,8 +795,16 @@ def reinplace_inplaceable_ops(graph):
                     graph.erase_node(copy_node)
 
                 node.target = inplaceable_op.inplace_op
-    for node, replacement in replace_list:
-        node.replace_all_uses_with(replacement)
+
+    def get_replacement(node):
+        ori_node = node
+        while node in replace_dict:
+            node = replace_dict[node]
+        replace_dict[ori_node] = node
+        return node
+
+    for node in replace_dict.keys():
+        node.replace_all_uses_with(get_replacement(node))
         graph.erase_node(node)
 
 
