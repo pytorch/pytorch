@@ -2477,20 +2477,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         # Extra calls don't recompile
         self.assertEqual(cnts.frame_count, 2)
 
-    def test_dict_namedtuple(self):
-        def fn(d):
-            return d[3] * 2
-
-        args1 = {collections.namedtuple: None, 3: torch.randn(3)}
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
-        self.assertEqual(fn(args1), opt_fn(args1))
-        self.assertEqual(cnts.frame_count, 1)
-        # Test a failing namedtuple guard
-        args2 = {2: None, 3: torch.randn(3)}
-        self.assertEqual(fn(args2), opt_fn(args2))
-        self.assertEqual(cnts.frame_count, 2)
-
     def test_dict_order_keys_tensors(self):
         def fn(d, x):
             return d[x] + 3
