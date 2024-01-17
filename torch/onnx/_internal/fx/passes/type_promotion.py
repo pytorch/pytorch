@@ -8,7 +8,7 @@ import inspect
 import logging
 from types import ModuleType
 
-from typing import Any, Callable, Mapping, Optional, Sequence, Set
+from typing import Any, Callable, Mapping, Optional, Sequence, Set, Union
 
 import torch
 import torch._ops
@@ -24,7 +24,7 @@ from torch._prims_common import (
 from torch._refs import linalg as _linalg_refs, nn as _nn_refs, special as _special_refs
 from torch._refs.nn import functional as _functional_refs
 from torch._subclasses import fake_tensor
-from torch.fx.experimental import proxy_tensor
+from torch.fx.experimental import proxy_tensor, symbolic_shapes
 
 # Imported to resolve beartype issue when type checking node.Argument.
 from torch.fx.node import Node  # noqa: F401
@@ -70,14 +70,27 @@ class TypePromotionSnapshot:
 
 
 @_beartype.beartype
-def _fake_tensor_from_node_val(node: torch.fx.Node) -> fake_tensor.FakeTensor:
+def _fake_tensor_from_node_val(
+    node: torch.fx.Node,
+) -> Union[fake_tensor.FakeTensor, int, float, bool]:
     """Syntactic sugar for retrieving fake tensor from node.meta['val']."""
     val = node.meta.get("val", None)
-    if not isinstance(val, fake_tensor.FakeTensor):
+    if isinstance(val, fake_tensor.FakeTensor):
+        return val
+    elif isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        # For type promotion, the actual value should not matter. For example,
+        # we can return any `int` for a `torch.SymInt` node. Let's
+        # remove this assert and return dummy values (e.g., 0 for SymInt,
+        # 0.0 for SymFloat, and false for SymBool) if finding the hint
+        # becomes a problem.
+        assert symbolic_shapes.has_hint(
+            val.node
+        ), f"Cannot retrieve hint value from torch.Sym* node {node}."
+        return val.node.hint
+    else:
         raise RuntimeError(
             f"Cannot retrieve fake tensor from node {node}. Got type({type(val)}) instead."
         )
-    return val
 
 
 class TypePromotionRule(abc.ABC):
@@ -1684,7 +1697,9 @@ class InsertTypePromotion(_pass.Transform):
             diagnostic_context, module, type_promotion_table or TypePromotionTable()
         )
 
-    def _fetch_fake_args(self) -> Sequence[Optional[fake_tensor.FakeTensor]]:
+    def _fetch_fake_args(
+        self,
+    ) -> Sequence[Optional[Union[fake_tensor.FakeTensor, float, int, bool]]]:
         """Fetch fake args from fx graph.
 
         For each argument, try to fetch fake tensor from the matching placeholder node.
