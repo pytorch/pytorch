@@ -684,13 +684,11 @@ class GraphLowering(torch.fx.Interpreter):
                 # Custom operations that require preserving stride order
                 # which run through implicit fallback must constrain their
                 # arguments' fx strides
-                if torch._C.Tag.needs_fixed_layout in target.tags:
+                if torch._C.Tag.needs_fixed_stride_order in target.tags:
                     # We have to set the current args because call_function will immediately
                     # evaluate this lowering after creating the fallback, without evaluating
                     # the layout constraint
-                    args, kwargs = constrain_to_fx_strides(
-                        self.current_node, *args, **kwargs
-                    )
+                    args, kwargs = constrain_to_fx_strides(self.current_node, *args, **kwargs)
                     # Also register the layout constraint so when the fallback
                     # is used again, we can constrain the args to the same layout
                     layout_constraint = constrain_to_fx_strides
