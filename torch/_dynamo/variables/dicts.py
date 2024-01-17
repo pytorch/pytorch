@@ -72,6 +72,7 @@ def is_hashable(x):
                 variables.misc.NumpyVariable,
                 variables.NNModuleVariable,
                 variables.MethodWrapperVariable,
+                variables.TorchInGraphFunctionVariable,
             ),
         )
 
