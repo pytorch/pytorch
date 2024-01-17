@@ -3274,7 +3274,6 @@ dynamo_expected_failures = {
     "TestAOTAutograd.test_input_mutation_output_view_multiple",  # functorch/test_aotdispatch
     "TestUnflatten.test_unflatten_container_type",  # export/test_unflatten
     "TestDeserialize.test_tensor_tensor_list",  # export/test_serialize
-    "TestSerializeCustomClass.test_custom_class",  # export/test_serialize
     "SerDesExportTestExport.test_constrain_size_with_constrain_value_serdes",  # export/test_serdes
     "SerDesExportTestDynamismExpression.test_export_inline_constraints_serdes",  # export/test_serdes
     "SerDesExportTestExport.test_nn_module_stack_serdes",  # export/test_serdes
