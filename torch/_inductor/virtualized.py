@@ -1,3 +1,45 @@
+"""
+This file provides a number of "global" variables/handlers that are actually
+thread local and dynamically scoped, with Inductor patching them to various
+implementations depending on the situation.
+
+These handlers are interacted with in a fairly stylized way.  Typically,
+we will import V from this module::
+
+    from .virtualized import V
+
+Various handlers are accessible as attributes on this module; for example,
+you might access ``V.graph.sizevars.size_hint`` to resolve a size hint associated with
+a number.
+
+There are a few distinct usage patterns for virtualized global variables:
+
+1. Implicit argument passing.  Examples: ``V.current_node``, ``V.aot_compilation``.
+   Use ``V.set_current_node`` to change what the current node is while we're
+   executing some region of code, so code inside that region can query ``V.current_node``
+   to find out what it is.  This is often more convenient than manually threading
+   the current node as an argument through all call stacks.
+
+2. Per-compilation global state.  Examples: ``V.fake_mode``, ``V.graph``.  For a
+   given ``compile_fx`` invocation, these typically don't change, but they are
+   associated with some internal state so they cannot just be global functions.
+   We install these objects at the beginning of compilation and then you can
+   conveniently access them without having to pass them around.
+
+3. Alternate define-by-run interpretations.  Examples: ``V.ops``, ``V.kernel``.  Inductor's
+   IR is define-by-run: instead of maintaining explicit syntax data structures,
+   we instead represent loop bodies as callable functions, which internally invoke
+   operations defined on ``V.ops``.  To perform semantic analysis, print or code
+   generate these operations, we dynamically patch ``V.ops`` with an alternate
+   handler with the intended semantics and then run the callable function.
+   TODO: Define a parent class / protocol that defines all of the operations
+   V.ops is expected to support.
+
+It is typically an error to access a virtualized global without having installed
+an appropriate handler (you will get a NullHandler), although in some cases we
+provide a default implementation.
+"""
+
 from __future__ import annotations
 
 import itertools
