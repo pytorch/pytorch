@@ -690,9 +690,8 @@ test_xpu_bin(){
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  for xpu_case in "${BUILD_BIN_DIR}"/*{xpu,sycl}*
-  do
-    if [[ "$xpu_case" != *"*"* ]]; then
+  for xpu_case in "${BUILD_BIN_DIR}"/*{xpu,sycl}*; do
+    if [[ "$xpu_case" != *"*"* && "$xpu_case" != *.so && "$xpu_case" != *.a ]]; then
       case_name=$(basename "$xpu_case")
       echo "Testing ${case_name} ..."
       "$xpu_case" --gtest_output=xml:"$TEST_REPORTS_DIR"/"$case_name".xml
@@ -1035,14 +1034,17 @@ test_docs_test() {
 }
 
 test_executorch() {
+  echo "Install torchvision and torchaudio"
+  install_torchvision
+  install_torchaudio
+
   pushd /executorch
 
-  echo "Install torchvision and torchaudio"
-  # TODO(huydhn): Switch this to the pinned commits on ExecuTorch once they are
-  # there.  These libraries need to be built here, and not part of the Docker
-  # image because they require the target version of torch to be installed first
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git"
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git"
+  # NB: We need to build ExecuTorch runner here and not inside the Docker image
+  # because it depends on PyTorch
+  # shellcheck disable=SC1091
+  source .ci/scripts/utils.sh
+  build_executorch_runner "cmake"
 
   echo "Run ExecuTorch regression tests for some models"
   # NB: This is a sample model, more can be added here
