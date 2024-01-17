@@ -458,6 +458,9 @@ class cpp:
     # Use funsafe-math-optimizations when compiling
     enable_unsafe_math_opt_flag = False
 
+    # Use ffp-contract when compiling
+    enable_floating_point_contract_flag = False
+
 
 # config specific to codegen/triton.py
 class triton:
@@ -542,6 +545,9 @@ class triton:
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 16
+
+    # Generate code containing the newer tl.make_block_ptr() API for loads/store
+    use_block_ptr = False
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.

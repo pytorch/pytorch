@@ -1228,6 +1228,13 @@
     CompositeExplicitAutograd: copysign_out
   tags: pointwise
 
+- func: _lazy_clone(Tensor self) -> Tensor
+  # Like clone, but the copy takes place lazily, only if either the
+  # input or the output are written.
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: _lazy_clone
+
 - func: logical_not(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -4826,7 +4833,7 @@
   device_guard: False
   dispatch:
     CompositeImplicitAutograd: reshape_symint
-    CompositeImplicitAutogradNestedTensor: reshape_nested
+    CompositeImplicitAutogradNestedTensor: reshape_nested_symint
 
 - func: _reshape_copy(Tensor self, SymInt[] size) -> Tensor
   variants: function
@@ -5372,6 +5379,21 @@
     CompositeExplicitAutograd: slice_backward
   autogen: slice_backward.out
 
+# NB: This op exists to back the implementation of reverse view_funcs for various views (chunk,
+# slice.Tensor, split_with_sizes, et. al.). Currently, these are only used during fake-ification
+# of PT2 graph input subclass instances that are views. This means:
+# * This op shouldn't really show up in eager mode (so e.g. XLA shouldn't have to implement it)
+# * This op shouldn't show up in a PT2 graph (so a PT2 backend shouldn't have to implement it)
+# * A subclass will have to implement this to work in PT2 if a subclass view is used as a graph
+#   input AND the view utilizes this op in its inverse. The idea is that slice_inverse() is
+#   easier to implement for a subclass than as_strided()
+- func: slice_inverse(Tensor(a) self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: slice_inverse_symint
+
 - func: slice_scatter(Tensor self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor
   variants: function, method
   device_check: NoCheck
@@ -5379,7 +5401,7 @@
   dispatch:
     CompositeExplicitAutogradNonFunctional: slice_scatter
   autogen: slice_scatter.out
-  tags: core
+  tags: [core, view_copy]
 
 - func: select_scatter(Tensor self, Tensor src, int dim, SymInt index) -> Tensor
   variants: function, method
@@ -10131,12 +10153,14 @@
   variants: function
   dispatch:
     CUDA: _amp_foreach_non_finite_check_and_unscale_cuda_
+    CPU: _amp_foreach_non_finite_check_and_unscale_cpu_
   autogen: _amp_foreach_non_finite_check_and_unscale, _amp_foreach_non_finite_check_and_unscale.out
 
 - func: _amp_update_scale_(Tensor(a!) self, Tensor(b!) growth_tracker, Tensor found_inf, float scale_growth_factor, float scale_backoff_factor, int growth_interval) -> Tensor(a!)
   variants: function
   dispatch:
     CUDA: _amp_update_scale_cuda_
+    CPU: _amp_update_scale_cpu_
   autogen: _amp_update_scale, _amp_update_scale.out
 
     #- func: _cat(Tensor[] tensors, int dim=0) -> Tensor
@@ -15372,6 +15396,22 @@
   dispatch:
     CUDA: _fused_adamw_kernel_cuda_
   autogen: _fused_adamw.tensor_lr, _fused_adamw.tensor_lr_out
+
+- func: _fused_sgd_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] momentum_buffer_list, *, float weight_decay, float momentum, float lr, float dampening, bool nesterov, bool maximize, bool is_first_step, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
+  # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
+  variants: function
+  dispatch:
+    CUDA: _fused_sgd_kernel_cuda_
+  autogen: _fused_sgd, _fused_sgd.out
+
+- func: _fused_sgd_.tensor_lr(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] momentum_buffer_list, *, float weight_decay, float momentum, Tensor lr, float dampening, bool nesterov, bool maximize, bool is_first_step, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
+  # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
+  # but still skip the device check as the Tensor LR can be on CPU
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CUDA: _fused_sgd_kernel_cuda_
+  autogen: _fused_sgd.tensor_lr, _fused_sgd.tensor_lr_out
 
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()

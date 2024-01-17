@@ -383,11 +383,11 @@ void record_op(
       0u,
       api::utils::make_ivec3(v_input.extents()),
       0u,
-      api::utils::make_ivec4(overlay_region, /*reverse=*/true),
-      api::utils::make_ivec2({kernel_size[3], kernel_size[2]}),
-      api::utils::make_ivec2(stride, /*reverse=*/true),
-      api::utils::make_ivec2(padding, /*reverse=*/true),
-      api::utils::make_ivec2(dilation, /*reverse=*/true),
+      utils::make_ivec4(overlay_region, /*reverse=*/true),
+      utils::make_ivec2({kernel_size[3], kernel_size[2]}),
+      utils::make_ivec2(stride, /*reverse=*/true),
+      utils::make_ivec2(padding, /*reverse=*/true),
+      utils::make_ivec2(dilation, /*reverse=*/true),
       {output_min, output_max},
   };
   api::UniformParamsBuffer params(context, block);
@@ -468,11 +468,11 @@ void record_quantized_op(
       0u,
       api::utils::make_ivec3(v_input.extents()),
       0u,
-      api::utils::make_ivec4(overlay_region, /*reverse=*/true),
-      api::utils::make_ivec2({kernel_size[3], kernel_size[2]}),
-      api::utils::make_ivec2(stride, /*reverse=*/true),
-      api::utils::make_ivec2(padding, /*reverse=*/true),
-      api::utils::make_ivec2(dilation, /*reverse=*/true),
+      utils::make_ivec4(overlay_region, /*reverse=*/true),
+      utils::make_ivec2({kernel_size[3], kernel_size[2]}),
+      utils::make_ivec2(stride, /*reverse=*/true),
+      utils::make_ivec2(padding, /*reverse=*/true),
+      utils::make_ivec2(dilation, /*reverse=*/true),
       {output_min, output_max},
   };
   api::UniformParamsBuffer params(context, block);
@@ -530,8 +530,8 @@ vTensor pack_weights(
 
   vTensor v_weight{
       api::context(),
-      weight_rearranged.sizes(),
-      weight_arg.scalar_type(),
+      weight_rearranged.sizes().vec(),
+      convert_dtype(weight_rearranged.scalar_type()),
       api::StorageType::TEXTURE_2D,
   };
 
@@ -555,8 +555,8 @@ vTensor pack_biases(
 
   vTensor v_bias{
       api::context(),
-      bias_rearranged.sizes(),
-      bias_rearranged.scalar_type(),
+      bias_rearranged.sizes().vec(),
+      convert_dtype(bias_rearranged.scalar_type()),
       api::StorageType::TEXTURE_2D,
   };
 
@@ -903,7 +903,7 @@ Tensor conv1d(
           weight_out_channels,
           v_input_sizes[2] - kernel_size + 1,
       },
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
 
   const struct Block final {
@@ -1186,7 +1186,7 @@ Tensor run_conv2d_context_impl(
   vTensor v_output{
       context,
       output_size,
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
 
   if (quantized) {
