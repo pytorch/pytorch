@@ -3141,11 +3141,6 @@ dynamo_expected_failures = {
     "TestContentStoreCPU.test_repeated_hash_cpu",  # test_content_store
     "TestLazyTensor.test_tensor_ctr",  # lazy/test_ts_opinfo
     "TestAnalyze.test_trace_dependencies",  # test_package
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-=======
->>>>>>> ad50668e8bd ([codemod] markDynamoStrictTest batch 21)
     "TestProfilerTree.test_profiler_experimental_tree_with_memory",  # profiler/test_profiler_tree
     "TestProfilerTree.test_profiler_experimental_tree_with_memory_and_stack",  # profiler/test_profiler_tree
     "TestProfilerTree.test_profiler_experimental_tree_with_record_function",  # profiler/test_profiler_tree
@@ -3237,6 +3232,8 @@ dynamo_expected_failures = {
     "TestPartitioning.test_min_cut_partitioner_recomputable_ops",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_all_alias_types",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_set__and_data_mutation_good",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_set__and_data_mutation_bad",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_set__nop",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_dupe_arg_torture",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_mutation_noncontiguous",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_output_view_mutate_multiple",  # functorch/test_aotdispatch
@@ -3328,8 +3325,6 @@ dynamo_expected_failures = {
     "TestOpCPU.test_cat_cpu_bfloat16",  # test_jit_llga_fuser
     "TestOpCPU.test_identity_binary_cpu_bfloat16",  # test_jit_llga_fuser
     "TestOpCPU.test_identity_binary_cpu_float32",  # test_jit_llga_fuser
-<<<<<<< HEAD
-=======
     "TestTorch.test_type",  # test_torch
     "TestTorch.test_cuda_not_built",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint4x2",  # test_torch
@@ -3392,8 +3387,6 @@ dynamo_expected_failures = {
     "TestTorch.test_parsing_double",  # test_torch
     "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float32",  # test_torch
     "TestTorchDeviceTypeCPU.test_deterministic_empty_cpu_uint64",  # test_torch
->>>>>>> 41ef7455ae3 ([codemod] markDynamoStrictTest batch 21)
->>>>>>> ad50668e8bd ([codemod] markDynamoStrictTest batch 21)
 }
 
 dynamo_skips = {
