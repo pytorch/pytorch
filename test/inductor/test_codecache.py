@@ -187,7 +187,7 @@ class TestFxGraphCache(TestCase):
         for tensor sizes < int32.
         """
         if device == GPU_TYPE and not HAS_GPU:
-            raise unittest.SkipTest("requires GPU")
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires CUDA SM80 or later")
 
