@@ -401,9 +401,9 @@ bool check_dtypes_low_precision(sdp_params const& params, bool debug) {
 }
 
 bool check_runtime_enabled_cudnn(sdp_params const& params, bool debug) {
-  static std::once_flag supported_flag;
+  static c10::once_flag supported_flag;
   static bool supported = false;
-  std::call_once(supported_flag, []() {
+  c10::call_once(supported_flag, []() {
     supported = (c10::utils::check_env("TORCH_CUDNN_SDPA_ENABLED") == true);
   });
   if (!supported) {
@@ -430,7 +430,7 @@ bool check_cudnn_requires_grad(sdp_params const& params, bool debug) {
 } // namespace
 
 bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
-  
+
   // Define gate functions that determine if a flash kernel can be ran
   // Replace with std::to_array when we migrate to c++20
   constexpr auto general_constraints =
