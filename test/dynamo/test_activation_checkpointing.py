@@ -659,7 +659,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
     def test_compile_selective_checkpoint_partial_ctx_fn(self):
-        from functools import partial
         def selective_checkpointing_context_fn(no_recompute_list):
             return _pt2_selective_checkpoint_context_fn_gen(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
@@ -674,7 +673,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 x,
                 y,
                 use_reentrant=False,
-                context_fn=partial(selective_checkpointing_context_fn, [torch.ops.aten.mm.default]),
+                context_fn=functools.partial(selective_checkpointing_context_fn, [torch.ops.aten.mm.default]),
             )
 
         x = torch.randn(4, 4, requires_grad=True, device="cuda")
