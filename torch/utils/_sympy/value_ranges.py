@@ -10,6 +10,7 @@ from typing import Union, Dict, Optional, SupportsFloat
 
 from torch._prims_common import dtype_to_type
 from .interp import sympy_interp
+from .functions import Round, RoundDecimal
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +79,14 @@ class ValueRanges:
         object.__setattr__(self, "is_bool", isinstance(lower, SympyBoolean))
         assert isinstance(upper, SympyBoolean) == self.is_bool
 
+    def boolify(self):
+        if self.is_bool:
+            return self
+        elif self == ValueRanges.unknown():
+            return ValueRanges.unknown_bool()
+        else:
+            raise AssertionError(f"not bool like {self}")
+
     def __contains__(self, x):
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
@@ -117,6 +126,10 @@ class ValueRanges:
     @classmethod
     def unknown(cls):
         return cls(-sympy.oo, sympy.oo)
+
+    @classmethod
+    def unknown_bool(cls):
+        return cls(sympy.false, sympy.true)
 
     @classmethod
     def wrap(cls, arg):
@@ -214,6 +227,7 @@ class SymPyValueRangeAnalysis:
     @staticmethod
     def not_(a):
         a = ValueRanges.wrap(a)
+        a = a.boolify()
         assert a.is_bool
         return ValueRanges.decreasing_map(a, sympy.Not)
 
@@ -443,6 +457,19 @@ class SymPyValueRangeAnalysis:
     def ceil(cls, x):
         return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.ceiling)
 
+    @classmethod
+    def round(cls, number, ndigits=None):
+        if ndigits is None:
+            fn = Round
+        else:
+            assert ndigits.is_singleton()
+            ndigits = ndigits.lower
+            # We can't use functools.partial here since sympy doesn't support keyword arguments, but we have to bind
+            # the second parameter.
+            fn = lambda number: RoundDecimal(number, ndigits)  # noqa: E731
+
+        return ValueRanges.increasing_map(number, fn)
+
     # It's used in some models on symints
     @staticmethod
     def sqrt(x):
@@ -455,7 +482,7 @@ class SymPyValueRangeAnalysis:
     def where(a, b, c):
         b = ValueRanges.wrap(b)
         c = ValueRanges.wrap(c)
-        assert a.is_bool
+        a = a.boolify()
         assert b.is_bool == c.is_bool
         if b.is_bool:
             return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
@@ -467,7 +494,7 @@ class SymPyValueRangeAnalysis:
     # and defer the analysis to piecewise
     @staticmethod
     def expr_cond_pair(a, b):
-        assert b.is_bool, f"expect cond_expr's ValueRange to be a boolean range but got {b}"
+        b = b.boolify()
         return (a, b)
 
     # piecewise function can be used to convert a SymBool to SymInt:
@@ -485,6 +512,58 @@ class SymPyValueRangeAnalysis:
                 else:
                     init_range = init_range | expr_range
         return init_range
+
+    @staticmethod
+    def cos(x):
+        # TODO: We should tighten value ranges
+        # If input range span is pi + 2*pi*k, then output range is (-1, 1)
+        # otherwise the minimum of the value of the function on the extremes
+        return ValueRanges(-1.0, 1.0)
+
+    @staticmethod
+    def cosh(x):
+        x = ValueRanges.wrap(x)
+        if x.lower > 0:
+            return ValueRanges.increasing_map(x, sympy.cosh)
+        elif x.upper < 0:
+            return ValueRanges.decreasing_map(x, sympy.cosh)
+        return ValueRanges(0.0, sympy.oo)
+
+    @staticmethod
+    def sin(x):
+        # TODO: We should tighten value ranges
+        # See details on cos
+        return ValueRanges(-1.0, 1.0)
+
+    @staticmethod
+    def sinh(x):
+        return ValueRanges.increasing_map(x, sympy.sinh)
+
+    @staticmethod
+    def tan(x):
+        return ValueRanges(-sympy.oo, sympy.oo)
+
+    @staticmethod
+    def tanh(x):
+        return ValueRanges.increasing_map(x, sympy.tanh)
+
+    @staticmethod
+    def asin(x):
+        x = ValueRanges.wrap(x)
+        if -1 <= x.lower and x.upper <= 1:
+            return ValueRanges.increasing_map(x, sympy.asin)
+        return ValueRanges.unknown()
+
+    @staticmethod
+    def acos(x):
+        x = ValueRanges.wrap(x)
+        if -1 <= x.lower and x.upper <= 1:
+            return ValueRanges.decreasing_map(x, sympy.acos)
+        return ValueRanges.unknown()
+
+    @staticmethod
+    def atan(x):
+        return ValueRanges.increasing_map(x, sympy.atan)
 
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):

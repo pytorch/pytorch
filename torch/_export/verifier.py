@@ -130,14 +130,7 @@ class Verifier(metaclass=_VerifierMeta):
             # TODO Enforce type checking in the constructor.
             return
         self._check_graph_module(ep.graph_module)
-        try:
-            _verify_exported_program_signature(ep)
-        except SpecViolationError as e:
-            # TODO Remove this branch.
-            if ep.dialect == "EDGE":  # !!! Don't change this allowlist. !!!
-                pass
-            else:
-                raise e
+        _verify_exported_program_signature(ep)
 
     @final
     def _check_graph_module(self, gm: torch.fx.GraphModule) -> None:
@@ -158,7 +151,20 @@ class Verifier(metaclass=_VerifierMeta):
                 return ret
 
             # TODO Remove this allowlist.
-            _allowed_torch_functions = (torch.autograd.grad_mode.set_grad_enabled,)
+            _allowed_torch_functions = (
+                torch.autograd.grad_mode.set_grad_enabled,
+                torch.sym_int,
+                torch.sym_ite,
+                torch.sym_max,
+                torch.sym_min,
+                torch.sym_not,
+                torch.sym_sqrt,
+                # TODO (tmanlaibaatar)
+                # Predispatch export is able to contain autograd ops.
+                # These will be modeled as HOO later
+                torch._C._set_grad_enabled
+
+            )
 
             if not isinstance(op, _allowed_op_types()):
                 if op not in _allowed_builtin_ops() and op not in _allowed_torch_functions:

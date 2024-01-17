@@ -245,6 +245,12 @@ class ViewAndMutationMeta:
     # to reset the grad mode to its pre-graph value prior to calling aot_autograd.
     grad_enabled_mutation: Optional[bool] = None
 
+    # Keeps track of whether `torch.use_deterministic_algorithms` was turned on
+    # when the forward was run. If deterministic mode was turned off during the
+    # forward, but is turned on during the backward call, then an error is
+    # raised
+    deterministic: Optional[bool] = None
+
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
@@ -636,6 +642,12 @@ class AOTConfig:
     aot_autograd_arg_pos_to_source: Optional[List[Source]] = None
     inference_compiler: Optional[Callable] = None
     enable_log: bool = True
+    # this is always false outside of export.
+    pre_dispatch: bool = False
+
+    def __post_init__(self):
+        if self.pre_dispatch:
+            assert self.is_export, "Can only have pre_dispatch IR for export."
 
 
 SubclassTracingInfo = collections.namedtuple(

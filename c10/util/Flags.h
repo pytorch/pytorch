@@ -30,9 +30,9 @@
  * general - that will allow Python to run without wrong flags.
  */
 
+#include <c10/macros/Export.h>
 #include <string>
 
-#include <c10/macros/Macros.h>
 #include <c10/util/Registry.h>
 
 namespace c10 {

@@ -11,7 +11,7 @@ import zipfile
 
 import torch
 import torch._dynamo as torchdynamo
-from torch.export import export, save, load
+from torch.export import export, save, load, Dim
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
@@ -40,26 +40,31 @@ from torch.testing._internal.common_utils import (
 
 
 def get_filtered_export_db_tests():
-    unsupported_test_names = {
-        "dynamic_shape_constructor",  # 'NoneType' object has no attribute 'from_tensor'
-        "dictionary",  # Graph output must be a tuple()
-        "fn_with_kwargs",  # export doesn't support kwargs yet
-        "scalar_output",  # Tracing through 'f' must produce a single graph
-        "user_input_mutation",  # TODO(zhxchen17) Support serializing user inputs mutation.
-    }
-
     return [
         (name, case)
         for name, case in all_examples().items()
-        if (
-            case.support_level == SupportLevel.SUPPORTED and
-            name not in unsupported_test_names
-        )
+        if case.support_level == SupportLevel.SUPPORTED
     ]
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
+    def test_predispatch_export_with_autograd_op(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                with torch.enable_grad():
+                    return x + x
+
+        with torch.no_grad():
+            from torch.export._trace import _export
+            ep = _export(Foo(), (torch.ones(10),), pre_dispatch=True)
+
+        with self.assertRaisesRegex(SerializeError, "Failed serializing node _set_grad_enabled"):
+            torch.export.save(ep, io.BytesIO())
+
     def test_serialize_multiple_returns_from_node(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -471,6 +476,15 @@ class TestDeserialize(TestCase):
         inputs = (torch.rand(8, 8, 8), torch.rand(8, 8, 8), torch.rand(8, 8, 4))
         self.check_graph(MyModule(), inputs)
 
+    def test_sym_ite(self):
+        def f(x):
+            b = x.shape[0] == 5
+            ret = torch.sym_ite(b, x.shape[0], x.shape[1])
+            return ret
+
+        dynamic_shapes = {'x': {0: Dim("dim0"), 1: Dim("dim1")}}
+        self.check_graph(f, (torch.ones(4, 5),), dynamic_shapes=dynamic_shapes)
+
     @parametrize(
         "name,case",
         get_filtered_export_db_tests(),
@@ -532,8 +546,8 @@ class TestSchemaVersioning(TestCase):
         ep = export(f, (torch.randn(1, 3),))
 
         serialized_artifact = ExportedProgramSerializer().serialize(ep)
-        serialized_artifact.exported_program.schema_version = -1
-        with self.assertRaisesRegex(SerializeError, r"Serialized schema version -1 does not match our current"):
+        serialized_artifact.exported_program.schema_version.major = -1
+        with self.assertRaisesRegex(SerializeError, r"Serialized schema version .* does not match our current"):
             ExportedProgramDeserializer().deserialize(serialized_artifact)
 
 
@@ -564,6 +578,21 @@ class TestOpVersioning(TestCase):
 
 unittest.expectedFailure(
     TestDeserialize.test_exportdb_supported_case_tensor_setattr
+)
+
+# We didn't set up kwargs input yet
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_fn_with_kwargs
+)
+
+# Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph.
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_scalar_output
+)
+
+# TODO(zhxchen17) Support serializing user inputs mutation.
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_user_input_mutation
 )
 
 
@@ -648,9 +677,9 @@ class TestSaveLoad(TestCase):
 
             # Modify the version
             with zipfile.ZipFile(f, 'a') as zipf:
-                zipf.writestr('version', "-1")
+                zipf.writestr('version', "-1.1")
 
-            with self.assertRaisesRegex(RuntimeError, r"Serialized version -1 does not match our current"):
+            with self.assertRaisesRegex(RuntimeError, r"Serialized version .* does not match our current"):
                 f.seek(0)
                 load(f)
 

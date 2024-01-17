@@ -679,6 +679,24 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    @requires_cuda()
+    def test_multi_device(self):
+        def test_foreach_add(a0, a1, b0, b1):
+            return torch._foreach_add([a0, a1], [b0, b1])
+
+        inps = [
+            torch.ones(10, 10, device="cuda"),
+            torch.ones(20, 20, device="cpu"),
+            torch.zeros(10, 10, device="cuda"),
+            torch.zeros(20, 20, device="cpu"),
+        ]
+
+        out_eager = test_foreach_add(*inps)
+        out_compiled = torch.compile(test_foreach_add)(*inps)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

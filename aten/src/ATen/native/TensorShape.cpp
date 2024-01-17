@@ -151,6 +151,7 @@
 #include <ATen/ops/slice.h>
 #include <ATen/ops/slice_backward_native.h>
 #include <ATen/ops/slice_copy_native.h>
+#include <ATen/ops/slice_inverse_native.h>
 #include <ATen/ops/slice_native.h>
 #include <ATen/ops/slice_scatter_native.h>
 #include <ATen/ops/sparse_coo_tensor.h>
@@ -372,6 +373,7 @@ Tensor& set_(Tensor& result, Storage source) {
   return result.set_(std::move(source), 0, new_size, {});
 }
 
+
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
 Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
   checkSetStorage(result, std::move(storage), storage_offset, size, stride);
@@ -524,10 +526,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   Tensor new_values = values.expand(broadcast_dense_sizes).repeat_interleave(nnz_factor, 0);
   Tensor new_indices = indices.new_empty(new_indices_size);
   if (!broadcast_sizes.empty()) {
-    // ones(broadcast_sizes).nonzero() is equivalent to
-    // product(map(arange, broadcast_sizes)) but avoids creating
-    // auxilary arange tensors
-    Tensor broadcast_indices = at::native::new_ones(indices, broadcast_sizes).nonzero().transpose(0, 1).tile(nnz);
+    Tensor broadcast_indices = at::sparse::full_coo_indices(broadcast_sizes, indices.options()).tile(nnz);
     new_indices.narrow(0, 0, sparse_extra_ndim).copy_(broadcast_indices.narrow(0, 0, sparse_extra_ndim));
     for (size_t i=0; i<broadcast_dims.size(); i++) {
       int64_t j=broadcast_dims[i];
@@ -1502,8 +1501,7 @@ Tensor permute_sparse_coo(const Tensor& self, IntArrayRef dims) {
       }
       return old_values.permute(values_perm);
     }();
-
-  const auto is_coalesced = self.is_coalesced() && (dims[0] == 0);
+  const auto is_coalesced = self.is_coalesced() && (dims.empty() || dims[0] == 0);
   // TODO: apply `is_coalesced ||= new_values.size(0) < 2`.
   return _sparse_coo_tensor_with_dims_and_tensors(
        sparse_ndim, dense_ndim, new_sizes, new_indices, new_values, self.options(), is_coalesced);
@@ -1827,7 +1825,11 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
   }
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.sym_sizes()[dim];
-  if (size < -index || size <= index) {
+  // Note: `size < -index` is not equivalent to `size <= -1 - index` if index is INT64_MIN
+  // For std::numeric_limits<int64_t>::min() result of unary minus is undefined by the standard
+  // but in practice is equal to self. On the other hand, indexing wraping is valid for all
+  // negative int64_t values, as x[INT64_MIN] is the same as x[INT64_MAX]
+  if (size <= -1 - index || size <= index) {
     if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
       TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
                      self.sizes(), " at dimension ", self.names()[dim]);
@@ -2556,6 +2558,17 @@ Tensor slice(
   }
   namedinference::propagate_names(result, self);
   return result;
+}
+
+Tensor slice_inverse_symint(
+    const Tensor& self,
+    const Tensor& base,
+    int64_t /* dim */,
+    c10::optional<SymInt> /* start */,
+    c10::optional<SymInt> /* end */,
+    SymInt /* step */) {
+  // assume self has enough to storage to be viewed with base's metadata
+  return self.as_strided_symint(base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
 }
 
 Tensor slice_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {

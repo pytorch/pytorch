@@ -22,18 +22,7 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   GraphExecutorState getDebugState() override;
   ~ProfilingGraphExecutorImpl() override = default;
 
-  void debugFlushCompilationCache() {
-    std::lock_guard<std::mutex> lock(compile_mutex);
-    pr_.reset();
-    fallback_plan_.reset();
-    profiling_plan_.reset();
-    optimized_plan_.reset();
-    // prevent memory leaks
-    fallback_functions_.clear();
-    remaining_bailout_depth_.reset();
-    // TODO - would be nice to have it initialized in subsequent use
-    fusion_strategy_ = getFusionStrategy();
-  }
+  void debugFlushCompilationCache();
 
   bool isOptimized() const override {
     return optimized_plan_.has_value();
@@ -54,6 +43,9 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
       std::shared_ptr<Graph>& graph,
       size_t remaining_bailout_depth);
   void runFinalOptimizations(std::shared_ptr<Graph>& graph);
+
+  void clearTheGraphCompilationIntermediateGraphs();
+
   std::unique_ptr<ProfilingRecord> pr_;
   c10::optional<ExecutionPlan>
       profiling_plan_; // plan to run in order to profiling the code
@@ -72,6 +64,10 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   // of the GraphExecutor and only shared with InterpreterState
   std::vector<std::unique_ptr<Function>> fallback_functions_;
   c10::optional<size_t> remaining_bailout_depth_;
+  // The time the optimized_plan_ is created.
+  int32_t time_optimized_plan_created_ = 0;
+  // Has the extra memory used by the graph for profiling is released?
+  bool is_graph_extra_memory_released_ = false;
 };
 
 } // namespace torch::jit

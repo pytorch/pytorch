@@ -55,8 +55,7 @@ def save_model_states(state_dict, sparsified_model_dump_path, save_file_name, sp
     model_state = state_dict['state_dict']
     model_state_path = os.path.join(folder_name, folder_str, save_file_name)
 
-    if not os.path.exists(os.path.dirname(model_state_path)):
-        os.makedirs(os.path.dirname(model_state_path))
+    os.makedirs(os.path.dirname(model_state_path), exist_ok=True)
     torch.save(model_state, model_state_path)
 
     if zip:
