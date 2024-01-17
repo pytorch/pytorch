@@ -2833,7 +2833,6 @@ dynamo_expected_failures = {
     "TestGradNewOnesOverride.test_newones",  # test_overrides
     "TestTorchFunctionOverride.test_precedence_semantics",  # test_overrides
     "TestNamedTupleAPI.test_namedtuple_return",  # test_namedtuple_return_api
-    "TestAnalyze.test_trace_dependencies",  # test_package
     "TestVmapOperatorsLegacy.test_contiguous",  # test_legacy_vmap
     "TestVmapAPILegacy.test_accepts_nested_inputs",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nested_out_dims",  # test_legacy_vmap
@@ -7587,8 +7586,6 @@ dynamo_skips = {
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int16",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int8",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_uint8",  # known py38 fail
-    "TestRepackage.test_repackage_import_indirectly_via_parent_module",  # known py311 fail
-    "TestPackageScript.test_load_shared_tensors_repackaged",  # known py311 fail
     "TestFX.test_assert",  # known py38 fail
     "TestFX.test_annotations_empty_tuple",  # known py38 fail
     "TestDataLoaderPersistentWorkers.test_early_exit",  # known py38 fail
