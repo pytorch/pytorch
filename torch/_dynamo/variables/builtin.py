@@ -1281,16 +1281,11 @@ class BuiltinVariable(VariableTracker):
             if isinstance(obj, variables.TensorVariable):
                 from .builder import wrap_fx_proxy
 
-<<<<<<< HEAD
                 # Note - this distributed check is a hack - we rely on the fact that we know
                 # in our current distributed approaches (DDP, FSDP, etc) that we never do this
                 # mutation in a way that introduce a new leaf from a non leaf or vice versa.
                 # TODO(voz): Teach aot_autograd to handle this case properly.
                 if name == "requires_grad" and not config.trace_distributed:
-=======
-                if name == "requires_grad" and not config.trace_distributed:
-                    # TODO(voz): Make it work properly for all cases
->>>>>>> 9bf46de1f9d (FSDP initial)
                     unimplemented(
                         "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
                         "the middle of the graph, which aot_autograd does not currently know how to handle. "
@@ -1338,14 +1333,10 @@ class BuiltinVariable(VariableTracker):
                         {},
                     )
                     _lower_version_count_by_1(obj.as_proxy().node.meta["example_value"])
-<<<<<<< HEAD
                     # This handles options prop, guards and ends with a clone
                     # Step 4 - Annoying metadata transfer - this used to replace_all
                     # but as that is gone, we need to remap from the output result to the new obj
                     # in-place on the VT.
-=======
-                    # Step 4 - Annoying metadata transfer
->>>>>>> 9bf46de1f9d (FSDP initial)
                     obj.proxy = out.proxy
                     obj.dtype = out.dtype
                     obj.device = out.device
