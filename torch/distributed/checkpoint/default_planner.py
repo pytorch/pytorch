@@ -40,6 +40,7 @@ from torch.distributed.checkpoint.planner_helpers import (
     _create_default_metadata_only_plan,
     _create_read_items,
     _create_write_items,
+    _init_state_dict,
 )
 from torch.distributed.checkpoint.utils import find_state_dict_object
 
@@ -162,6 +163,7 @@ class DefaultLoadPlanner(LoadPlanner):
         metadata: Metadata,
         is_coordinator: bool,
     ) -> None:
+        _init_state_dict(state_dict)
         self.original_state_dict = state_dict
 
         if self.flatten_sharded_tensors:
