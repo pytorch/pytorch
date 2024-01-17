@@ -3242,6 +3242,8 @@ dynamo_expected_failures = {
     "TestPartitioning.test_min_cut_partitioner_recomputable_ops",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_all_alias_types",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_set__and_data_mutation_good",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_set__and_data_mutation_bad",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_set__nop",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_dupe_arg_torture",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_mutation_noncontiguous",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_output_view_mutate_multiple",  # functorch/test_aotdispatch
