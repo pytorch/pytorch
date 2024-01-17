@@ -4,7 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
-from typing import Dict
+from typing import Dict, Tuple
 
 import torch
 import torch._export
@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     IS_WINDOWS,
+    skipIfRocm,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -479,6 +480,7 @@ class AOTInductorTestsTemplate:
         not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
         "FP8 is only supported on H100+",
     )
+    @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     def test_fp8(self):
         class Model(torch.nn.Module):
             def __init__(self, dtype):
@@ -763,6 +765,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (a, b)
         self.check_model(Model(), example_inputs, constraints=constraints)
 
+    @skipIfRocm
     @requires_multigpu()
     def test_replicate_on_devices(self):
         if self.device != "cuda":
@@ -817,6 +820,7 @@ class AOTInductorTestsTemplate:
 
         self.check_model(M(), ({"x": torch.ones(5), "y": torch.ones(5)},))
 
+    @skipIfRocm
     @requires_multigpu()
     def test_non_default_cuda_device(self):
         if self.device != "cuda":
@@ -1106,6 +1110,7 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(model, example_inputs)
 
+    @skipIfRocm
     @common_utils.parametrize("grid_type", [1, 2, 3])
     @common_utils.parametrize("num_dims", [1, 2])
     @common_utils.parametrize("dynamic", [False, True])
@@ -1351,6 +1356,27 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), inputs)
 
+    def test_index_put_fallback(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self,
+                self_tensor: torch.Tensor,
+                indices: Tuple[torch.Tensor],
+                values: torch.Tensor,
+            ):
+                return torch.index_put(self_tensor, indices, values, accumulate=True)
+
+        inputs = (
+            torch.ones(4, device=self.device, dtype=torch.int64),
+            (torch.tensor([1, 1, 2, 2], device=self.device, dtype=torch.bool),),
+            torch.ones(4, device=self.device, dtype=torch.int64),
+        )
+
+        self.check_model(Model(), inputs)
+
     def test_convolution(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1527,6 +1553,28 @@ class AOTInductorTestsTemplate:
 
         self.check_model(MyModule(), (torch.randn(2, 3, device=self.device),))
 
+    def test_model_modified_weights(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        M = 16
+        N = 10
+        K = 128
+        batch = 8
+        example_inputs = (torch.randn(2, M, K, device=self.device),)
+        model = Model(N, K, self.device)
+        self.check_model(model, example_inputs)
+        # Update model weights, after this AOTInductor should re-generate model.so
+        # if weights are stored in the model.so
+        model.weight += 1
+        self.check_model(model, example_inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1568,6 +1616,20 @@ def fail_minimal_arrayref_interface(is_skip=False):
     )
 
 
+def fail_cuda(is_skip=False):
+    return TestFailure(
+        ("abi_compatible_cuda", "non_abi_compatible_cuda"),
+        is_skip=is_skip,
+    )
+
+
+def fail_abi_compatible_cuda(is_skip=False):
+    return TestFailure(
+        ("abi_compatible_cuda",),
+        is_skip=is_skip,
+    )
+
+
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
     "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
@@ -1582,6 +1644,7 @@ CPU_TEST_FAILURES = {
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_model_modified_weights": fail_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
@@ -1591,16 +1654,46 @@ CPU_TEST_FAILURES = {
     # the test segfaults
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
-    # Minimal arrayref interface doesn't support bfloat16 yet.
-    "test_sdpa": fail_minimal_arrayref_interface(is_skip=True),
-    # Minimal arrayref interface doesn't support bfloat16 yet.
-    "test_sdpa_2": fail_minimal_arrayref_interface(is_skip=True),
+    "test_index_put_fallback": fail_stack_allocation(is_skip=True),
+    # C++ compile error, need for aoti_torch___scaled_dot_product_flash_attention_for_cpu
+    "test_sdpa": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_sdpa_2": fail_with_and_without_stack_allocation(is_skip=True),
     # error: could not find s0
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
     "test_simple_dynamic": fail_with_and_without_stack_allocation(),
 }
+
+CUDA_TEST_FAILURES = {
+    # test_failures, xfail by default, set is_skip=True to skip
+    "test_dup_unbacked_sym_decl": fail_abi_compatible_cuda(),
+    # will add .item support later
+    "test_dynamic_scalar": fail_abi_compatible_cuda(),
+    "test_normal_functional": fail_abi_compatible_cuda(),
+    # There is a double-free issue which will be fixed in another PR
+    "test_repeat_output": fail_abi_compatible_cuda(is_skip=True),
+}
+
+if TEST_WITH_ROCM:
+    CUDA_TEST_FAILURES.update(
+        {
+            "test_dup_unbacked_sym_decl": fail_cuda(is_skip=True),
+            "test_addmm_multiple_dynamic": fail_cuda(is_skip=True),
+            "test_bmm_multiple_dynamic": fail_cuda(is_skip=True),
+            "test_convolution": fail_cuda(is_skip=True),
+            "test_large": fail_cuda(is_skip=True),
+            "test_missing_cubin": fail_cuda(is_skip=True),
+            "test_multi_device": fail_cuda(is_skip=True),
+            "test_poi_multiple_dynamic": fail_cuda(is_skip=True),
+            "test_sdpa": fail_cuda(is_skip=True),
+            "test_sdpa_2": fail_cuda(is_skip=True),
+            "test_dynamic_smem_above_default_limit": fail_cuda(is_skip=True),
+            "test_foreach_multiple_dynamic": fail_cuda(is_skip=True),
+            "test_reuse_kernel": fail_cuda(is_skip=True),
+            "test_zero_grid_with_unbacked_symbols": fail_cuda(is_skip=True),
+        }
+    )
 
 if not IS_FBCODE:
     # The following tests look like they pass in both pytest and unittest (xml
@@ -1622,6 +1715,9 @@ if not IS_FBCODE:
             "test_empty_graph": fail_minimal_arrayref_interface(is_skip=True),
             "test_large": fail_minimal_arrayref_interface(is_skip=True),
             "test_missing_output": fail_minimal_arrayref_interface(is_skip=True),
+            "test_model_modified_weights": fail_minimal_arrayref_interface(
+                is_skip=True
+            ),
             "test_output_path_1": fail_minimal_arrayref_interface(is_skip=True),
             "test_repeat_interleave": fail_minimal_arrayref_interface(is_skip=True),
             "test_return_constant": fail_minimal_arrayref_interface(is_skip=True),
@@ -1694,15 +1790,7 @@ copy_tests(
     AOTInductorTestsTemplate,
     AOTInductorTestABICompatibleCuda,
     "abi_compatible_cuda",
-    # test_failures, xfail by default, set is_skip=True to skip
-    {
-        "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cuda",)),
-        # will add .item support later
-        "test_dynamic_scalar": TestFailure(("abi_compatible_cuda",)),
-        "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
-        # There is a double-free issue which will be fixed in another PR
-        "test_repeat_output": TestFailure(("abi_compatible_cuda",), is_skip=True),
-    },
+    CUDA_TEST_FAILURES,
 )
 
 
@@ -1748,6 +1836,7 @@ copy_tests(
     AOTInductorTestsTemplate,
     AOTInductorTestNonABICompatibleCuda,
     "non_abi_compatible_cuda",
+    CUDA_TEST_FAILURES,
 )
 
 
@@ -1755,5 +1844,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA and not TEST_WITH_ROCM:
+    if HAS_CUDA:
         run_tests(needs="filelock")

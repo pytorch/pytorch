@@ -272,6 +272,40 @@ inline bool check_for_attn_mask(sdp_params const& params, bool debug) {
   return true;
 }
 
+inline bool check_attn_mask_shape(sdp_params const& params, bool debug) {
+  auto attn_mask = params.attn_mask;
+  if (!attn_mask.has_value()) {
+    return true;
+  }
+  if (attn_mask.value().requires_grad()) {
+    return false;
+  }
+  auto batchSize = params.query.sym_size(0);
+  auto qSize = params.query.sym_size(2);
+  auto kvSize = params.key.sym_size(2);
+  auto num_head = params.query.sym_size(1);
+  if (attn_mask.value().sym_size(-2) != qSize && attn_mask.value().sym_size(-2) != 1) {
+    return false;
+  }
+  if (attn_mask.value().sym_size(-1) != kvSize && attn_mask.value().sym_size(-1) != 1) {
+    return false;
+  }
+  if (attn_mask.value().dim() == 2) {
+    return true;
+  } else if (attn_mask.value().dim() == 4) {
+    if ((attn_mask.value().sym_size(0) == 1 || attn_mask.value().sym_size(0) == batchSize)
+        && (attn_mask.value().sym_size(1) == 1 || attn_mask.value().sym_size(1) == num_head)) {
+      return true;
+    }
+  }
+  if (debug) {
+    TORCH_WARN("Please use the following attn mask shapes: ",
+        "2d - ({Q_seq_len, 1}  x {KV_seq_len, 1}); ",
+        "4d - ({Batch, 1} x {Num_heads, 1} x {Q_seq_len, 1}  x {KV_seq_len, 1})");
+  }
+  return false;
+}
+
 inline bool check_tensor_shapes(sdp_params const& params, bool debug) {
   auto query_dim = params.query.dim();
   if (!(query_dim == params.key.dim() && query_dim == params.value.dim() &&
@@ -397,6 +431,7 @@ inline bool check_nonzero_sequence_lengths_dense(sdp_params const& params, bool 
   return true;
 }
 
+template<bool ignore_singleton_dim>
 inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool debug) {
   // The stride checking for NestedTensors is done within the kernel
   // And .contiguous will be called if needed
@@ -405,6 +440,13 @@ inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool 
   // fused_attention have stride 1
   bool qkv_strides_equal_1 = params.query.sym_stride(-1) == 1 &&
       params.key.sym_stride(-1) == 1 && params.value.sym_stride(-1) == 1;
+
+  // https://github.com/pytorch/pytorch/issues/116333
+  // If the head_dim is size 1 the stride won't matter, but we
+  // check this condition before padding the head_dim to 1
+  if (ignore_singleton_dim){
+    qkv_strides_equal_1 = qkv_strides_equal_1 || params.query.sym_size(-1) == 1;
+  }
   bool mask_stride_equal_1 = params.attn_mask.has_value()
       ? params.attn_mask.value().sym_stride(-1) == 1
       : true;
