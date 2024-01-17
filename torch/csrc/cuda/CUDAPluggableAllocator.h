@@ -56,12 +56,13 @@ struct CUDAPluggableAllocator
   void set_record_stream_fn(
       std::function<void(void* ptr, cudaStream_t stream)> record_stream_fn);
 
-  void set_begin_allocate_stream_to_pool(
-      std::function<void(int, cudaStream_t, c10::cuda::MempoolId_t)>
+  void set_begin_allocate_to_pool(
+      std::function<
+          void(int, c10::cuda::MempoolId_t, std::function<bool(cudaStream_t)>)>
           capture_begin_fn);
 
-  void set_end_allocate_stream_to_pool_fn(
-      std::function<void(int, cudaStream_t)> capture_about_to_end_fn);
+  void set_end_allocate_to_pool_fn(
+      std::function<void(int, c10::cuda::MempoolId_t)> capture_about_to_end_fn);
 
   void set_release_pool(
       std::function<void(int, c10::cuda::MempoolId_t)> capture_destroy_fn);
@@ -88,11 +89,12 @@ struct CUDAPluggableAllocator
   void resetAccumulatedStats(int device) override;
   void resetPeakStats(int device) override;
   c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot() override;
-  void beginAllocateStreamToPool(
+  void beginAllocateToPool(
       int device,
-      cudaStream_t stream,
-      c10::cuda::MempoolId_t mempool_id) override;
-  void endAllocateStreamToPool(int device, cudaStream_t stream) override;
+      c10::cuda::MempoolId_t mempool_id,
+      std::function<bool(cudaStream_t)>) override;
+  void endAllocateToPool(int device, c10::cuda::MempoolId_t mempool_id)
+      override;
   void releasePool(int device, c10::cuda::MempoolId_t mempool_id) override;
   std::shared_ptr<void> getIpcDevPtr(std::string handle) override;
   void recordHistory(
@@ -120,6 +122,7 @@ struct CUDAPluggableAllocator
       cudaStream_t stream,
       bool p2p_enabled) override;
   std::string name() override;
+  void copy_data(void* dest, const void* src, std::size_t count) const final;
 
  protected:
   std::function<void*(size_t, int, cudaStream_t)> alloc_fn_;
@@ -129,9 +132,10 @@ struct CUDAPluggableAllocator
   std::function<void(double, int)> memory_fraction_fn_;
   std::function<void*(void*, size_t*)> base_alloc_fn_;
   std::function<void(void* ptr, cudaStream_t stream)> record_stream_fn_;
-  std::function<void(int, cudaStream_t, c10::cuda::MempoolId_t)>
-      begin_allocate_stream_to_pool_fn_;
-  std::function<void(int, cudaStream_t)> end_allocate_stream_to_pool_fn_;
+  std::function<
+      void(int, c10::cuda::MempoolId_t, std::function<bool(cudaStream_t)>)>
+      begin_allocate_to_pool_fn_;
+  std::function<void(int, c10::cuda::MempoolId_t)> end_allocate_to_pool_fn_;
   std::function<void(int, c10::cuda::MempoolId_t)> relase_pool_fn_;
   std::mutex allocator_mutex_;
   // We do the bookeeping here in order to simplify custom allocators

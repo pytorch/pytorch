@@ -6,6 +6,8 @@ import inspect
 import sys
 from typing import Any, Dict, List, Optional
 
+import torch
+
 from torch._subclasses.fake_tensor import is_fake
 
 from .. import variables
@@ -19,7 +21,6 @@ from ..utils import istype, iter_contains, specialize_symnode
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
-
 # Note: [Adding a new supported class the keys of ConstDictVarialble]
 # You'll need to add it to:
 # - `is_hashable_python_var` in this file
@@ -32,13 +33,14 @@ def is_hashable_python_var(x):
 
     # Note: Keep me in sync with is_hashable!
     # Even better, we should have a map of functions connecting the two
-    from ..allowed_functions import is_builtin_callable
+    from ..trace_rules import is_builtin_callable, is_numpy
 
     return (
         ConstantVariable.is_literal(x)
-        or isinstance(x, (Tensor, enum.Enum))
+        or isinstance(x, (Tensor, enum.Enum, type, torch.nn.Module))
         or is_builtin_callable(x)
         or (isinstance(x, tuple) and all(is_hashable_python_var(e) for e in x))
+        or is_numpy(x)
     )
 
 
@@ -60,6 +62,10 @@ def is_hashable(x):
                 variables.SymNodeVariable,
                 variables.ConstantVariable,
                 variables.EnumVariable,
+                variables.user_defined.UserDefinedClassVariable,
+                variables.misc.SkipFilesVariable,
+                variables.misc.NumpyVariable,
+                variables.NNModuleVariable,
             ),
         )
 
@@ -85,6 +91,8 @@ class ConstDictVariable(VariableTracker):
             elif isinstance(self.vt, variables.TupleVariable):
                 Hashable = ConstDictVariable._HashableTracker
                 x = tuple(Hashable(e).underlying_value for e in self.vt.items)
+            elif isinstance(self.vt, variables.NNModuleVariable):
+                return self.vt.module
             else:
                 x = self.vt.as_python_constant()
             return x

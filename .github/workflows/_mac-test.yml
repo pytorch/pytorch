@@ -58,6 +58,10 @@ jobs:
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PR_BODY: ${{ github.event.pull_request.body }}
     steps:
+      - name: Print runner OS/HW info
+        run: |
+          sysctl machdep.cpu.brand_string kern.osproductversion
+
       - name: Clean up leftover processes on MacOS pet runner
         continue-on-error: true
         run: |
@@ -73,8 +77,6 @@ jobs:
             echo "Cleaning up ${dir}"
             rm -rf "${dir}"
           done
-
-
 
       - name: Clean up disk space before running MacOS workflow
         uses: pytorch/test-infra/.github/actions/check-disk-space@main

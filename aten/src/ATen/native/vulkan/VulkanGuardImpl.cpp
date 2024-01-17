@@ -4,9 +4,12 @@
 namespace at {
 namespace detail {
 
-struct VulkanGuardImpl final : public c10::impl::DeviceGuardImplInterface {
-  VulkanGuardImpl() {}
+namespace {
 
+struct VulkanGuardImpl final : public c10::impl::DeviceGuardImplInterface {
+  VulkanGuardImpl() = default;
+
+  // NOLINTNEXTLINE
   explicit VulkanGuardImpl(DeviceType t) {
     TORCH_INTERNAL_ASSERT(t == DeviceType::Vulkan);
   }
@@ -25,14 +28,17 @@ struct VulkanGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     // no-op
   }
   void uncheckedSetDevice(Device d) const noexcept override {
+    (void)d;
     // no-op
   }
   Stream getStream(Device d) const noexcept override {
+    (void)d;
     // no-op
     return Stream(Stream::DEFAULT, Device(DeviceType::Vulkan, -1));
   }
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
+    (void)s;
     // no-op
     return Stream(Stream::DEFAULT, Device(DeviceType::Vulkan, -1));
   }
@@ -46,17 +52,30 @@ struct VulkanGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const Stream& stream,
       const DeviceIndex device_index,
       const EventFlag flag) const override {
+    (void)event;
+    (void)stream;
+    (void)device_index;
+    (void)flag;
     TORCH_CHECK(false, "VULKAN backend doesn't support events.");
   }
   void block(void* event, const Stream& stream) const override {
+    (void)event;
+    (void)stream;
     TORCH_CHECK(false, "VULKAN backend doesn't support events.")
   }
   bool queryEvent(void* event) const override {
+    (void)event;
     TORCH_CHECK(false, "VULKAN backend doesn't support events.")
   }
   void destroyEvent(void* event, const DeviceIndex device_index)
-      const noexcept override {}
+      const noexcept override {
+    (void)event;
+    (void)device_index;
+    // no-op
+  }
 };
+
+} // namespace
 
 C10_REGISTER_GUARD_IMPL(Vulkan, VulkanGuardImpl);
 

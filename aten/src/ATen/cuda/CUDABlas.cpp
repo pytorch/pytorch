@@ -745,8 +745,11 @@ void gemm_and_bias(
     epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
 #endif
   }
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
+
+  if (bias != nullptr) {
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
+  }
 
   CuBlasLtMatrixLayout Adesc(abcType, m, k, mat1_ld, transpose_mat1);
   CuBlasLtMatrixLayout Bdesc(abcType, k, n, mat2_ld, transpose_mat2);
@@ -1102,10 +1105,10 @@ void int8_gemm(
 #endif // (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
 
 // ROCm 5.6 hipblas matches the const Dtype *A API, but prior hipblas does not.
-#if defined(USE_ROCM) && ROCM_VERSION <= 50600
-#define ROCM_CONST_BUG
+#if defined(USE_ROCM) && ROCM_VERSION < 50600
+#define ROCM_CONST_BUG_CAST(Type, Input) const_cast<Type>(reinterpret_cast<const Type>(Input))
 #else
-#define ROCM_CONST_BUG const
+#define ROCM_CONST_BUG_CAST(Type, Input) reinterpret_cast<const Type>(Input)
 #endif
 
 template <>
@@ -1131,7 +1134,7 @@ void trsm<c10::complex<float>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<float>)) {
       m,
       n,
       reinterpret_cast<const cuComplex*>(alpha),
-      reinterpret_cast<ROCM_CONST_BUG cuComplex*>(A),
+      ROCM_CONST_BUG_CAST(cuComplex*, A),
       lda,
       reinterpret_cast<cuComplex*>(B),
       ldb));
@@ -1148,7 +1151,7 @@ void trsm<c10::complex<double>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<double>)) {
       m,
       n,
       reinterpret_cast<const cuDoubleComplex*>(alpha),
-      reinterpret_cast<ROCM_CONST_BUG cuDoubleComplex*>(A),
+      ROCM_CONST_BUG_CAST(cuDoubleComplex*, A),
       lda,
       reinterpret_cast<cuDoubleComplex*>(B),
       ldb));
