@@ -4,7 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
-from typing import Dict
+from typing import Dict, Tuple
 
 import torch
 import torch._export
@@ -1356,6 +1356,27 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), inputs)
 
+    def test_index_put_fallback(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self,
+                self_tensor: torch.Tensor,
+                indices: Tuple[torch.Tensor],
+                values: torch.Tensor,
+            ):
+                return torch.index_put(self_tensor, indices, values, accumulate=True)
+
+        inputs = (
+            torch.ones(4, device=self.device, dtype=torch.int64),
+            (torch.tensor([1, 1, 2, 2], device=self.device, dtype=torch.bool),),
+            torch.ones(4, device=self.device, dtype=torch.int64),
+        )
+
+        self.check_model(Model(), inputs)
+
     def test_convolution(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1633,6 +1654,7 @@ CPU_TEST_FAILURES = {
     # the test segfaults
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
+    "test_index_put_fallback": fail_stack_allocation(is_skip=True),
     # C++ compile error, need for aoti_torch___scaled_dot_product_flash_attention_for_cpu
     "test_sdpa": fail_with_and_without_stack_allocation(is_skip=True),
     "test_sdpa_2": fail_with_and_without_stack_allocation(is_skip=True),

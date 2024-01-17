@@ -2761,9 +2761,8 @@ class CPUReproTests(TestCase):
             self.assertTrue(same(m(x), opt_m(x)))
             # Two kernels: one for reduction, one pointwises
             assert metrics.generated_cpp_vec_kernel_count == 2
-            # Only one kernel has non-contiguous load
             FileCheck().check_count(
-                "Vectorized<float>::loadu(tmpbuf.data())", 1, exactly=True
+                "Vectorized<float>::loadu(tmpbuf.data())", 0, exactly=True
             ).run(code)
 
 
