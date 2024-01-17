@@ -76,10 +76,9 @@ class FSDPParam:
     _unsharded_param_data: torch.Tensor  # 1D
     _unsharded_param_view: torch.Tensor  # 1D
     _sharded_param_data: torch.Tensor  # 1D
-    _sharded_param_view: torch.Tensor  # ND
     _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
-    _sharded_param: nn.Parameter
-    _unsharded_param: nn.Parameter
+    _sharded_param: nn.Parameter  # ND
+    _unsharded_param: nn.Parameter  # ND
     _cpu_sharded_grad: torch.Tensor  # pinned memory
     # For splitting autograd-computed gradient
     unsharded_chunk_numels: List[int]
@@ -266,10 +265,10 @@ class FSDPParam:
             else:  # no padding
                 self.padded_unsharded_chunk_numels.append([chunk_numel])
                 self.is_padding_mask.append([False])
-        self._sharded_param_view = self._sharded_param_data[: self._sharded_size[0]]
+        sharded_param_view = self._sharded_param_data[: self._sharded_size[0]]
         self._sharded_param_data = self._sharded_param_data.view(-1)
         self._sharded_param = nn.Parameter(
-            self.to_sharded_dtensor(self._sharded_param_view)
+            self.to_sharded_dtensor(sharded_param_view)
         )
         self._sharded_param.requires_grad_(param.requires_grad)
         self._unsharded_param_data = param_data  # HACK: for `to_sharded()`
@@ -278,9 +277,8 @@ class FSDPParam:
         else:
             assert self._sharded_param.device == torch.device("cpu")
             self._cpu_sharded_grad = torch.empty_like(
-                self._sharded_param_view
+                self._sharded_param._local_tensor
             ).pin_memory()  # no padding
-        setattr(param, FSDP_SHARDED, True)
         setattr(self._sharded_param, FSDP_SHARDED, True)
         self.to_sharded()
 
@@ -320,7 +318,6 @@ class FSDPParam:
             self.padded_unsharded_numel * self.unsharded_param_data_dtype.itemsize
         )
         unsafe_free_storage(self._unsharded_param_data)
-        setattr(self._unsharded_param, FSDP_SHARDED, True)
 
     def to_sharded(self) -> None:
         self._setattr_on_modules(self.sharded_param)
@@ -341,7 +338,7 @@ class FSDPParam:
             dim=0,
         )
         # NOTE: This constructs a new Tensor object.
-        self._sharded_post_forward_param_data = chunks[shard_rank].clone()
+        self._sharded_post_forward_param_data = chunks[shard_rank].clone().view(-1)
         self._setattr_on_modules(self._sharded_post_forward_param_data, as_param=False)
         # Do not strip padding here since this resharded parameter should never
         # be used in any ops and is only meant as a temporary storage
