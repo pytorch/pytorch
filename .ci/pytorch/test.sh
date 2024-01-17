@@ -283,6 +283,7 @@ test_dynamo_shard() {
       test_python_dispatch \
       test_fx \
       test_custom_ops \
+      export/test_db \
       functorch/test_dims \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
