@@ -73,7 +73,7 @@ class LazyVariableTracker(VariableTracker):
 
     def __str__(self):
         if self.is_realized():
-            return type(self.unwrap()).__str__(self.unwrap())
+            return self.unwrap().__str__()
         return VariableTracker.__str__(self.unwrap())
 
     def __getattr__(self, item):
