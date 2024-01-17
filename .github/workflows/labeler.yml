@@ -1,7 +1,21 @@
 name: Labeler
 
 on:
-- pull_request_target
+  # We need pull_request_target to be able to add lables to PRs from forks.
+  # Only allow pull_request_target when targeting main, not some historical branch.
+  #
+  # Make sure to don't introduce explicit checking out and installing/running
+  # untrusted user code into this workflow!
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [main]
+    paths-ignore: [.github]
+
+  # To allow testing PRs that change workflows.
+  # May be triggered together with pull_request_target, it's OK.
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths: [.github]
 
 jobs:
   triage:
