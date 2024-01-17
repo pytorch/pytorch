@@ -17,7 +17,7 @@ except ModuleNotFoundError:
 import torch
 import torch._logging
 from torch._guards import compile_context, CompileContext, CompileId, tracing
-from torch._utils_internal import log_compilation_event, signpost_event
+from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
@@ -26,7 +26,6 @@ from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.utils._traceback import format_traceback_short
 
 from . import config, exc
-from .allowed_functions import is_allowed, is_numpy
 from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
@@ -62,6 +61,7 @@ from .hooks import Hooks
 from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator, SpeculationLog
+from .trace_rules import is_numpy
 from .types import BytecodeHook
 from .utils import (
     CleanupManager,
@@ -77,6 +77,7 @@ from .utils import (
     istype,
     LazyString,
     orig_code_map,
+    record_compilation_metrics,
     reset_graph_break_dup_checker,
     setup_compile_debug,
     troubleshooting_url,
@@ -179,7 +180,9 @@ def has_tensor_in_frame(frame):
     for co_name in frame.f_code.co_names:
         if co_name in frame.f_globals:
             obj = frame.f_globals[co_name]
-            if is_allowed(obj):
+            if isinstance(obj, types.ModuleType) and (
+                obj.__name__.startswith("torch.") or obj is torch
+            ):
                 return True
             # ... or a global import of numpy.*
             if np and config.trace_numpy and (obj is np or is_numpy(obj)):
@@ -219,7 +222,7 @@ def has_tensor_in_frame(frame):
         elif istype(obj, (str, int, float, type(None), bool)):
             seen_ids[obj_id] = False
             return seen_ids[obj_id]
-        elif is_namedtuple(obj):
+        elif is_namedtuple(obj) and hasattr(obj, "_fields"):
             seen_ids[obj_id] = any(has_tensor(getattr(obj, v)) for v in obj._fields)
             return seen_ids[obj_id]
         else:
@@ -451,6 +454,7 @@ def _compile(
     )
 
     output: Optional[OutputGraph] = None
+    tracer: Optional[InstructionTranslator] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
     fail_type: Optional[str] = None
@@ -462,6 +466,7 @@ def _compile(
     @preserve_global_state
     def transform(instructions, code_options):
         nonlocal output
+        nonlocal tracer
         speculation_log.restart()
         tracer = InstructionTranslator(
             instructions,
@@ -666,64 +671,64 @@ def _compile(
                 e.__traceback__
             ) from None
         finally:
-            if config.log_compilation_metrics:
-                from .utils import curr_frame
+            if tracer:
+                tracer.output.local_scope = {}
 
-                frame_key = str(curr_frame)
-                if (
-                    fail_reason is None
-                    and output is not None
-                    and frame_key in frame_phase_timing
-                ):
-                    guard_count = len(output.guards)
-                    shape_env_guard_count = len(output.shape_env.guards)
-                    graph_op_count = output.count_calls()
-                    graph_node_count = len(output.graph.nodes)
-                    graph_input_count = len(output.placeholders)
-                    entire_frame_compile_time = frame_phase_timing[frame_key].get(
-                        "entire_frame_compile", None
-                    )
-                    backend_compile_time = frame_phase_timing[frame_key].get(
-                        "backend_compile", None
-                    )
-                    non_compliant_ops = {
-                        op.__qualname__ for op in output.non_compliant_ops
-                    }
-                    compliant_custom_ops = {
-                        op.__qualname__ for op in output.compliant_custom_ops
-                    }
-                else:
-                    guard_count = None
-                    shape_env_guard_count = None
-                    graph_op_count = None
-                    graph_node_count = None
-                    graph_input_count = None
-                    entire_frame_compile_time = None
-                    backend_compile_time = None
-                    non_compliant_ops = set({})
-                    compliant_custom_ops = set({})
-                metrics = CompilationMetrics(
-                    frame_key,
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                    cache_size.num_cache_entries_with_same_id_matched_objs,
-                    cache_size.num_cache_entries,
-                    guard_count,
-                    shape_env_guard_count,
-                    graph_op_count,
-                    graph_node_count,
-                    graph_input_count,
-                    entire_frame_compile_time,
-                    backend_compile_time,
-                    fail_type,
-                    fail_reason,
-                    fail_user_frame_filename,
-                    fail_user_frame_lineno,
-                    non_compliant_ops,
-                    compliant_custom_ops,
+            from .utils import curr_frame
+
+            frame_key = str(curr_frame)
+            if (
+                fail_reason is None
+                and output is not None
+                and frame_key in frame_phase_timing
+            ):
+                guard_count = len(output.guards)
+                shape_env_guard_count = len(output.shape_env.guards)
+                graph_op_count = output.count_calls()
+                graph_node_count = len(output.graph.nodes)
+                graph_input_count = len(output.placeholders)
+                entire_frame_compile_time = frame_phase_timing[frame_key].get(
+                    "entire_frame_compile", None
                 )
-                log_compilation_event(metrics)
+                backend_compile_time = frame_phase_timing[frame_key].get(
+                    "backend_compile", None
+                )
+                non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
+                compliant_custom_ops = {
+                    op.__qualname__ for op in output.compliant_custom_ops
+                }
+            else:
+                guard_count = None
+                shape_env_guard_count = None
+                graph_op_count = None
+                graph_node_count = None
+                graph_input_count = None
+                entire_frame_compile_time = None
+                backend_compile_time = None
+                non_compliant_ops = set({})
+                compliant_custom_ops = set({})
+            metrics = CompilationMetrics(
+                frame_key,
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                cache_size.num_cache_entries_with_same_id_matched_objs,
+                cache_size.num_cache_entries,
+                guard_count,
+                shape_env_guard_count,
+                graph_op_count,
+                graph_node_count,
+                graph_input_count,
+                entire_frame_compile_time,
+                backend_compile_time,
+                fail_type,
+                fail_reason,
+                fail_user_frame_filename,
+                fail_user_frame_lineno,
+                non_compliant_ops,
+                compliant_custom_ops,
+            )
+            record_compilation_metrics(metrics)
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):

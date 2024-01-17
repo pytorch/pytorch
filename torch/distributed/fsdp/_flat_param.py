@@ -31,11 +31,15 @@ from torch.distributed.fsdp._common_utils import (
     _FSDPDeviceHandle,
     _named_parameters_with_duplicates,
     _no_dispatch_record_stream,
-    _same_storage_as_data_ptr,
     _set_fsdp_flattened,
     HandleTrainingState,
 )
-from torch.distributed.utils import _alloc_storage, _free_storage, _p_assert
+from torch.distributed.utils import (
+    _alloc_storage,
+    _data_ptr_allocated,
+    _free_storage,
+    _p_assert,
+)
 from torch.nn.parameter import _ParameterMeta  # type: ignore[attr-defined]
 from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
 
@@ -904,16 +908,17 @@ class FlatParamHandle:
                 flat_param.storage_offset() == 0,
                 "The `FlatParameter` is not the sole occupant of its storage",
             )
-            orig_storage = flat_param._typed_storage()
             sharded_flat_param, numel_padded = FlatParamHandle._get_shard(
                 flat_param, self.rank, self.world_size
             )
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                allocated = flat_param._typed_storage()._size() > 0
+                if allocated:
+                    flat_param._typed_storage()._resize_(0)
             flat_param.set_(sharded_flat_param)  # type: ignore[call-overload]
             start_idx = sharded_flat_param.numel() * self.rank
             end_idx = sharded_flat_param.numel() * (self.rank + 1) - 1  # inclusive
             self._init_shard_metadata(numel_padded, start_idx, end_idx)
-            if orig_storage._size() > 0:
-                orig_storage._resize_(0)
         if self._use_orig_params:
             self._use_sharded_views()
 
@@ -1142,8 +1147,7 @@ class FlatParamHandle:
     @torch.no_grad()
     def init_flat_param_attributes(self) -> None:
         """
-        Initialize some attributes on the handle's ``FlatParameter``.
-
+        This initializes some attributes on the handle's ``FlatParameter``.
         This should be called during lazy initialization since it requires the
         parameter to be on the compute device if not offloading to CPU and we
         want to give users the chance to move the parameter appropriately after
@@ -1309,9 +1313,8 @@ class FlatParamHandle:
         if not self.uses_sharded_strategy:
             return False
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
-        already_unsharded = (
-            unsharded_flat_param._typed_storage()._size()
-            == unsharded_flat_param.numel()
+        already_unsharded = _same_storage_size(
+            unsharded_flat_param, unsharded_flat_param.numel()
         )
         return not already_unsharded
 
@@ -1419,11 +1422,9 @@ class FlatParamHandle:
         This is a view into the *padded* unsharded flat parameter.
         """
         unsharded_size = self.flat_param._unpadded_unsharded_size
-        self.flat_param.data = padded_unsharded_flat_param[
-            : unsharded_size.numel()
-        ].view(
-            unsharded_size
-        )  # this `.view()` is not autograd visible
+        flat_param_part = padded_unsharded_flat_param[: unsharded_size.numel()]
+        # slicing [:] is not visible to autograd because of .data
+        self.flat_param.data = flat_param_part
         in_forward = self._training_state == HandleTrainingState.FORWARD
         in_pre_backward = self._training_state == HandleTrainingState.BACKWARD_PRE
         if self._use_orig_params:
@@ -1667,12 +1668,8 @@ class FlatParamHandle:
         # padded unsharded flat parameter as expected
         # NOTE: This check is not strictly needed for correctness but is a
         # useful sanity check since the tensor should only be used internally.
-        unpadded_storage_ptr = self.flat_param._typed_storage()._data_ptr()
-        padded_storage_ptr = (
-            self._get_padded_unsharded_flat_param()._typed_storage()._data_ptr()
-        )
         _p_assert(
-            unpadded_storage_ptr == padded_storage_ptr,
+            _same_storage(self.flat_param, self._get_padded_unsharded_flat_param()),
             "Expects the unpadded parameter to be a view into the padded parameter",
         )
         self.flat_param_to(torch.device("cpu"))
@@ -1865,6 +1862,7 @@ class FlatParamHandle:
         return views
 
     @no_type_check
+    @torch.enable_grad()
     def _use_unsharded_views(self, as_params: bool) -> None:
         """
         Unflatten the unsharded flat parameter by setting the original parameter variables to be views into it.
@@ -1875,6 +1873,12 @@ class FlatParamHandle:
                 the original parameters only as ``Tensor`` s. ``False`` should
                 be used during forward/backward computation and when hiding the
                 original parameters from :meth:`nn.Module.named_parameters`.
+
+        Note:
+            when prefetching for next forward, current forward may be
+            annotated with `@torch.no_grad()`
+            `@torch.enable_grad()` ensures non-empty `view.grad_fn`
+            otherwise `_post_backward_hook` will not get called
         """
         flat_param = self.flat_param
         self._check_unsharded(flat_param)
@@ -2182,16 +2186,14 @@ class FlatParamHandle:
             # unsharded views were computed, not the one from the current
             # calling context (`_get_padded_unsharded_flat_param()`) since that
             # may be different (e.g. the model changed from train to eval).
-            flat_param_data_ptr = (
-                self._unsharded_flat_param_for_skipped_views.untyped_storage().data_ptr()
-            )
+            flat_param_tensor = self._unsharded_flat_param_for_skipped_views
             _p_assert(
-                flat_param_data_ptr > 0,
+                _data_ptr_allocated(flat_param_tensor),
                 "If skipped using sharded views, the unsharded flat parameter "
                 "should be allocated",
             )
         else:
-            flat_param_data_ptr = flat_param.untyped_storage().data_ptr()
+            flat_param_tensor = flat_param
         # NOTE: Since this method is called in the pre-unshard, which is only
         # called during computation in the pre-forward or pre-backward, the
         # sharded gradient should be guaranteed to be in `.grad`, not in
@@ -2200,11 +2202,6 @@ class FlatParamHandle:
             flat_param.grad
             if self.uses_sharded_strategy or not self._offload_params
             else flat_param._cpu_grad
-        )
-        flat_param_grad_data_ptr = (
-            None
-            if flat_param_grad is None
-            else flat_param_grad.untyped_storage().data_ptr()
         )
         for i, (
             param,
@@ -2234,9 +2231,7 @@ class FlatParamHandle:
             param_changed = getattr(module, param_name) is not param
             needs_param_writeback = (
                 param_changed  # changed parameter variable itself
-                or not _same_storage_as_data_ptr(
-                    param, flat_param_data_ptr
-                )  # changed `.data`
+                or not _same_storage(param, flat_param_tensor)
             )
             if self._skipped_use_sharded_views and (
                 param_changed or needs_param_writeback
@@ -2276,11 +2271,9 @@ class FlatParamHandle:
                     # referenced by `flat_param.grad`, while `flat_param_grad`
                     # is `flat_param._cpu_grad`, which is on CPU
                     continue
-                needs_grad_writeback = (
-                    flat_param_grad is None
-                    or not _same_storage_as_data_ptr(
-                        param.grad, flat_param_grad_data_ptr
-                    )
+
+                needs_grad_writeback = flat_param_grad is None or not _same_storage(
+                    param.grad, flat_param_grad
                 )
                 if needs_grad_writeback:
                     if flat_param_grad is None:
@@ -2296,9 +2289,7 @@ class FlatParamHandle:
                     )
                     flat_param.grad = flat_param_grad
                     flat_param_grad = flat_param.grad
-                    flat_param_grad_data_ptr = (
-                        flat_param_grad.untyped_storage().data_ptr()
-                    )
+
         # TODO: If we want to handle shared parameters, we need to re-generate
         # the shared parameter data structures in case sharedness changed.
         for i, (
@@ -2541,7 +2532,7 @@ class FlatParamHandle:
     def _check_on_compute_device(self, tensor: Tensor):
         _p_assert(
             tensor.device == self.device,
-            f"Expects tensor to be on the compute device {self.device}",
+            f"Expects tensor to be on the compute device {self.device}, was on {tensor.device}",
         )
 
     def _check_on_cpu(self, tensor: Tensor):
@@ -2552,16 +2543,16 @@ class FlatParamHandle:
 
     @staticmethod
     def _check_storage_freed(tensor: Tensor):
-        storage_size: int = tensor._typed_storage()._size()
-        _p_assert(
-            storage_size == 0,
-            f"Expects storage to be freed but got storage with size {storage_size}",
-        )
+        # Compile does not resize during trace
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            _p_assert(
+                _same_storage_size(tensor, 0),
+                "Expects storage to be freed but got storage with size > 0",
+            )
 
     @staticmethod
     def _check_storage_allocated(tensor: Tensor):
-        storage_size: int = tensor._typed_storage()._size()
-        _p_assert(storage_size > 0, "Expects storage to be allocated")
+        _p_assert(_storage_size_allocated(tensor), "Expects storage to be allocated")
 
     def _check_low_precision_shard(self):
         _p_assert(
@@ -2717,3 +2708,16 @@ def _warn_use_fake_all_gather(log: logging.Logger, warning: str):
 @functools.lru_cache(1)
 def _warn_use_fake_reduce(log: logging.Logger, warning: str):
     log.warning(warning)
+
+
+def _same_storage(a, b):
+    return a.untyped_storage().data_ptr() == b.untyped_storage().data_ptr()
+
+
+def _same_storage_size(a: torch.Tensor, b: int):
+    return a.untyped_storage().size() // a.element_size() == b
+
+
+def _storage_size_allocated(tensor: Tensor):
+    storage_size: int = tensor.untyped_storage().size()
+    return storage_size > 0

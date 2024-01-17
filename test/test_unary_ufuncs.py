@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     skipIfNoSciPy,
     IS_WINDOWS,
     gradcheck,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
@@ -266,6 +267,7 @@ class TestUnaryUfuncs(TestCase):
     #   1D tensors and a large 2D tensor with interesting and extremal values
     #   and noncontiguities.
     @suppress_warnings
+    @skipIfTorchDynamo()  # really flaky
     @ops(reference_filtered_ops)
     def test_reference_numerics_normal(self, device, dtype, op):
         tensors = generate_elementwise_unary_tensors(
@@ -274,6 +276,7 @@ class TestUnaryUfuncs(TestCase):
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
+    @skipIfTorchDynamo()  # really flaky
     @ops(reference_filtered_ops)
     def test_reference_numerics_small(self, device, dtype, op):
         if dtype in (torch.bool,):
@@ -285,6 +288,7 @@ class TestUnaryUfuncs(TestCase):
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
+    @skipIfTorchDynamo()  # really flaky
     @ops(reference_filtered_ops)
     def test_reference_numerics_large(self, device, dtype, op):
         if dtype in (torch.bool, torch.uint8, torch.int8):

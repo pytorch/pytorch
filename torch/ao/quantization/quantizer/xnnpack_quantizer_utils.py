@@ -218,6 +218,68 @@ def _annotate_linear(
     return annotated_partitions
 
 
+@register_annotator("linear_relu")
+def _annotate_linear_relu(
+    gm: torch.fx.GraphModule,
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
+) -> Optional[List[List[Node]]]:
+    annotated_partitions = []
+    input_act_qspec = get_input_act_qspec(quantization_config)
+    output_act_qspec = get_output_act_qspec(quantization_config)
+    weight_qspec = get_weight_qspec(quantization_config)
+    bias_qspec = get_bias_qspec(quantization_config)
+    for node in gm.graph.nodes:
+        if node.op != "call_function" or node.target not in [
+            torch.ops.aten.relu.default,
+            torch.ops.aten.relu_.default,
+        ]:
+            continue
+        relu_node = node
+        maybe_linear_node = node.args[0]
+        if (
+            not isinstance(maybe_linear_node, Node)
+            or maybe_linear_node.op != "call_function"
+            or maybe_linear_node.target != torch.ops.aten.linear.default
+        ):
+            continue
+
+        linear_node = maybe_linear_node
+        input_qspec_map = {}
+        input_act = linear_node.args[0]
+        assert isinstance(input_act, Node)
+        input_qspec_map[input_act] = input_act_qspec
+
+        weight = linear_node.args[1]
+        assert isinstance(weight, Node)
+        input_qspec_map[weight] = weight_qspec
+
+        # adding weight node to the partition as well
+        partition = [relu_node, linear_node, weight]
+        bias = linear_node.args[2] if len(linear_node.args) > 2 else None
+        if isinstance(bias, Node):
+            input_qspec_map[bias] = bias_qspec
+            partition.append(bias)
+
+        if _is_annotated(partition):
+            continue
+
+        if filter_fn and any(not filter_fn(n) for n in partition):
+            continue
+
+        linear_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
+            _annotated=True,
+        )
+        relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            output_qspec=output_act_qspec,
+            _annotated=True,
+        )
+        _mark_nodes_as_annotated(partition)
+        annotated_partitions.append(partition)
+    return annotated_partitions
+
+
 @register_annotator("conv")
 def _annotate_conv(
     gm: torch.fx.GraphModule,
@@ -471,7 +533,7 @@ def _annotate_gru_io_only(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
     gru_partitions = get_source_partitions(gm.graph, [torch.nn.GRU], filter_fn)
-    gru_partitions = list(itertools.chain(*gru_partitions.values()))
+    gru_partitions = list(itertools.chain.from_iterable(gru_partitions.values()))
     annotated_partitions = []
     for gru_partition in gru_partitions:
         annotated_partitions.append(gru_partition.nodes)
@@ -525,7 +587,7 @@ def _annotate_max_pool2d(
     module_partitions = get_source_partitions(
         gm.graph, [torch.nn.MaxPool2d, torch.nn.functional.max_pool2d], filter_fn
     )
-    maxpool_partitions = list(itertools.chain(*module_partitions.values()))
+    maxpool_partitions = list(itertools.chain.from_iterable(module_partitions.values()))
     annotated_partitions = []
     for maxpool_partition in maxpool_partitions:
         annotated_partitions.append(maxpool_partition.nodes)
@@ -577,7 +639,7 @@ def _annotate_adaptive_avg_pool2d(
     module_partitions = get_source_partitions(
         gm.graph, [torch.nn.AdaptiveAvgPool2d, F.adaptive_avg_pool2d], filter_fn
     )
-    partitions = list(itertools.chain(*module_partitions.values()))
+    partitions = list(itertools.chain.from_iterable(module_partitions.values()))
     annotated_partitions = []
     for partition in partitions:
         pool_node = partition.output_nodes[0]
@@ -701,7 +763,7 @@ def _annotate_add(
     add_partitions = get_source_partitions(
         gm.graph, [operator.add, torch.add, operator.iadd], filter_fn
     )
-    add_partitions = list(itertools.chain(*add_partitions.values()))
+    add_partitions = list(itertools.chain.from_iterable(add_partitions.values()))
     annotated_partitions = []
     for add_partition in add_partitions:
         annotated_partitions.append(add_partition.nodes)
@@ -800,7 +862,7 @@ def _annotate_mul(
     mul_partitions = get_source_partitions(
         gm.graph, ["mul", "mul_", operator.mul, torch.mul, operator.imul], filter_fn
     )
-    mul_partitions = list(itertools.chain(*mul_partitions.values()))
+    mul_partitions = list(itertools.chain.from_iterable(mul_partitions.values()))
     annotated_partitions = []
     for mul_partition in mul_partitions:
         annotated_partitions.append(mul_partition.nodes)
@@ -844,7 +906,7 @@ def _annotate_cat(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
     cat_partitions = get_source_partitions(gm.graph, [torch.cat], filter_fn)
-    cat_partitions = list(itertools.chain(*cat_partitions.values()))
+    cat_partitions = list(itertools.chain.from_iterable(cat_partitions.values()))
     annotated_partitions = []
     for cat_partition in cat_partitions:
         cat_node = cat_partition.output_nodes[0]

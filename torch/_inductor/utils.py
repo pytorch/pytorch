@@ -440,7 +440,9 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
         sources = [
             origin.meta["original_aten"]._overloadpacket.__name__
             for origin in all_origins
-            if origin.op == "call_function" and "original_aten" in origin.meta
+            if origin.op == "call_function"
+            and "original_aten" in origin.meta
+            and origin.meta["original_aten"] is not None
         ]
         sources = sorted(set(sources))
     elif descriptive_names == "torch":
@@ -471,7 +473,7 @@ def get_kernel_metadata(node_schedule, wrapper):
     from_node_dict = collections.defaultdict(list)
     original_aten_dict = collections.defaultdict(list)
     for node in inductor_nodes:
-        if "original_aten" in node.meta:
+        if "original_aten" in node.meta and node.meta["original_aten"] is not None:
             key = str(node.meta["original_aten"]._overloadpacket)
             original_aten_dict[key].append(node.name)
         if "from_node" in node.meta:
@@ -576,6 +578,17 @@ def free_symbol_has(index: sympy.Expr, pattern: str):
     return any(pattern in v.name for v in index.free_symbols)
 
 
+def is_symbolic(a: Any) -> bool:
+    return isinstance(a, torch.SymInt) or (
+        isinstance(a, torch.Tensor)
+        and any(is_symbolic(x) for x in itertools.chain(a.size(), a.stride()))
+    )
+
+
+def any_is_symbolic(*args: Any) -> bool:
+    return any(is_symbolic(a) for a in args)
+
+
 def has_incompatible_cudagraph_ops(gm):
     forbidden_set = {
         "aten._fused_moving_avg_obs_fq_helper.default",
@@ -609,11 +622,16 @@ def has_incompatible_cudagraph_ops(gm):
     return False
 
 
-instance_descriptor = collections.namedtuple(
-    "instance_descriptor",
-    ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
-    defaults=[tuple(), tuple(), tuple(), tuple()],
-)
+try:
+    from triton.compiler.compiler import AttrsDescriptor as instance_descriptor
+except ImportError:
+    # To support older version of triton which does not have AttrsDescriptor
+    # class
+    instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
+        "instance_descriptor",
+        ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
+        defaults=[tuple(), tuple(), tuple(), tuple()],
+    )
 
 
 @functools.lru_cache(None)
@@ -1118,14 +1136,14 @@ def get_device_tflops(dtype):
         # Triton API change in https://github.com/openai/triton/pull/2293
         from triton.testing import nvsmi
 
-        cur_sm_clock = nvsmi(["clocks.current.sm"])[0]
+        sm_clock = nvsmi(["clocks.max.sm"])[0]
         if dtype in (torch.float16, torch.bfloat16):
-            return get_max_tensorcore_tflops(dtype, cur_sm_clock)
+            return get_max_tensorcore_tflops(dtype, sm_clock)
 
         if torch.backends.cuda.matmul.allow_tf32:
-            return get_max_tensorcore_tflops(torch.float32, cur_sm_clock)
+            return get_max_tensorcore_tflops(torch.float32, sm_clock)
         else:
-            return get_max_simd_tflops(torch.float32, cur_sm_clock)
+            return get_max_simd_tflops(torch.float32, sm_clock)
     else:
         if dtype in (torch.float16, torch.bfloat16):
             return get_max_tensorcore_tflops(dtype)
@@ -1189,37 +1207,3 @@ class Placeholder(enum.Enum):
     # The descriptive name of the triton kernel; when unique_kernel_names = False, this
     # placeholder will be replaced with a string with more information.
     DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
-
-
-# A utility function for easier AOTInductor testing
-def aot_inductor_launcher(so_path: str, device: str):
-    if device == "cuda":
-        return f"""
-            #include <torch/csrc/inductor/aoti_model_container_runner_cuda.h>
-
-            torch::inductor::AOTIModelContainerRunnerCuda runner("{so_path}");
-
-            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
-                return runner.run(input_tensors);
-            }}
-
-            std::vector<const char*> get_call_spec() {{
-                return runner.get_call_spec();
-            }}
-        """
-    elif device == "cpu":
-        return f"""
-            #include <torch/csrc/inductor/aoti_model_container_runner.h>
-
-            torch::inductor::AOTIModelContainerRunnerCpu runner("{so_path}");
-
-            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
-                return runner.run(input_tensors);
-            }}
-
-            std::vector<const char*> get_call_spec() {{
-                return runner.get_call_spec();
-            }}
-        """
-    else:
-        raise RuntimeError(f"Unsupported device: {device}")

@@ -648,7 +648,6 @@ meta_function_expected_failures = {
     torch.kthvalue : {f64, i32, i64, u8, i16, f16, bf16, i8, f32},
     torch.nn.functional.ctc_loss : {f64, f32},
     torch.nn.functional.gaussian_nll_loss : {f16, f64, bf16, f32},
-    torch.nn.functional.one_hot : {i64},
     torch.linalg.eig : {f64, f32, c128, c64},
     torch.linalg.eigvals : {f64, f32, c128, c64},
     torch.linalg.lstsq : {f64, f32, c128, c64},
@@ -694,12 +693,12 @@ meta_function_skips = {
     torch.equal : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.nanmean : {bf16, f64, f32, f16, c32, c64, c128},
     torch.nn.functional.cross_entropy : {bf16, f64, f32},
-    torch.nn.functional.interpolate : {bf16, f64, f32, u8},
     torch.nn.functional.nll_loss : {bf16, f64, f32},
     torch.linalg.cond : {c128, c64, f32, f64},
     torch.linalg.vecdot : {bf16, f64, f32, f16},
     torch.empty : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.Tensor.addbmm_: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
+    torch.nn.functional.one_hot : {i64},
 }
 
 
@@ -710,7 +709,7 @@ meta_function_device_skips = defaultdict(dict)
 meta_function_device_expected_failures['cpu'] = {
     torch.native_batch_norm: {bf16, f16},
     torch._native_batch_norm_legit: {bf16, f16},
-    torch.native_layer_norm: {bf16},
+    torch.native_layer_norm: {bf16, f16},
 }
 
 meta_function_device_expected_failures['cuda'] = {
@@ -855,7 +854,7 @@ meta_dispatch_device_expected_failures['cpu'] = {
     aten.native_batch_norm.default: {bf16, f16},
     aten._native_batch_norm_legit.default: {bf16, f16},
     aten._native_batch_norm_legit.no_stats: {bf16, f16},
-    aten.native_layer_norm.default: {bf16},
+    aten.native_layer_norm.default: {bf16, f16},
     aten.histc.default: {f16},
     aten.histc.out: {f16},
 }

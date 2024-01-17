@@ -32,7 +32,7 @@ from torch._dynamo import (
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
-from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
+from torch._dynamo.utils import counters, detect_fake_mode, lazy_format_graph_code
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
@@ -511,6 +511,10 @@ def fx_codegen_and_compile(
         post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
         post_grad_graphs_log.debug("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
+        log.debug(
+            "counters of inductor dict after apply passes on the input FX graph in the post grad pass: %s",
+            counters["inductor"],
+        )
 
     with V.set_fake_mode(fake_mode):
         graph = GraphLowering(
@@ -518,7 +522,7 @@ def fx_codegen_and_compile(
             # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
             # For the forward pass, we have the real inputs to be used as example_inputs. For the backward pass,
             # we currently use fake tensors and defake them later.
-            example_inputs=V.real_inputs if is_inference else example_inputs,
+            example_inputs=example_inputs,
             shape_env=shape_env,
             num_static_inputs=num_fixed,
             graph_id=graph_id,
@@ -1010,6 +1014,10 @@ def compile_fx(
             )
 
         model_ = pre_grad_passes(model_, example_inputs_)
+        log.debug(
+            "counters of inductor dict after apply passes on the input FX graph in the pre grad pass: %s",
+            counters["inductor"],
+        )
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
@@ -1156,6 +1164,10 @@ def compile_fx(
             model_, example_inputs_, trace_joint=False, decompositions=decompositions
         )
         unlifted_gm = _unlift_graph(model_, gm, graph_signature)
+        if "dynamo_flat_name_to_original_fqn" in model_.meta:
+            unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
+                "dynamo_flat_name_to_original_fqn"
+            ]
         with V.set_fake_mode(fake_mode), compiled_autograd.disable():
             return inference_compiler(unlifted_gm, example_inputs_)
 

@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch._dynamo.testing import rand_strided
+from torch._C._functorch import is_batchedtensor, _add_batch_dim, get_unwrapped
 from torch.testing import FileCheck
 import unittest
 import torch._prims as prims
@@ -37,7 +38,6 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 import torch.utils._pytree as pytree
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorTest(TestCase):
     def checkType(self, t, device_str, size):
         self.assertTrue(isinstance(t, FakeTensor))
@@ -201,6 +201,23 @@ class FakeTensorTest(TestCase):
                 y = x + x
                 FileCheck().check("CPU").check("AutocastCPU").run(torch._C._dispatch_key_set(y))
                 FileCheck().check_not("ADInplaceOrView").check_not("Autograd").run(torch._C._dispatch_key_set(y))
+
+    def test_batch_tensor(self):
+        x = torch.rand((3, 4, 5))
+        b = _add_batch_dim(x, 0, 0)
+        mode = FakeTensorMode()
+        fake_b = mode.from_tensor(b)
+        prims.utils.compare_tensor_meta(b, fake_b, check_strides=True)
+
+        b1 = _add_batch_dim(x, 1, 1)
+        b2 = _add_batch_dim(b1, 0, 2)
+        fake_b2 = mode.from_tensor(b2)
+        prims.utils.compare_tensor_meta(b2, fake_b2, check_strides=True)
+        self.assertTrue(is_batchedtensor(fake_b2))
+        fake_b1 = get_unwrapped(fake_b2)
+        self.assertTrue(is_batchedtensor(fake_b1))
+        fake_tensor = get_unwrapped(fake_b1)
+        self.assertIsInstance(fake_tensor, FakeTensor)
 
     def test_constructor(self):
         with FakeTensorMode():
@@ -753,7 +770,6 @@ class FakeTensorTest(TestCase):
             self.assertTrue(torch._prims_common.suggest_memory_format(grad_in) == torch.channels_last)
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorConstHandling(TestCase):
     def assertConst(self, *args):
         for arg in args:
@@ -850,7 +866,6 @@ def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     )
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorOpInfoTest(TestCase):
     @ops(custom_op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
@@ -861,7 +876,6 @@ class FakeTensorOpInfoTest(TestCase):
             optests.fake_check(op, args, kwargs)
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorConverterTest(TestCase):
     def test_memoized_conversion_to_meta(self):
         x = torch.rand(2, 2, 2)
@@ -971,7 +985,6 @@ class FakeTensorConverterTest(TestCase):
         assert y_weak() is None
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorOperatorInvariants(TestCase):
     @staticmethod
     def get_aten_op(schema):
@@ -1163,7 +1176,6 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertEqual(mode.count, 0)
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorPropTest(TestCase):
     def test_fake_tensor_prop_on_nn_module(self):
         class ToyNnModuleWithParameters(torch.nn.Module):

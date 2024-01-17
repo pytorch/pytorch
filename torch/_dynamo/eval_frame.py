@@ -21,7 +21,6 @@ from typing import (
     Callable,
     Dict,
     List,
-    Mapping,
     NamedTuple,
     Optional,
     Set,
@@ -234,22 +233,6 @@ class OptimizedModule(torch.nn.Module):
         return orig_mod_attrs + [
             attr for attr in super().__dir__() if attr not in orig_mod_attrs
         ]
-
-    def state_dict(self, *args, **kwargs):
-        return self._orig_mod.state_dict(*args, **kwargs)
-
-    def load_state_dict(
-        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
-    ):
-        # we strip away the '_orig_mod' prefix for backward-compatibility with old checkpoints
-        prefix = "_orig_mod."
-        processed_state_dict = {}
-        for key in state_dict:
-            clean_key = key[len(prefix) :] if key.startswith(prefix) else key
-            processed_state_dict[clean_key] = state_dict[key]
-        return self._orig_mod.load_state_dict(
-            state_dict=processed_state_dict, strict=strict, assign=assign
-        )
 
 
 def remove_from_cache(f):
@@ -883,6 +866,14 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             )
         return result_proxy
 
+    def transform(self):
+        result_gm = super().transform()
+        if "dynamo_flat_name_to_original_fqn" in self.module.meta:
+            result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
+                "dynamo_flat_name_to_original_fqn"
+            ]
+        return result_gm
+
 
 class ExportResult(NamedTuple):
     graph_module: torch.fx.GraphModule
@@ -976,11 +967,13 @@ def rewrite_signature(
                     else:
                         raise AssertionError(
                             f"{candidate_desc} #{i+1}, of type {type(val)}, is not among {source_types}"
+                            'Set TORCH_LOGS="+export" for more information.'
                         )
                 else:
                     raise AssertionError(
                         f"{candidate_desc} #{i+1} is {val}, but only "
                         f"the following types are supported: {supported_types}"
+                        'Set TORCH_LOGS="+export" for more information.'
                     )
 
         return matched_elements_positions
@@ -1311,17 +1304,21 @@ def export(
                         f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
                         "It appears that you're trying to set a constraint on a "
                         f"value which we evaluated to have a static value of {k}. "
-                        "Scroll up to see where this constraint was set."
+                        'Set TORCH_LOGS="+export" for more information.'
                     )
         if constraint_violation_error:
             raise constraint_violation_error
 
         assert (
             graph is not None
-        ), "Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph."
+        ), "Failed to produce a graph during tracing as no tensor operations were found."
         assert hasattr(graph, "_source_to_user_stacks")
         assert out_guards is not None, "Failed to produce guards during tracing"
         assert fake_mode is not None
+
+        log.info(
+            "Dynamo captured graph:\n\n%s", graph.print_readable(print_output=False)
+        )
 
         # This check need to happened before aten_graph
         # because placeholder's _source_node attribute is not preserved by make_fx
@@ -1525,9 +1522,7 @@ class TorchPatcher:
             # disable any currently set hooks
             # Note: we only want to disable the profiling hook
             # which is the *last* hook applied, we want to keep the no_grad hook
-            # Note: skip AdamW as its step calls to Adam.step which already will
-            # unwrap once. Unwrapping twice will accidentally get rid of the no_grad hook too.
-            hooked = getattr(opt.step, "hooked", False) and opt.__name__ != "AdamW"
+            hooked = getattr(opt.step, "hooked", False)
             if hooked:
                 unwrapped_step = getattr(opt.step, "__wrapped__", None)
                 if unwrapped_step:
