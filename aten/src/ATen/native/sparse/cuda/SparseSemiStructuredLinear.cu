@@ -25,8 +25,7 @@
   }
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 #ifndef USE_ROCM
 // Wrapper function for CUTLASS sparse GEMM implementation, used
@@ -771,12 +770,10 @@ Tensor _sparse_semi_structured_linear(
 #endif
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 // Following is just for testing purposes.
-namespace at {
-namespace native {
+namespace at::native {
 
 #ifndef USE_ROCM
 // Copied from tools/util/include/host_reorder.h, from CUTLASS source
@@ -946,5 +943,4 @@ _to_sparse_semi_structured(const Tensor& dense) {
 #endif
 }
 
-}  // namespace native
-}  // namespace at
+}  // namespace at::native
