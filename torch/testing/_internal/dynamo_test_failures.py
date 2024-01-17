@@ -2014,7 +2014,6 @@ dynamo_expected_failures = {
     "TestOutDtypeOp.test_out_dtype_wrong_output",  # test_out_dtype_op
     "TestNumPyInteropCPU.test_numpy_non_writeable_cpu",  # test_numpy_interop
     "TestNN.test_Sequential_append",  # test_nn
-    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_False_mode_bicubic_memory_format0_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_all_ignored_cpu",  # test_nn
     "TestNN.test_ParameterList_replication",  # test_nn
     "TestNNDeviceTypeCPU.test_CTCLoss_no_batch_dim_reduction_none_use_module_form_False_cpu",  # test_nn
@@ -2031,8 +2030,6 @@ dynamo_expected_failures = {
     "TestNNDeviceTypeCPU.test_hardswish_grad_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_threshold_inplace_overlap_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_module_to_empty_cpu_float64",  # test_nn
-    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_True_mode_bicubic_memory_format1_cpu",  # test_nn
-    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_True_mode_bicubic_memory_format0_cpu",  # test_nn
     "TestNN.test_Sequential_imul",  # test_nn
     "TestNN.test_upsampling_bfloat16",  # test_nn
     "TestNNDeviceTypeCPU.test_triplet_margin_with_distance_loss_cpu",  # test_nn
@@ -2040,7 +2037,6 @@ dynamo_expected_failures = {
     "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_sum_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format0_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format1_cpu",  # test_nn
-    "TestNNDeviceTypeCPU.test_upsamplingBiMode2d_antialias_True_align_corners_False_mode_bicubic_memory_format1_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_batchnorm_grad_cpu",  # test_nn
     "TestNN.test_interpolate",  # test_nn
     "TestNN.test_register_state_dict_pre_hook",  # test_nn
@@ -3145,6 +3141,11 @@ dynamo_expected_failures = {
     "TestContentStoreCPU.test_repeated_hash_cpu",  # test_content_store
     "TestLazyTensor.test_tensor_ctr",  # lazy/test_ts_opinfo
     "TestAnalyze.test_trace_dependencies",  # test_package
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+=======
+>>>>>>> ad50668e8bd ([codemod] markDynamoStrictTest batch 21)
     "TestProfilerTree.test_profiler_experimental_tree_with_memory",  # profiler/test_profiler_tree
     "TestProfilerTree.test_profiler_experimental_tree_with_memory_and_stack",  # profiler/test_profiler_tree
     "TestProfilerTree.test_profiler_experimental_tree_with_record_function",  # profiler/test_profiler_tree
@@ -3327,6 +3328,8 @@ dynamo_expected_failures = {
     "TestOpCPU.test_cat_cpu_bfloat16",  # test_jit_llga_fuser
     "TestOpCPU.test_identity_binary_cpu_bfloat16",  # test_jit_llga_fuser
     "TestOpCPU.test_identity_binary_cpu_float32",  # test_jit_llga_fuser
+<<<<<<< HEAD
+=======
     "TestTorch.test_type",  # test_torch
     "TestTorch.test_cuda_not_built",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint4x2",  # test_torch
@@ -3389,13 +3392,14 @@ dynamo_expected_failures = {
     "TestTorch.test_parsing_double",  # test_torch
     "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float32",  # test_torch
     "TestTorchDeviceTypeCPU.test_deterministic_empty_cpu_uint64",  # test_torch
+>>>>>>> 41ef7455ae3 ([codemod] markDynamoStrictTest batch 21)
+>>>>>>> ad50668e8bd ([codemod] markDynamoStrictTest batch 21)
 }
 
 dynamo_skips = {
     "TestMatmulOperator.test_matmul_raises",
     "TestMatmulOperator.test_exceptions",
     "TestMatmulOperator.test_matmul_inplace",
-    "TestMonitorTensorboard.test_event_handler",  # weird
     "TestMethods.test_diagonal",
     "TestMethods.test_searchsorted_complex",
     "TestMethods.test_round",
