@@ -818,8 +818,6 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
             value = FSDPManagedNNModuleVariable._wrap_source(value)
 
         return super().__setattr__(name, value)
-        # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
-        self.source = NotNNModuleSource(source)
 
     def call_method(
         self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
