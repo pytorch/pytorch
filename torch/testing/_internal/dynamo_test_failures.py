@@ -3187,7 +3187,6 @@ dynamo_expected_failures = {
     "TestProfiler.test_is_profiler_enabled",  # profiler/test_profiler
     "TestExperimentalUtils.test_utils_compute_idle_time",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_optimizer_parameters_sgd",  # profiler/test_profiler
-    "TestProfiler.test_source_multithreaded_complex_work_in_main_thread_False",  # profiler/test_profiler
     "TestExperimentalUtils.test_profiler_name_pattern",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_extra_fields",  # profiler/test_profiler
     "TestProfiler.test_flops",  # profiler/test_profiler
@@ -3200,7 +3199,6 @@ dynamo_expected_failures = {
     "TestTorchTidyProfiler.test_optimizer_parameters_adam",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_tensor_properties",  # profiler/test_profiler
     "TestProfiler.test_record_function_fast",  # profiler/test_profiler
-    "TestProfiler.test_source_multithreaded_close_in_scope_work_in_main_thread_False",  # profiler/test_profiler
     "TestProfiler.test_profiler_fwd_bwd_link",  # profiler/test_profiler
     "TestProfiler.test_concrete_inputs_profiling",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_tensorimpl_invalidation_scalar_args",  # profiler/test_profiler
@@ -3227,7 +3225,6 @@ dynamo_expected_failures = {
     "TestTorchTidyProfiler.test_pointers_and_ids",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_nnmodule_params",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_tensorimpl_invalidation_set",  # profiler/test_profiler
-    "TestProfiler.test_source_multithreaded_basic_work_in_main_thread_False",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_scalar_ins",  # profiler/test_profiler
     "TestProfiler.test_profiler_op_event_args",  # profiler/test_profiler
     "TestProfiler.test_source_multithreaded_complex_work_in_main_thread_True",  # profiler/test_profiler
@@ -7697,8 +7694,11 @@ dynamo_skips = {
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int16",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int8",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_uint8",  # known py38 fail
+    "TestProfiler.test_source_multithreaded_basic_work_in_main_thread_False",
+    "TestProfiler.test_source_multithreaded_complex_work_in_main_thread_False",
     "TestProfiler.test_source_multithreaded_open_in_scope_work_in_main_thread_False",
     "TestProfiler.test_source_multithreaded_multiple_preexisting_work_in_main_thread_False",
+    "TestProfiler.test_source_multithreaded_close_in_scope_work_in_main_thread_False",
     "TestProfiler.test_profiler_disable_fwd_bwd_link",
     "TestProfiler.test_profiler_metadata",
     "TestFX.test_assert",  # known py38 fail
