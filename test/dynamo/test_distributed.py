@@ -6,10 +6,13 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 
 from torch._dynamo.testing import normalize_gm
-
+import unittest
 
 class DistributedTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(trace_distributed=True)
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "requires distributed package"
+    )
     def test_fsdp_same_storage_size_allowed(self):
         import torch.distributed.fsdp._flat_param as flat_param
 
@@ -31,14 +34,14 @@ class DistributedTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
-    class GraphModule(torch.nn.Module):
-        def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
-            l_x_ = L_x_
-            l_y_ = L_y_
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+        l_x_ = L_x_
+        l_y_ = L_y_
 
-            _same_storage_size = torch.distributed.fsdp._flat_param._same_storage_size(l_x_, l_y_);  l_x_ = l_y_ = None
-            return (_same_storage_size,)
-    """,
+        _same_storage_size = torch.distributed.fsdp._flat_param._same_storage_size(l_x_, l_y_);  l_x_ = l_y_ = None
+        return (_same_storage_size,)
+""",
             )
         else:
             self.assertExpectedInline(
