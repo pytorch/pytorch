@@ -393,6 +393,7 @@ def _shard_orig_param_state(
     )
     if not shard_param_info.in_shard:
         return {}
+
     # Flatten and shard the state.
     new_optim_state: Dict[str, Any] = {}
     intra_param_start_idx = shard_param_info.intra_param_start_idx
@@ -403,8 +404,11 @@ def _shard_orig_param_state(
             and value.dim() > 0
             and fsdp_state.sharding_strategy != ShardingStrategy.NO_SHARD
         ):
-            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1].clone()  # type: ignore[operator]
+            value = value.flatten()[
+                intra_param_start_idx : intra_param_end_idx + 1
+            ].clone()  # type: ignore[operator]
         new_optim_state[state_name] = value
+    del optim_state
     return new_optim_state
 
 
@@ -461,6 +465,8 @@ def _flatten_optim_state_dict(
     unflat_osd_state = unflat_osd["state"]
     all_state_keys = set(unflat_osd_state.keys())
 
+    sync_threshold = 200
+    curr_numel = 0
     for param, fqns in param_to_fqns.items():
         fqn = fqns[0]
         if fqn not in unflat_osd_state:
@@ -485,6 +491,7 @@ def _flatten_optim_state_dict(
                         fqn,
                         unflat_osd_state[fqn],
                     )
+
             else:
                 flat_state = _flatten_optim_state(
                     fsdp_param_info,
@@ -515,6 +522,15 @@ def _flatten_optim_state_dict(
                     f"The state of {key} is empty. This should happen when "
                     "use_orig_params=True."
                 )
+
+            for t in flat_state.items():
+                if torch.is_tensor(t):
+                    curr_numel += t.numel()
+            # Call synchronize() to ensure the some temporary tensors being recycled.
+            if curr_numel > sync_threshold:
+                torch.cuda.Synchronize()
+                curr_numel = 0
+
         else:  # do not flatten non-FSDP parameters' states
             assert len(fqns) == 1
             key = _OptimStateKey(tuple(fqns), False)
