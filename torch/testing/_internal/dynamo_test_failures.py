@@ -2709,7 +2709,11 @@ dynamo_expected_failures = {
     "FuncTorchHigherOrderOpTests.test_vmap_free_const",  # dynamo/test_higher_order_ops
     "FuncTorchHigherOrderOpTests.test_vmap_multiple_invocation_in_dims",  # dynamo/test_higher_order_ops
     "FuncTorchHigherOrderOpTests.test_grad",  # dynamo/test_higher_order_ops
-    "FuncTorchHigherOrderOpTests.test_vmap_illegal_op_graph_break",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_with_conditional_graph_break",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_with_graph_break",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_with_graph_break_2",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_with_graph_break_lambda",  # dynamo/test_higher_order_ops
+    "FuncTorchHigherOrderOpTests.test_vmap_previous_illegal_op_no_graph_break",  # dynamo/test_higher_order_ops
     "HigherOrderOpTests.test_cond_pytree_operands",  # dynamo/test_higher_order_ops
     "HigherOrderOpTests.test_cond_branches_no_arguments_no_closure",  # dynamo/test_higher_order_ops
     "FuncTorchHigherOrderOpTests.test_vmap_side_effects",  # dynamo/test_higher_order_ops

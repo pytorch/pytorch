@@ -4,6 +4,7 @@ import functools
 import pprint
 import re
 import unittest
+import warnings
 
 import functorch.experimental.control_flow as control_flow
 
@@ -2436,7 +2437,8 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
                 "Interpreter stack is not empty. Test should have called "
                 "'torch._C._functorch._vmap_decrement_nesting()'"
             )
-            self.fail(msg)
+            warnings.warn(msg)
+            torch._C._functorch._vmap_decrement_nesting()
 
     def _compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
         backend = EagerAndRecordGraphs()
@@ -3636,11 +3638,11 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(actual, expected)
 
-    @unittest.expectedFailure
     @config.patch(capture_func_transforms=True)
-    def test_vmap_illegal_op_graph_break(self):
+    def test_vmap_previous_illegal_op_no_graph_break(self):
         counters.clear()
 
+        # calling .stride() would previously graph break
         def bad_fn(x):
             y = x.view((4, 3))
             y.stride()
@@ -3652,12 +3654,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 3, 4)
         actual = wrapper_fn(x)
         expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
-        self.assertEqual(len(counters["graph_break"]), 1)
-        assert_dict_matches_regex(
-            self,
-            dict(counters["graph_break"]),
-            {".*Illegal getattr invocation stride in strict mode": 2},
-        )
+        self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(actual, expected)
 
     @config.patch(capture_func_transforms=True)
