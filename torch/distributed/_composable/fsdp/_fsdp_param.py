@@ -5,7 +5,7 @@ from typing import cast, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
-
+from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import DTensorSpec
@@ -416,15 +416,18 @@ class FSDPParam:
     def unsharded_grad_data(self) -> torch.Tensor:
         grad = self.unsharded_param.grad
         assert grad is not None, "Expects unsharded_param.grad to not be None"
-        if self.is_dtensor:
-            grad = cast(DTensor, grad)._local_tensor
-        return grad
+        return self._get_grad_inner_tensor(grad)
 
     @property
     def unsharded_accumulated_grad_data(self) -> torch.Tensor:
         grad = self.unsharded_accumulated_grad
         assert grad is not None, "Expects unsharded_accumulated_grad to not be None"
+        return self._get_grad_inner_tensor(grad)
+
+    def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
         if self.is_dtensor:
+            if isinstance(grad, AsyncCollectiveTensor):
+                grad = grad.wait()
             grad = cast(DTensor, grad)._local_tensor
         return grad
 
