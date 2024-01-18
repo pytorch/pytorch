@@ -17,6 +17,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
 )
 from torch.testing._internal.common_utils import (
+    IS_ARM64,
     IS_CI,
     IS_WINDOWS,
     parametrize,
@@ -295,6 +296,35 @@ class TestInductorDynamic(TestCase):
             return x.item()
 
         f(torch.tensor([3.0], device=device))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_matmul(self, device):
+        def f(x):
+            y = x.item()
+            return torch.ones(1, y, device=device) @ torch.ones(y, 1, device=device)
+
+        cf = torch.compile(fullgraph=True)(f)
+        arg = torch.tensor(5, device=device)
+        self.assertEqual(f(arg), cf(arg))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_reduction(self, device):
+        expect_fail = device == "cpu" and not IS_ARM64
+        try:
+
+            def f(x):
+                y = x.item()
+                return torch.ones(y, device=device).sum()
+
+            cf = torch.compile(fullgraph=True)(f)
+            arg = torch.tensor(5, device=device)
+            self.assertEqual(f(arg), cf(arg))
+        except Exception:
+            if not expect_fail:
+                raise
+        else:
+            if expect_fail:
+                self.fail("expected to fail, but actually passed")
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
