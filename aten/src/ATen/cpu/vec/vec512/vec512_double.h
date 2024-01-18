@@ -83,15 +83,27 @@ public:
     if (count == size())
       return _mm512_loadu_pd(reinterpret_cast<const double*>(ptr));
 
-    __mmask8 mask = (1ULL << count) - 1;
-    return _mm512_maskz_loadu_pd(mask, ptr);
+
+    __at_align__ double tmp_values[size()];
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
+    for (const auto i : c10::irange(size())) {
+      tmp_values[i] = 0.0;
+    }
+    std::memcpy(
+        tmp_values,
+        reinterpret_cast<const double*>(ptr),
+        count * sizeof(double));
+    return _mm512_load_pd(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
       _mm512_storeu_pd(reinterpret_cast<double*>(ptr), values);
     } else if (count > 0) {
-      __mmask8 mask = (1ULL << count) - 1;
-      _mm512_mask_storeu_pd(reinterpret_cast<double*>(ptr), mask, values);
+      double tmp_values[size()];
+      _mm512_storeu_pd(reinterpret_cast<double*>(tmp_values), values);
+      std::memcpy(ptr, tmp_values, count * sizeof(double));
     }
   }
   const double& operator[](int idx) const  = delete;

@@ -46,7 +46,7 @@ bool use_flash_attention_cpp(sdp_params const& params, bool debug) {
       check_attn_mask_shape,
       check_head_dim_size_cpp,
       check_nonzero_sequence_lengths_dense,
-      check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim*/>);
+      check_last_dim_stride_equals_1_dense);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;

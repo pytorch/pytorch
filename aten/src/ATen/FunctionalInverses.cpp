@@ -12,7 +12,7 @@ namespace at::functionalization {
 // We can't easily share it though, because (eventually) these functions
 // will all call `permute/unsqueeze_copy()` instead of `permute/unsqueeze`.
 
-static Tensor permute_inverse(const Tensor& self, IntArrayRef dims, InverseReturnMode inverse_return_mode) {
+static Tensor permute_copy_inverse(const Tensor& self, IntArrayRef dims, InverseReturnMode inverse_return_mode) {
   // invert the permutation
   auto ndims = dims.size();
   std::vector<int64_t> dims_(ndims);
@@ -103,17 +103,17 @@ static Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef dim, c10::SymIn
 // The codegen automatically generates the corresponding function declaration.
 // ----------------------------------------------------------
 
-Tensor FunctionalInverses::_fw_primal_inverse(const at::Tensor& base, const at::Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t level) {
+Tensor FunctionalInverses::_fw_primal_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t level) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _fw_primal() during the functionalization pass. For now, this is not supported.");
     return Tensor();
 }
 
-Tensor FunctionalInverses::_make_dual_inverse(const at::Tensor& base, const at::Tensor& mutated_view, InverseReturnMode inverse_return_mode, const at::Tensor& tangent, int64_t level) {
+Tensor FunctionalInverses::_make_dual_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, InverseReturnMode inverse_return_mode, const at::Tensor& tangent, int64_t level) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _make_dual() during the functionalization pass. For now, this is not supported.");
     return Tensor();
 }
 
-Tensor FunctionalInverses::view_as_real_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::view_as_real_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     if (inverse_return_mode != InverseReturnMode::NeverView) {
       return at::view_as_complex(mutated_view);
     } else {
@@ -121,7 +121,7 @@ Tensor FunctionalInverses::view_as_real_inverse(const Tensor& base, const Tensor
     }
 }
 
-Tensor FunctionalInverses::view_as_complex_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::view_as_complex_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     if (inverse_return_mode != InverseReturnMode::NeverView) {
       return at::view_as_real(mutated_view.resolve_conj());
     } else {
@@ -129,7 +129,7 @@ Tensor FunctionalInverses::view_as_complex_inverse(const Tensor& base, const Ten
     }
 }
 
-Tensor FunctionalInverses::_conj_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::_conj_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     if (inverse_return_mode != InverseReturnMode::NeverView) {
       return at::_conj(mutated_view);
     } else {
@@ -137,7 +137,7 @@ Tensor FunctionalInverses::_conj_inverse(const Tensor& base, const Tensor& mutat
     }
 }
 
-Tensor FunctionalInverses::_neg_view_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::_neg_view_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     if (inverse_return_mode != InverseReturnMode::NeverView) {
       return at::_neg_view(mutated_view);
     } else {
@@ -145,7 +145,7 @@ Tensor FunctionalInverses::_neg_view_inverse(const Tensor& base, const Tensor& m
     }
 }
 
-Tensor FunctionalInverses::as_strided_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
+Tensor FunctionalInverses::as_strided_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
@@ -156,7 +156,7 @@ Tensor FunctionalInverses::as_strided_inverse(const Tensor& base, const Tensor& 
     }
 }
 
-Tensor FunctionalInverses::diagonal_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t offset, int64_t dim1, int64_t dim2) {
+Tensor FunctionalInverses::diagonal_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t offset, int64_t dim1, int64_t dim2) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
@@ -167,7 +167,7 @@ Tensor FunctionalInverses::diagonal_inverse(const Tensor& base, const Tensor& mu
     }
 }
 
-Tensor FunctionalInverses::expand_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::SymIntArrayRef size, bool implicit) {
+Tensor FunctionalInverses::expand_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::SymIntArrayRef size, bool implicit) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is an expanded view of base.
       // We should NOT do this for functionalization
@@ -182,11 +182,11 @@ Tensor FunctionalInverses::expand_inverse(const Tensor& base, const Tensor& muta
     }
 }
 
-Tensor FunctionalInverses::permute_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::IntArrayRef dims) {
-    return at::functionalization::permute_inverse(mutated_view, dims, inverse_return_mode);
+Tensor FunctionalInverses::permute_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::IntArrayRef dims) {
+    return at::functionalization::permute_copy_inverse(mutated_view, dims, inverse_return_mode);
 }
 
-Tensor FunctionalInverses::_reshape_alias_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::SymIntArrayRef size, at::SymIntArrayRef stride) {
+Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::SymIntArrayRef size, at::SymIntArrayRef stride) {
     // Note that I'm directly calling reshape(), and ignoring the strides.
     // _reshape_alias() isn't available from user code, and is an implementation detail of reshape().
     // Specifically, passing in the strides directly can get us into trouble in cases like:
@@ -200,7 +200,7 @@ Tensor FunctionalInverses::_reshape_alias_inverse(const Tensor& base, const Tens
     }
 }
 
-Tensor FunctionalInverses::select_int_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim, c10::SymInt index) {
+Tensor FunctionalInverses::select_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim, c10::SymInt index) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
@@ -211,16 +211,16 @@ Tensor FunctionalInverses::select_int_inverse(const Tensor& base, const Tensor& 
     }
 }
 
-Tensor FunctionalInverses::detach_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::detach_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     // the functionalization pass doesn't care about autograd metadata - as a view, I think detach() is just an identity function
     return mutated_view;
 }
 
-Tensor FunctionalInverses::lift_fresh_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::lift_fresh_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     return mutated_view;
 }
 
-Tensor FunctionalInverses::slice_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim, c10::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step) {
+Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim, c10::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
@@ -231,7 +231,7 @@ Tensor FunctionalInverses::slice_Tensor_inverse(const Tensor& base, const Tensor
     }
 }
 
-Tensor FunctionalInverses::split_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, c10::SymInt split_size, int64_t dim) {
+Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, c10::SymInt split_size, int64_t dim) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
@@ -251,7 +251,7 @@ Tensor FunctionalInverses::split_Tensor_inverse(const Tensor& base, const Tensor
     }
 }
 
-Tensor FunctionalInverses::split_with_sizes_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, c10::SymIntArrayRef split_sizes, int64_t dim) {
+Tensor FunctionalInverses::split_with_sizes_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, c10::SymIntArrayRef split_sizes, int64_t dim) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
@@ -270,19 +270,19 @@ Tensor FunctionalInverses::split_with_sizes_inverse(const Tensor& base, const Te
     }
 }
 
-Tensor FunctionalInverses::squeeze_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::squeeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     return unsqueeze_copy_to(mutated_view, base.sym_sizes(), inverse_return_mode);
 }
 
-Tensor FunctionalInverses::squeeze_dim_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim) {
+Tensor FunctionalInverses::squeeze_copy_dim_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim) {
     return unsqueeze_copy_to(mutated_view, dim, base.sym_sizes(), inverse_return_mode);
 }
 
-Tensor FunctionalInverses::squeeze_dims_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, IntArrayRef dim) {
+Tensor FunctionalInverses::squeeze_copy_dims_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, IntArrayRef dim) {
     return unsqueeze_copy_to(mutated_view, dim, base.sym_sizes(), inverse_return_mode);
 }
 
-Tensor FunctionalInverses::t_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::t_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     if (inverse_return_mode != InverseReturnMode::NeverView) {
       return at::t(mutated_view);
     } else {
@@ -290,7 +290,7 @@ Tensor FunctionalInverses::t_inverse(const Tensor& base, const Tensor& mutated_v
     }
 }
 
-Tensor FunctionalInverses::transpose_int_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim0, int64_t dim1) {
+Tensor FunctionalInverses::transpose_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim0, int64_t dim1) {
     if (inverse_return_mode != InverseReturnMode::NeverView) {
       return transpose(mutated_view, dim0, dim1);
     } else {
@@ -298,12 +298,12 @@ Tensor FunctionalInverses::transpose_int_inverse(const Tensor& base, const Tenso
     }
 }
 
-Tensor FunctionalInverses::_nested_view_from_buffer_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, const Tensor& nested_sizes, const Tensor& nested_strides, const Tensor& storage_offsets) {
+Tensor FunctionalInverses::_nested_view_from_buffer_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, const Tensor& nested_sizes, const Tensor& nested_strides, const Tensor& storage_offsets) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _nested_view_from_buffer() during the functionalization pass. For now, nested tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::unsqueeze_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim) {
+Tensor FunctionalInverses::unsqueeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim) {
     if (inverse_return_mode != InverseReturnMode::NeverView) {
       return at::squeeze(mutated_view, dim);
     } else {
@@ -311,52 +311,52 @@ Tensor FunctionalInverses::unsqueeze_inverse(const Tensor& base, const Tensor& m
     }
 }
 
-Tensor FunctionalInverses::_indices_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::_indices_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::_values_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::_values_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _values() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::indices_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::indices_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::values_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::values_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call values() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::_sparse_broadcast_to_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::IntArrayRef size) {
+Tensor FunctionalInverses::_sparse_broadcast_to_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::IntArrayRef size) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _sparse_broadcast_to() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::crow_indices_inverse(const at::Tensor& base, const at::Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::crow_indices_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call crow_indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::col_indices_inverse(const at::Tensor& base, const at::Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::col_indices_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call col_indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::ccol_indices_inverse(const at::Tensor& base, const at::Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::ccol_indices_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call ccol_indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::row_indices_inverse(const at::Tensor& base, const at::Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::row_indices_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call row_indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::unbind_int_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, int64_t dim) {
+Tensor FunctionalInverses::unbind_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, int64_t dim) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
@@ -368,7 +368,7 @@ Tensor FunctionalInverses::unbind_int_inverse(const Tensor& base, const Tensor& 
     }
 }
 
-Tensor FunctionalInverses::view_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::SymIntArrayRef size) {
+Tensor FunctionalInverses::view_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::SymIntArrayRef size) {
     if (inverse_return_mode != InverseReturnMode::NeverView) {
       return mutated_view.view_symint(base.sym_sizes());
     } else {
@@ -377,7 +377,7 @@ Tensor FunctionalInverses::view_inverse(const Tensor& base, const Tensor& mutate
 }
 
 
-Tensor FunctionalInverses::view_dtype_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::ScalarType dtype) {
+Tensor FunctionalInverses::view_copy_dtype_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::ScalarType dtype) {
     if (inverse_return_mode != InverseReturnMode::NeverView) {
       return mutated_view.view(base.scalar_type());
     } else {
@@ -385,7 +385,7 @@ Tensor FunctionalInverses::view_dtype_inverse(const Tensor& base, const Tensor& 
     }
 }
 
-Tensor FunctionalInverses::unfold_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dimension, int64_t size, int64_t step) {
+Tensor FunctionalInverses::unfold_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dimension, int64_t size, int64_t step) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
@@ -407,7 +407,7 @@ or removing the mutation from your model."
     }
 }
 
-Tensor FunctionalInverses::alias_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+Tensor FunctionalInverses::alias_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     if (inverse_return_mode != InverseReturnMode::NeverView) {
       return at::alias(mutated_view);
     } else {
@@ -415,16 +415,16 @@ Tensor FunctionalInverses::alias_inverse(const Tensor& base, const Tensor& mutat
     }
 }
 
-Tensor FunctionalInverses::chunk_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, int chunks, int dim) {
+Tensor FunctionalInverses::chunk_copy_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, int chunks, int dim) {
     // TODO: Can the logic from TensorShape.cpp be reused here somehow?
     const auto dim_size = base.sym_size(dim);
     auto split_size = (dim_size + chunks - 1) / chunks;
     std::vector<c10::SymInt> split_sizes(chunks, split_size);
     split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size);
-    return split_with_sizes_inverse(base, mutated_view, inverse_return_mode, mutated_view_idx, split_sizes, dim);
+    return split_with_sizes_copy_inverse(base, mutated_view, inverse_return_mode, mutated_view_idx, split_sizes, dim);
 }
 
-Tensor FunctionalInverses::narrow_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, int dim, c10::SymInt start, c10::SymInt length) {
+Tensor FunctionalInverses::narrow_copy_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, int dim, c10::SymInt start, c10::SymInt length) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization

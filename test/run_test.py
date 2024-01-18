@@ -300,6 +300,7 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
+    "dynamo/test_activation_checkpointing",
 ]
 
 # The tests inside these files should never be run in parallel with each other

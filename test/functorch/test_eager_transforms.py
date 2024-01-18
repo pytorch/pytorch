@@ -1528,6 +1528,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
 
 @markDynamoStrictTest
 class TestVmapOfGrad(TestCase):
+    @xfailIfTorchDynamo
     def test_per_sample_grads_inplace_view(self, device):
         def compute_loss(weight, x, t):
             x = x.mm(weight)
@@ -1571,6 +1572,7 @@ class TestVmapOfGrad(TestCase):
         result = vmap(grad(foo))(y, x)
         self.assertEqual(result, torch.ones_like(y))
 
+    @xfailIfTorchDynamo
     def test_per_sample_grads_simple(self, device):
         def compute_loss(weight, x, t):
             y = x @ weight
@@ -3152,7 +3154,7 @@ class TestComposability(TestCase):
             torch.vmap(torch.sin)
 
     # Some of these pass, some of these don't
-    @skipIfTorchDynamo()
+    @skipIfTorchDynamo
     @parametrize('transform', [
         'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
@@ -3398,7 +3400,7 @@ class TestComposability(TestCase):
             transform(MySin.apply)(x)
 
     # Some of these pass, some of these don't
-    @skipIfTorchDynamo()
+    @skipIfTorchDynamo
     @parametrize('transform', [
         'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
@@ -3935,6 +3937,7 @@ class TestExamplesCorrectness(TestCase):
 
         self.assertEqual(result_grads, expected_grads)
 
+    @xfailIfTorchDynamo
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_maml_omniglot(self, device, mechanism):
         # TODO: there appears to be precision issues for float32

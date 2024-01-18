@@ -29,16 +29,6 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
     case at::kByte:
       *(uint8_t*)data = unpackIntegral<uint8_t>(obj, "uint8");
       break;
-    case at::kUInt16:
-      *(uint16_t*)data = unpackIntegral<uint16_t>(obj, "uint16");
-      break;
-    case at::kUInt32:
-      *(uint32_t*)data = unpackIntegral<uint32_t>(obj, "uint32");
-      break;
-    case at::kUInt64:
-      // NB: This doesn't allow implicit conversion of float to int
-      *(uint64_t*)data = THPUtils_unpackUInt64(obj);
-      break;
     case at::kChar:
       *(int8_t*)data = unpackIntegral<int8_t>(obj, "int8");
       break;
@@ -105,12 +95,6 @@ inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
   switch (scalarType) {
     case at::kByte:
       return THPUtils_packInt64(*(uint8_t*)data);
-    case at::kUInt16:
-      return THPUtils_packInt64(*(uint16_t*)data);
-    case at::kUInt32:
-      return THPUtils_packUInt32(*(uint32_t*)data);
-    case at::kUInt64:
-      return THPUtils_packUInt64(*(uint64_t*)data);
     case at::kChar:
       return THPUtils_packInt64(*(int8_t*)data);
     case at::kShort:

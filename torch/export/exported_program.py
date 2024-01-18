@@ -103,12 +103,18 @@ class ExportedProgram:
         graph_signature: ExportGraphSignature,
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
         range_constraints: "Dict[sympy.Symbol, Any]",
-        module_call_graph: List[ModuleCallEntry],
+        equality_constraints: Optional[List[Tuple[Any, Any]]] = None,
+        module_call_graph: Optional[
+            List[ModuleCallEntry]
+        ] = None,  # TODO: make this not optional
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
         verifier: Optional[Type[Any]] = None,  # TODO Change typing hint to Verifier.
         tensor_constants: Optional[Dict[str, torch.Tensor]] = None,
     ):
         from torch._export.exported_program import _create_graph_module_for_export
+        from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
+            InputDim,
+        )
 
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -119,6 +125,9 @@ class ExportedProgram:
         self._graph_signature: ExportGraphSignature = graph_signature
         self._state_dict: Dict[str, Any] = state_dict
         self._range_constraints: "Dict[sympy.Symbol, ValueRanges]" = range_constraints
+        self._equality_constraints: List[Tuple[InputDim, InputDim]] = (
+            equality_constraints or []
+        )
         assert module_call_graph is not None
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
@@ -192,6 +201,11 @@ class ExportedProgram:
     @compatibility(is_backward_compatible=False)
     def range_constraints(self):
         return self._range_constraints
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def equality_constraints(self):
+        return self._equality_constraints
 
     @property
     @compatibility(is_backward_compatible=False)

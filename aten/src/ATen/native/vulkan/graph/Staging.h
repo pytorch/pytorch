@@ -2,8 +2,6 @@
 
 #ifdef USE_VULKAN_API
 
-#include <string.h>
-
 #include <ATen/native/vulkan/graph/Graph.h>
 
 namespace at {
@@ -18,12 +16,12 @@ void memcpy_to_mapping(
     const void* src,
     api::MemoryMap& dst_mapping,
     const size_t nbytes,
-    const api::ScalarType dtype);
+    const c10::ScalarType dtype);
 void memcpy_from_mapping(
     const api::MemoryMap& src_mapping,
     void* dst,
     const size_t nbytes,
-    const api::ScalarType dtype);
+    const c10::ScalarType dtype);
 
 //
 // Utility functions for memcpy

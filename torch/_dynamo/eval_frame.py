@@ -967,13 +967,11 @@ def rewrite_signature(
                     else:
                         raise AssertionError(
                             f"{candidate_desc} #{i+1}, of type {type(val)}, is not among {source_types}"
-                            'Set TORCH_LOGS="+export" for more information.'
                         )
                 else:
                     raise AssertionError(
                         f"{candidate_desc} #{i+1} is {val}, but only "
                         f"the following types are supported: {supported_types}"
-                        'Set TORCH_LOGS="+export" for more information.'
                     )
 
         return matched_elements_positions
@@ -1304,21 +1302,17 @@ def export(
                         f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
                         "It appears that you're trying to set a constraint on a "
                         f"value which we evaluated to have a static value of {k}. "
-                        'Set TORCH_LOGS="+export" for more information.'
+                        "Scroll up to see where this constraint was set."
                     )
         if constraint_violation_error:
             raise constraint_violation_error
 
         assert (
             graph is not None
-        ), "Failed to produce a graph during tracing as no tensor operations were found."
+        ), "Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph."
         assert hasattr(graph, "_source_to_user_stacks")
         assert out_guards is not None, "Failed to produce guards during tracing"
         assert fake_mode is not None
-
-        log.info(
-            "Dynamo captured graph:\n\n%s", graph.print_readable(print_output=False)
-        )
 
         # This check need to happened before aten_graph
         # because placeholder's _source_node attribute is not preserved by make_fx

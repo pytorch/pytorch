@@ -158,7 +158,7 @@ at::_ops::${unambiguous_name}::call(${unpacked_args})"""
 
 REVERSE_VIEW_DISPATCH = CodeTemplate(
     """\
-${reverse_name}(${unpacked_args})"""
+at::functionalization::FunctionalInverses::${reverse_name}(${unpacked_args})"""
 )
 
 MULTI_OUTPUT_VIEW_ITERATION = CodeTemplate(
@@ -429,10 +429,8 @@ def emit_view_lambda(
         *updated_args[1:],
     ]
 
-    from torchgen.api.functionalization import reverse_name
-
     reverse_replay_view_call = REVERSE_VIEW_DISPATCH.substitute(
-        reverse_name=reverse_name(f, include_namespace=True),
+        reverse_name=inverse_view_name(f),
         unpacked_args=reverse_unpacked_args,
     )
     reverse_replay_view_func = REVERSE_REPLAY_VIEW_LAMBDA_FUNC.substitute(

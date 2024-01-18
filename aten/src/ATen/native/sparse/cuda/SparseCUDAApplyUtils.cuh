@@ -5,7 +5,9 @@
 #include <ATen/native/cuda/thread_constants.h>
 #include <c10/macros/Macros.h>
 
-namespace at::native::apply {
+namespace at { namespace native {
+
+namespace apply {
 
 using at::cuda::detail::TensorInfo;
 using indexT = int64_t;
@@ -288,4 +290,6 @@ __global__ void coalesceValuesKernel(
   }
 }
 
-} // namespace at::native::apply
+} // namespace apply
+
+}} // namespace at::native

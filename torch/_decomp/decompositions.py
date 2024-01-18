@@ -301,8 +301,8 @@ def _prelu_kernel_backward(
 def rrelu_with_noise(
     self: Tensor,
     noise: Tensor,
-    lower: float = 0.125,
-    upper: float = 0.3333333333333333,
+    lower: float,
+    upper: float,
     training: bool = False,
     generator: Optional[torch.Generator] = None,
 ) -> Tensor:
@@ -2333,7 +2333,6 @@ def _index_copy(
     # Treat scalars as elements of \R^1
     zero_dim = x.ndim == 0
     x1 = x.unsqueeze(0) if zero_dim else x
-    index = index.unsqueeze(0) if index.ndim == 0 else index
     idx = (None,) * dim + (index,)
     index_put = aten.index_put_ if inplace else aten.index_put
     out = index_put(x1, idx, tensor)
@@ -4277,25 +4276,25 @@ def multilabel_margin_loss_forward(
 # it calls _scaled_dot_product_attention_math and
 # _scaled_dot_product_attention_math only has a CompositeImplicitAutograd
 # kernel. As a result it's decomposed into ops with finer granularity.
-# However recent PRs (#103826 #105131 #115913) added new logic in
+# However recent PRs (#103826 #105131) added new logic in
 # scaled_dot_product_attention and now it calls
-# _scaled_dot_product_flash_attention_for_cpu in export path. This results
-# in _scaled_dot_product_flash_attention_for_cpu showing up in export result.
+# _scaled_dot_product_flash_attention which contains a CPU kernel. This results
+# in _scaled_dot_product_flash_attention showing up in torch.export().
 # This decomposition ensures scaled_dot_product_attention is still decomposed
 # the same way as before, i.e., going through
 # _scaled_dot_product_attention_math. Notice that this decomp rule should be
 # excluded by inductor.
-@register_decomposition(aten._scaled_dot_product_flash_attention_for_cpu.default)
-def scaled_dot_product_flash_attention_for_cpu(
+@register_decomposition(aten._scaled_dot_product_flash_attention.default)
+def scaled_dot_product_flash_attention(
     query: Tensor,
     key: Tensor,
     value: Tensor,
     dropout_p: float = 0.0,
     is_causal: bool = False,
+    return_debug_mask: bool = False,
     *,
-    attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
-) -> Tuple[Tensor, Tensor]:
+) -> Tuple[Tensor, Tensor, Tensor, Tensor, int, int, Tensor, Tensor, Tensor]:
     dtype = query.dtype
     batchSize, num_head, qSize, headSize = (
         query.shape[0],
@@ -4319,8 +4318,25 @@ def scaled_dot_product_flash_attention_for_cpu(
         query.shape[3] == value.shape[3] and key.shape[3] == value.shape[3],
         lambda: "q, k, v should have the same head size",
     )
+    torch._check(
+        return_debug_mask is False, lambda: "return_debug_mask is not supported."
+    )
 
-    output, attn = aten._scaled_dot_product_attention_math.default(
+    logsumexp = torch.empty([batchSize, qSize, num_head, headSize], dtype=torch.float)
+    cum_seq_q, cum_seq_k = torch.empty([], dtype=torch.long), torch.empty(
+        [], dtype=torch.long
+    )
+    max_q, max_k = 0, 0
+    philox_seed, philox_offset = torch.empty([], dtype=torch.long), torch.empty(
+        [], dtype=torch.long
+    )
+    debug_attn_mask = torch.empty(
+        [],
+        dtype=query.dtype,
+        device=query.device,
+        requires_grad=query.requires_grad,
+    )
+    output, _ = aten._scaled_dot_product_attention_math.default(
         query, key, value, None, dropout_p, is_causal, None, scale=scale
     )
     # Why this change?
@@ -4357,7 +4373,17 @@ def scaled_dot_product_flash_attention_for_cpu(
     # pre-dispatch op-output and its decomposed representation must
     # return tensor with same view and dims
     output = output.transpose(1, 2).contiguous(memory_format=torch.contiguous_format)
-    return (output.transpose(1, 2), attn)
+    return (
+        output.transpose(1, 2),
+        logsumexp,
+        cum_seq_q,
+        cum_seq_k,
+        max_q,
+        max_k,
+        philox_seed,
+        philox_offset,
+        debug_attn_mask,
+    )
 
 
 def register_inplace(aten_op, outplace_op):
@@ -4390,11 +4416,6 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
 @out_wrapper()
 def floor_divide(self, other):
     return torch.div(self, other, rounding_mode="floor")
-
-
-@register_decomposition(aten.sym_numel)
-def sym_numel(t):
-    return functools.reduce(operator.mul, t.shape, 1)
 
 
 @register_decomposition([aten.sum.default, aten.sum.out])

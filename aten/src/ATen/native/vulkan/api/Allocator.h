@@ -5,9 +5,9 @@
 // Always include this file (Allocator.h) instead.
 //
 
-#include <ATen/native/vulkan/api/vk_api.h>
-
 #ifdef USE_VULKAN_API
+
+#include <ATen/native/vulkan/api/Common.h>
 
 #define VMA_VULKAN_VERSION 1000000
 

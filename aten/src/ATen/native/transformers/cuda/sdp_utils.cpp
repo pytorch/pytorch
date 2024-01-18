@@ -341,7 +341,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
     constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
         check_batch_size_and_num_heads_dense,
         check_nonzero_sequence_lengths_dense,
-        check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>);
+        check_last_dim_stride_equals_1_dense);
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;
@@ -399,7 +399,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
     constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
         check_batch_size_and_num_heads_dense,
         check_nonzero_sequence_lengths_dense,
-        check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim=*/>);
+        check_last_dim_stride_equals_1_dense);
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;

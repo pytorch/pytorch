@@ -576,17 +576,6 @@ def free_symbol_has(index: sympy.Expr, pattern: str):
     return any(pattern in v.name for v in index.free_symbols)
 
 
-def is_symbolic(a: Any) -> bool:
-    return isinstance(a, torch.SymInt) or (
-        isinstance(a, torch.Tensor)
-        and any(is_symbolic(x) for x in itertools.chain(a.size(), a.stride()))
-    )
-
-
-def any_is_symbolic(*args: Any) -> bool:
-    return any(is_symbolic(a) for a in args)
-
-
 def has_incompatible_cudagraph_ops(gm):
     forbidden_set = {
         "aten._fused_moving_avg_obs_fq_helper.default",
@@ -1205,3 +1194,37 @@ class Placeholder(enum.Enum):
     # The descriptive name of the triton kernel; when unique_kernel_names = False, this
     # placeholder will be replaced with a string with more information.
     DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
+
+
+# A utility function for easier AOTInductor testing
+def aot_inductor_launcher(so_path: str, device: str):
+    if device == "cuda":
+        return f"""
+            #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
+
+            torch::inductor::AOTIModelContainerRunnerCuda runner("{so_path}");
+
+            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
+                return runner.run(input_tensors);
+            }}
+
+            std::vector<std::string> get_call_spec() {{
+                return runner.get_call_spec();
+            }}
+        """
+    elif device == "cpu":
+        return f"""
+            #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
+
+            torch::inductor::AOTIModelContainerRunnerCpu runner("{so_path}");
+
+            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
+                return runner.run(input_tensors);
+            }}
+
+            std::vector<std::string> get_call_spec() {{
+                return runner.get_call_spec();
+            }}
+        """
+    else:
+        raise RuntimeError(f"Unsupported device: {device}")

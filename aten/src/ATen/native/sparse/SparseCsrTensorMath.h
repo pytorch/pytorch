@@ -6,7 +6,10 @@
 #include <ATen/native/ReductionType.h>
 #include <ATen/native/cpu/SpmmReduceKernel.h>
 
-namespace at::native::sparse::impl {
+namespace at {
+namespace native {
+namespace sparse {
+namespace impl {
 
 // Returns true if all entries of self are zero
 // TODO: This has potential to be a generic helper
@@ -81,4 +84,7 @@ inline void check_sparse_mm_reduce_impl_inputs(
   check_dim_size(other, 2, 0, self.size(1));
 }
 
-} // at::native::sparse::impl
+}
+}
+}
+}

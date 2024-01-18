@@ -129,13 +129,6 @@ class TORCH_API Context {
   void lazyInitHIP() {
     c10::call_once(thh_init, [&] { detail::getHIPHooks().initHIP(); });
   }
-  void lazyInitPrivateUse1() {
-    c10::call_once(thp_init, [&] {
-      if (isPrivateUse1HooksRegistered()) {
-        at::GetPrivateUse1HooksInterface()->initPrivateUse1();
-      }
-    });
-  }
   static const at::cuda::NVRTC& getNVRTC() {
     return detail::getCUDAHooks().nvrtc();
   }
@@ -308,7 +301,6 @@ class TORCH_API Context {
   static bool checkCuBLASConfigDeterministic();
   c10::once_flag thc_init;
   c10::once_flag thh_init;
-  c10::once_flag thp_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool _deterministic_algorithms = false;

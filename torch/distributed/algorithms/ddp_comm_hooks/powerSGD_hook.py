@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 def _orthogonalize(matrices, epsilon=0):
     """
     Decide between Gram-Schmidt or QR factorization to orthogonalize a batch of matrices.
-
     QR factorization doesn't work with half-precision, but it is usually faster with a rank > 2.
     """
     assert len(matrices.shape) == 3 and matrices.shape[2] <= matrices.shape[1]
@@ -40,8 +39,7 @@ def _orthogonalize(matrices, epsilon=0):
 
 def _orthogonalize_gram_schmidt(matrices, epsilon=0):
     """
-    Apply Gram-Schmidt procedure to orthogonalize a batch of matrices.
-
+    Applies Gram-Schmidt procedure to orthogonalize a batch of matrices.
     If epsilon is 0, this is equivalent to `torch.qr(matrices, out=(matrices, _))`,
     """
     num_cols = matrices.shape[2]
@@ -75,8 +73,6 @@ def _should_compress(
     num_rows, num_cols, matrix_approximation_rank, min_compression_rate
 ):
     """
-    Recommend if tensor given is worth compressing.
-
     Returns a recommendation as to whether the 2D tensor described by the arguments is worth compressing,
     including statistics describing the expected savings from compression.  We consider a tensor worth
     compressing when ``min_compression_rate`` < uncompressed size / compressed size, where
@@ -101,7 +97,9 @@ def _should_compress(
 
 
 def _report_compression_stats(bucket, state):
-    """Report compression stats at frequency of ``compression_stats_logging_frequency`` specified in PowerSGD state."""
+    """
+    Report compression stats at the frequency of `compression_stats_logging_frequency` specified in PowerSGD state.
+    """
     if (
         bucket.is_last()
         and state.iter >= state.next_stats_report
@@ -116,8 +114,7 @@ def _report_compression_stats(bucket, state):
 
 class PowerSGDState:
     r"""
-    Store both the algorithm's hyperparameters and internal state for all gradients during training.
-
+    Stores both the algorithm's hyperparameters and the internal state for all the gradients during the training.
     Particularly, ``matrix_approximation_rank`` and ``start_powerSGD_iter`` are the main hyperparameters that should be tuned by the user.
     For performance, we suggest to keep binary hyperparameters ``use_error_feedback`` and ``warm_start`` on.
 
@@ -269,8 +266,7 @@ class PowerSGDState:
 
     def __getstate__(self):
         r"""
-        Return a ``Dict[str, Any]`` which will be pickled and saved.
-
+        Returns a ``Dict[str, Any]`` which will be pickled and saved.
         ``process_group`` is not serializable and excluded from
         a returned state.
         """
@@ -284,8 +280,7 @@ class PowerSGDState:
 
     def __setstate__(self, state):
         r"""
-        Take a provided ``state`` and set to this ``PowerSGDState`` instance.
-
+        Takes a provided ``state`` and retrieves ``PowerSGDState``.
         ``process_group`` is set to default.
         """
         self.process_group = distributed_c10d._get_default_group()
@@ -297,7 +292,6 @@ class PowerSGDState:
             setattr(self, slot, value)
 
     def maybe_increase_iter(self, bucket):
-        """Track iterations and trigger log message at start of local SGD."""
         # Since bucket 0 is the last bucket to allreduce in an iteration.
         # Only increase `iter` when bucket 0 is processed.
         if bucket.is_last():
@@ -310,9 +304,7 @@ class PowerSGDState:
 
     def compression_stats(self):
         r"""
-        Return latest compression statistics as tuple.
-
-        Returns tuple of form (compress_rate, numel_before_compression, numel_after_compression) where:
+        Returns the latest compression statistics as a tuple of the form (compress_rate, numel_before_compression, numel_after_compression), where:
 
         compress_rate is the effective compression rate i.e. (number of elements before compression) / (number of elements after compression);
 
@@ -336,8 +328,6 @@ def powerSGD_hook(
     state: PowerSGDState, bucket: dist.GradBucket
 ) -> torch.futures.Future[torch.Tensor]:
     r"""
-    Implement PowerSGD algorithm.
-
     This DDP communication hook implements PowerSGD gradient compression
     algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
     Once gradient tensors are aggregated across all workers, this hook applies
@@ -646,8 +636,6 @@ def batched_powerSGD_hook(
     state: PowerSGDState, bucket: dist.GradBucket
 ) -> torch.futures.Future[torch.Tensor]:
     r"""
-    Implement simplified PowerSGD algorithm.
-
     This DDP communication hook implements a simplified PowerSGD gradient compression
     algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
     This variant does not compress the gradients layer by layer,
@@ -762,7 +750,7 @@ def batched_powerSGD_hook(
             )
 
         def create_low_rank_tensor(fill_random_values, rng):
-            """Return a low-rank 2D tensor of square_side_length * matrix_approximation_rank."""
+            "Returns a low-rank 2D tensor of square_side_length * matrix_approximation_rank."
             if fill_random_values:
                 with torch.random.fork_rng(devices=[]):
                     # Fork this RNG to avoid changing the seed globally and affecting the random sampling

@@ -96,16 +96,6 @@ def onlyIfTranslationValidation(fn: typing.Callable) -> typing.Callable:
     return wrapper
 
 
-def cleanup_op(opname):
-    ns, name = opname.split("::")
-    if not hasattr(torch.ops, ns):
-        return
-    actual_ns = getattr(torch.ops, ns)
-    if not hasattr(actual_ns, name):
-        return
-    delattr(actual_ns, name)
-
-
 class MyPickledModule(torch.nn.Module):
     def __init__(self, z):
         super().__init__()
@@ -330,7 +320,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             optimized_g = torch._dynamo.optimize(counts, nopython=True)(f)
             _ = optimized_g(x)
         finally:
-            cleanup_op("mylib::bar")
+            del torch.ops.mylib.bar
             del lib
 
     @torch._dynamo.config.patch(only_allow_pt2_compliant_ops=True)
@@ -366,7 +356,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 optimized_g = torch._dynamo.optimize(counts, nopython=True)(f)
                 y = optimized_g(x)
         finally:
-            cleanup_op("mylib::bar2")
+            del torch.ops.mylib.bar2
             del lib
 
     @torch._dynamo.config.patch(only_allow_pt2_compliant_ops=True)
@@ -422,7 +412,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 y = optimized_h(x)
 
         finally:
-            cleanup_op("mylib::bar3")
+            del torch.ops.mylib.bar3
             del lib
 
     def test_generate_trivial_abstract_impl(self):
@@ -453,7 +443,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             output = torch.compile(f, backend="eager", fullgraph=True)(*args)
             self.assertEqual(output, None)
         finally:
-            cleanup_op("mylib::foo")
+            del torch.ops.mylib.foo
             del lib
 
     def test_can_auto_functionalize(self):
@@ -485,7 +475,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 )
                 self.assertFalse(can_auto_functionalize(torch.ops.mylib.a))
             finally:
-                cleanup_op("mylib::a")
+                del torch.ops.mylib.a
                 del lib
         for schema in expected_false:
             try:
@@ -496,7 +486,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 )
                 self.assertFalse(can_auto_functionalize(torch.ops.mylib.a))
             finally:
-                cleanup_op("mylib::a")
+                del torch.ops.mylib.a
                 del lib
 
     def test_auto_functionalize(self):
@@ -525,13 +515,15 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             orig_args = (x, y, z, n)
 
             compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            torch.compile(f, backend="inductor", fullgraph=True)(*compiled_args)
+            torch.compile(f, backend="aot_eager_decomp_partition", fullgraph=True)(
+                *compiled_args
+            )
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
             self.assertEqual(compiled_args, eager_args)
         finally:
-            cleanup_op("mylib::foo")
+            del torch.ops.mylib.foo
             del lib
 
     def test_auto_functionalize_with_returns(self):
@@ -574,7 +566,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(compiled_args, eager_args)
             self.assertEqual(compiled_out, eager_out)
         finally:
-            cleanup_op("mylib::foo")
+            del torch.ops.mylib.foo
             del lib
 
     def test_auto_functionalize_on_view(self):
@@ -609,8 +601,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             y = f(x)
             self.assertEqual(y, x.sin())
         finally:
-            cleanup_op("mylib::foo")
             del lib
+            del torch.ops.mylib.foo
 
     def test_auto_functionalize_optional(self):
         try:
@@ -648,7 +640,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             f(*eager_args)
             self.assertEqual(compiled_args, eager_args)
         finally:
-            cleanup_op("mylib::foo")
+            del torch.ops.mylib.foo
             del lib
 
     def test_shape_int_inplace_binops(self):
@@ -2483,33 +2475,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.randn(10)
         y = torch.randn(10)
         z = torch.randn(10)
-        args1[x] = y
-        args1[3] = z
-
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
-        self.assertEqual(fn(args1, x), opt_fn(args1, x))
-        self.assertEqual(cnts.frame_count, 1)
-
-        # Calling again doesn't recompile (same id and key order)
-        opt_fn(args1, x)
-        self.assertEqual(cnts.frame_count, 1)
-        args2 = {}
-        args2[3] = z
-        args2[x] = y
-
-        # Different order recompiles
-        self.assertEqual(fn(args2, x), opt_fn(args2, x))
-        self.assertEqual(cnts.frame_count, 2)
-
-    def test_dict_order_keys_modules(self):
-        def fn(d, x):
-            return d[x](torch.ones(2, 2))
-
-        args1 = {}
-        x = torch.nn.Linear(2, 2)
-        y = torch.nn.Linear(2, 2)
-        z = torch.nn.Linear(2, 2)
         args1[x] = y
         args1[3] = z
 
@@ -7644,48 +7609,6 @@ def ___make_guard_fn():
         compiled_out = compiled_fn()
         self.assertTrue(same(fn_out, compiled_out))
 
-    def test_fn_hasattr__name__1(self):
-        def fn():
-            foo = lambda x: x + 1
-            return hasattr(foo, "__name__")
-
-        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
-
-        fn_out = fn()
-        compiled_out = compiled_fn()
-        self.assertEqual(fn_out, compiled_out)
-        self.assertTrue(fn_out)
-
-    def test_fn_hasattr__name__2(self):
-        def bar(x):
-            return torch.sin(x)
-
-        def fn():
-            return hasattr(bar, "__name__")
-
-        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
-
-        fn_out = fn()
-        compiled_out = compiled_fn()
-        self.assertEqual(fn_out, compiled_out)
-        self.assertTrue(fn_out)
-
-    def test_fn_hasattr__name__3(self):
-        def bar(x, y):
-            return torch.sin(x) + torch.cos(y)
-
-        baz = functools.partial(bar, y=4)
-
-        def fn():
-            return hasattr(baz, "__name__")
-
-        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
-
-        fn_out = fn()
-        compiled_out = compiled_fn()
-        self.assertEqual(fn_out, compiled_out)
-        self.assertFalse(fn_out)
-
     def test_torch_objects_as_keys(self):
         remap = {torch.float16: torch.float32}
 
@@ -9195,19 +9118,6 @@ fn
 fn
 """,
         )
-
-    def test_return_dict_with_graph_break_and_update(self):
-        def create():
-            torch._dynamo.graph_break()
-            return {0: torch.tensor(3)}
-
-        def fn():
-            return {**create()}
-
-        opt_fn = torch.compile(backend="eager")(fn)
-        result = opt_fn()
-        self.assertIn(0, result)
-        self.assertTrue(same(result[0], torch.tensor(3)))
 
 
 class TestTracer(JitTestCase):
