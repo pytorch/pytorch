@@ -288,7 +288,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             opts.rootTensor = rootTensor
             work = pg.broadcast(xs, opts)
             work.wait()
-            return work.result()
+            return xs
 
         # Every rank is root once
         for i in range(self.world_size):
@@ -322,12 +322,13 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         # sparse allreduce call is wrapped in a try catch since the c10d API is only available in the nccl experimental branch
         try:
-            work = pg.allreduce([sparse_tensor])
+            tensor_list = [sparse_tensor]
+            work = pg.allreduce(tensor_list)
             work.wait()
 
-            # work.result() returns a list of size 1, with the allreduce output as a dense tensor
+            # tensor_list is a list of size 1, with the allreduce output as a dense tensor
             a = torch.tensor([[2, 4, 0], [8, 0, 12]]).to(self.rank)
-            self.assertEqual(work.result()[0], a)
+            self.assertEqual(tensor_list[0], a)
         except RuntimeError as e:
             if "allreduce_sparse is only available in the NCCL experimental branch." in str(e):
                 pass
