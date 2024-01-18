@@ -6,9 +6,12 @@ import torch
 import torch.distributed as dist
 from torch.distributed.checkpoint.stateful import Stateful
 
+from .config import _TEST_BC
 from .default_planner import DefaultLoadPlanner
+from .default_serialization import _DefaultDeserializer
 from .filesystem import FileSystemReader
 from .planner import LoadPlanner
+from .serialization import Deserializer, Serializer
 from .storage import StorageReader
 from .utils import _all_gather_keys, _api_bc_check, _DistWrapper, _profile
 
@@ -47,6 +50,7 @@ def load(
     checkpoint_id: Union[str, os.PathLike] = "",
     storage_reader: Optional[StorageReader] = None,
     planner: Optional[LoadPlanner] = None,
+    deserializer: Optional[Deserializer] = None,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
@@ -157,6 +161,7 @@ def load(
             coordinator_rank,
             no_dist,
             planner,
+            deserializer,
         )
         for key in keys:
             if key not in state_dict:
@@ -174,16 +179,32 @@ def _load_state_dict(
     coordinator_rank: int = 0,
     no_dist: bool = False,
     planner: Optional[LoadPlanner] = None,
+    deserializer: Optional[Deserializer] = None,
 ) -> None:
     torch._C._log_api_usage_once("torch.distributed.checkpoint.load_state_dict")
 
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
     if planner is None:
         planner = DefaultLoadPlanner()
+    if deserializer is None and not _TEST_BC:
+        deserializer = _DefaultDeserializer()
+    try:
+        planner.set_deserializer(deserializer)
+        old_planner = False
+    except NotImplementedError:
+        old_planner = True
+
+    storage_reader.set_deserializer(deserializer)
 
     def local_step():
         assert planner is not None
         metadata = storage_reader.read_metadata()
+        if metadata.serialization_signature:
+            if metadata.serialization_signature != deserializer.signature:
+                raise RuntimeError(
+                    f"Serialization signature does not match, {old_planner=}, "
+                    f"{metadata.serialization_signature=}, {deserializer.signature=}."
+                )
         planner.set_up_planner(state_dict, metadata, distW.is_coordinator)
         storage_reader.set_up_storage_reader(metadata, distW.is_coordinator)
 

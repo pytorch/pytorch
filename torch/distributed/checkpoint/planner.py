@@ -14,6 +14,8 @@ from .metadata import (
     TensorProperties,
 )
 
+from .serialization import Deserializer, Serializer
+
 
 __all__ = [
     "WriteItemType",
@@ -178,6 +180,9 @@ class SavePlanner(abc.ABC):
     >>>         return global_plan, metadata
     """
 
+    def set_serializer(self, serializer: Optional[Serializer] = None) -> None:
+        raise NotImplementedError
+
     @abc.abstractmethod
     def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
         """
@@ -311,6 +316,9 @@ class LoadPlanner:
     >>>     def commit_tensor(self, read_item, tensor):
     >>>         self.state_dict[read_item.dest_index.fqn] = tensor
     """
+
+    def set_deserializer(self, deserializer: Optional[Deserializer]) -> None:
+        raise NotImplementedError
 
     @abc.abstractmethod
     def set_up_planner(
