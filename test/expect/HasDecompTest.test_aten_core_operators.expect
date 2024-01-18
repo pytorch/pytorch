@@ -19,6 +19,8 @@ aten::_softmax
 aten::_softmax.out
 aten::_to_copy
 aten::_to_copy.out
+aten::_unsafe_masked_index
+aten::_unsafe_masked_index_put
 aten::_upsample_nearest_exact1d
 aten::_upsample_nearest_exact2d
 aten::_upsample_nearest_exact3d

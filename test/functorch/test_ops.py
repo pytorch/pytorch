@@ -1305,6 +1305,7 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail('as_strided', 'partial_views'),
+        xfail('_unsafe_masked_index'),  # Batching rule not implemented
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
