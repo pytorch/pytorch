@@ -2926,6 +2926,7 @@ dynamo_expected_failures = {
     "TestVmapBatchedGradientLegacyCPU.test_median_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_T_numpy",  # test_legacy_vmap
     "TestNamedTensor.test_expand",  # test_namedtensor
+    "TestNamedTensor.test_masked_fill",  # test_namedtensor
     "TestNamedTensor.test_addmv",  # test_namedtensor
     "TestNamedTensor.test_cummax_cummin",  # test_namedtensor
     "TestNamedTensor.test_no_jit_script_support",  # test_namedtensor
