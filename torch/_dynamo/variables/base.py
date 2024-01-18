@@ -229,6 +229,29 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         return str(self)
 
     def python_type(self):
+        """
+        Abstract method to be implemented by subclasses of VariableTracker.
+
+        This method should return the type represented by the instance of the subclass.
+        The purpose is to provide a standardized way to retrieve the Python type information
+        of the variable being tracked.
+
+        Returns:
+            type: The Python type (such as int, str, list, etc.) of the variable tracked by
+                the subclass. If the type cannot be determined or is not relevant,
+                leaving it undefined or invoking super() is always sound.
+
+        Note:
+            This is an abstract method and may be overridden in subclasses.
+
+        Example:
+            class SetVariable(VariableTracker):
+                def python_type(self):
+                    return set
+
+        Raises:
+            NotImplementedError: If the method is not implemented in a subclass.
+        """
         raise NotImplementedError(f"{self} has no type")
 
     def as_python_constant(self):
