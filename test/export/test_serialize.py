@@ -581,10 +581,6 @@ class TestOpVersioning(TestCase):
             deserializer._validate_model_opset_version(model_opset_version)
             self.assertIn("Compiler doesn't have a version table for op namespace", log.output[0])
 
-unittest.expectedFailure(
-    TestDeserialize.test_exportdb_supported_case_tensor_setattr
-)
-
 # We didn't set up kwargs input yet
 unittest.expectedFailure(
     TestDeserialize.test_exportdb_supported_case_fn_with_kwargs

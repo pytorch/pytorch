@@ -13,6 +13,7 @@ __all__ = [
     "OutputSpec",
     "SymIntArgument",
     "TensorArgument",
+    "CustomObjArgument",
 ]
 
 
@@ -31,7 +32,14 @@ class ConstantArgument:
     value: Union[int, float, bool, None]
 
 
-ArgumentSpec = Union[TensorArgument, SymIntArgument, ConstantArgument]
+@dataclasses.dataclass
+class CustomObjArgument:
+    name: str
+
+
+ArgumentSpec = Union[
+    TensorArgument, SymIntArgument, ConstantArgument, CustomObjArgument
+]
 
 
 class InputKind(Enum):
@@ -39,6 +47,7 @@ class InputKind(Enum):
     PARAMETER = auto()
     BUFFER = auto()
     CONSTANT_TENSOR = auto()
+    CUSTOM_OBJ = auto()
 
 
 @dataclasses.dataclass
@@ -48,7 +57,10 @@ class InputSpec:
     target: Optional[str]
 
     def __post_init__(self):
-        assert isinstance(self.arg, (TensorArgument, SymIntArgument, ConstantArgument))
+        assert isinstance(
+            self.arg,
+            (TensorArgument, SymIntArgument, ConstantArgument, CustomObjArgument),
+        )
 
 
 class OutputKind(Enum):
