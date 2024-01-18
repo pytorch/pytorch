@@ -1654,7 +1654,7 @@ def check_pip_packages() -> None:
         "pytest-flakefinder",
         "pytest-xdist",
     ]
-    installed_packages = [i.key for i in pk_resources.working_set]
+    installed_packages = [i.key for i in pkg_resources.working_set]
     for package in packages:
         if package not in installed_packages:
             print_to_stderr(
