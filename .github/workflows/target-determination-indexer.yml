@@ -45,6 +45,7 @@ jobs:
 
           conda activate tdenv
 
+          cd ../../
           ls
           pwd
           cd llm-target-determinator 
