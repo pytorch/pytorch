@@ -40,7 +40,7 @@ void _fused_adam_cuda_impl_(
         multi_tensor_apply_for_fused_optimizer<4>(
             tensor_lists,
             state_steps,
-            FusedAdamMathFunctor<scalar_t, 4>(),
+            FusedAdamMathFunctor<scalar_t, 4, ADAM_MODE::ORIGINAL>(),
             lr_ptr, // unused
             lr,
             beta1,
@@ -50,8 +50,7 @@ void _fused_adam_cuda_impl_(
             maximize,
             /* amsgrad */ false,
             grad_scale_ptr,
-            found_inf_ptr,
-            ADAM_MODE::ORIGINAL);
+            found_inf_ptr);
       });
 }
 
@@ -88,7 +87,7 @@ void _fused_adam_cuda_impl_(
         multi_tensor_apply_for_fused_optimizer<4>(
             tensor_lists,
             state_steps,
-            FusedAdamMathFunctor<scalar_t, 4>(),
+            FusedAdamMathFunctor<scalar_t, 4, ADAM_MODE::ORIGINAL>(),
             lr_ptr,
             1.0, // unused
             beta1,
@@ -98,8 +97,7 @@ void _fused_adam_cuda_impl_(
             maximize,
             /* amsgrad */ false,
             grad_scale_ptr,
-            found_inf_ptr,
-            ADAM_MODE::ORIGINAL);
+            found_inf_ptr);
       });
 }
 

@@ -17,8 +17,12 @@ constexpr uint8_t kExpAvgIdx = 2;
 constexpr uint8_t kExpAvgSqIdx = 3;
 constexpr uint8_t kMaxExpAvgSqIdx = 4;
 
-template <typename scalar_type, typename opmath_t, int depth = 4>
-C10_DEVICE __forceinline__ void adam_math(
+template <
+    typename scalar_type,
+    typename opmath_t,
+    int depth,
+    ADAM_MODE adam_mode>
+C10_DEVICE inline void adam_math(
     scalar_type r_args[depth][kILP],
     const float* step_count,
     const double lr,
@@ -29,8 +33,8 @@ C10_DEVICE __forceinline__ void adam_math(
     const bool maximize,
     const bool amsgrad,
     const float* grad_scale_ptr,
-    const float* found_inf_ptr,
-    const ADAM_MODE adam_mode) {
+    const float* found_inf_ptr) {
+  static_assert(depth == 4 || depth == 5);
 #pragma unroll
   for (int ii = 0; ii < kILP; ii++) {
     // Load values.
@@ -51,13 +55,10 @@ C10_DEVICE __forceinline__ void adam_math(
     }
     // Update param, grad, 1st and 2nd order momentum.
     if (weight_decay != 0) {
-      switch (adam_mode) {
-        case ADAM_MODE::ORIGINAL:
-          grad += param * weight_decay;
-          break;
-        case ADAM_MODE::ADAMW:
-          param -= lr * weight_decay * param;
-          break;
+      if constexpr (adam_mode == ADAM_MODE::ORIGINAL) {
+        grad += param * weight_decay;
+      } else if constexpr (adam_mode == ADAM_MODE::ADAMW) {
+        param -= lr * weight_decay * param;
       }
     }
     // todo(crcrpar): use lerp
@@ -102,7 +103,7 @@ C10_DEVICE __forceinline__ void adam_math(
 // parameter updates accordingly. To be functionally on par with `torch.optim`
 // optimizers and `_multi_tensor` ones, the kernel below writes out gradients
 // only when `grad_scale_ptr != nullptr.
-template <typename scalar_type, int depth = 4>
+template <typename scalar_type, int depth, ADAM_MODE adam_mode>
 struct FusedAdamMathFunctor {
   static_assert(
       depth == 4 || depth == 5,
@@ -147,7 +148,7 @@ struct FusedAdamMathFunctor {
         for (int i = 0; i < depth; i++) {
           load_store(r_args[i], args[i], 0, i_start);
         }
-        adam_math<scalar_type, opmath_t, depth>(
+        adam_math<scalar_type, opmath_t, depth, adam_mode>(
             r_args,
             step_count,
             lr_double,
@@ -158,8 +159,7 @@ struct FusedAdamMathFunctor {
             maximize,
             amsgrad,
             grad_scale_ptr,
-            found_inf_ptr,
-            adam_mode);
+            found_inf_ptr);
 #pragma unroll
         for (int i = 0; i < depth; i++) {
           if (i != kGradIdx || grad_scale_ptr) {
@@ -171,7 +171,7 @@ struct FusedAdamMathFunctor {
       for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
            i_start += blockDim.x * kILP) {
         load_args<depth>(r_args, args, i_start, chunk_size, n);
-        adam_math<scalar_type, opmath_t, depth>(
+        adam_math<scalar_type, opmath_t, depth, adam_mode>(
             r_args,
             step_count,
             lr_double,
@@ -182,8 +182,7 @@ struct FusedAdamMathFunctor {
             maximize,
             amsgrad,
             grad_scale_ptr,
-            found_inf_ptr,
-            adam_mode);
+            found_inf_ptr);
 #pragma unroll
         for (int i = 0; i < depth; i++) {
           if (i != kGradIdx || grad_scale_ptr) {
