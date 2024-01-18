@@ -11,6 +11,7 @@ try:
     from . import (
         test_aot_autograd,
         test_ctx_manager,
+        test_distributed,
         test_export,
         test_functions,
         test_higher_order_ops,
@@ -22,6 +23,7 @@ try:
 except ImportError:
     import test_aot_autograd
     import test_ctx_manager
+    import test_distributed
     import test_export
     import test_functions
     import test_higher_order_ops
@@ -69,6 +71,7 @@ tests = [
     test_higher_order_ops.HigherOrderOpTests,
     test_higher_order_ops.FuncTorchHigherOrderOpTests,
     test_aot_autograd.AotAutogradFallbackTests,
+    test_distributed.DistributedTests,
 ]
 for test in tests:
     make_dynamic_cls(test)
