@@ -70,6 +70,7 @@ RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1
 CPP_TEST_PREFIX = "cpp"
 CPP_TEST_PATH = "build/bin"
 DISTRIBUTED_TEST_PREFIX = "distributed"
+INDUCTOR_TEST_PREFIX = "inductor"
 
 
 # Note [ROCm parallel CI testing]
@@ -437,6 +438,7 @@ JIT_EXECUTOR_TESTS = [
     "test_jit_fuser_legacy",
 ]
 
+INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
@@ -1243,6 +1245,11 @@ def parse_args():
         help="exclude distributed tests",
     )
     parser.add_argument(
+        "--exclude-inductor-tests",
+        action="store_true",
+        help="exclude inductor tests",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Only list the test that will run.",
@@ -1363,6 +1370,9 @@ def get_selected_tests(options) -> List[str]:
 
     if options.exclude_distributed_tests:
         options.exclude.extend(DISTRIBUTED_TESTS)
+
+    if options.exclude_inductor_tests:
+        options.exclude.extend(INDUCTOR_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:
@@ -1747,6 +1757,7 @@ def main():
 
     if options.dynamo:
         os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
+
     elif options.inductor:
         os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
 
