@@ -5,6 +5,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/Bitset.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/util/irange.h>
 #include <ATen/core/Variadic.h>
 #include <ATen/core/stack.h>
@@ -44,6 +45,15 @@ static inline DispatchKeySet computeDispatchKeySet(
   // the TLS in question to be zero-initialized, so you don't actually win
   // anyting in that case.
   return (((ks | local.included_) - local.excluded_) & key_mask);
+}
+
+// NB: This is also used in backend select
+inline void updateDispatchKeySetFromSize(DispatchKeySet& ks, c10::SymIntArrayRef sizes) {
+  for (const auto& x : sizes) {
+    if (x.is_heap_allocated()) {
+      ks = ks | x.toSymNode()->key_set();
+    }
+  }
 }
 
 }
@@ -95,12 +105,7 @@ namespace detail {
       }
     }
     void operator()(const c10::SymIntArrayRef& xs) {
-      for (const auto& x : xs) {
-        if (x.is_heap_allocated() && x.toSymNode()->singleton_int().has_value()) {
-          ts = ts | DispatchKeySet({DispatchKey::Python, DispatchKey::PythonTLSSnapshot});
-          break;
-        }
-      }
+      impl::updateDispatchKeySetFromSize(ts, xs);
     }
     template <typename T>
     void operator()(const T&) {

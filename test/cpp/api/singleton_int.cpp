@@ -8,12 +8,17 @@
 #include <test/cpp/api/support.h>
 
 TEST(SingletonIntTest, Comparisons) {
-  auto a = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 1)));
-  auto b = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 1)));
-  auto c = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(2, 1)));
+  auto x = torch::randn({2, 2});
+
+  auto a =
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
+          1, 1, x, 1, c10::SingletonType::CPP)));
+  auto b =
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
+          1, 1, x, 1, c10::SingletonType::CPP)));
+  auto c =
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
+          2, 1, x, 1, c10::SingletonType::CPP)));
   auto d = c10::SymInt(3);
 
   ASSERT_TRUE(a == a);
@@ -86,10 +91,14 @@ TEST(SingletonIntTest, Comparisons) {
 }
 
 TEST(SingletonIntTest, WiithFactor) {
-  auto a = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 5)));
-  auto b = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 10)));
+  auto x = torch::randn({2, 2});
+
+  auto a =
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
+          1, 5, x, 1, c10::SingletonType::CPP)));
+  auto b =
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
+          1, 10, x, 1, c10::SingletonType::CPP)));
   // eq
   ASSERT_FALSE(a == b);
   ASSERT_FALSE(a >= b);

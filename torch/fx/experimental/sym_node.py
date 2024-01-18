@@ -77,6 +77,10 @@ class SymNode:
     ):
         self._expr = expr
         self.shape_env = shape_env
+        # Only populated when is_singleton() is true
+        self._singleton_vec = None
+        self._singleton_sum_vec = None
+        # Symbolic singleton int have pytype int.
         self.pytype = pytype
         # What's the difference between hint and constant?
         #
@@ -170,6 +174,22 @@ class SymNode:
 
     def is_bool(self):
         return self.pytype is bool
+
+    def is_singleton(self):
+        # Unbacked SymInts cannot be singletons today
+        return (
+            self.hint is not None
+            and isinstance(self.hint, SymInt)
+            and self.hint.node.is_singleton()
+        )
+
+    def singleton_vec(self):
+        assert self._singleton_vec is not None
+        return self._singleton_vec
+
+    def singleton_sum_vec(self):
+        assert self._singleton_sum_vec is not None
+        return self._singleton_sum_vec
 
     def wrap_int(self, num):
         assert type(num) is int

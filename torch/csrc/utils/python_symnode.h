@@ -95,6 +95,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("is_bool")().is(py::handle(Py_True));
   }
 
+  bool is_singleton() override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("is_singleton")().is(py::handle(Py_True));
+  }
+
   bool has_hint() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("has_hint")().is(py::handle(Py_True));

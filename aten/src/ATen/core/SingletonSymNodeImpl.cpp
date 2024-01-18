@@ -6,7 +6,7 @@ namespace c10 {
 
 namespace {
 bool _eq(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
-  TORCH_INTERNAL_ASSERT(lhs->singleton_int().has_value());
+  TORCH_INTERNAL_ASSERT(lhs->is_singleton());
   c10::optional<int64_t> c = rhs->singleton_int();
   return (
       c.has_value() && lhs->singleton_int() == *c &&
@@ -72,7 +72,12 @@ c10::SymNode SingletonSymNodeImpl::mul(const c10::SymNode& other) {
   }
   c10::optional<int64_t> c = other->constant_int();
   TORCH_CHECK(c.has_value());
-  return SymNode(c10::make_intrusive<SingletonSymNodeImpl>(val_, coeff_ * *c));
+  return SymNode(c10::make_intrusive<SingletonSymNodeImpl>(val_, coeff_ * *c, vec_, sum_vec_, type_));
+}
+
+at::Tensor get_singleton_vec(const c10::SymNode& node) {
+  TORCH_INTERNAL_ASSERT(node->is_singleton());
+  return at::Tensor(c10::intrusive_ptr<c10::TensorImpl>::reclaim_copy(node->singleton_vec()));
 }
 
 } // namespace c10
