@@ -40,7 +40,13 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import EventVariable, StreamVariable
-from .dicts import ConstDictVariable, DefaultDictVariable, is_hashable, SetVariable
+from .dicts import (
+    ConstDictVariable,
+    DefaultDictVariable,
+    DictView,
+    is_hashable,
+    SetVariable,
+)
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -849,22 +855,12 @@ class BuiltinVariable(VariableTracker):
             # determine the control flow
             return obj
 
-        # TODO This should probably be treated as a dict, or dicts should also be treated here
-        if self.fn == set:
-            cls = SetVariable
-        else:
-            cls = variables.BaseListVariable.cls_for(self.fn)
+        cls = variables.BaseListVariable.cls_for(self.fn)
         if obj is None:
-            if cls is SetVariable:
-                return cls(
-                    [],
-                    mutable_local=MutableLocal(),
-                )
-            else:
-                return cls(
-                    [],
-                    mutable_local=MutableLocal(),
-                )
+            return cls(
+                [],
+                mutable_local=MutableLocal(),
+            )
         elif obj.has_unpack_var_sequence(tx):
             if obj.source and not is_constant_source(obj.source):
                 if isinstance(obj, TupleIteratorVariable):
@@ -873,11 +869,6 @@ class BuiltinVariable(VariableTracker):
                     )
                 else:
                     install_guard(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
-            if cls is SetVariable:
-                return cls(
-                    list(obj.unpack_var_sequence(tx)),
-                    mutable_local=MutableLocal(),
-                )
 
             return cls(
                 list(obj.unpack_var_sequence(tx)),
@@ -887,7 +878,6 @@ class BuiltinVariable(VariableTracker):
     call_iter = _call_iter_tuple_list
     call_tuple = _call_iter_tuple_list
     call_list = _call_iter_tuple_list
-    call_set = _call_iter_tuple_list
 
     def call_callable(self, tx, arg):
         from .functions import BaseUserFunctionVariable
@@ -967,6 +957,21 @@ class BuiltinVariable(VariableTracker):
                 dict.fromkeys(keys, value), user_cls, mutable_local=MutableLocal()
             )
         unimplemented(f"{user_cls.__name__}.fromkeys(): {args} {kwargs}")
+
+    def call_set(self, tx, *args, **kwargs):
+        # Can we merge this implementation and call_dict's one?
+        assert not kwargs
+        if not args:
+            return SetVariable([], mutable_local=MutableLocal())
+        assert len(args) == 1
+        arg = args[0]
+        if isinstance(arg, variables.SetVariable):
+            return arg.clone(mutable_local=MutableLocal())
+        elif arg.has_unpack_var_sequence(tx):
+            items = arg.unpack_var_sequence(tx)
+            return SetVariable(items, mutable_local=MutableLocal())
+        else:
+            unimplemented(f"set(): {args} {kwargs}")
 
     def call_zip(self, tx, *args, **kwargs):
         if kwargs:
@@ -1553,12 +1558,9 @@ class BuiltinVariable(VariableTracker):
                 _unimplemented()
             return BaseListVariable.list_compare(tx, op, left, right)
 
-        if isinstance(left, SetVariable):
-            if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
-                _unimplemented()
-            return ConstantVariable.create(
-                op(left._underlying_items, right._underlying_items)
-            )
+        # If they implement set semantics (e.g. SetVariable or DictKeys)
+        if hasattr(left, "set_items") and hasattr(right, "set_items"):
+            return ConstantVariable.create(op(left.set_items, right.set_items))
 
         if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):
             from .builder import wrap_fx_proxy_cls
@@ -1642,8 +1644,9 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
+        if hasattr(a, "set_items") and hasattr(b, "set_items"):
+            return SetVariable(list(a.set_items & b.set_items))
         # None no-ops this handler and lets the driving function proceed
-        return None
 
     def call_or_(self, tx, a, b):
         # Rely on constant_handler
@@ -1659,6 +1662,8 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
+        if hasattr(a, "set_items") and hasattr(b, "set_items"):
+            return SetVariable(list(a.set_items | b.set_items))
         # None no-ops this handler and lets the driving function proceed
         return None
 
@@ -1672,7 +1677,10 @@ class BuiltinVariable(VariableTracker):
                 sym_num=None,
             )
 
-        if isinstance(a, ListVariable):
+        # Unwrap the underlying ConstDictVariable
+        if isinstance(a, DictView):
+            a = a.dv_dict
+        if isinstance(a, (ListVariable, ConstDictVariable)):
             return ConstantVariable.create(len(a.items) == 0)
 
         return None

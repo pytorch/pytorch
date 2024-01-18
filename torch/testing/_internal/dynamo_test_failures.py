@@ -1897,20 +1897,13 @@ dynamo_expected_failures = {
     "TestTensorBoardEmbedding.test_embedding",  # test_tensorboard
     "TestTensorProtoSummary.test_float_tensor_proto",  # test_tensorboard
     "TestTensorBoardSummary.test_image_without_channel",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_smoke",  # test_tensorboard
     "TestTensorBoardUtils.test_numpy_vid_uint8",  # test_tensorboard
     "TestTensorProtoSummary.test_complex_tensor_proto",  # test_tensorboard
     "TestTensorBoardSummary.test_image_with_one_channel",  # test_tensorboard
     "TestTensorBoardEmbedding.test_embedding_64",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_domain_discrete",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_wrong_parameter",  # test_tensorboard
     "TestTensorBoardSummary.test_video",  # test_tensorboard
     "TestTensorProtoSummary.test_int_tensor_proto",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_number",  # test_tensorboard
-    "TestTensorBoardWriter.test_writer",  # test_tensorboard
     "TestTensorProtoSummary.test_empty_tensor_proto",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_string",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_bool",  # test_tensorboard
     "TestTensorBoardSummary.test_uint8_image",  # test_tensorboard
     "TestAsArrayCPU.test_copy_list_cpu_float64",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int64",  # test_tensor_creation_ops
@@ -2000,7 +1993,6 @@ dynamo_expected_failures = {
     "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int8",  # test_scatter_gather_ops
     "TestScatterGatherCPU.test_scatter__reductions_cpu_complex64",  # test_scatter_gather_ops
     "TestCxxPytree.test_pytree_serialize_spec8",  # test_pytree
-    "TestGenericPytree.test_flatten_unflatten_namedtuple_py",  # test_pytree
     "TestCxxPytree.test_pytree_serialize_spec9",  # test_pytree
     "TestCxxPytree.test_pytree_serialize_spec3",  # test_pytree
     "TestGenericPytree.test_flatten_unflatten_deque_py",  # test_pytree
@@ -2789,7 +2781,6 @@ dynamo_expected_failures = {
     "TestNamedTuple.test_max",  # test_overrides
     "TestTorchFunctionMode.test_mode_notimplemented_loop",  # test_overrides
     "TestTorchFunctionMode.test_disable_enable_subclass",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___setitem__",  # test_overrides
     "TestTorchFunctionOverride.test_mean_semantics",  # test_overrides
     "TestGradCheckOverride.test_gradcheck",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor___cuda_array_interface_____get__",  # test_overrides
