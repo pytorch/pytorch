@@ -73,6 +73,15 @@ TEST(XPUStreamTest, StreamBehavior) {
   c10::xpu::XPUStream cur_stream = c10::xpu::getCurrentXPUStream();
 
   ASSERT_EQ_XPU(cur_stream, stream);
+  ASSERT_EQ_XPU(stream.priority(), 0);
+
+  auto [least_priority, greatest_priority] =
+      c10::xpu::XPUStream::priority_range();
+  ASSERT_EQ_XPU(least_priority, 0);
+  ASSERT_TRUE(greatest_priority < 0);
+
+  stream = c10::xpu::getStreamFromPool(/* isHighPriority */ true);
+  ASSERT_TRUE(stream.priority() < 0);
 
   if (c10::xpu::device_count() <= 1) {
     return;
@@ -133,6 +142,10 @@ TEST(XPUStreamTest, StreamPoolRoundRobinTest) {
     }
   }
   ASSERT_TRUE(hasDuplicates);
+
+  auto stream = c10::xpu::getStreamFromPool(/* isHighPriority */ true);
+  auto result_pair = queue_set.insert(stream.queue());
+  ASSERT_TRUE(result_pair.second);
 }
 
 void asyncMemCopy(sycl::queue& queue, int* dst, int* src, size_t numBytes) {
