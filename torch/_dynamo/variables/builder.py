@@ -423,8 +423,14 @@ class VariableBuilder:
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
             def build_key_value(i, k, v):
-                source_key = ConstDictKeySource(self.get_source(), i)
-                key = LazyVariableTracker.create(k, source_key)
+                # Remove once we make keys really lazy
+                # (we are currently instantiating them in _HashableTracker._eq_impl)
+                if ConstantVariable.is_literal(k):
+                    key = ConstantVariable.create(k)
+                    source_key = k
+                else:
+                    source_key = ConstDictKeySource(self.get_source(), i)
+                    key = LazyVariableTracker.create(k, source_key)
 
                 source_value = GetItemSource(self.get_source(), source_key)
                 value = LazyVariableTracker.create(v, source_value)
