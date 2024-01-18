@@ -495,8 +495,6 @@ class OpOverrides:
     def bitwise_left_shift(x, y):
         return f"{ExprPrinter.paren(x)} << {ExprPrinter.paren(y)}"
 
-    # TODO(fdrocha): this is currently not being used anywhere,
-    # pending on moving triton pin past 972b761
     @staticmethod
     def bitwise_right_shift(x, y):
         return f"{ExprPrinter.paren(x)} >> {ExprPrinter.paren(y)}"
