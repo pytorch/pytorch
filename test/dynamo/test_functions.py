@@ -19,7 +19,12 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
-from torch._dynamo.testing import expectedFailureDynamic
+from torch._dynamo.testing import (
+    CompileCounterWithBackend,
+    EagerAndRecordGraphs,
+    expectedFailureDynamic,
+    normalize_gm,
+)
 from torch._dynamo.utils import ifdynstaticdefault, same
 
 from torch.nn import functional as F
@@ -1506,6 +1511,69 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         eager_result = fn(lambda0, lambda1, x)
         self.assertEqual(eager_result, dynamo_result)
 
+    def test_partials_graph_break_reconstruct(self):
+        def fn(udf_mul_0, udf_mul_1, x):
+            lambda0 = functools.partial(udf_mul_0, y=x)
+            lambda1 = functools.partial(udf_mul_1, y=x)
+
+            print("break")
+            return torch.mul(lambda0(x), lambda1(x))
+
+        backend = EagerAndRecordGraphs()
+        cnts = CompileCounterWithBackend(backend)
+        x = torch.randn(2, 2)
+        dynamo_result = torch._dynamo.optimize(cnts)(fn)(udf_mul, udf_mul, x)
+
+        eager_result = fn(udf_mul, udf_mul, x)
+        gm = backend.graphs[0]
+        self.assertEqual(eager_result, dynamo_result)
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_lambda0_keywords_y_ : torch.Tensor):
+        l_lambda0_keywords_y_ = L_lambda0_keywords_y_
+
+        mul = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+        mul_1 = l_lambda0_keywords_y_ * l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+
+        mul_2 = torch.mul(mul, mul_1);  mul = mul_1 = None
+        return (mul_2,)
+""",
+        )
+
+    def test_partials_graph_break_reconstruct_mix(self):
+        def fn(udf_mul_0, udf_add_1, x):
+            lambda0 = functools.partial(udf_mul_0, y=x)
+            lambda1 = functools.partial(udf_add_1, x)
+
+            print("break")
+            return torch.mul(lambda0(x), lambda1(x))
+
+        backend = EagerAndRecordGraphs()
+        cnts = CompileCounterWithBackend(backend)
+        x = torch.randn(2, 2)
+        dynamo_result = torch._dynamo.optimize(cnts)(fn)(udf_mul, udf_add, x)
+
+        eager_result = fn(udf_mul, udf_add, x)
+        gm = backend.graphs[0]
+        self.assertEqual(eager_result, dynamo_result)
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_lambda0_keywords_y_ : torch.Tensor):
+        l_lambda0_keywords_y_ = L_lambda0_keywords_y_
+
+        mul = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+
+        add = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+
+        mul_1 = torch.mul(mul, add);  mul = add = None
+        return (mul_1,)
+""",
+        )
+
     def test_partials_recompilation(self):
         def fn(f0, f1, x):
             return f0(x) * f1(x)
@@ -1514,6 +1582,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         lambda1 = functools.partial(udf_mul, y=torch.randn(2, 2))
 
         cnts = torch._dynamo.testing.CompileCounter()
+
         x = torch.randn(2, 2)
         fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         dynamo_result = fn(lambda0, lambda1, x)
@@ -1696,6 +1765,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
 def udf_mul(x, y):
     return x * y
+
+
+def udf_add(x, y):
+    return x + y
 
 
 class SmallNN(torch.nn.Module):
