@@ -29,6 +29,7 @@ jobs:
       - name: Setup Conda
         uses: conda-incubator/setup-miniconda@v2.1.1
         with:
+          miniconda-version: "py39_4.12.0"
           python-version: 3.9
 
       - name: Fetch CodeLlama Checkpoint
