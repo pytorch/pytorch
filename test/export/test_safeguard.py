@@ -35,17 +35,9 @@ class TestSafeguard(TestCase):
         a = torch.randn(10)
         with torch.no_grad():
             export(f1, (a,))
+            export(f2, (a,))
             export(f3, (a,))
-
-            with self.assertRaisesRegex(
-                RuntimeError, "Encountered autograd state manager op.*"
-            ):
-                export(f2, (a,))
-
-            with self.assertRaisesRegex(
-                RuntimeError, "Encountered autograd state manager op.*"
-            ):
-                export(f4, (a,))
+            export(f4, (a,))
 
         with torch.enable_grad():
             export(f2, (a,))
@@ -60,6 +52,35 @@ class TestSafeguard(TestCase):
                 RuntimeError, "Encountered autograd state manager op.*"
             ):
                 export(f3, (a,))
+
+    def test_tensor_autograd(self):
+        # dynamo errors when Tensor.requires_grad_ change the autograd state
+        def f1(a):
+            a.requires_grad_(True)
+            b = a + a
+            return b
+
+        # dynamo errors when Tensor.requires_grad_ change the autograd state
+        def f2(a):
+            a.requires_grad_(False)
+            b = a + a
+            return b
+
+        # dynamo always errors on Tensor.requires_grad
+        def f3(a):
+            a.requires_grad = False
+            b = a + a
+            return b
+
+        export(f1, (torch.randn(10, requires_grad=True),))
+        export(f2, (torch.randn(10, requires_grad=False),))
+
+        with self.assertRaises(RuntimeError):
+            export(f1, (torch.randn(10, requires_grad=False),))
+        with self.assertRaises(RuntimeError):
+            export(f2, (torch.randn(10, requires_grad=True),))
+        with self.assertRaises(RuntimeError):
+            export(f3, (torch.randn(10, requires_grad=False),))
 
     def test_global_autograd_exempt_predispatch(self):
         def f1(a):
@@ -97,35 +118,6 @@ class TestSafeguard(TestCase):
             _export(f2, (a,), pre_dispatch=True)
             _export(f3, (a,), pre_dispatch=True)
             _export(f4, (a,), pre_dispatch=True)
-
-    def test_tensor_autograd(self):
-        # dynamo errors when Tensor.requires_grad_ change the autograd state
-        def f1(a):
-            a.requires_grad_(True)
-            b = a + a
-            return b
-
-        # dynamo errors when Tensor.requires_grad_ change the autograd state
-        def f2(a):
-            a.requires_grad_(False)
-            b = a + a
-            return b
-
-        # dynamo always errors on Tensor.requires_grad
-        def f3(a):
-            a.requires_grad = False
-            b = a + a
-            return b
-
-        export(f1, (torch.randn(10, requires_grad=True),))
-        export(f2, (torch.randn(10, requires_grad=False),))
-
-        with self.assertRaises(RuntimeError):
-            export(f1, (torch.randn(10, requires_grad=False),))
-        with self.assertRaises(RuntimeError):
-            export(f2, (torch.randn(10, requires_grad=True),))
-        with self.assertRaises(RuntimeError):
-            export(f3, (torch.randn(10, requires_grad=False),))
 
 
 if __name__ == "__main__":

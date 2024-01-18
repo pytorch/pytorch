@@ -84,20 +84,15 @@ class PlacementStrategy:
     @cached_property
     def output_spec(self) -> DTensorSpec:
         """
-        This function requires that the strategy have at least one DTensorSpec as the
-        output spec. If the output_specs is a tuple, then we will just return the first
-        element in the tuple and this element must be a DTensorSpec.
+        This function requires that the strategy have exactly one DTensorSpec as the
+        output spec. If the output_specs is a tuple, we throw an exception.
         """
         if isinstance(self.output_specs, DTensorSpec):
             return self.output_specs
         else:
-            assert len(self.output_specs) > 0, "empty output_specs!"
-            spec = self.output_specs[0]
-            assert isinstance(
-                spec, DTensorSpec
-            ), "If the operator returns a tuple, PlacementStrategy requires the first"
-            f"element in tuple be not None but got: {spec}."
-            return spec
+            raise ValueError(
+                f"function output_spec expects a single DTensorSpec but got: {self.output_specs}"
+            )
 
     def __str__(self) -> str:
         input_specs_str = _pretty_print_spec(self.input_specs)
