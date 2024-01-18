@@ -702,38 +702,6 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   ncclCommDevIdxMapMutex.unlock();
 }
 
-ProcessGroupNCCL::CoalescedWorkNCCL::CoalescedWorkNCCL(
-    std::vector<ProcessGroupNCCL::WorkNCCL> works,
-    int rank,
-    OpType opType)
-    : Work(rank, opType, nullptr), works_(std::move(works)) {}
-
-ProcessGroupNCCL::CoalescedWorkNCCL::~CoalescedWorkNCCL() = default;
-
-c10::intrusive_ptr<ProcessGroupNCCL::CoalescedWorkNCCL> ProcessGroupNCCL::
-    initCoalescedWork(
-        const std::vector<c10::intrusive_ptr<Work>>& works,
-        int rank,
-        OpType opType) {
-  std::vector<ProcessGroupNCCL::WorkNCCL> ncclWorks;
-  ncclWorks.reserve(works.size());
-  for (auto& work : works) {
-    ncclWorks.push_back(*static_cast<ProcessGroupNCCL::WorkNCCL*>(work.get()));
-  }
-  return c10::make_intrusive<ProcessGroupNCCL::CoalescedWorkNCCL>(
-      ncclWorks, rank, opType);
-}
-
-// Same as calling synchronize().
-bool ProcessGroupNCCL::CoalescedWorkNCCL::wait(
-    std::chrono::milliseconds timeout) {
-  for (auto& w : works_) {
-    w.wait(timeout);
-  }
-  // Always return true, because abort API is not implemented.
-  return true;
-}
-
 static std::atomic<size_t> process_group_id = 0;
 
 ProcessGroupNCCL::ProcessGroupNCCL(
