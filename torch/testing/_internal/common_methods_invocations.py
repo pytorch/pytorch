@@ -5061,6 +5061,35 @@ def sample_inputs_index_reduce(op_info, device, dtype, requires_grad, **kwargs):
                           args=(0, idx, src, 'prod'),
                           kwargs={'include_self': True})
 
+def sample_inputs__unsafe_masked_index(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def make_idx(n, m, dim, d):
+        view_shape = [1] * dim
+        view_shape[d] = n
+        return make_tensor((n,), device=device, dtype=torch.int64, low=0, high=m).view(view_shape)
+
+    cases = [
+        ((S, S), S, M),
+        ((S, S), M, S),
+        ((S, S, S), S, M),
+    ]
+
+    for c in cases:
+        self_shape, high, idx_size = c
+        dim = len(self_shape)
+        indices = [make_idx(idx_size, high, dim, d) for d in range(dim)]
+        masks = [torch.logical_and(idx >= 0, idx < self_shape[i]) for i, idx in enumerate(indices) if idx is not None]
+        mask = functools.reduce(torch.logical_and, masks)
+        args = (mask, indices, 1)
+        yield SampleInput(make_arg(self_shape), args=args)
+
+        masks = [torch.logical_and(idx >= 1, idx < self_shape[i] - 1) for i, idx in enumerate(indices) if idx is not None]
+        mask = functools.reduce(torch.logical_and, masks)
+        args = (mask, indices, 1)
+        yield SampleInput(make_arg(self_shape), args=args)
+
+
 def sample_inputs_mode(op_info, device, dtype, requires_grad, **kwargs):
     args = (
         ((S, S, S), (),),
@@ -16420,6 +16449,10 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            supports_out=True,
            sample_inputs_func=sample_inputs_index_reduce),
+    OpInfo('_unsafe_masked_index',
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           supports_out=False,
+           sample_inputs_func=sample_inputs__unsafe_masked_index),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
