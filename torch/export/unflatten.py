@@ -605,12 +605,19 @@ class _ModuleFrame:
         if parent_out is None:
             return
 
+        parent_out.meta["val"] = (
+            graph_outputs.meta.get("val")
+            if isinstance(graph_outputs, torch.fx.Node)
+            else [o.meta.get("val") for o in graph_outputs]
+        )
+
         if len(orig_outputs) == 1 and signature is None:
             self.parent.node_map[orig_outputs[0]] = parent_out
         else:
             for i, orig_output in enumerate(orig_outputs):
                 # Use Proxy to record getitem access.
                 proxy_out = torch.fx.Proxy(parent_out)[i].node  # type: ignore[index]
+                proxy_out.meta["val"] = copy.copy(orig_output.meta["val"])
                 self.parent.node_map[orig_output] = proxy_out
 
         if self.cached_graph_module is not None:
@@ -760,7 +767,8 @@ def _sink_params(
         return
 
     graph = module.graph
-    inputs = filter(lambda n: n.op == "placeholder", graph.nodes)
+    inputs = list(filter(lambda n: n.op == "placeholder", graph.nodes))
+    the_last_input = inputs[-1]
 
     # Also remove from call_module nodes
     call_module_nodes = filter(lambda n: n.op == "call_module", graph.nodes)
@@ -786,7 +794,8 @@ def _sink_params(
             state_attr = _recursive_getattr(module, attr_path)
             assert isinstance(state_attr, torch.Tensor)
 
-            with graph.inserting_after(node):
+            # Make sure the newly created get_attr node is placed after the last placeholder node
+            with graph.inserting_after(the_last_input):
                 new_node = graph.create_node("get_attr", ".".join(attr_path))
 
             node.replace_all_uses_with(new_node, propagate_meta=True)
