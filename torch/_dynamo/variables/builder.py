@@ -408,6 +408,18 @@ class VariableBuilder:
         elif value is sys.modules:
             return PythonSysModulesVariable(source=self.source)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
+            if not value and self.get_source().is_nn_module():
+                # It is faster to guard on 'false' property than to guard
+                # on actual dict keys, but we can't do this fast guard in general because
+                # it omits a crucial type check that ensures the value is actually still a dict at runtime.
+
+                # Why is this OK for (specialized) nnmodules? We set up a setattr hook
+                # to check for module property mutations, which does a reasonable,
+                # but not completely secure job ensuring a property wasn't changed.
+                self.install_guards(GuardBuilder.BOOL_FALSE)
+            else:
+                self.install_guards(GuardBuilder.LIST_LENGTH)
+
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
             def build_key_value(i, k, v):
@@ -422,18 +434,6 @@ class VariableBuilder:
             result = dict(
                 build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
             )
-
-            if not value and self.get_source().is_nn_module():
-                # It is faster to guard on 'false' property than to guard
-                # on actual dict keys, but we can't do this fast guard in general because
-                # it omits a crucial type check that ensures the value is actually still a dict at runtime.
-
-                # Why is this OK for (specialized) nnmodules? We set up a setattr hook
-                # to check for module property mutations, which does a reasonable,
-                # but not completely secure job ensuring a property wasn't changed.
-                self.install_guards(GuardBuilder.BOOL_FALSE)
-            else:
-                self.install_guards(GuardBuilder.LIST_LENGTH)
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(
