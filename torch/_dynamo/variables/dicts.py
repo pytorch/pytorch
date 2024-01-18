@@ -22,11 +22,9 @@ from ..utils import dict_keys, dict_values, istype, specialize_symnode
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
-# Note: [Adding a new supported class the keys of ConstDictVarialble]
-# You'll need to add it to:
-# - `is_hashable` in this file
-# - `const_repr` in util.py, and perhaps modify DICT_KEYS in guards.py
-#   You'll need to test that the the guards don't raise an exception when triggered
+# [Adding a new supported class the keys of ConstDictVarialble]
+# - Add its tracker type to `is_hashable` in this file
+# - (perhaps) Define how they are compared  _HashableTracker._eq_impl
 
 
 def is_hashable(x):

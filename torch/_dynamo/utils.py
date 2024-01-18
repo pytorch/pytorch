@@ -1101,8 +1101,6 @@ def const_repr(x, *, local) -> str:
             return module + "." + klass.__qualname__
 
         return fullname(x)
-    elif x == collections.namedtuple:
-        return "G['collections'].namedtuple"
     else:
         return f"{x!r}"
 
