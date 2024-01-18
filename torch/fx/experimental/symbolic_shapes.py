@@ -81,7 +81,7 @@ __all__ = [
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool", "is_singleton", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
     "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext",
-    "StatefulSymbolicContext", "SubclassSymbolicContext"
+    "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -336,16 +336,34 @@ def definitely_false(a):
             return False
     return not bool(a)
 
-# TODO: could improve parallel_or/parallel_and by avoiding guards
-# if there exists a quantity that can be handled un-guardedly.  However,
-# for backed SymInts, avoiding guards doesn't really matter in practice,
-# so I chose not to do it.
+def statically_known_true(x: Union[bool, SymBool]) -> bool:
+    """Returns True if x can be simplified to a constant and is true.
+
+    NOTE: This function doesn't introduce new guards, so the expression may end
+    up evaluating to true at runtime even if this function returns False.
+
+    """
+    if isinstance(x, SymBool):
+        expr = x.node.expr
+        shape_env = x.node.shape_env
+        try:
+            simplified = shape_env._maybe_evaluate_static(expr)
+            if simplified is not None:
+                return bool(simplified)
+        except Exception:
+            log.debug("Could not simplify %s", expr)
+        return False
+    assert isinstance(x, bool)
+    return x
+
 
 def parallel_or(*args):
     """
     Evaluate the logical OR of several arguments, avoiding guarding on
     unbacked SymInts if another argument is definitely True.
     """
+    if any(statically_known_true(a) for a in args):
+        return True
     if any(definitely_true(a) for a in args):
         return True
     return any(args)
@@ -355,6 +373,8 @@ def parallel_and(*args):
     Evaluate the logical FALSE of several arguments, avoiding guarding on
     unbacked SymInts if another argument is definitely False.
     """
+    if any(statically_known_true(torch.sym_not(a)) for a in args):
+        return False
     if any(definitely_false(a) for a in args):
         return False
     return all(args)
@@ -1734,6 +1754,8 @@ class ShapeEnv:
         duck_shape=True,
         # For debugging
         co_fields=None,
+        # XXX Add any new settings that could affect FakeTensor evaluation
+        # to: torch._subclasses.fake_tensor._ShapeEnvSettings
     ):
         # Not directly used by ShapeEnv; indirectly used by FakeTensor
         self.allow_scalar_outputs = allow_scalar_outputs

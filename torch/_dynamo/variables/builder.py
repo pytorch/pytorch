@@ -557,7 +557,9 @@ class VariableBuilder:
             # handle aliased autograd function `apply` calls
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return GetAttrVariable(
-                AutogradFunctionVariable(value.__self__, source=self.source),
+                AutogradFunctionVariable(
+                    value.__self__, source=AttrSource(self.source, member="__self__")
+                ),
                 "apply",
             )
         elif np and isinstance(value, np.number):
@@ -697,13 +699,10 @@ class VariableBuilder:
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
-        elif (
-            istype(value, (types.ModuleType, replay_record.DummyModule))
-            # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
-            # type(torch.ops) -> <class 'torch._ops._Ops'>
-            or any(value is obj for obj in (torch.backends.cudnn, torch.ops))
-            or isinstance(value, torch._ops._OpNamespace)
-        ):
+        # Don't use istype, since some python modules are not subclasses of types.ModuleType directly.
+        # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,
+        # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
+        elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonModuleVariable(
                 value,
@@ -788,26 +787,6 @@ class VariableBuilder:
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
             return self.tx.output.side_effects.track_object_existing(value, result)
-
-    def tensor_should_specialize(self):
-        return (
-            self.source
-            and isinstance(self.source, GetItemSource)
-            and isinstance(self.source.base, GetItemSource)
-            and self.source.base.index == "params"
-            and isinstance(self.source.base.base, GetItemSource)
-            and isinstance(self.source.base.base.base, AttrSource)
-            and self.source.base.base.base.member == "param_groups"
-            and isinstance(self.source.base.base.base.base, LocalSource)
-            and (
-                isinstance(
-                    self.tx.f_locals[self.source.base.base.base.base.local_name],
-                    torch.optim.Optimizer,
-                )
-                if self.source.base.base.base.base.local_name in self.tx.f_locals.keys()
-                else True
-            )
-        )
 
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         if config.specialize_int and type(value) is torch.Size:
@@ -1045,7 +1024,6 @@ class VariableBuilder:
             tx=self.tx,
             proxy=tensor_proxy,
             example_value=value,
-            should_specialize=self.tensor_should_specialize(),
             subclass_type=subclass_type,
             source=source,
             **options,
@@ -1414,11 +1392,6 @@ def wrap_fx_proxy_cls(
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
-        should_specialize = options.pop("should_specialize", False)
-        if is_parameter or should_specialize:
-            specialized_value = initial_example_value
-        else:
-            specialized_value = None
 
         # NB: In most (all?) cases, this does not actually do a clone.
         # (WARNING: this means that if we mutate metadata on the fake
@@ -1435,8 +1408,6 @@ def wrap_fx_proxy_cls(
             specialized_props["class_type"] = (
                 torch.nn.Parameter if is_parameter else tensor_type
             )
-
-        specialized_props["specialized_value"] = specialized_value
 
         options.update(specialized_props)
         return target_cls(proxy, **options)
@@ -1457,7 +1428,7 @@ def wrap_fx_proxy_cls(
     ):
         sizes = [ConstantVariable.create(x) for x in example_value]
         return SizeVariable(sizes, **options)
-    elif isinstance(example_value, (tuple, list, set)):
+    elif isinstance(example_value, (tuple, list)):
         proxy.node.meta["example_value"] = example_value
         unpacked = []
         for i, val in enumerate(example_value):
@@ -1486,8 +1457,6 @@ def wrap_fx_proxy_cls(
             return TupleVariable(unpacked, **options)
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, mutable_local=MutableLocal(), **options)
-        elif istype(example_value, set):
-            return SetVariable(unpacked, mutable_local=MutableLocal(), **options)
         else:
             assert example_value.__class__.__module__ == "torch.return_types" or hasattr(
                 example_value, "_fields"
@@ -1878,6 +1847,7 @@ class SourcelessBuilder:
             items = {self(tx, k): self(tx, v) for k, v in value.items()}
             return ConstDictVariable(items, mutable_local=MutableLocal())
         elif isinstance(value, set):
+            # Nb. value is a set here so the iteration below is non-deterministic!
             return SetVariable(
                 [self(tx, x) for x in value], mutable_local=MutableLocal()
             )

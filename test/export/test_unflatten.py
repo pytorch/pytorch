@@ -456,5 +456,61 @@ class TestUnflatten(TestCase):
         ep = torch.export.export(gm_unflat_non_strict, inp, strict=False)
         self.assertTrue(torch.allclose(ep(*inp), mod(*inp)))
 
+    def test_unflattened_module_nodes_has_meta_val(self):
+        class SubMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + x, x * x
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = SubMod()
+
+            def forward(self, x):
+                return x + sum(self.submod(x))
+
+        orig_eager = MyModule()
+        export_module = torch.export.export(orig_eager, (torch.rand(2, 3),), {})
+        unflattened = unflatten(export_module)
+
+        inputs = (torch.rand(2, 3),)
+        self.compare_outputs(orig_eager, unflattened, inputs)
+
+        def check_meta(gm):
+            for n in gm.graph.nodes:
+                if n.op == "output":
+                    continue
+                self.assertTrue(n.meta.get("val") is not None)
+
+        for m in unflattened.modules():
+            check_meta(m)
+
+    def test_placeholder_and_get_attr_ordering_after_unflattened(self):
+        class TransposeModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 1, 3, stride=2)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x.transpose(0, 1)
+
+        x = torch.randn(32, 3, 64, 64)
+        exported_program = export(TransposeModule(), args=(x,))
+        unflattened_module = unflatten(exported_program)
+
+        # Check the inputs of the created call_module node are in order
+        call_module_input_order = []
+        for node in unflattened_module.graph.nodes:
+            if node.op == "call_module":
+                transpose_module = unflattened_module.get_submodule(node.target)
+                for sub_node in transpose_module.graph.nodes:
+                    if sub_node.op == "placeholder" or sub_node.op == "get_attr":
+                        call_module_input_order.append(sub_node.op)
+        self.assertEqual(call_module_input_order, ["placeholder", "get_attr", "get_attr"])
+
 if __name__ == "__main__":
     run_tests()
