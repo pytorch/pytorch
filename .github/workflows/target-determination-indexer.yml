@@ -6,7 +6,8 @@ on:
 
 jobs:
   index:
-    runs-on: linux.g5.12xlarge.nvidia.gpu # 4 GPU A10G 24GB each
+    runs-on: linux.g5.4xlarge.nvidia.gpu # 1 GPU A10G 24GB each
+    environment: target-determinator-env
     container:
       image: pytorch/manylinux-builder:cuda12.1
       options: '--gpus all'
@@ -78,7 +79,7 @@ jobs:
           torchrun \
             --standalone \
             --nnodes=1 \
-            --nproc-per-node=8 \
+            --nproc-per-node=1 \
             indexer.py \
             --experiment-name indexer-output
 
