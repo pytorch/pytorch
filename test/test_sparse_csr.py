@@ -46,6 +46,8 @@ def _check_cusparse_spgemm_available():
     return not TEST_WITH_ROCM
 
 def _check_cusparse_sddmm_available():
+    if TEST_WITH_ROCM:
+        return True 
     version = _get_torch_cuda_version()
     # cusparseSDDMM was added in 11.2.1 but we don't have access to patch version
     min_supported_version = (11, 3)
@@ -2382,7 +2384,7 @@ class TestSparseCSR(TestCase):
             run_test(n, k, upper, unitriangular, transpose, zero)
 
     @skipCUDAIf(
-        not (TEST_WITH_ROCM or _check_cusparse_sddmm_available()),
+        not _check_cusparse_sddmm_available(),
         "cuSparse Generic API SDDMM is not available"
     )
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -2436,7 +2438,7 @@ class TestSparseCSR(TestCase):
                     run_test(c, a, b, op_a, op_b)
 
     @skipCUDAIf(
-        not (TEST_WITH_ROCM or _check_cusparse_sddmm_available()),
+        not _check_cusparse_sddmm_available(),
         "cuSparse Generic API SDDMM is not available"
     )
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -2488,7 +2490,7 @@ class TestSparseCSR(TestCase):
 
     @onlyCUDA
     @skipCUDAIf(
-        not (TEST_WITH_ROCM or _check_cusparse_sddmm_available()),
+        not _check_cusparse_sddmm_available(),
         "cuSparse Generic API SDDMM is not available"
     )
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -2771,7 +2773,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(sparse_input.grad, dense_input.grad)
 
     @skipCUDAIf(
-        not (TEST_WITH_ROCM or _check_cusparse_sddmm_available()),
+        not _check_cusparse_sddmm_available(),
         "cuSparse Generic API SDDMM is not available"
     )
     @dtypes(torch.float64)
