@@ -133,6 +133,15 @@ void Context::setSDPUseMath(bool e) {
   enabled_mathSDP = e;
 }
 
+bool Context::userEnabledCuDNNSDP() const {
+  return enabled_cudnnSDP;
+}
+
+void Context::setSDPUseCuDNN(bool e) {
+  enabled_cudnnSDP = e;
+}
+
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
