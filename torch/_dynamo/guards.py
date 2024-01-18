@@ -58,11 +58,12 @@ from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     common_constant_types,
-    dict_const_keys,
-    dict_const_keys_repr,
-    dict_param_key_ids,
+    dict_keys_getitem,
+    dict_keys_repr,
     guard_failures,
     istype,
+    key_is_id,
+    key_to_id,
     orig_code_map,
     tensor_always_has_static_shape,
     tuple_iterator_getitem,
@@ -109,10 +110,10 @@ CLOSURE_VARS = {
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
     ),
     "___odict_getitem": collections.OrderedDict.__getitem__,
-    "___dict_param_key_ids": dict_param_key_ids,
-    "___dict_const_keys": dict_const_keys,
+    "___key_to_id": key_to_id,
     "___dict_version": dict_version,
     "___dict_contains": lambda a, b: a in b,
+    "___dict_keys_getitem": dict_keys_getitem,
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
@@ -401,7 +402,7 @@ class GuardBuilder(GuardBuilderBase):
             assert istype(
                 val,
                 ok_types,
-            ), t.__name__
+            ), f"Unexpected type {type(val)}, not in {ok_types}"
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
@@ -517,22 +518,22 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def DICT_KEYS(self, guard):
+        # Guard on the keys and their order
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        param_key_ids = set(dict_param_key_ids(value))
-        const_keys = set(dict_const_keys(value))
-        const_keys_repr = dict_const_keys_repr(
-            const_keys, local=is_from_local_source(guard.originating_source)
+        any_key_is_id = any(key_is_id(k) for k in value.keys())
+        const_keys_repr = dict_keys_repr(
+            key_to_id(value),
+            local=is_from_local_source(guard.originating_source),
         )
-        if param_key_ids:
-            code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
-            code.append(f"___dict_const_keys({ref}) == {const_keys_repr}")
+        if any_key_is_id:
+            code.append(f"___key_to_id({ref}) == {const_keys_repr}")
         else:
-            code.append(f"set({ref}.keys()) == {const_keys_repr}")
+            code.append(f"list({ref}.keys()) == {const_keys_repr}")
 
         self._produce_guard_code(guard, code)
 
@@ -896,7 +897,11 @@ class PyExprCSEPass:
     def count(self, exprs: List[str]) -> None:
         counter = self.ExprCounter(self._config)
         for e in exprs:
-            counter.visit(ast.parse(e))
+            try:
+                counter.visit(ast.parse(e))
+            except SyntaxError as ex:
+                log.exception("Failed to visit expr at line %s.\n%s", ex.lineno, e)
+                raise
 
     def replace(self, expr: str) -> Tuple[List[str], str]:
         replacer = self.Replacer(self._config, self._new_var)
@@ -1161,7 +1166,11 @@ class CheckFunctionManager:
             print("GUARDS\n", guard_body)
 
         out: Dict[str, Any] = dict()
-        exec(pycode, builder.scope, out)
+        try:
+            exec(pycode, builder.scope, out)
+        except SyntaxError as ex:
+            log.exception("Failed to exec guard at line %s.\n%s", ex.lineno, pycode)
+            raise
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both

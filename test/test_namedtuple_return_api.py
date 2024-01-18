@@ -26,7 +26,9 @@ all_operators_with_namedtuple_return = {
 
 all_operators_with_namedtuple_return_skip_list = {
     '_scaled_dot_product_flash_attention',
+    '_scaled_dot_product_flash_attention_for_cpu',
     '_scaled_dot_product_efficient_attention',
+    '_scaled_dot_product_cudnn_attention',
 }
 
 
