@@ -1078,7 +1078,7 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
         # We have a custom pytest shard that conflicts with the normal plugin
-        pytest_args.extend(["-p", "no:xdist", "no:pytest-shard", "--use-pytest"])
+        pytest_args.extend(["-p", "no:xdist", "--use-pytest"])
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
         # is much slower than running them directly
