@@ -276,8 +276,6 @@ test_dynamo_shard() {
     --exclude-distributed-tests \
     --exclude \
       test_jit \
-      test_python_dispatch \
-      test_custom_ops \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
