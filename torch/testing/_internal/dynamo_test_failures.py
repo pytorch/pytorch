@@ -1,3 +1,18 @@
+# NOTE: [dynamo_test_failures.py]
+#
+# We generate xFailIfTorchDynamo* for all tests in `dynamo_expected_failures`
+# We generate skipIfTorchDynamo* for all tests in `dynamo_skips`
+#
+# For an easier-than-manual way of generating and updating these lists,
+# see scripts/compile_tests/update_failures.py
+#
+# If you're adding a new test, and it's failing PYTORCH_TEST_WITH_DYNAMO=1,
+# either add the appropriate decorators to your test or list them in this file.
+#
+# *These are not exactly unittest.expectedFailure and unittest.skip. We'll
+# always execute the test and then suppress the signal, if necessary.
+# If your tests crashes, or is slow, please use @skipIfTorchDynamo instead.
+
 # tests in this list will run without Dynamo strict mode by default.
 FIXME_default_non_strict = {
     "dynamo/test_logging",
@@ -14,6 +29,7 @@ FIXME_inductor_non_strict = {
 
 # We generate unittest.expectedFailure for all of the following tests
 # when run under PYTORCH_TEST_WITH_DYNAMO=1.
+# see NOTE [dynamo_test_failures.py] for more details
 #
 # This lists exists so we can more easily add large numbers of failing tests,
 dynamo_expected_failures = {
@@ -3711,6 +3727,7 @@ dynamo_expected_failures = {
     "TestPythonDispatch.test_list_ret",  # test_python_dispatch
 }
 
+# see NOTE [dynamo_test_failures.py] for more details
 dynamo_skips = {
     "TestMatmulOperator.test_matmul_raises",
     "TestMatmulOperator.test_exceptions",
