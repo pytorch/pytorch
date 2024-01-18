@@ -1608,6 +1608,37 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_partials_graph_break_reconstruct_args_and_kwargs(self):
+        def fn(udf_mul_0, x):
+            lambda0 = functools.partial(udf_mul_0, x, 4, z=x)
+            lambda1 = functools.partial(udf_mul_0, 4, z=x)
+
+            return torch.mul(lambda0(), lambda1(5))
+
+        backend = EagerAndRecordGraphs()
+        cnts = CompileCounterWithBackend(backend)
+        x = torch.randn(2, 2)
+        dynamo_result = torch._dynamo.optimize(cnts)(fn)(udf_mul2, x)
+
+        eager_result = fn(udf_mul2, x)
+        gm = backend.graphs[0]
+        self.assertEqual(eager_result, dynamo_result)
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        mul = l_x_ * 4
+        mul_1 = mul * l_x_;  mul = None
+        mul_2 = 20 * l_x_;  l_x_ = None
+
+        mul_3 = torch.mul(mul_1, mul_2);  mul_1 = mul_2 = None
+        return (mul_3,)
+""",
+        )
+
     def test_partials_recompilation(self):
         def fn(f0, f1, x):
             return f0(x) * f1(x)
@@ -1799,6 +1830,10 @@ class GraphModule(torch.nn.Module):
 
 def udf_mul(x, y):
     return x * y
+
+
+def udf_mul2(x, y, z):
+    return x * y * z
 
 
 def udf_add(x, y):

@@ -649,17 +649,16 @@ class FunctoolsPartialVariable(VariableTracker):
     def reconstruct(self, codegen):
         codegen.load_import_from("functools", "partial")
         codegen(self.func)
-        if self.args and self.keywords:
-            # TODO(voz): Is there a util to help with this? neither the existing ones suffice?
-            unimplemented("Reconstruction of mixed args and keywords NYI")
-        if self.keywords:
-            codegen.foreach(self.keywords.values())
-            keys = tuple(self.keywords.keys())
-            # TODO(voz): Why is create_call_function_kw on codegen, but create_call_function is a free func?
-            return codegen.create_call_function_kw(len(keys) + 1, keys, True)
-        else:
+        if self.args:
             codegen.foreach(self.args)
-            return create_call_function(len(self.args) + 1, False)
+        if not self.keywords:
+            create_call_function(len(self.args) + 1, False)
+
+        codegen.foreach(self.keywords.values())
+        keys = tuple(self.keywords.keys())
+        return codegen.create_call_function_kw(
+            len(keys) + len(self.args) + 1, keys, True
+        )
 
 
 class TritonKernelVariable(VariableTracker):
