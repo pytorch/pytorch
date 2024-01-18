@@ -656,46 +656,58 @@ Tensor _unsafe_index(const Tensor& self, const torch::List<c10::optional<Tensor>
   return at::index(self, indices);
 }
 
-Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch::List<c10::optional<Tensor>>& indices, const Scalar& other) {
-  torch::List<c10::optional<Tensor>> clamped_indices;
-  clamped_indices.reserve(indices.size());
-
-  auto sizes = self.sizes();
-  for (auto i : c10::irange(indices.size())) {
-    auto index = indices.get(i);
-    if (!index.has_value()) {
-      clamped_indices.push_back(index);
-    } else {
-      auto dtype = index->scalar_type();
-      TORCH_CHECK(dtype == kLong || dtype == kInt,
-                  "_unsafe_masked_index found unexpected index type ", dtype);
-      clamped_indices.push_back(at::clamp(*index, -sizes[i], sizes[i] - 1));
+Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch::List<c10::optional<Tensor>>& indices, const Scalar& fill) {
+  // Unsafe masked index is equivalent to
+  //   where(mask, self[indices], fill)
+  // with the main difference being that the when the `mask` is false, the tensor
+  // `self` is not indexed using `indices`. This allows `indices` to be out-of-bounds
+  // when `mask` is false. When `mask` is true, the `indices` are expected to be
+  // in bounds and is not checked.
+  //
+  // This function is not meant to be executed on eager mode. An unoptimized version
+  // is provided here.
+  //
+  // compiler backends should implement this op such that `self[indices]` is not
+  // loaded when `mask` is true. See inductor for a reference.
+  auto clamp = [](const c10::optional<Tensor>& index, auto size) -> c10::optional<Tensor> {
+    if (!index) {
+      return index;
     }
-  }
+    // Disallow bool
+    auto dtype = index->scalar_type();
+    TORCH_CHECK(dtype == kLong || dtype == kInt,
+                "_unsafe_masked_index found unexpected index type ", dtype);
+    return at::clamp(*index, -size, size - 1);
+  };
+
+  torch::List<c10::optional<Tensor>> clamped_indices(indices);
+  std::transform(indices.begin(), indices.end(), self.sizes().begin(), clamped_indices.begin(), clamp);
+
   auto result = at::_unsafe_index(self, clamped_indices);
-  result.masked_fill_(at::logical_not(mask), other);
+  result.masked_fill_(at::logical_not(mask), fill);
   return result;
 }
 
-Tensor _unsafe_masked_index_put(const Tensor& self, const Tensor& mask, const torch::List<c10::optional<Tensor>>& indices, const Tensor& value, bool accumulate) {
-   // This is the backward of _unsafe_masked_index.
-   // This function is not meant to be executed on eager mode.
-   // We recompute the clamped indices and rely on inductor to CSE the computation
-   auto clamp = [](const c10::optional<Tensor>& index, auto size) -> c10::optional<Tensor> {
-     if (!index) {
-       return index;
-     }
-     // Disallow bool
-     auto dtype = index->scalar_type();
-     TORCH_CHECK(dtype == kLong || dtype == kInt,
-                 "_unsafe_masked_index found unexpected index type ", dtype);
-     return at::clamp(*index, -size, size - 1);
-   };
+Tensor _unsafe_masked_index_put(const Tensor& self, const Tensor& mask, const torch::List<c10::optional<Tensor>>& indices, const Tensor& values, bool accumulate) {
+  // This is the backward of _unsafe_masked_index.
+  // This function is not meant to be executed on eager mode.
+  // We recompute the clamped indices and rely on inductor to CSE the computation
+  auto clamp = [](const c10::optional<Tensor>& index, auto size) -> c10::optional<Tensor> {
+    if (!index) {
+      return index;
+    }
+    // Disallow bool
+    auto dtype = index->scalar_type();
+    TORCH_CHECK(dtype == kLong || dtype == kInt,
+                "_unsafe_masked_index found unexpected index type ", dtype);
+    return at::clamp(*index, -size, size - 1);
+  };
 
-   torch::List<c10::optional<Tensor>> clamped_indices(indices);
-   std::transform(indices.begin(), indices.end(), self.sizes().begin(), clamped_indices.begin(), clamp);
-   auto masked_value = value.masked_fill(~mask, 0);
-   return at::_unsafe_index_put(self, clamped_indices, masked_value, accumulate);
+  torch::List<c10::optional<Tensor>> clamped_indices(indices);
+  std::transform(indices.begin(), indices.end(), self.sizes().begin(), clamped_indices.begin(), clamp);
+
+  auto masked_value = values.masked_fill(~mask, 0);
+  return at::_unsafe_index_put(self, clamped_indices, masked_value, accumulate);
 }
 
 Tensor & put_(Tensor & self, const Tensor& index, const Tensor & source, const bool accumulate) {
