@@ -208,6 +208,12 @@ from torch._C import _SDPAParams as SDPAParams, _SDPBackend as SDPBackend
 
 # Set the __module__ attribute
 SDPBackend.__module__ = "torch.backends.cuda"
+SDPAParams.__module__ = "torch.backends.cuda"
+# This is needed to allow torch.compile FX graphs
+# to properly find _SDPAParams in this module because
+# __name__ is unchanged
+# i.e. the graph searches for torch.backends.cuda._SDPAParams
+_SDPAParams = SDPAParams
 
 
 def flash_sdp_enabled():
