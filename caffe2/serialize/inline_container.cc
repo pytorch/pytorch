@@ -625,9 +625,9 @@ void PyTorchStreamWriter::setup(const string& file_name) {
     valid("opening archive ", file_name.c_str());
 
     const std::filesystem::path file_path(file_name);
-    const std::string dir_name = file_path.parent_path();
-    bool dir_exists = std::filesystem::is_directory(dir_name); 
-    TORCH_CHECK(dir_exists, "Parent directory ", dir_name, " does not exist.");
+    const std::filesystem::path dir_name = file_path.parent_path();
+    bool dir_exists = std::filesystem::is_directory(dir_name);
+    TORCH_CHECK(dir_exists, "Parent directory ", dir_name.string(), " does not exist.");
     
     TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
     writer_func_ = [this](const void* buf, size_t nbytes) -> size_t {
