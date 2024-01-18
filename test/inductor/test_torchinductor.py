@@ -8027,7 +8027,11 @@ class CommonTemplate:
             return torch.empty_like(x)
 
         define_custom_op_for_test(
-            "bar", bar_cpu, bar_cuda, bar_meta, tags=[torch._C.Tag.needs_fixed_stride_order]
+            "bar",
+            bar_cpu,
+            bar_cuda,
+            bar_meta,
+            tags=[torch._C.Tag.needs_fixed_stride_order],
         )
 
         def fn(x):
@@ -8081,7 +8085,11 @@ class CommonTemplate:
             return torch.empty_like(x)
 
         define_custom_op_for_test(
-            "baz", baz_cpu, baz_cuda, baz_meta, tags=[torch._C.Tag.needs_fixed_stride_order]
+            "baz",
+            baz_cpu,
+            baz_cuda,
+            baz_meta,
+            tags=[torch._C.Tag.needs_fixed_stride_order],
         )
 
         with torch.no_grad():

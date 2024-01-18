@@ -958,12 +958,12 @@ def get_abstract_impl(qualname):
     return custom_op._get_impl("abstract").func
 
 
-def _custom_op_with_schema(qualname, schema, needs_fixed_layout=True):
+def _custom_op_with_schema(qualname, schema, needs_fixed_stride_order=True):
     ns, name = qualname.split("::")
     schema_str = f"{name}{schema}"
     function_schema = FunctionSchema.parse(schema_str)
     validate_schema(function_schema)
-    tags = [torch.Tag.needs_fixed_layout] if needs_fixed_layout else []
+    tags = [torch._C.Tag.needs_fixed_stride_order] if needs_fixed_stride_order else []
     lib = library.Library(ns, "FRAGMENT")
     lib.define(schema_str, tags=tags)
     ophandle = find_ophandle_or_throw(ns, function_schema.name)

@@ -688,7 +688,9 @@ class GraphLowering(torch.fx.Interpreter):
                     # We have to set the current args because call_function will immediately
                     # evaluate this lowering after creating the fallback, without evaluating
                     # the layout constraint
-                    args, kwargs = constrain_to_fx_strides(self.current_node, *args, **kwargs)
+                    args, kwargs = constrain_to_fx_strides(
+                        self.current_node, *args, **kwargs
+                    )
                     # Also register the layout constraint so when the fallback
                     # is used again, we can constrain the args to the same layout
                     layout_constraint = constrain_to_fx_strides
