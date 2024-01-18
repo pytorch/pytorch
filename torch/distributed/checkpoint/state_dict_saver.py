@@ -129,7 +129,7 @@ def save(
             storage_writer = FileSystemWriter(checkpoint_id)
 
         if not checkpoint_id:
-            storage_writer.set_checkpoint_id(checkpiont_id)
+            storage_writer.set_checkpoint_id(checkpoint_id)
 
         return _save_state_dict(
             _stateful_to_state_dict(state_dict),

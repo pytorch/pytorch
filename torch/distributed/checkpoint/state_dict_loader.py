@@ -129,7 +129,7 @@ def load(
             storage_reader = FileSystemReader(checkpoint_id)
 
         if not checkpoint_id:
-            storage_writer.set_checkpoint_id(checkpiont_id)
+            storage_reader.set_checkpoint_id(checkpoint_id)
 
         if no_dist:
             keys = list(state_dict.keys())
