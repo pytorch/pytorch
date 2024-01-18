@@ -2,7 +2,7 @@ import ctypes
 
 import torch
 from torch._streambase import _StreamBase
-from torch._utils import _dummy_type
+from ._utils import _dummy_type
 
 
 if not hasattr(torch._C, "_XpuStreamBase"):
@@ -20,7 +20,9 @@ class Stream(torch._C._XpuStreamBase, _StreamBase):
         device(torch.device or int, optional): a device on which to allocate
             the stream. If :attr:`device` is ``None`` (default) or a negative
             integer, this will use the current device.
-        priority(int, optional): priority of the stream, should be 0.
+        priority(int, optional): priority of the stream, should be 0 or
+            negative, where negative numbers indicate higher priority. By default,
+            streams have priority 0.
     """
 
     def __new__(cls, device=None, priority=0, **kwargs):

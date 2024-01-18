@@ -46,8 +46,7 @@ static PyObject* THXPStream_pynew(
   at::xpu::XPUStream stream = (stream_id || device_index || device_type)
       ? at::xpu::XPUStream::unpack3(
             stream_id, device_index, static_cast<c10::DeviceType>(device_type))
-      : at::xpu::getStreamFromPool(
-            /* isHighPriority */ priority < 0 ? true : false, current_device);
+      : at::xpu::getStreamFromPool(priority, current_device);
 
   THXPStream* self = (THXPStream*)ptr.get();
   self->stream_id = static_cast<int64_t>(stream.id());
@@ -78,7 +77,7 @@ static PyObject* THXPStream_get_sycl_queue(THXPStream* self, void* unused) {
 
 static PyObject* THXPStream_get_priority(THXPStream* self, void* unused) {
   HANDLE_TH_ERRORS
-  return THPUtils_packInt64(0);
+  return THPUtils_packInt64(self->xpu_stream.priority());
   END_HANDLE_TH_ERRORS
 }
 
@@ -86,10 +85,8 @@ static PyObject* THXPStream_priority_range(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  // Both least_priority and greatest_priority being equal to 0 usually means
-  // there is no defined priority, indicating that the device may no support
-  // stream priorities.
-  int least_priority = 0, greatest_priority = 0;
+  auto [least_priority, greatest_priority] =
+      at::xpu::XPUStream::priority_range();
   return Py_BuildValue("(ii)", least_priority, greatest_priority);
   END_HANDLE_TH_ERRORS
 }
