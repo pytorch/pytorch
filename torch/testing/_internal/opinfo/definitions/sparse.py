@@ -574,10 +574,7 @@ def _validate_sample_input_elementwise_binary_sparse_mul(sample):
     if layout is torch.sparse_csr and batch_dim > 0 and t_args[0].ndim > 0:
         return ErrorInput(
             sample,
-            error_regex=(
-                "coo_to_sparse_csr: conversion from Sparse to SparseCsr for input"
-                " tensors with sparse_dim[(][)]!=2 is not supported"
-            ),
+            error_regex="crow_indices is supposed to be a vector, but got 2 dimensional tensor",
         )
     elif layout is torch.sparse_csc and t_args[0].ndim > 0:
         return ErrorInput(

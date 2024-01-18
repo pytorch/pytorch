@@ -272,9 +272,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
 
     @common_device_type.ops(
         [op for op in OPS_DB if op.name in TESTED_OPS],
-        allowed_dtypes=onnx_test_common.INT_TYPES
-        + onnx_test_common.FLOAT_TYPES
-        + onnx_test_common.BOOL_TYPES,
+        allowed_dtypes=onnx_test_common.TESTED_DTYPES,
     )
     def test_output_match(self, device: str, dtype: torch.dtype, op):
         """Test the ONNX exporter."""

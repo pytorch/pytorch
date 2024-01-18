@@ -21,10 +21,7 @@ class AutogradStateOpsFailSafeguard(TorchFunctionMode):
         ]
         # It's only enabled while tracing, by confirming the torch dispatch mode is
         # any active PROXY. This is to allow the autograd ops out of tracing.
-        current_state = torch._C.is_grad_enabled()
         if func in unsupported_grad_mode_ops:
-            assert len(args) == 1
-            changed_state = args[0]
             mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
             # Intend to check if it's not the pre_dispatch mode. It's allowed to use
             # autograd ops in pre_dispatch mode, e.g. `torch.no_grad`
@@ -32,11 +29,10 @@ class AutogradStateOpsFailSafeguard(TorchFunctionMode):
                 mode
                 and isinstance(mode, ProxyTorchDispatchMode)
                 and not mode.pre_dispatch
-                and changed_state != current_state
             ):
                 raise RuntimeError(
-                    f"Encountered autograd state manager op {func} trying to change global autograd state "
-                    "while exporting. This is unsafe because we don't capture this op in torch.export "
+                    f"Encountered autograd state manager op {func} while exporting. "
+                    "This is unsafe because we don't capture this op in torch.export"
                     "today, hence we can't reflect the user intention soundly."
                 )
         return func(*args, **kwargs)

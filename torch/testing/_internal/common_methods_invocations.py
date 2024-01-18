@@ -11911,6 +11911,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_isin),
     OpInfo('kthvalue',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
+           dtypesIfCUDA=all_types_and(torch.float16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_kthvalue,
@@ -12124,6 +12125,7 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('logaddexp',
                     dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
                     dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+                    dtypesIfROCM=floating_types_and(torch.bfloat16, torch.float16),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_rhs_python_scalar=False,
@@ -12133,6 +12135,8 @@ op_db: List[OpInfo] = [
                     )),
     OpInfo('logaddexp2',
            dtypes=floating_types_and(torch.bfloat16, torch.half),
+           dtypesIfCUDA=floating_types_and(torch.bfloat16),
+           dtypesIfROCM=floating_types_and(torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_logaddexp),
@@ -12335,6 +12339,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('median',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
+           dtypesIfCUDA=all_types_and(torch.float16),
            # TODO: some signatures of median do support out
            supports_out=False,
            supports_forward_ad=True,
@@ -12343,6 +12348,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('nanmedian',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
+           dtypesIfCUDA=all_types_and(torch.float16),
            # TODO: some signatures of nanmedian do support out
            supports_out=False,
            supports_forward_ad=True,
@@ -13796,7 +13802,8 @@ op_db: List[OpInfo] = [
                wrapper_set_seed(torch.nn.functional.fractional_max_pool2d, input, *args, **kwargs),
            # vmap does not support random operations
            check_batched_forward_grad=False,
-           dtypes=floating_types_and(torch.bfloat16, torch.float16),
+           dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16),
            test_neg_view=False,
            sample_inputs_func=sample_inputs_fractional_max_pool2d,
            decorators=(
@@ -13816,7 +13823,8 @@ op_db: List[OpInfo] = [
                wrapper_set_seed(torch.nn.functional.fractional_max_pool3d, input, *args, **kwargs),
            # vmap does not support random operations
            check_batched_forward_grad=False,
-           dtypes=floating_types_and(torch.bfloat16, torch.float16),
+           dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16),
            test_neg_view=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_fractional_max_pool3d,
@@ -17173,6 +17181,7 @@ op_db: List[OpInfo] = [
            method_variant=lambda inp, *args, **kwargs:
                wrapper_set_seed(torch.Tensor.multinomial, inp, *args, **kwargs),
            dtypes=floating_types_and(torch.bfloat16, torch.half),
+           dtypesIfCUDA=floating_types_and(torch.half),
            supports_out=True,
            sample_inputs_func=sample_inputs_multinomial,
            error_inputs_func=error_inputs_multinomial,

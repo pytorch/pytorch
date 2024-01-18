@@ -23,8 +23,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
-     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, skipCUDAIfNotRocm,
-     dtypesIfMPS, largeTensorTest)
+     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, dtypesIfMPS, largeTensorTest)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
@@ -4411,20 +4410,6 @@ class TestLinalg(TestCase):
             y = make_arg(size_y, noncontiguous=nctg_y)
             self.check_single_matmul(x, y)
 
-    @dtypes(torch.float, torch.complex64)
-    def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
-        a = torch.empty((256, 512), device=device, dtype=dtype, requires_grad=True).unsqueeze(0)
-        b = torch.empty((4, 128, 512), device=device, dtype=dtype, requires_grad=True).transpose(-1, -2)
-        c = torch.empty((256, 4, 128), device=device, dtype=dtype).movedim(1, 0)
-
-        torch.matmul(a.detach(), b.detach(), out=c)
-
-        with self.assertRaisesRegex(RuntimeError, "functions with out=... arguments don't support automatic differentiation"):
-            torch.matmul(a, b, out=c)
-
-        with torch.no_grad():
-            torch.matmul(a, b, out=c)
-
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
     @largeTensorTest('16GB', device='cuda')
     def test_large_bmm_mm_backward(self, device):
@@ -4696,44 +4681,6 @@ class TestLinalg(TestCase):
         m1 = torch.randn(32, 131071 , device=device).to(dtype)
         m2 = torch.randn(16, 131071, device=device).to(dtype)
         torch.nn.functional.linear(m1, m2, M)
-
-    @onlyCUDA
-    @skipCUDAIfNotRocm
-    @dtypes(*floating_types_and(torch.bfloat16, torch.half))
-    def test_hipblaslt_corner_cases_rocm(self, device, dtype):
-        if dtype == torch.double:
-            raise unittest.SkipTest("hipblasLt doesn't support doubles yet")
-
-        # enable hipblaslt path via env variable.
-        import os
-        DISABLE_ADDMM_HIP_LT = "DISABLE_ADDMM_HIP_LT"
-        prev_val = os.getenv(DISABLE_ADDMM_HIP_LT)
-        try:
-            os.environ[DISABLE_ADDMM_HIP_LT] = "0"
-            # common case
-            M = torch.randn(128, device=device, dtype=dtype)
-            m1 = torch.randn(2048, 2400, device=device, dtype=dtype)
-            m2 = torch.randn(128, 2400, device=device, dtype=dtype)
-            out1 = torch.nn.functional.linear(m1, m2, M)
-            M_cpu = M.to('cpu')
-            m1_cpu = m1.to('cpu')
-            m2_cpu = m2.to('cpu')
-            out1_cpu = torch.nn.functional.linear(m1_cpu, m2_cpu, M_cpu)
-            self.assertTrue(torch.allclose(out1_cpu, out1.cpu(), rtol=1e-2, atol=1e-2))
-
-            # common case without bias
-            m1 = torch.randn(2048, 2400, device=device, dtype=dtype)
-            m2 = torch.randn(128, 2400, device=device, dtype=dtype)
-            out2 = torch.nn.functional.linear(m1, m2, bias=None)
-            m1_cpu = m1.to('cpu')
-            m2_cpu = m2.to('cpu')
-            out2_cpu = torch.nn.functional.linear(m1_cpu, m2_cpu, bias=None)
-            self.assertTrue(torch.allclose(out2_cpu, out2.cpu(), rtol=1e-2, atol=1e-2))
-        finally:
-            if prev_val is None:
-                del os.environ[DISABLE_ADDMM_HIP_LT]
-            else:
-                os.environ[DISABLE_ADDMM_HIP_LT] = prev_val
 
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   torch.half,

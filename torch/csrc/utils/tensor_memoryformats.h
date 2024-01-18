@@ -4,9 +4,11 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/utils/python_stub.h>
 
-namespace torch::utils {
+namespace torch {
+namespace utils {
 
 void initializeMemoryFormats();
 TORCH_PYTHON_API PyObject* getTHPMemoryFormat(c10::MemoryFormat);
 
-} // namespace torch::utils
+} // namespace utils
+} // namespace torch

@@ -382,11 +382,10 @@ def aot_dispatch_autograd(
         metadata: ViewAndMutationMeta = fw_metadata  # type: ignore[assignment]
         maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
         num_symints_saved_for_bw = _num_symints_saved_for_bw
-        _compiled_autograd_should_lift = False
 
         @staticmethod
         def _compiled_autograd_key(ctx):
-            return (ctx._autograd_function_id, *ctx.symints)
+            return (aot_config.aot_id, *ctx.symints)
 
         @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):
@@ -723,9 +722,6 @@ Got grad_output types: {str(grad_output_types)}"""
                 # See comment for why once_differentiable is not sufficient:
                 # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
                 class CompiledFunctionBackward(torch.autograd.Function):
-                    # CompiledFunctionBackward is not yet supported in dynamo skipfiles
-                    _compiled_autograd_should_lift = False
-
                     @staticmethod
                     def forward(ctx, *unused_args):
                         outs = call_compiled_backward()
@@ -748,7 +744,7 @@ Got grad_output types: {str(grad_output_types)}"""
                             "torch.compile with aot_autograd does not currently support double backward"
                         )
 
-                CompiledFunctionBackward._compiled_autograd_key = (  # type: ignore[method-assign]
+                CompiledFunctionBackward._compiled_autograd_key = (  # type: ignore[attr-defined]
                     CompiledFunction._compiled_autograd_key
                 )
 

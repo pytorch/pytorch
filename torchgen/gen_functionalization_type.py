@@ -686,8 +686,8 @@ def gen_functionalization_view_inverse_declaration(
     def emit_decl_helper(g: NativeFunctionsViewGroup) -> Optional[str]:
         if g.view.has_composite_implicit_autograd_kernel:
             return None
-        view_inverse_sig = ViewInverseSignature(g)
-        return view_inverse_sig.decl()
+        view_copy_inverse_sig = ViewInverseSignature(g)
+        return view_copy_inverse_sig.decl()
 
     return emit_decl_helper(g)
 

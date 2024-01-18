@@ -75,18 +75,22 @@ VkImageLayout vk_layout(
           return VK_IMAGE_LAYOUT_GENERAL;
       }
       break;
+
     case PipelineStage::TRANSFER:
       switch (access) {
         case MemoryAccessType::READ:
           return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+
         case MemoryAccessType::WRITE:
           return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
         default:
-          VK_THROW("Invalid memory access type for transfer stage!");
+          TORCH_INTERNAL_ASSERT(false, "Invalid!");
       }
       break;
+
     default:
-      VK_THROW("Cannot determine appropriate image layout");
+      TORCH_INTERNAL_ASSERT(false, "Invalid!");
   }
 
   return VK_IMAGE_LAYOUT_UNDEFINED;
@@ -121,7 +125,7 @@ PipelineLayout::PipelineLayout(PipelineLayout&& other) noexcept
 }
 
 PipelineLayout::~PipelineLayout() {
-  if (VK_NULL_HANDLE == handle_) {
+  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroyPipelineLayout(device_, handle_, nullptr);
@@ -212,7 +216,7 @@ ComputePipeline::ComputePipeline(ComputePipeline&& other) noexcept
 }
 
 ComputePipeline::~ComputePipeline() {
-  if (VK_NULL_HANDLE == handle_) {
+  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroyPipeline(device_, handle_, nullptr);
@@ -260,7 +264,7 @@ VkPipelineLayout PipelineLayoutCache::retrieve(
   std::lock_guard<std::mutex> lock(cache_mutex_);
 
   auto it = cache_.find(key);
-  if (cache_.cend() == it) {
+  if C10_UNLIKELY (cache_.cend() == it) {
     it = cache_.insert({key, PipelineLayoutCache::Value(device_, key)}).first;
   }
 
@@ -307,7 +311,7 @@ ComputePipelineCache::ComputePipelineCache(
 ComputePipelineCache::~ComputePipelineCache() {
   purge();
 
-  if (VK_NULL_HANDLE == pipeline_cache_) {
+  if C10_LIKELY (VK_NULL_HANDLE == pipeline_cache_) {
     return;
   }
   vkDestroyPipelineCache(device_, pipeline_cache_, nullptr);
@@ -319,7 +323,7 @@ VkPipeline ComputePipelineCache::retrieve(
   std::lock_guard<std::mutex> lock(cache_mutex_);
 
   auto it = cache_.find(key);
-  if (cache_.cend() == it) {
+  if C10_UNLIKELY (cache_.cend() == it) {
     it = cache_
              .insert(
                  {key,

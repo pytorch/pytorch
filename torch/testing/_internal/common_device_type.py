@@ -843,11 +843,10 @@ def _serialize_sample(sample_input):
 
 class ops(_TestParametrizer):
     def __init__(self, op_list, *, dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.supported,
-                 allowed_dtypes: Optional[Sequence[torch.dtype]] = None, skip_if_dynamo=True):
+                 allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
         self.op_list = list(op_list)
         self.opinfo_dtypes = dtypes
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
-        self.skip_if_dynamo = skip_if_dynamo
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         """ Parameterizes the given test function across each op and its associated dtypes. """
@@ -928,9 +927,6 @@ class ops(_TestParametrizer):
                             raise e
                         finally:
                             clear_tracked_input()
-
-                    if self.skip_if_dynamo:
-                        test_wrapper = skipIfTorchDynamo("Policy: we don't run OpInfo tests w/ Dynamo")(test_wrapper)
 
                     # Initialize info for the last input seen. This is useful for tracking
                     # down which inputs caused a test failure. Note that TrackedInputIter is

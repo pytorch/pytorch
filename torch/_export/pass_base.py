@@ -200,8 +200,8 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                 pred, true_fn, false_fn, inputs = args
                 return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
             elif target == torch.ops.higher_order.map_impl:
-                f, mapped_args, operands = args  # type: ignore[assignment]
-                return self.callback.call_map(f, mapped_args, operands, meta)
+                f, num_args, *rest = args  # type: ignore[assignment]
+                return self.callback.call_map(f, num_args, list(rest), meta)
             # For other unregistered HigherOrderOps, just interpret them blindly
             elif isinstance(target, torch._ops.HigherOrderOperator):
                 return self.callback._fx(
@@ -357,17 +357,18 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
     def call_map(
         self,
         f: torch.fx.GraphModule,
-        mapped_args: List[ProxyValue],
-        operands: List[ProxyValue],
+        num_args: int,
+        args: List[ProxyValue],
         meta: NodeMetadata,
     ) -> ProxyValue:
-        xs = _unstack_pytree([arg.data for arg in mapped_args])[0]
-        f_branch = self.call_submodule(f, tuple(xs + [arg.data for arg in operands]))
+        xs = _unstack_pytree([arg.data for arg in args[:num_args]])[0]
+        pos_args = args[num_args:]
+        f_branch = self.call_submodule(f, tuple(xs + [arg.data for arg in pos_args]))
         assert f_branch is not None
         return self._fx(
             "call_function",
             torch.ops.higher_order.map_impl,
-            (f_branch.graph_module, mapped_args, operands),
+            (f_branch.graph_module, num_args, *args),
             {},
             meta,
         )

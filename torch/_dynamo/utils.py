@@ -423,9 +423,6 @@ def hashable(x):
         return True
     except TypeError:
         return False
-    # cannot hash writable memoryview object
-    except ValueError:
-        return False
 
 
 def nothing(*args, **kwargs):
@@ -1062,11 +1059,8 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     return found
 
 
-def tensor_or_module_to_id(value):
-    return [
-        id(k) if isinstance(k, (torch.Tensor, torch.nn.Module)) else k
-        for k in value.keys()
-    ]
+def tensor_to_id(value):
+    return [id(k) if isinstance(k, torch.Tensor) else k for k in value.keys()]
 
 
 def const_repr(x, *, local) -> str:
@@ -1089,15 +1083,7 @@ def const_repr(x, *, local) -> str:
     elif is_builtin_callable(x):
         return x.__name__
     elif isinstance(x, type):
-
-        def fullname(o):
-            klass = o.__class__
-            module = klass.__module__
-            if module == "builtins":
-                return klass.__qualname__  # avoid outputs like 'builtins.str'
-            return module + "." + klass.__qualname__
-
-        return fullname(x)
+        return x.__name__
     else:
         return f"{x!r}"
 
@@ -2429,19 +2415,3 @@ def get_first_attr(obj, *attrs):
             return getattr(obj, attr)
 
     raise AssertionError(f"{obj} does not has any of the attributes: {attrs}")
-
-
-@contextlib.contextmanager
-def maybe_enable_compiled_autograd(should_enable):
-    def compiler_fn(gm):
-        def inner_compiler(gm_, example_inputs_):
-            torch._dynamo.utils.counters["compiled_autograd"]["compiles"] += 1
-            return torch._inductor.compile(gm_, example_inputs_)
-
-        return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
-
-    if should_enable:
-        with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
-            yield ctx
-    else:
-        yield

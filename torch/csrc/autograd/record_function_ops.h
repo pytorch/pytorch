@@ -3,7 +3,9 @@
 #include <c10/util/Optional.h>
 #include <torch/custom_class.h>
 
-namespace torch::autograd::profiler {
+namespace torch {
+namespace autograd {
+namespace profiler {
 
 struct PythonRecordFunction : public torch::CustomClassHolder {
   at::RecordFunction record;
@@ -24,4 +26,6 @@ TORCH_API c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut_new
     const c10::intrusive_ptr<PythonRecordFunction>& record,
     const c10::intrusive_ptr<c10::ivalue::Future>& fut);
 
-} // namespace torch::autograd::profiler
+} // namespace profiler
+} // namespace autograd
+} // namespace torch

@@ -4239,10 +4239,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("hipDeviceAttributeMaxSharedMemoryPerBlock", CONV_TYPE, API_RUNTIME),
         ),
         (
-            "cudaDevAttrMaxSharedMemoryPerBlockOptin",
-            ("hipDeviceAttributeMaxSharedMemoryPerBlock", CONV_TYPE, API_RUNTIME),
-        ),
-        (
             "cudaDevAttrTotalConstantMemory",
             ("hipDeviceAttributeTotalConstantMemory", CONV_TYPE, API_RUNTIME),
         ),

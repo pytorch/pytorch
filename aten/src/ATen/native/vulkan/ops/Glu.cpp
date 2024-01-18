@@ -31,7 +31,7 @@ Tensor glu(const at::Tensor& input_arg, const int64_t dim = -1) {
   vTensor v_output{
       context,
       {v_input_sizes[0], output_ch_size, v_input_sizes[2], v_input_sizes[3]},
-      v_input.dtype(),
+      input_arg.scalar_type(),
   };
 
   const struct Block final {

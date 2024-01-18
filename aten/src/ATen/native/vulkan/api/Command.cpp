@@ -1,5 +1,6 @@
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
+#include <ATen/native/vulkan/api/Utils.h>
 
 #include <mutex>
 
@@ -43,7 +44,7 @@ CommandBuffer& CommandBuffer::operator=(CommandBuffer&& other) noexcept {
 }
 
 void CommandBuffer::begin() {
-  VK_CHECK_COND(
+  TORCH_CHECK(
       state_ == CommandBuffer::State::NEW,
       "Vulkan CommandBuffer: called begin() on a command buffer whose state "
       "is not NEW.");
@@ -60,7 +61,7 @@ void CommandBuffer::begin() {
 }
 
 void CommandBuffer::end() {
-  VK_CHECK_COND(
+  TORCH_CHECK(
       state_ == CommandBuffer::State::RECORDING ||
           state_ == CommandBuffer::State::SUBMITTED,
       "Vulkan CommandBuffer: called end() on a command buffer whose state "
@@ -76,7 +77,7 @@ void CommandBuffer::bind_pipeline(
     VkPipeline pipeline,
     VkPipelineLayout pipeline_layout,
     const utils::uvec3 local_workgroup_size) {
-  VK_CHECK_COND(
+  TORCH_CHECK(
       state_ == CommandBuffer::State::RECORDING,
       "Vulkan CommandBuffer: called bind_pipeline() on a command buffer whose state "
       "is not RECORDING.");
@@ -94,7 +95,7 @@ void CommandBuffer::bind_pipeline(
 }
 
 void CommandBuffer::bind_descriptors(VkDescriptorSet descriptors) {
-  VK_CHECK_COND(
+  TORCH_CHECK(
       state_ == CommandBuffer::State::PIPELINE_BOUND,
       "Vulkan CommandBuffer: called bind_descriptors() on a command buffer whose state "
       "is not PIPELINE_BOUND.");
@@ -117,20 +118,20 @@ void CommandBuffer::bind_descriptors(VkDescriptorSet descriptors) {
 }
 
 void CommandBuffer::insert_barrier(const PipelineBarrier& pipeline_barrier) {
-  VK_CHECK_COND(
+  TORCH_CHECK(
       state_ == CommandBuffer::State::DESCRIPTORS_BOUND ||
           state_ == CommandBuffer::State::RECORDING,
       "Vulkan CommandBuffer: called insert_barrier() on a command buffer whose state "
       "is not DESCRIPTORS_BOUND or RECORDING.");
 
   if (pipeline_barrier) {
-    std::vector<VkBufferMemoryBarrier> buffer_memory_barriers(4);
+    c10::SmallVector<VkBufferMemoryBarrier, 4u> buffer_memory_barriers;
     for (const api::BufferMemoryBarrier& memory_barrier :
          pipeline_barrier.buffers) {
       buffer_memory_barriers.push_back(memory_barrier.handle);
     }
 
-    std::vector<VkImageMemoryBarrier> image_memory_barriers(4);
+    c10::SmallVector<VkImageMemoryBarrier, 4u> image_memory_barriers;
     for (const api::ImageMemoryBarrier& memory_barrier :
          pipeline_barrier.images) {
       image_memory_barriers.push_back(memory_barrier.handle);
@@ -153,7 +154,7 @@ void CommandBuffer::insert_barrier(const PipelineBarrier& pipeline_barrier) {
 }
 
 void CommandBuffer::dispatch(const utils::uvec3& global_workgroup_size) {
-  VK_CHECK_COND(
+  TORCH_CHECK(
       state_ == CommandBuffer::State::BARRIERS_INSERTED,
       "Vulkan CommandBuffer: called dispatch() on a command buffer whose state "
       "is not BARRIERS_INSERTED.");
@@ -177,7 +178,7 @@ void CommandBuffer::copy_buffer_to_buffer(
     const api::utils::uvec3& copy_range,
     const api::utils::uvec3& src_offset,
     const api::utils::uvec3& dst_offset) {
-  VK_CHECK_COND(
+  TORCH_CHECK(
       state_ == CommandBuffer::State::BARRIERS_INSERTED,
       "Vulkan CommandBuffer: called copy_buffer_to_buffer() on a command buffer whose state "
       "is not BARRIERS_INSERTED.");
@@ -200,7 +201,7 @@ void CommandBuffer::copy_texture_to_texture(
     const api::utils::uvec3& copy_range,
     const api::utils::uvec3& src_offset,
     const api::utils::uvec3& dst_offset) {
-  VK_CHECK_COND(
+  TORCH_CHECK(
       state_ == CommandBuffer::State::BARRIERS_INSERTED,
       "Vulkan CommandBuffer: called copy_texture_to_texture() on a command buffer whose state "
       "is not BARRIERS_INSERTED.");
@@ -245,7 +246,7 @@ void CommandBuffer::copy_texture_to_buffer(
     const api::utils::uvec3& copy_range,
     const api::utils::uvec3& src_offset,
     const api::utils::uvec3& dst_offset) {
-  VK_CHECK_COND(
+  TORCH_CHECK(
       state_ == CommandBuffer::State::BARRIERS_INSERTED,
       "Vulkan CommandBuffer: called copy_texture_to_buffer() on a command buffer whose state "
       "is not BARRIERS_INSERTED.");
@@ -283,7 +284,7 @@ void CommandBuffer::copy_buffer_to_texture(
     const api::utils::uvec3& copy_range,
     const api::utils::uvec3& src_offset,
     const api::utils::uvec3& dst_offset) {
-  VK_CHECK_COND(
+  TORCH_CHECK(
       state_ == CommandBuffer::State::BARRIERS_INSERTED,
       "Vulkan CommandBuffer: called copy_buffer_to_texture() on a command buffer whose state "
       "is not BARRIERS_INSERTED.");
@@ -317,7 +318,7 @@ void CommandBuffer::copy_buffer_to_texture(
 
 void CommandBuffer::write_timestamp(VkQueryPool querypool, const uint32_t idx)
     const {
-  VK_CHECK_COND(
+  TORCH_CHECK(
       state_ == CommandBuffer::State::RECORDING,
       "Vulkan CommandBuffer: called write_timestamp() on a command buffer whose state "
       "is not RECORDING.");
@@ -330,7 +331,7 @@ void CommandBuffer::reset_querypool(
     VkQueryPool querypool,
     const uint32_t first_idx,
     const uint32_t count) const {
-  VK_CHECK_COND(
+  TORCH_CHECK(
       state_ == CommandBuffer::State::RECORDING,
       "Vulkan CommandBuffer: called reset_querypool() on a command buffer whose state "
       "is not RECORDING.");
@@ -339,7 +340,7 @@ void CommandBuffer::reset_querypool(
 }
 
 VkCommandBuffer CommandBuffer::get_submit_handle(const bool final_use) {
-  VK_CHECK_COND(
+  TORCH_CHECK(
       state_ == CommandBuffer::State::READY,
       "Vulkan CommandBuffer: called begin() on a command buffer whose state "
       "is not READY.");

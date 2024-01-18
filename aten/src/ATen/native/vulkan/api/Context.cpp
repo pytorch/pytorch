@@ -1,16 +1,6 @@
 #include <ATen/native/vulkan/api/Context.h>
 
-#include <cstring>
-#include <memory>
 #include <sstream>
-
-#ifndef VULKAN_DESCRIPTOR_POOL_SIZE
-#define VULKAN_DESCRIPTOR_POOL_SIZE 1024u
-#endif
-
-#ifndef VULKAN_QUERY_POOL_SIZE
-#define VULKAN_QUERY_POOL_SIZE 4096u
-#endif
 
 namespace at {
 namespace native {
@@ -48,6 +38,7 @@ Context::~Context() {
     // Let the device know the context is done with the queue
     adapter_p_->return_queue(queue_);
   } catch (...) {
+    TORCH_WARN("Exception thrown when destroying the Vulkan Context!");
   }
 }
 
@@ -120,16 +111,16 @@ Context* context() {
       };
 
       const DescriptorPoolConfig descriptor_pool_config{
-          VULKAN_DESCRIPTOR_POOL_SIZE, // descriptorPoolMaxSets
-          VULKAN_DESCRIPTOR_POOL_SIZE, // descriptorUniformBufferCount
-          VULKAN_DESCRIPTOR_POOL_SIZE, // descriptorStorageBufferCount
-          VULKAN_DESCRIPTOR_POOL_SIZE, // descriptorCombinedSamplerCount
-          VULKAN_DESCRIPTOR_POOL_SIZE, // descriptorStorageImageCount
+          1024u, // descriptorPoolMaxSets
+          1024u, // descriptorUniformBufferCount
+          1024u, // descriptorStorageBufferCount
+          1024u, // descriptorCombinedSamplerCount
+          1024u, // descriptorStorageImageCount
           32u, // descriptorPileSizes
       };
 
       const QueryPoolConfig query_pool_config{
-          VULKAN_QUERY_POOL_SIZE, // maxQueryCount
+          4096u, // maxQueryCount
           256u, // initialReserveSize
       };
 
@@ -141,11 +132,27 @@ Context* context() {
       };
 
       return new Context(runtime()->default_adapter_i(), config);
+    } catch (const c10::Error& e) {
+      TORCH_WARN(
+          "Pytorch Vulkan Context: Failed to initialize global vulkan context: ",
+          e.what());
+    } catch (const std::exception& e) {
+      TORCH_WARN(
+          "Pytorch Vulkan Context: Failed to initialize global vulkan context: ",
+          e.what());
     } catch (...) {
+      TORCH_WARN(
+          "Pytorch Vulkan Context: Failed to initialize global vulkan context!");
     }
 
     return nullptr;
   }());
+
+  if (!context) {
+    TORCH_WARN(
+        "Pytorch Vulkan Context: The global context could not be retrieved "
+        "because it failed to initialize.");
+  }
 
   return context.get();
 }

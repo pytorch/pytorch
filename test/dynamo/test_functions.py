@@ -25,8 +25,6 @@ from torch._dynamo.utils import ifdynstaticdefault, same
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
-    instantiate_parametrized_tests,
-    parametrize,
 )
 
 # Defines all the kernels for tests
@@ -1363,83 +1361,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         triple = functools.partial(multiply, y=3)
         return triple(x)
 
-    @parametrize(
-        "attr",
-        (
-            # True
-            "__subclasshook__",
-            "__lt__",
-            "__hash__",
-            "__ge__",
-            "__le__",
-            "__gt__",
-            "__dict__",
-            "__getattribute__",
-            "__setattr__",
-            "__doc__",
-            "__repr__",
-            "__dir__",
-            "__init__",
-            "__new__",
-            "__class__",
-            "__eq__",
-            "__delattr__",
-            "__reduce__",
-            "__module__",
-            "__format__",
-            "__str__",
-            "__sizeof__",
-            "__ne__",
-            "__call__",
-            "__reduce_ex__",
-            "__init_subclass__",
-            "args",
-            "keywords",
-            "func",
-            # False
-            "__code__",
-            "__kwdefaults__",
-            "__defaults__",
-            "__name__",
-            "__annotations__",
-            "__get__",
-            "__builtins__",
-            "__qualname__",
-            "__globals__",
-            "__closure__",
-        ),
-    )
-    def test_partials_hasattr(self, attr):
-        def fn(t):
-            f = lambda x, y: torch.sin(x) + torch.cos(y)
-            p = functools.partial(f, y=t)
-            if hasattr(p, attr):
-                return p(t)
-            else:
-                return torch.zeros_like(t)
-
-        t = torch.randn(3, 4)
-        counter = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fullgraph=True, backend=counter)(fn)
-        self.assertEqual(opt_fn(t), fn(t))
-        self.assertGreater(counter.frame_count, 0)
-
-    @unittest.expectedFailure
-    def test_partials_hasattr_set_attr(self):
-        def fn(t):
-            f = lambda x, y: torch.sin(x) + torch.cos(y)
-            p = functools.partial(f, y=t)
-            p.__name__ = "test"
-            if hasattr(p, "__name__"):
-                return p(t)
-            else:
-                return torch.zeros_like(t)
-
-        t = torch.randn(3, 4)
-        counter = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fullgraph=True, backend=counter)(fn)
-        self.assertEqual(opt_fn(t), fn(t))
-
     def test_pow_int(self):
         def fn(a, b):
             return torch.pow(a, b)
@@ -1660,38 +1581,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         input2 = torch.randn(1)
 
         self.assertTrue(same(program(input1, input2), input1 + input1))
-
-    def test_compare_constant_and_tensor(self):
-        for op in [
-            operator.lt,
-            operator.le,
-            operator.gt,
-            operator.ge,
-            operator.ne,
-            operator.eq,
-            operator.is_,
-            operator.is_not,
-        ]:
-            with self.subTest(op=op):
-
-                def fn(x):
-                    return op(-10, x)
-
-                opt_fn = torch.compile(fullgraph=True)(fn)
-
-                x = torch.randn(10)
-                self.assertEqual(opt_fn(x), fn(x))
-
-    def test_unary_fold_op(self):
-        for op in (operator.abs, abs, operator.neg, operator.pos, operator.truth):
-            with self.subTest(op=op):
-
-                def fn():
-                    a = range(-10, 10)
-                    return list(map(op, a))
-
-                opt_fn = torch._dynamo.optimize(nopython=True)(fn)
-                self.assertEqual(opt_fn(), fn())
 
 
 def udf_mul(x, y):
@@ -2147,8 +2036,24 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(ValueError, "zip()"):
             opt_fn(x, ys[:1], zs)
 
+    def test_compare_constant_and_tensor(self):
+        for op in [
+            operator.lt,
+            operator.le,
+            operator.gt,
+            operator.ge,
+            operator.ne,
+            operator.eq,
+        ]:
 
-instantiate_parametrized_tests(FunctionTests)
+            def fn(x):
+                return op(-10, x)
+
+            opt_fn = torch.compile(fullgraph=True)(fn)
+
+            x = torch.randn(10)
+            self.assertEqual(opt_fn(x), fn(x))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

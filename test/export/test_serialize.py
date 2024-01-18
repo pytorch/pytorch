@@ -40,10 +40,21 @@ from torch.testing._internal.common_utils import (
 
 
 def get_filtered_export_db_tests():
+    unsupported_test_names = {
+        "dynamic_shape_constructor",  # 'NoneType' object has no attribute 'from_tensor'
+        "dictionary",  # Graph output must be a tuple()
+        "fn_with_kwargs",  # export doesn't support kwargs yet
+        "scalar_output",  # Tracing through 'f' must produce a single graph
+        "user_input_mutation",  # TODO(zhxchen17) Support serializing user inputs mutation.
+    }
+
     return [
         (name, case)
         for name, case in all_examples().items()
-        if case.support_level == SupportLevel.SUPPORTED
+        if (
+            case.support_level == SupportLevel.SUPPORTED and
+            name not in unsupported_test_names
+        )
     ]
 
 
@@ -562,21 +573,6 @@ class TestOpVersioning(TestCase):
 
 unittest.expectedFailure(
     TestDeserialize.test_exportdb_supported_case_tensor_setattr
-)
-
-# We didn't set up kwargs input yet
-unittest.expectedFailure(
-    TestDeserialize.test_exportdb_supported_case_fn_with_kwargs
-)
-
-# Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph.
-unittest.expectedFailure(
-    TestDeserialize.test_exportdb_supported_case_scalar_output
-)
-
-# TODO(zhxchen17) Support serializing user inputs mutation.
-unittest.expectedFailure(
-    TestDeserialize.test_exportdb_supported_case_user_input_mutation
 )
 
 

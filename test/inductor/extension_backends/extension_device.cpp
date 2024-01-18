@@ -81,10 +81,6 @@ struct DummyCustomAllocator final : at::Allocator {
   at::DeleterFnPtr raw_deleter() const override {
     return &ReportAndDelete;
   }
-
-  void copy_data(void* dest, const void* src, std::size_t count) const final {
-    default_copy_data(dest, src, count);
-  }
 };
 
 // Register our dummy allocator

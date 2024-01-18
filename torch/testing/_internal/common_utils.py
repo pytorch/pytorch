@@ -803,7 +803,7 @@ TEST_IN_SUBPROCESS = args.subprocess
 TEST_SAVE_XML = args.save_xml
 REPEAT_COUNT = args.repeat
 SEED = args.seed
-if not getattr(expecttest, "ACCEPT", False):
+if not expecttest.ACCEPT:
     expecttest.ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
@@ -1342,14 +1342,6 @@ def xfailIfTorchDynamo(func):
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
-    """
-    Usage:
-    @skipIfTorchDynamo(msg)
-    def test_blah(self):
-        ...
-    """
-    assert isinstance(msg, str), "Are you using skipIfTorchDynamo correctly?"
-
     def decorator(fn):
         if not isinstance(fn, type):
             @wraps(fn)
@@ -1366,6 +1358,7 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
             fn.__unittest_skip_why__ = msg
 
         return fn
+
 
     return decorator
 
@@ -1393,6 +1386,7 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
 
 def unMarkDynamoStrictTest(cls=None):
     def decorator(cls):
+        assert inspect.isclass(cls)
         cls.dynamo_strict = False
         return cls
 
@@ -1491,9 +1485,6 @@ IS_TBB = "tbb" in os.getenv("BUILD_ENVIRONMENT", "")
 numpy_to_torch_dtype_dict = {
     np.bool_      : torch.bool,
     np.uint8      : torch.uint8,
-    np.uint16     : torch.uint16,
-    np.uint32     : torch.uint32,
-    np.uint64     : torch.uint64,
     np.int8       : torch.int8,
     np.int16      : torch.int16,
     np.int32      : torch.int32,
@@ -2711,15 +2702,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 if os.environ["STRICT_DEFAULT"] == "1":
                     strict_default = True
 
-        strict_mode = False
-        if compiled:
-            test_method = getattr(self, self._testMethodName)
-            if hasattr(test_method, "dynamo_strict"):
-                strict_mode = test_method.dynamo_strict
-            elif hasattr(test_cls, "dynamo_strict"):
-                strict_mode = test_cls.dynamo_strict
-            else:
-                strict_mode = strict_default
+        strict_mode = getattr(test_cls, "dynamo_strict", strict_default) and compiled
         nopython = getattr(test_cls, "dynamo_strict_nopython", False) and compiled
 
         if strict_mode:
@@ -4523,9 +4506,6 @@ def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.devi
     dtype_to_ctype: Dict[torch.dtype, Any] = {
         torch.int8: ctypes.c_int8,
         torch.uint8: ctypes.c_uint8,
-        torch.uint16: ctypes.c_uint16,
-        torch.uint32: ctypes.c_uint32,
-        torch.uint64: ctypes.c_uint64,
         torch.int16: ctypes.c_int16,
         torch.int32: ctypes.c_int32,
         torch.int64: ctypes.c_int64,

@@ -231,10 +231,7 @@ def _private_register_pytree_node(
         )
 
 
-def tree_flatten(
-    tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> Tuple[List[Any], TreeSpec]:
+def tree_flatten(tree: PyTree) -> Tuple[List[Any], TreeSpec]:
     """Flatten a pytree.
 
     See also :func:`tree_unflatten`.
@@ -261,11 +258,6 @@ def tree_flatten(
 
     Args:
         tree (pytree): A pytree to flatten.
-        is_leaf (callable, optional): An extra leaf predicate function that will be called at each
-            flattening step. The function should have a single argument with signature
-            ``is_leaf(node) -> bool``. If it returns :data:`True`, the whole subtree being treated
-            as a leaf. Otherwise, the default pytree registry will be used to determine a node is a
-            leaf or not. If the function is not specified, the default pytree registry will be used.
 
     Returns:
         A pair ``(leaves, treespec)`` where the first element is a list of leaf values and the
@@ -273,7 +265,6 @@ def tree_flatten(
     """
     return optree.tree_flatten(  # type: ignore[return-value]
         tree,
-        is_leaf=is_leaf,
         none_is_leaf=True,
         namespace="torch",
     )
@@ -306,10 +297,7 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
     return optree.tree_unflatten(treespec, leaves)  # type: ignore[arg-type]
 
 
-def tree_leaves(
-    tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> List[Any]:
+def tree_leaves(tree: PyTree) -> List[Any]:
     """Get the leaves of a pytree.
 
     See also :func:`tree_flatten`.
@@ -324,27 +312,14 @@ def tree_leaves(
 
     Args:
         tree (pytree): A pytree to flatten.
-        is_leaf (callable, optional): An extra leaf predicate function that will be called at each
-            flattening step. The function should have a single argument with signature
-            ``is_leaf(node) -> bool``. If it returns :data:`True`, the whole subtree being treated
-            as a leaf. Otherwise, the default pytree registry will be used to determine a node is a
-            leaf or not. If the function is not specified, the default pytree registry will be used.
 
     Returns:
         A list of leaf values.
     """
-    return optree.tree_leaves(
-        tree,
-        is_leaf=is_leaf,
-        none_is_leaf=True,
-        namespace="torch",
-    )
+    return optree.tree_leaves(tree, none_is_leaf=True, namespace="torch")
 
 
-def tree_structure(
-    tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> TreeSpec:
+def tree_structure(tree: PyTree) -> TreeSpec:
     """Get the treespec for a pytree.
 
     See also :func:`tree_flatten`.
@@ -359,29 +334,18 @@ def tree_structure(
 
     Args:
         tree (pytree): A pytree to flatten.
-        is_leaf (callable, optional): An extra leaf predicate function that will be called at each
-            flattening step. The function should have a single argument with signature
-            ``is_leaf(node) -> bool``. If it returns :data:`True`, the whole subtree being treated
-            as a leaf. Otherwise, the default pytree registry will be used to determine a node is a
-            leaf or not. If the function is not specified, the default pytree registry will be used.
 
     Returns:
         A treespec object representing the structure of the pytree.
     """
     return optree.tree_structure(  # type: ignore[return-value]
         tree,
-        is_leaf=is_leaf,
         none_is_leaf=True,
         namespace="torch",
     )
 
 
-def tree_map(
-    func: Callable[..., Any],
-    tree: PyTree,
-    *rests: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
+def tree_map(func: Callable[..., Any], tree: PyTree, *rests: PyTree) -> PyTree:
     """Map a multi-input function over pytree args to produce a new pytree.
 
     See also :func:`tree_map_`.
@@ -404,11 +368,6 @@ def tree_map(
             argument to function ``func``.
         rests (tuple of pytree): A tuple of pytrees, each of which has the same structure as
             ``tree`` or has ``tree`` as a prefix.
-        is_leaf (callable, optional): An extra leaf predicate function that will be called at each
-            flattening step. The function should have a single argument with signature
-            ``is_leaf(node) -> bool``. If it returns :data:`True`, the whole subtree being treated
-            as a leaf. Otherwise, the default pytree registry will be used to determine a node is a
-            leaf or not. If the function is not specified, the default pytree registry will be used.
 
     Returns:
         A new pytree with the same structure as ``tree`` but with the value at each leaf given by
@@ -419,18 +378,12 @@ def tree_map(
         func,
         tree,
         *rests,
-        is_leaf=is_leaf,
         none_is_leaf=True,
         namespace="torch",
     )
 
 
-def tree_map_(
-    func: Callable[..., Any],
-    tree: PyTree,
-    *rests: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> PyTree:
+def tree_map_(func: Callable[..., Any], tree: PyTree, *rests: PyTree) -> PyTree:
     """Like :func:`tree_map`, but do an inplace call on each leaf and return the original tree.
 
     See also :func:`tree_map`.
@@ -442,11 +395,6 @@ def tree_map_(
             argument to function ``func``.
         rests (tuple of pytree): A tuple of pytrees, each of which has the same structure as
             ``tree`` or has ``tree`` as a prefix.
-        is_leaf (callable, optional): An extra leaf predicate function that will be called at each
-            flattening step. The function should have a single argument with signature
-            ``is_leaf(node) -> bool``. If it returns :data:`True`, the whole subtree being treated
-            as a leaf. Otherwise, the default pytree registry will be used to determine a node is a
-            leaf or not. If the function is not specified, the default pytree registry will be used.
 
     Returns:
         The original ``tree`` with the value at each leaf is given by the side-effect of function
@@ -457,7 +405,6 @@ def tree_map_(
         func,
         tree,
         *rests,
-        is_leaf=is_leaf,
         none_is_leaf=True,
         namespace="torch",
     )
@@ -535,7 +482,6 @@ def tree_map_only(
     __type_or_types: Type[T],
     func: Fn[T, Any],
     tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
     ...
 
@@ -545,7 +491,6 @@ def tree_map_only(
     __type_or_types: Type2[T, S],
     func: Fn2[T, S, Any],
     tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
     ...
 
@@ -555,7 +500,6 @@ def tree_map_only(
     __type_or_types: Type3[T, S, U],
     func: Fn3[T, S, U, Any],
     tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
     ...
 
@@ -564,9 +508,8 @@ def tree_map_only(
     __type_or_types: TypeAny,
     func: FnAny[Any],
     tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
-    return tree_map(map_only(__type_or_types)(func), tree, is_leaf=is_leaf)
+    return tree_map(map_only(__type_or_types)(func), tree)
 
 
 @overload
@@ -574,7 +517,6 @@ def tree_map_only_(
     __type_or_types: Type[T],
     func: Fn[T, Any],
     tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
     ...
 
@@ -584,7 +526,6 @@ def tree_map_only_(
     __type_or_types: Type2[T, S],
     func: Fn2[T, S, Any],
     tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
     ...
 
@@ -594,7 +535,6 @@ def tree_map_only_(
     __type_or_types: Type3[T, S, U],
     func: Fn3[T, S, U, Any],
     tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
     ...
 
@@ -603,26 +543,17 @@ def tree_map_only_(
     __type_or_types: TypeAny,
     func: FnAny[Any],
     tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
-    return tree_map_(map_only(__type_or_types)(func), tree, is_leaf=is_leaf)
+    return tree_map_(map_only(__type_or_types)(func), tree)
 
 
-def tree_all(
-    pred: Callable[[Any], bool],
-    tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+def tree_all(pred: Callable[[Any], bool], tree: PyTree) -> bool:
+    flat_args = tree_leaves(tree)
     return all(map(pred, flat_args))
 
 
-def tree_any(
-    pred: Callable[[Any], bool],
-    tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+def tree_any(pred: Callable[[Any], bool], tree: PyTree) -> bool:
+    flat_args = tree_leaves(tree)
     return any(map(pred, flat_args))
 
 
@@ -631,7 +562,6 @@ def tree_all_only(
     __type_or_types: Type[T],
     pred: Fn[T, bool],
     tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
     ...
 
@@ -641,7 +571,6 @@ def tree_all_only(
     __type_or_types: Type2[T, S],
     pred: Fn2[T, S, bool],
     tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
     ...
 
@@ -651,7 +580,6 @@ def tree_all_only(
     __type_or_types: Type3[T, S, U],
     pred: Fn3[T, S, U, bool],
     tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
     ...
 
@@ -660,9 +588,8 @@ def tree_all_only(
     __type_or_types: TypeAny,
     pred: FnAny[bool],
     tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_leaves(tree)
     return all(pred(x) for x in flat_args if isinstance(x, __type_or_types))
 
 
@@ -671,7 +598,6 @@ def tree_any_only(
     __type_or_types: Type[T],
     pred: Fn[T, bool],
     tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
     ...
 
@@ -681,7 +607,6 @@ def tree_any_only(
     __type_or_types: Type2[T, S],
     pred: Fn2[T, S, bool],
     tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
     ...
 
@@ -691,7 +616,6 @@ def tree_any_only(
     __type_or_types: Type3[T, S, U],
     pred: Fn3[T, S, U, bool],
     tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
     ...
 
@@ -700,17 +624,12 @@ def tree_any_only(
     __type_or_types: TypeAny,
     pred: FnAny[bool],
     tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_leaves(tree)
     return any(pred(x) for x in flat_args if isinstance(x, __type_or_types))
 
 
-def broadcast_prefix(
-    prefix_tree: PyTree,
-    full_tree: PyTree,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> List[Any]:
+def broadcast_prefix(prefix_tree: PyTree, full_tree: PyTree) -> List[Any]:
     """Return a list of broadcasted leaves in ``prefix_tree`` to match the number of leaves in ``full_tree``.
 
     If a ``prefix_tree`` is a prefix of a ``full_tree``, this means the ``full_tree`` can be
@@ -736,11 +655,10 @@ def broadcast_prefix(
     Args:
         prefix_tree (pytree): A pytree with the same structure as a prefix of ``full_tree``.
         full_tree (pytree): A pytree with the same structure as a suffix of ``prefix_tree``.
-        is_leaf (callable, optional): An extra leaf predicate function that will be called at each
-            flattening step. The function should have a single argument with signature
-            ``is_leaf(node) -> bool``. If it returns :data:`True`, the whole subtree being treated
-            as a leaf. Otherwise, the default pytree registry will be used to determine a node is a
-            leaf or not. If the function is not specified, the default pytree registry will be used.
+        is_leaf (callable, optional): An optionally specified function that will be called at each
+            flattening step. It should return a boolean, with :data:`True` stopping the traversal
+            and the whole subtree being treated as a leaf, and :data:`False` indicating the
+            flattening should traverse the current object.
 
     Returns:
         A list of leaves in ``prefix_tree`` broadcasted to match the number of leaves in ``full_tree``.
@@ -748,7 +666,6 @@ def broadcast_prefix(
     return optree.broadcast_prefix(
         prefix_tree,
         full_tree,
-        is_leaf=is_leaf,
         none_is_leaf=True,
         namespace="torch",
     )
@@ -762,15 +679,11 @@ def broadcast_prefix(
 # a user can pass in vmap(fn, in_dims)(*inputs). `in_dims` should be
 # broadcastable to the tree structure of `inputs` and we use
 # _broadcast_to_and_flatten to check this.
-def _broadcast_to_and_flatten(
-    tree: PyTree,
-    treespec: TreeSpec,
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> Optional[List[Any]]:
+def _broadcast_to_and_flatten(tree: PyTree, treespec: TreeSpec) -> Optional[List[Any]]:
     assert isinstance(treespec, TreeSpec)
     full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     try:
-        return broadcast_prefix(tree, full_tree, is_leaf=is_leaf)
+        return broadcast_prefix(tree, full_tree)
     except ValueError:
         return None
 

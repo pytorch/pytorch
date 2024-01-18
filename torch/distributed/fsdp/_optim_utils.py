@@ -403,7 +403,7 @@ def _shard_orig_param_state(
             and value.dim() > 0
             and fsdp_state.sharding_strategy != ShardingStrategy.NO_SHARD
         ):
-            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1].clone()  # type: ignore[operator]
+            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1]  # type: ignore[operator]
         new_optim_state[state_name] = value
     return new_optim_state
 
