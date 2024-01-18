@@ -1,14 +1,16 @@
+import os
 import warnings
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 import torch
 import torch.distributed as dist
 from torch.distributed.checkpoint.stateful import Stateful
 
 from .default_planner import DefaultLoadPlanner
+from .filesystem import FileSystemReader
 from .planner import LoadPlanner
 from .storage import StorageReader
-from .utils import _all_gather_keys, _DistWrapper, _profile
+from .utils import _all_gather_keys, _api_bc_check, _DistWrapper, _profile
 
 __all__ = ["load_state_dict", "load"]
 
@@ -38,14 +40,16 @@ def load_state_dict(
         )
 
 
+@_api_bc_check
 def load(
     state_dict: Dict[str, Any],
-    storage_reader: StorageReader,
     *,
+    checkpoint_id: Union[str, os.PathLike] = "",
+    storage_reader: Optional[StorageReader] = None,
+    planner: Optional[LoadPlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
-    planner: Optional[LoadPlanner] = None,
 ) -> None:
     """
     Load a distributed ``state_dict`` in SPMD style.
@@ -116,6 +120,17 @@ def load(
     """
 
     with _profile():
+        if not storage_reader:
+            if not checkpoint_id:
+                raise RuntimeError(
+                    "`checkpoint_id` must be specificed if storage_reader is None."
+                )
+            # TODO: automatically decide whether to use FSSpecFileSystem
+            storage_reader = FileSystemReader(checkpoint_id)
+
+        if not checkpoint_id:
+            storage_writer.set_checkpoint_id(checkpiont_id)
+
         if no_dist:
             keys = list(state_dict.keys())
         else:
