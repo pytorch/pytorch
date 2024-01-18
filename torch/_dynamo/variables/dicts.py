@@ -219,6 +219,7 @@ class ConstDictVariable(VariableTracker):
         if name == "__getitem__":
             assert len(args) == 1
             return self.getitem_const(args[0])
+
         elif name == "items":
             assert not (args or kwargs)
             return TupleVariable(
@@ -395,6 +396,10 @@ class SetVariable(VariableTracker):
             return SetVariable.SetElement(vt, vt.value)
         if isinstance(vt, MethodWrapperVariable):
             return SetVariable.SetElement(vt, vt.as_python_constant())
+        if isinstance(vt, variables.UserDefinedObjectVariable):
+            return SetVariable.SetElement(vt, vt.value)
+        if isinstance(vt, variables.NNModuleVariable):
+            return SetVariable.SetElement(vt, vt.module)
 
         unimplemented(f"Sets with {type(vt)} NYI")
 

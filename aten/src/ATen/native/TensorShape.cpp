@@ -438,6 +438,7 @@ Tensor& set_tensor_(Tensor& result, const Tensor& source) {
   return result;
 }
 
+
 // this needs to be split along CPU/CUDA lines because we don't have a consistent
 // way of getting the allocator to use for a device (c10::GetAllocator is not
 // the same as at::cuda::getCUDADeviceAllocator().

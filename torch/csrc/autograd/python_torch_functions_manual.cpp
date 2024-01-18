@@ -393,19 +393,25 @@ static PyObject* THPVariable__mirror_autograd_meta_to(
   auto r = parser.parse(args, kwargs, parsed_args);
   auto src_ = r.tensor(0);
   auto dst_ = r.tensor(1);
-  // Here, we unsafely set the grad function on the wrapper to be the same as
-  // the inner. We expect this grad_fn to NEVER be used. It's needed so that
-  // .is_leaf metadata is accurate on the wrapper
-  auto inner_autograd_meta = impl::get_autograd_meta(src_);
-  if (inner_autograd_meta) {
-    dst_.set_requires_grad(src_.requires_grad());
-    if (dst_.requires_grad()) {
+  auto src_autograd_meta = impl::get_autograd_meta(src_);
+  if (src_autograd_meta) {
+    auto dst_autograd_meta = impl::materialize_autograd_meta(dst_);
+    dst_autograd_meta->requires_grad_ = src_autograd_meta->requires_grad_;
+    if (src_autograd_meta->grad_fn_) {
+      // Don't use the src grad_fn, this will result in a frankenstein
+      // autograd graph.  Create an Error node and set it
       auto new_grad_fn = std::shared_ptr<torch::autograd::Error>(
           new torch::autograd::Error(
               "Cannot backprop through mirrored meta, file a bug in PyTorch"),
           torch::autograd::deleteNode);
       torch::autograd::set_history(dst_, new_grad_fn);
+    } else {
+      dst_.unsafeGetTensorImpl()->set_autograd_meta(
+          std::make_unique<AutogradMeta>(
+              dst_.unsafeGetTensorImpl(), src_autograd_meta->requires_grad_));
     }
+  } else {
+    dst_.unsafeGetTensorImpl()->set_autograd_meta(nullptr);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

@@ -206,7 +206,7 @@ class EnumVariable(VariableTracker):
         return self.value
 
     def __str__(self):
-        return f"EnumVariable({type(self.value)})"
+        return f"EnumVariable({type(self.value)}.{self.value})"
 
     def python_type(self):
         return type(self.value)

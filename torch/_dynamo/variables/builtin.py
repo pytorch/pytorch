@@ -855,16 +855,10 @@ class BuiltinVariable(VariableTracker):
         else:
             cls = variables.BaseListVariable.cls_for(self.fn)
         if obj is None:
-            if cls is SetVariable:
-                return cls(
-                    [],
-                    mutable_local=MutableLocal(),
-                )
-            else:
-                return cls(
-                    [],
-                    mutable_local=MutableLocal(),
-                )
+            return cls(
+                [],
+                mutable_local=MutableLocal(),
+            )
         elif obj.has_unpack_var_sequence(tx):
             if obj.source and not is_constant_source(obj.source):
                 if isinstance(obj, TupleIteratorVariable):
@@ -873,11 +867,6 @@ class BuiltinVariable(VariableTracker):
                     )
                 else:
                     install_guard(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
-            if cls is SetVariable:
-                return cls(
-                    list(obj.unpack_var_sequence(tx)),
-                    mutable_local=MutableLocal(),
-                )
 
             return cls(
                 list(obj.unpack_var_sequence(tx)),
@@ -1139,6 +1128,7 @@ class BuiltinVariable(VariableTracker):
         if not name_var.is_python_constant():
             unimplemented("non-const getattr() name")
 
+        # Note - grad attribute mutation is handled below
         if tx.output.side_effects.is_attribute_mutation(obj) and name != "grad":
             try:
                 # re-read a pending side effect?
@@ -1294,8 +1284,11 @@ class BuiltinVariable(VariableTracker):
             if isinstance(obj, variables.TensorVariable):
                 from .builder import wrap_fx_proxy
 
-                if name == "requires_grad":
-                    # TODO(voz): Make it work properly
+                # Note - this distributed check is a hack - we rely on the fact that we know
+                # in our current distributed approaches (DDP, FSDP, etc) that we never do this
+                # mutation in a way that introduce a new leaf from a non leaf or vice versa.
+                # TODO(voz): Teach aot_autograd to handle this case properly.
+                if name == "requires_grad" and not config.trace_distributed:
                     unimplemented(
                         "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
                         "the middle of the graph, which aot_autograd does not currently know how to handle. "
@@ -1344,14 +1337,29 @@ class BuiltinVariable(VariableTracker):
                     )
                     _lower_version_count_by_1(obj.as_proxy().node.meta["example_value"])
                     # This handles options prop, guards and ends with a clone
-                    # Step 4 - replace all reference to the current object with the new one
-                    return out
+                    # Step 4 - Annoying metadata transfer - this used to replace_all
+                    # but as that is gone, we need to remap from the output result to the new obj
+                    # in-place on the VT.
+                    obj.proxy = out.proxy
+                    obj.dtype = out.dtype
+                    obj.device = out.device
+                    obj.layout = out.layout
+                    obj.ndim = out.ndim
+                    obj.size = out.size
+                    obj.stride = out.stride
+                    obj.requires_grad = out.requires_grad
+                    obj.is_quantized = out.is_quantized
+                    obj.is_contiguous = out.is_contiguous
+                    obj.is_sparse = out.is_sparse
+                    obj.class_type = out.class_type
+                    obj.specialized_value = out.specialized_value
+                    return obj
 
             tx.output.side_effects.store_attr(obj, name, val)
             return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(
-                f"setattr(UserDefinedObjectVariable) {type(obj.value).__setattr__}"
+                f"setattr(UserDefinedObjectVariable) {obj.source} {type(obj.value).__setattr__}"
             )
         elif isinstance(obj, variables.NNModuleVariable):
             if not tx.output.is_root_tracer():
@@ -1503,6 +1511,7 @@ class BuiltinVariable(VariableTracker):
             UserFunctionVariable,
         )
         from .lists import SizeVariable
+        from .nn_module import FSDPManagedNNModuleVariable
         from .tensor import (
             supported_const_comparison_ops,
             supported_tensor_comparison_ops,
@@ -1515,21 +1524,22 @@ class BuiltinVariable(VariableTracker):
 
         if (
             all(
-                isinstance(x, (NNModuleVariable, ConstantVariable))
+                isinstance(
+                    x, (NNModuleVariable, ConstantVariable, FSDPManagedNNModuleVariable)
+                )
                 for x in [left, right]
             )
             and op in supported_const_comparison_ops.values()
         ):
-            left = (
-                tx.output.get_submodule(left.module_key)
-                if isinstance(left, NNModuleVariable)
-                else left.as_python_constant()
-            )
-            right = (
-                tx.output.get_submodule(right.module_key)
-                if isinstance(right, NNModuleVariable)
-                else right.as_python_constant()
-            )
+
+            def _get(element):
+                if isinstance(element, (NNModuleVariable, FSDPManagedNNModuleVariable)):
+                    return element.module
+                else:
+                    return element.as_python_constant()
+
+            left = _get(left)
+            right = _get(right)
             return ConstantVariable.create(op(left, right))
 
         if isinstance(left, UserFunctionVariable):
@@ -1554,6 +1564,9 @@ class BuiltinVariable(VariableTracker):
             return BaseListVariable.list_compare(tx, op, left, right)
 
         if isinstance(left, SetVariable):
+            if isinstance(right, ConstantVariable) and right.value is None:
+                return ConstantVariable(op(left._underlying_items, right.value))
+
             if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
                 _unimplemented()
             return ConstantVariable.create(

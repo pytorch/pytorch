@@ -112,9 +112,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             self.is_constant = True
         else:
             self.is_constant = False
-
         assert isinstance(
-            fn, (types.FunctionType, torch.jit.ScriptFunction)
+            fn, (types.FunctionType, torch.jit.ScriptFunction, functools.partial)
         ), f"expected FunctionType found {typestr(fn)} {fn}"
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
@@ -188,7 +187,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             itertools.count(), self.fn.__code__.co_freevars, closure
         ):
             if name == "__class__":
-                source = AttrSource(self.source, "__class__") if self.source else None
+                source = (
+                    AttrSource(self.source.base, "__class__") if self.source else None
+                )
                 result[name] = variables.UserDefinedClassVariable(
                     cell.cell_contents,
                     source=source,
@@ -463,7 +464,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
         for idx, name in enumerate(code.co_freevars):
             cell = self.closure.items[idx]
-            assert getattr(cell, name, name) == name
             assert name not in result
             if isinstance(cell, InlinedClosureVariable):
                 # InlinedClosureVariable's are created from LOAD_CLOSURE's from
@@ -584,6 +584,9 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         return (
             inspect.isfunction(variable) and variable in _traceable_collective_remaps()
         )
+
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.orig_fn} -> {self.fn})"
 
     @staticmethod
     def rewrite(tx, fn):

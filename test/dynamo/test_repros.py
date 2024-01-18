@@ -1234,9 +1234,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """2""")
+            self.assertExpectedInline(cnt.op_count, """25""")
+            self.assertExpectedInline(cnt.frame_count, """4""")
         else:
-            self.assertExpectedInline(cnt.frame_count, """3""")
+            self.assertExpectedInline(cnt.op_count, """36""")
+            self.assertExpectedInline(cnt.frame_count, """5""")
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -3811,6 +3813,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_fn(inp, vec1, vec2, alpha=alpha, beta=beta, out=compile_out)
         self.assertTrue(same(out, compile_out))
 
+    @torch._dynamo.config.patch(trace_distributed=False)
     def test_setattr_requires_grad_graph_breaks(self):
         def fn(x):
             z = x + 4

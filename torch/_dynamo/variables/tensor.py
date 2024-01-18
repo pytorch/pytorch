@@ -18,7 +18,10 @@ import torch._numpy as tnp
 
 import torch.fx
 import torch.random
+
 from torch._dynamo import compiled_autograd
+
+from torch._dynamo.variables.base import VariableTracker
 
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -27,7 +30,6 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     SymTypes,
 )
-
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 
@@ -132,6 +134,11 @@ class TensorVariable(VariableTracker):
 
     def python_type(self):
         return self.class_type
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        val = self.as_proxy().node.meta["example_value"]
+        result = hasattr(val, name)
+        return variables.ConstantVariable(result)
 
     @staticmethod
     def specialize(value: torch.Tensor):
@@ -701,7 +708,13 @@ class TensorVariable(VariableTracker):
                 mutable_local=variables.base.MutableLocal(),
             )
 
-            if not self.source:
+            # It is always sound to treat any hook as intermediary.
+            # In this case - it was very tricky getting residual hook mapping right,
+            # so Jansel proposed we just use the same higher order op pattern Voz uses for
+            # intermediaries.
+            compiled_autograd_enabled = compiled_autograd.compiled_autograd_enabled
+            should_treat_post_acc_grad_hook_as_intermediary = compiled_autograd_enabled and name == "register_post_accumulate_grad_hook" and config.trace_distributed
+            if not self.source or should_treat_post_acc_grad_hook_as_intermediary:
                 # Intermediary
                 src = fn_var.source
                 if (

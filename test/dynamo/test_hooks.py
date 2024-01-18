@@ -556,6 +556,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             h(x).sum().backward()
             self.assertEqual(orig_grad * 2, x.grad)
 
+    @torch._dynamo.config.patch(trace_distributed=False)
     def test_post_acc_grad_hook(self):
         def hook(input_t):
             input_t.mul_(input_t.grad)
