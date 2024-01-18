@@ -18,13 +18,23 @@ inline void increment_version(TensorList tensors) {
 }
 
 // Initializes args and checks if all args are aligned
-template <int depth, typename T, typename index_t>
+template <
+    int depth,
+    typename T,
+    typename index_t,
+    template <int>
+    class TensorListMetaStruct>
 __device__ bool init_args(
     T** args,
-    TensorListMetadata<depth>& tl,
+    TensorListMetaStruct<depth>& tl,
     const index_t chunk_idx,
     const index_t chunk_size,
     const index_t tensor_loc) {
+  static_assert(
+      std::is_same_v<TensorListMetaStruct<depth>, TensorListMetadata<depth>> ||
+      std::is_same_v<
+          TensorListMetaStruct<depth>,
+          FusedOptimizerTensorListMetadata<depth>>);
   bool all_aligned = true;
   for (int i = 0; i < depth; i++) {
     args[i] = (T*)tl.addresses[i][tensor_loc];
@@ -42,25 +52,6 @@ template <int depth, typename T, typename T2, typename index_t>
 __device__ bool init_args(
     T** args,
     TensorListScalarListMetadata<T2, depth>& tl,
-    const index_t chunk_idx,
-    const index_t chunk_size,
-    const index_t tensor_loc) {
-  bool all_aligned = true;
-  for (int i = 0; i < depth; i++) {
-    args[i] = (T*)tl.addresses[i][tensor_loc];
-    args[i] += chunk_idx * chunk_size;
-
-    if (!is_aligned(args[i])) {
-      all_aligned = false;
-    }
-  }
-  return all_aligned;
-}
-
-template <int depth, typename T, typename index_t>
-__device__ bool init_args(
-    T** args,
-    FusedOptimizerTensorListMetadata<depth>& tl,
     const index_t chunk_idx,
     const index_t chunk_size,
     const index_t tensor_loc) {
