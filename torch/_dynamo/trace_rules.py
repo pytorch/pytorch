@@ -151,7 +151,6 @@ manual_torch_name_rule_map = {
     "torch._functorch.vmap._unwrap_batched": UserFunctionVariable,
     "torch._functorch.vmap._validate_and_get_batch_size": UserFunctionVariable,
     "torch._functorch.vmap.doesnt_support_saved_tensors_hooks": UserFunctionVariable,
-    "torch._functorch.vmap.vmap_increment_nesting": TorchInGraphFunctionVariable,
     "torch._functorch.vmap.get_chunk_sizes": UserFunctionVariable,
     # lazy_load_decompositions uses a lock that is not supported yet in dynamo
     # "torch._functorch.vmap.lazy_load_decompositions": UserFunctionVariable,
@@ -168,6 +167,7 @@ torch_ctx_manager_classes = {
     k: TorchCtxManagerClassVariable
     for k in [
         "torch._C.DisableTorchFunctionSubclass",
+        "torch._functorch.vmap.vmap_increment_nesting",
         "torch.amp.autocast_mode.autocast",
         "torch.autograd.grad_mode.enable_grad",
         "torch.autograd.grad_mode.inference_mode",
@@ -426,6 +426,8 @@ torch_c_binding_in_graph_functions = {
         "torch._C._fft.fft_rfftn",
         "torch._C._functorch._add_batch_dim",
         "torch._C._functorch._remove_batch_dim",
+        "torch._C._functorch._vmap_incr_nest",
+        "torch._C._functorch._vmap_decr_nest",
         "torch._C._functorch._vmap_increment_nesting",
         "torch._C._functorch._vmap_decrement_nesting",
         "torch._C._functorch.is_batchedtensor",

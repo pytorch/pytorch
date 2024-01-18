@@ -2050,22 +2050,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             speculation_log=speculation_log,
         )
 
-        compiler_is_eager = False
-        if hasattr(compiler_fn, "compiler_name"):
-            compiler_is_eager = compiler_fn.compiler_name == "eager"
-        elif hasattr(compiler_fn, "__name__"):
-            compiler_name = compiler_fn.__name__ == "eager"
-        else:
-            # aot_eager won't match here as it has a "compiler_name" attribute
-            compiler_is_eager = "eager" in str(compiler_fn)
-
-        ci = torch._C._functorch.peek_interpreter_stack()
-        if (
-            ci is not None
-            and ci.key() == torch._C._functorch.TransformType.Vmap
-            and not compiler_is_eager
-        ):
-            unimplemented("functorch transform partial graph")
+        self._throw_if_in_vmap()
 
         # as soon as we create the tracing context we should keep it active, so any calls
         # into dynamo apis can rely on finding it
@@ -2102,6 +2087,22 @@ class InstructionTranslator(InstructionTranslatorBase):
             for name in self.code_options["co_freevars"]:
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])
+
+    def _throw_if_in_vmap(self):
+        # Fallback to eager in case of a graph break inside vmap
+        eager = torch._dynamo.lookup_backend("eager")
+        compiler_fn = inspect.getattr_static(
+            self.output.compiler_fn, "compiler_fn", self.output.compiler_fn
+        )
+        ci = torch._C._functorch.peek_interpreter_stack()
+        if (
+            ci is not None
+            and ci.key() == torch._C._functorch.TransformType.Vmap
+            and compiler_fn is not eager
+        ):
+            # if it reaches here, it means Dynamo failed to inline vmap
+            msg = "torch.vmap(fn) requires the function to be inlined by dynamo"
+            unimplemented(msg)
 
     def get_example_value(self, source: Source):
         if isinstance(source, LocalSource):

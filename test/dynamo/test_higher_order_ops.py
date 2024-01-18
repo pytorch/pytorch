@@ -2372,7 +2372,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
                 torch.compile(fn, backend="eager")(pred, pytree_in)
 
 
-class HigherOrderOpLoggingTests(LoggingTestCase):
+class HigherOrderOpVmapGuardTests(LoggingTestCase):
     @config.patch(capture_func_transforms=True)
     @make_logging_test(recompiles=True)
     def test_vmap_guard_ok(self, records):
@@ -2415,11 +2415,11 @@ class HigherOrderOpLoggingTests(LoggingTestCase):
         y = torch.vmap(torch.vmap(fn))(x)
         self.assertEqual(x.sin(), y)
         self.assertGreater(len(records), 0)
-        record = self.getRecord(records, "peek_interpreter_stack()")
+        record = self.getRecord(records, "maybe_current_level()")
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._C._functorch.peek_interpreter_stack() is None          # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:399 in _flat_vmap""",
+    - torch._C._functorch.maybe_current_level() is None             # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:399 in _flat_vmap""",
             record.getMessage(),
         )
 
@@ -2432,7 +2432,11 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         # and the call to increment nesting is not undone
         ci = torch._C._functorch.peek_interpreter_stack()
         if ci and ci.key() == torch._C._functorch.TransformType.Vmap:
-            torch._C._functorch._vmap_decrement_nesting()
+            msg = (
+                "Interpreter stack is not empty. Test should have called "
+                "'torch._C._functorch._vmap_decrement_nesting()'"
+            )
+            self.fail(msg)
 
     def _compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
         backend = EagerAndRecordGraphs()
@@ -3016,7 +3020,7 @@ class GraphModule(torch.nn.Module):
         def g(x):
             return x.sin()
 
-        @torch.compile(backend="aot_eager")
+        @torch.compile(backend="aot_eager", fullgraph=True)
         def fn():
             return torch.vmap(g)
 
@@ -3608,6 +3612,52 @@ class GraphModule(torch.nn.Module):
         actual = wrapper_fn(x, y)
         expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x, y)
         self.assertEqual(len(counters["graph_break"]), 0)
+        self.assertEqual(actual, expected)
+        self.assertEqual(some_list, [1, 1])
+
+    @unittest.expectedFailure
+    @config.patch(capture_func_transforms=True)
+    def test_vmap_side_effects_append_input(self):
+        counters.clear()
+        x = torch.ones(2, 3)
+        y = torch.randn(2, 3)
+
+        some_list = []
+
+        def f(x, y):
+            some_list.append(x)
+            return x + y
+
+        def wrapper_fn(x, y):
+            return torch.func.vmap(f)(x, y)
+
+        actual = wrapper_fn(x, y)
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x, y)
+        self.assertEqual(len(counters["graph_break"]), 0)
+        self.assertEqual(actual, expected)
+
+    @unittest.expectedFailure
+    @config.patch(capture_func_transforms=True)
+    def test_vmap_illegal_op_graph_break(self):
+        counters.clear()
+
+        def bad_fn(x):
+            y = x.view((4, 3))
+            y.stride()
+            return y
+
+        def wrapper_fn(x):
+            return torch.func.vmap(bad_fn)(x)
+
+        x = torch.randn(2, 3, 4)
+        actual = wrapper_fn(x)
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        assert_dict_matches_regex(
+            self,
+            dict(counters["graph_break"]),
+            {".*Illegal getattr invocation stride in strict mode": 2},
+        )
         self.assertEqual(actual, expected)
 
     @config.patch(capture_func_transforms=True)

@@ -140,7 +140,12 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import GradModeVariable, InferenceModeVariable, StreamVariable
+        from . import (
+            GradModeVariable,
+            InferenceModeVariable,
+            StreamVariable,
+            VmapIncrementNestingCtxManagerVariable,
+        )
 
         if self.value is torch.no_grad:
             if len(args) == 1 and isinstance(
@@ -193,6 +198,12 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx)
+        elif self.value is torch._functorch.vmap.vmap_increment_nesting:
+            assert len(args) == 2
+            return VmapIncrementNestingCtxManagerVariable.create(
+                tx,
+                [guard_if_dyn(x) for x in args],
+            )
 
 
 class TorchInGraphFunctionVariable(BaseTorchVariable):
@@ -213,7 +224,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
-            VmapIncrementNestingCtxManagerVariable,
         )
 
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
@@ -321,12 +331,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             assert len(args) == 1
             return DisabledSavedTensorsHooksVariable.create(
                 tx, args[0].as_python_constant()
-            )
-        elif self.value is torch._functorch.vmap.vmap_increment_nesting:
-            assert len(args) == 2
-            return VmapIncrementNestingCtxManagerVariable.create(
-                tx,
-                [guard_if_dyn(x) for x in args],
             )
         elif self.value is torch._C._is_torch_function_enabled:
             assert not (args or kwargs)

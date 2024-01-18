@@ -157,7 +157,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     # call from eager that calls the compiled function, as the vmap levels
     # may be different.
     _guards_singleton = Guard(
-        GlobalStateSource(), GuardBuilder.VMAP_INCREMENT_NESTING_MATCH
+        GlobalStateSource(), GuardBuilder.FUNCTORCH_CURRENT_LEVEL_MATCH
     )
 
     @staticmethod
