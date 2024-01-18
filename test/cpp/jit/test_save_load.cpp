@@ -263,6 +263,18 @@ TEST(SerializationTest, ParentDirNotExist) {
       "Parent directory ./doesnotexist does not exist.");
 }
 
+TEST(SerializationTest, SaveLoadTest) {
+  std::stringstream ss;
+  
+  torch::Tensor to_save = torch::ones(5);
+  torch::save(to_save, ss);
+  
+  torch::Tensor to_load;
+  torch::load(to_load, ss);
+
+  ASSERT_TRUE(to_save.equals(to_load));
+}
+
 TEST(SerializationTest, CalculateNecessaryArgsTest) {
   auto schema = torch::schema(
       "sync_stream(int stream_id = -1) -> ()",
