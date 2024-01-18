@@ -49,10 +49,6 @@ class NCCLTestBase {
     c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts =
         c10::make_intrusive<c10d::ProcessGroupNCCL::Options>();
     opts->timeout = pgTimeout_;
-    setenv(
-        c10d::TORCH_ENABLE_NCCL_HEALTH_CHECK[0].c_str(),
-        "1",
-        /* overwrite */ 1);
 #ifdef NCCL_HAS_COMM_SPLIT
     if (split_from) {
       opts->split_from = *split_from;
@@ -674,54 +670,6 @@ void testReduceScatter(const std::string& path, int rank, int size) {
   }
 }
 
-void testProcessGroupNCCLHealthCheckFailHelper(
-    const std::string& path,
-    bool timeout) {
-  // simulate world_size > 1 here via threads.
-  const int worldSize = 4;
-  std::unordered_set<uint64_t> nums;
-  auto runTest = [&](int i) {
-    NCCLTest test(path, worldSize, std::chrono::milliseconds(3000));
-    // Catch error relating to health check failure
-    bool error_caught = false;
-    try {
-      test.initialize(timeout ? 0 : -1, worldSize);
-    } catch (const std::exception& e) {
-      std::string errMsg = e.what();
-      const std::string kTimeoutErr =
-          "Failed to initialize NCCL communicator on rank";
-      const std::string kInvalidRankErr = "Invalid rank";
-      std::string expectedSubstr = timeout ? kTimeoutErr : kInvalidRankErr;
-      bool cond = errMsg.find(expectedSubstr) != std::string::npos;
-      EXPECT_TRUE(cond);
-      error_caught = true;
-    }
-    EXPECT_TRUE(error_caught);
-  };
-  std::vector<std::thread> threads;
-  threads.reserve(worldSize);
-  for (const auto r : c10::irange(worldSize)) {
-    threads.emplace_back(std::thread([=]() { runTest(r); }));
-  }
-  for (auto& t : threads) {
-    t.join();
-  }
-}
-
-void testProcessGroupNCCLHealthCheckFailException(
-    const std::string& path,
-    int /* unused */,
-    int /* unused */) {
-  testProcessGroupNCCLHealthCheckFailHelper(path, /* timeout */ false);
-}
-
-void testProcessGroupNCCLHealthCheckFailTimeout(
-    const std::string& path,
-    int /* unused */,
-    int /* unused */) {
-  testProcessGroupNCCLHealthCheckFailHelper(path, /* timeout */ true);
-}
-
 void testSequenceNumInit(
     const std::string& path,
     int /* unused */,
@@ -851,26 +799,6 @@ TEST_F(ProcessGroupNCCLTest, testSequenceNumInit) {
   {
     TemporaryFile file;
     testSequenceNumInit(file.path, rank_, size_);
-  }
-}
-
-TEST_F(ProcessGroupNCCLTest, testProcessGroupNCCLHealthCheckFailTimeout) {
-  if (skipTest()) {
-    return;
-  }
-  {
-    TemporaryFile file;
-    testProcessGroupNCCLHealthCheckFailTimeout(file.path, rank_, size_);
-  }
-}
-
-TEST_F(ProcessGroupNCCLTest, testProcessGroupNCCLHealthCheckFailException) {
-  if (skipTest()) {
-    return;
-  }
-  {
-    TemporaryFile file;
-    testProcessGroupNCCLHealthCheckFailException(file.path, rank_, size_);
   }
 }
 
