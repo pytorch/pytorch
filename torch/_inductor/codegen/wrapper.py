@@ -1757,8 +1757,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"""
             AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map,
                                                std::shared_ptr<std::vector<ConstantHandle>> constants_array,
+                                               const std::string& device_str,
                                                std::optional<std::string> cubin_dir)
-                : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, cubin_dir) {{
+                : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, device_str, cubin_dir) {{
             """
         )
 
