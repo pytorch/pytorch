@@ -87,15 +87,7 @@ class FSDPParamGroup:
 
         # - Mixed precision
         self._orig_dtype, self._reduce_dtype = self._get_mp_dtypes()
-        self._use_uint8_all_gather = False  # TODO
-        if not self._use_uint8_all_gather:
-            unsharded_param_dtypes = {
-                fsdp_param.unsharded_param_data_dtype for fsdp_param in self.fsdp_params
-            }
-            if len(unsharded_param_dtypes) != 1:
-                raise AssertionError(
-                    f"FSDP only supports uniform unsharded parameter dtype but got {unsharded_param_dtypes}"
-                )
+        self._param_dtype = mp_policy.param_dtype or self._orig_dtype
 
         # - Hook state
         self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
@@ -231,8 +223,8 @@ class FSDPParamGroup:
             async_op,
             self._all_gather_copy_in_stream_for_unshard,
             self._all_gather_stream_for_unshard,
-            self._use_uint8_all_gather,
             self._device,
+            self._param_dtype,
         )
 
     def _wait_for_unshard(self):
@@ -255,9 +247,9 @@ class FSDPParamGroup:
                 del prev_all_gather_state  # free
         foreach_all_gather_copy_out(
             self._all_gather_result.all_gather_output,
+            self._all_gather_result.all_gather_input_numels,
             self.fsdp_params,
             self._all_gather_process_group,
-            self._use_uint8_all_gather,
         )
         for fsdp_param in self.fsdp_params:
             fsdp_param.to_unsharded()

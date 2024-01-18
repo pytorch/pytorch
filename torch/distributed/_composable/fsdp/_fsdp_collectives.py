@@ -29,6 +29,7 @@ class AllGatherResult(NamedTuple):
     all_gather_output: torch.Tensor
     all_gather_event: Optional[torch.cuda.Event]
     all_gather_work: Optional[dist.distributed_c10d.Work]
+    all_gather_input_numels: List[int]
 
 
 class AllGatherState(NamedTuple):
@@ -57,8 +58,8 @@ def foreach_all_gather(
     async_op: bool,
     all_gather_copy_in_stream: torch.cuda.Stream,
     all_gather_stream: torch.cuda.Stream,
-    use_uint8: bool,
     device: torch.device,
+    dtype: torch.dtype,
 ) -> Optional[AllGatherResult]:
     """
     Args:
@@ -82,46 +83,28 @@ def foreach_all_gather(
     if len(unsharded_fsdp_params) == len(fsdp_params):
         return None  # already unsharded
     elif len(unsharded_fsdp_params) != 0:
-        msg = "Expects all parameters to be all sharded or all unsharded but got:\n"
+        msg = "Expects parameters to be all sharded or all unsharded but got:\n"
         for fsdp_param in fsdp_params:
             msg += f"{fsdp_param._param_fqn}: {fsdp_param.sharded_state}\n"
         print_and_raise_internal(msg)
-    # Already checked at construction time for a uniform unsharded parameter
-    # dtype if not using uint8
-    dtype = torch.uint8 if use_uint8 else fsdp_params[0].unsharded_param_data_dtype
-    world_size = group.size()
-    group_rank = group.rank()
-    if use_uint8:
-        total_padded_unsharded_numel = sum(
-            fsdp_param.padded_unsharded_bytes for fsdp_param in fsdp_params
-        )
-    else:
-        total_padded_unsharded_numel = sum(
-            fsdp_param.padded_unsharded_numel for fsdp_param in fsdp_params
-        )
-    total_sharded_numel = total_padded_unsharded_numel // world_size
+    world_size, rank = (group.size(), group.rank())
+    # - Copy in
     with torch.cuda.stream(all_gather_copy_in_stream):
-        # - Copy in
+        param_all_gather_inputs = [
+            fsdp_param.all_gather_input for fsdp_param in fsdp_params
+        ]
+        inp_split_sizes = [inp.numel() for inp in param_all_gather_inputs]
+        all_gather_input_numel = sum(inp_split_sizes)
+        all_gather_output_numel = all_gather_input_numel * world_size
         all_gather_output = torch.empty(
-            (total_padded_unsharded_numel,), dtype=dtype, device=device
+            (all_gather_output_numel,), dtype=dtype, device=device
         )
         all_gather_input = all_gather_output.narrow(
-            0, total_sharded_numel * group_rank, total_sharded_numel
+            0, all_gather_input_numel * rank, all_gather_input_numel
         )
-        foreach_copy_srcs = (
-            [fsdp_param.all_gather_input for fsdp_param in fsdp_params]
-            if not use_uint8
-            else [
-                # TODO: This incurs an extra fp32 -> bf16 copy.
-                fsdp_param.all_gather_input.to(
-                    fsdp_param.unsharded_param_data_dtype
-                ).view(torch.uint8)
-                for fsdp_param in fsdp_params
-            ]
-        )
-        split_sizes = [t.numel() for t in foreach_copy_srcs]
-        foreach_copy_dsts = torch.split(all_gather_input, split_sizes)
-        torch._foreach_copy_(foreach_copy_dsts, foreach_copy_srcs)
+        foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
+        torch._foreach_copy_(foreach_copy_dsts, param_all_gather_inputs)
+        del param_all_gather_inputs
         all_gather_copy_in_event = torch.cuda.Event()
         all_gather_copy_in_event.record()
     all_gather_stream.wait_event(all_gather_copy_in_event)
@@ -135,43 +118,37 @@ def foreach_all_gather(
         )
         all_gather_event = torch.cuda.Event()
         all_gather_event.record()
-        return AllGatherResult(all_gather_output, all_gather_event, all_gather_work)
+        return AllGatherResult(
+            all_gather_output, all_gather_event, all_gather_work, inp_split_sizes
+        )
 
 
 def foreach_all_gather_copy_out(
     all_gather_output: torch.Tensor,  # 1D
+    all_gather_input_numels: List[int],
     fsdp_params: List[FSDPParam],
     group: dist.ProcessGroup,
-    use_uint8: bool,
 ) -> None:
     world_size = group.size()
-    for fsdp_param in fsdp_params:
-        fsdp_param.alloc_unsharded_param()
-    if use_uint8:
-        split_sizes_per_rank = [
-            fsdp_param.all_gather_input_numel
-            * fsdp_param.unsharded_param_data_dtype.itemsize
-            for fsdp_param in fsdp_params
-        ]
-    else:
-        split_sizes_per_rank = [
-            fsdp_param.all_gather_input_numel for fsdp_param in fsdp_params
-        ]
-    split_sizes = split_sizes_per_rank * world_size
+    dtype, device = all_gather_output.dtype, all_gather_output.device
+    for all_gather_input_numel, fsdp_param in zip(all_gather_input_numels, fsdp_params):
+        fsdp_param.init_all_gather_output(
+            all_gather_input_numel, world_size, dtype, device
+        )
+        fsdp_param.alloc_all_gather_output()
+        fsdp_param.init_unsharded_param(world_size)
+    # TODO: Replace with foreach copy to prepare for custom kernel.
+    split_sizes = all_gather_input_numels * world_size
     splits = torch.split(all_gather_output, split_sizes, dim=0)
-    num_fsdp_params = len(fsdp_params)
     all_param_shards: List[List[torch.Tensor]] = []
     outs: List[torch.Tensor] = []
     for fsdp_param_idx, fsdp_param in enumerate(fsdp_params):
         param_shards: List[torch.Tensor] = [
-            splits[fsdp_param_idx + rank * num_fsdp_params]
+            splits[fsdp_param_idx + rank * len(fsdp_params)]
             for rank in range(world_size)
         ]
-        out = fsdp_param._unsharded_param_data
-        if use_uint8:
-            out = out.view(torch.uint8)
         all_param_shards.append(param_shards)
-        outs.append(out)
+        outs.append(fsdp_param.all_gather_output)
     with _unsafe_preserve_version_counters(outs):
         for param_shards, out in zip(all_param_shards, outs):
             torch.cat(param_shards, out=out)
@@ -238,6 +215,7 @@ def foreach_reduce_scatter(
         # - View out and accumulate
         flat_grad_offset = 0  # [0, total_sharded_numel - 1]
         for fsdp_param in fsdp_params:
+            # TODO: Get rid of `_padded_sharded_size`
             padded_sharded_numel = fsdp_param._padded_sharded_size.numel()
             sharded_numel = fsdp_param._sharded_size.numel()
             new_sharded_grad = reduce_scatter_output[

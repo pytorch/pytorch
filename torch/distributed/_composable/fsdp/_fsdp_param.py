@@ -6,7 +6,7 @@ from typing import cast, List, Optional, Tuple
 import torch
 import torch.nn as nn
 
-from torch.distributed._tensor import DTensor, Placement, Shard
+from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import DTensorSpec
 
@@ -16,22 +16,10 @@ from ._fsdp_common import (
     from_local_no_grad,
     FSDP_SHARDED,
     FSDPMeshInfo,
-    pad_tensor_on_dim0,
+    get_dim0_padded_size,
     ParamModuleInfo,
     print_and_raise_internal,
 )
-
-
-"""
-[Note: Composing Per-Parameter FSDP with Tensor Subclasses]
-FSDP manages the unsharded parameter data, all-gathering and freeing it as
-needed. As such, FSDP prefers (1) to have a reference to the subclass's
-underlying data and (2) a way to construct a new subclass object while
-specifying the underlying data.
-
-For DTensor, (1) is the local tensor, and (2) is ``DTensor.from_local``. For
-Float8Tensor, (1) is the fp8 data, and (2) is ``Float8Tensor.__new__``.
-"""
 
 
 class ShardedState(Enum):
@@ -53,9 +41,8 @@ class ShardedState(Enum):
 
 class FSDPParam:
     """
-    This class manages a parameter with FSDP or FSDP variants applied. This
-    implements dim-0 per-parameter sharding, which means that this class owns
-    the sharded and unsharded tensor data.
+    This class manages a parameter with FSDP or FSDP variants applied,
+    implementing dim-0 per-parameter sharding.
 
     Attributes:
         sharded_param (nn.Parameter): This the sharded parameter to be passed
@@ -67,19 +54,16 @@ class FSDPParam:
     orig_dtype: torch.dtype
     param_dtype: Optional[torch.dtype]
     reduce_dtype: Optional[torch.dtype]
-    # Save the `<...>_view` tensors, which are always views into the
-    # corresponding `<...>_data` tensor, to avoid slice calls per iteration
-    _padded_unsharded_size: torch.Size  # ND
-    _unsharded_size: torch.Size  # ND
+    # Sharded/unsharded parameter attributes
+    _orig_size: torch.Size  # ND
     _padded_sharded_size: torch.Size  # ND
     _sharded_size: torch.Size  # ND
-    _unsharded_param_data: torch.Tensor  # 1D
-    _unsharded_param_view: torch.Tensor  # 1D
     _sharded_param_data: torch.Tensor  # 1D
     _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
     _sharded_param: nn.Parameter  # ND
+    all_gather_output: torch.Tensor  # 1D
     _unsharded_param: nn.Parameter  # ND
-    _cpu_sharded_grad: torch.Tensor  # pinned memory
+    _cpu_sharded_grad: torch.Tensor  # unpadded, ND, pinned memory
     # For splitting autograd-computed gradient
     unsharded_chunk_numels: List[int]
     # For splitting reduce-scatter input: the next two lists have N elements
@@ -89,7 +73,6 @@ class FSDPParam:
     is_padding_mask: List[List[bool]]
     unsharded_accumulated_grad: Optional[torch.Tensor]
     padded_unsharded_numel: int
-    padded_unsharded_bytes: int
     # DTensor attributes (only defined for DTensor `param`):
     _tp_spec: DTensorSpec
     _tp_global_size: torch.Size
@@ -111,15 +94,13 @@ class FSDPParam:
         self.device = device
 
         self._init_offload_attrs(offload_policy)
-        self._init_dtensor_attrs(param)
         self._init_dtype_attrs(param, mp_policy)
-        self._init_global_mesh_attrs(param)
 
         # Debuggability
         self._param_fqn: Optional[str] = None  # prefixed from root module
 
         self._init_sharded_param(param, device)
-        self._init_unsharded_param()
+        self.all_gather_output = torch.empty(0)
 
     def _init_offload_attrs(self, offload_policy: OffloadPolicy):
         self.offload_to_cpu: bool = offload_policy.offload_type == "cpu"
@@ -145,70 +126,6 @@ class FSDPParam:
         self.reduce_dtype = reduce_dtype
         # None indicates that the mixed precision is not enabled
 
-    def _init_dtensor_attrs(self, param: nn.Parameter):
-        self.is_dtensor = isinstance(param, DTensor)  # assume TP
-        # These TP attributes are used for the unsharded parameter
-        if self.is_dtensor:
-            self._tp_spec = cast(DTensor, param)._spec
-            self._tp_global_size = param.size()
-            self._tp_global_stride = param.stride()
-
-    def _init_global_mesh_attrs(self, param: nn.Parameter):
-        """
-        Initializes attributes related to the global device mesh for the
-        *sharded* parameter.
-        TODO: Simplify with https://github.com/pytorch/pytorch/issues/116101
-        """
-        is_2d = self.is_dtensor
-        assert (
-            self.mesh_info.shard_mesh_dim == 0
-            and self.mesh_info.replicate_mesh_dim is None
-        ), "HSDP and DDP are not supported yet"
-        if is_2d:
-            dp_global_mesh = _mesh_resources.get_parent_mesh(self.mesh_info.mesh)
-            tp_global_mesh = _mesh_resources.get_parent_mesh(self._tp_spec.mesh)
-            if (
-                dp_global_mesh != tp_global_mesh
-                or dp_global_mesh is None
-                or tp_global_mesh is None
-            ):
-                raise AssertionError(
-                    "fully_shard requires the DP and TP mesh to have the same "
-                    "parent mesh but got:\n"
-                    f"DP's global mesh: {dp_global_mesh}\n"
-                    f"TP's global mesh: {tp_global_mesh}"
-                )
-            self._global_mesh = dp_global_mesh
-            if len(self._tp_spec.placements) != 1:
-                raise NotImplementedError(
-                    f"Only supports 1D TP, not ({self._tp_spec.placements})"
-                )
-            global_placements: List[Optional[Placement]] = [None, None]
-            global_dp_mesh_dim = _mesh_resources.get_parent_mesh_dim(
-                self.mesh_info.mesh
-            )
-            global_tp_mesh_dim = _mesh_resources.get_parent_mesh_dim(self._tp_spec.mesh)
-            assert global_dp_mesh_dim is not None  # mypy
-            assert global_tp_mesh_dim is not None  # mypy
-            # TODO: Hard code inter-node FSDP + intra-node TP; need to support
-            # HSDP and DDP in place of FSDP
-            global_placements[global_dp_mesh_dim] = Shard(0)
-            global_placements[global_tp_mesh_dim] = self._tp_spec.placements[0]
-            self._global_placements = cast(
-                Tuple[Placement, ...], tuple(global_placements)
-            )
-            self._global_size = self._tp_global_size
-            self._global_stride = self._tp_global_stride
-        else:
-            if _mesh_resources.get_parent_mesh(self.mesh_info.mesh) is not None:
-                raise NotImplementedError(
-                    "For pure FSDP/HSDP, using a parent mesh is not supported"
-                )
-            self._global_mesh = self.mesh_info.mesh
-            self._global_placements = (Shard(0),)
-            self._global_size = param.size()
-            self._global_stride = param.stride()
-
     @torch.no_grad()
     def _init_sharded_param(self, param: nn.Parameter, device: torch.device):
         if param.device != device:
@@ -216,38 +133,136 @@ class FSDPParam:
                 "Expects parameter to already be moved to device "
                 f"{device} but got {param.device}"
             )
-        param_data = param._local_tensor if isinstance(param, DTensor) else param
-        self._unsharded_size = param_data.size()
-        meta_param = torch.empty(
-            self._unsharded_size,
-            dtype=param.dtype,
-            layout=param.layout,
-            device="meta",
-            requires_grad=param.requires_grad,
-            # Assume contiguous memory layout
-        )
+        # TODO: Replace the sharded DTensor parameter construction logic with
+        # `distribute_tensor` after https://github.com/pytorch/pytorch/issues/116101
+        # TODO: Simplify the following sharded parameter padding logic after
+        # https://github.com/pytorch/pytorch/issues/113045
+        self.is_dtensor = isinstance(param, DTensor)
+        if self.is_dtensor:
+            self._tp_spec = cast(DTensor, param)._spec
+            self._tp_global_size = param.size()
+            self._tp_global_stride = param.stride()
+            if (
+                self.mesh_info.shard_mesh_dim != 0
+                or self.mesh_info.replicate_mesh_dim is not None
+            ):
+                raise NotImplementedError("Using TP with HSDP is not supported")
+            dp_mesh, tp_mesh = (self.mesh_info.mesh, self._tp_spec.mesh)
+            dp_global_mesh = _mesh_resources.get_parent_mesh(dp_mesh)
+            tp_global_mesh = _mesh_resources.get_parent_mesh(tp_mesh)
+            if dp_global_mesh != tp_global_mesh or (
+                dp_global_mesh is None or tp_global_mesh is None
+            ):
+                raise AssertionError(
+                    "FSDP requires the DP and TP mesh to have the same parent mesh but got: \n"
+                    f"DP's global mesh: {dp_global_mesh}\nTP's global mesh: {tp_global_mesh}"
+                )
+            self._global_mesh = dp_global_mesh
+            if len(self._tp_spec.placements) != 1:
+                raise NotImplementedError(
+                    f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
+                )
+            global_placements: List[Placement] = [Replicate(), Replicate()]
+            global_dp_mesh_dim = _mesh_resources.get_parent_mesh_dim(dp_mesh)
+            global_tp_mesh_dim = _mesh_resources.get_parent_mesh_dim(tp_mesh)
+            assert global_dp_mesh_dim is not None  # mypy
+            assert global_tp_mesh_dim is not None  # mypy
+            # TODO: Hard code FSDP + TP; need to support HSDP + TP
+            global_placements[global_dp_mesh_dim] = Shard(0)
+            global_placements[global_tp_mesh_dim] = self._tp_spec.placements[0]
+            self._global_placements = tuple(global_placements)
+            self._global_size = self._tp_global_size
+            self._global_stride = self._tp_global_stride
+            param_data = cast(DTensor, param)._local_tensor
+        else:
+            if _mesh_resources.get_parent_mesh(self.mesh_info.mesh) is not None:
+                raise NotImplementedError(
+                    "Using a parent mesh with pure FSDP/HSDP is not supported"
+                )
+            self._global_mesh = self.mesh_info.mesh
+            self._global_placements = (Shard(0),)
+            self._global_size = param.size()
+            self._global_stride = param.stride()
+            param_data = param
+        self._orig_size = param_data.size()
         shard_rank = self.mesh_info.shard_mesh_rank
         shard_world_size = self.mesh_info.shard_mesh_size
-        padded_param = pad_tensor_on_dim0(param_data, shard_world_size)
-        padded_chunks = torch.chunk(padded_param, shard_world_size, dim=0)
-        if self.offload_to_cpu:  # ignore `device`
-            self._sharded_param_data = param_data.new_empty(
-                padded_chunks[0].size(), device="cpu"
+        chunks = chunk_with_empty(param_data, shard_world_size, dim=0)
+        sharded_param = chunks[shard_rank]
+        self._sharded_size = sharded_param.size()
+        self._padded_sharded_size = chunks[0].size()  # 0th always padded
+        padded_sharded_param = param_data.new_zeros(self._padded_sharded_size)
+        if sharded_param.numel() > 0:
+            padded_sharded_param[: sharded_param.size(0)].copy_(sharded_param)
+        if self.offload_to_cpu:
+            padded_sharded_param = padded_sharded_param.cpu().pin_memory()
+            self._cpu_sharded_grad = sharded_param.new_zeros(
+                sharded_param.size(), device="cpu"
             ).pin_memory()
-        else:
-            self._sharded_param_data = param_data.new_empty(
-                padded_chunks[0].size(), device=device
+        self._sharded_param_data = padded_sharded_param.view(-1)
+        self._sharded_param = nn.Parameter(
+            self.to_sharded_dtensor(padded_sharded_param[: sharded_param.size(0)])
+        )
+        self._sharded_param.requires_grad_(param.requires_grad)
+        unsafe_free_storage(param_data)  # free immediately
+        del param_data  # delete PyObject reference to avoid warning
+        setattr(self._sharded_param, FSDP_SHARDED, True)
+        self._setattr_on_modules(self.sharded_param)
+        self.sharded_state = ShardedState.SHARDED
+
+    @torch.no_grad()
+    def init_all_gather_output(
+        self,
+        all_gather_input_numel: int,
+        world_size: int,
+        dtype: torch.dtype,
+        device: torch.device,
+    ):
+        if self.all_gather_output.numel() > 0:
+            return  # already initialized
+        all_gather_output_size = torch.Size([all_gather_input_numel * world_size])
+        self.all_gather_output = torch.empty(
+            all_gather_output_size, dtype=dtype, device=device
+        )
+
+    @torch.no_grad()
+    def init_unsharded_param(self, world_size: int):
+        if hasattr(self, "_unsharded_param"):
+            return  # already initialized
+        # For the default path (no post-all-gather), the all-gather output
+        # gives the unsharded parameter data directly
+        padded_unsharded_param_size = get_dim0_padded_size(self._orig_size, world_size)
+        padded_unsharded_param = self.all_gather_output.view(
+            padded_unsharded_param_size
+        )
+        unsharded_param = padded_unsharded_param[: self._orig_size[0]]
+        if self.is_dtensor:
+            unsharded_param = from_local_no_grad(
+                unsharded_param,
+                self._tp_spec.mesh,
+                self._tp_spec.placements,
+                self._tp_global_size,
+                self._tp_global_stride,
             )
-        if device != torch.device("meta"):
-            self._sharded_param_data.copy_(padded_chunks[shard_rank])
-        chunks = chunk_with_empty(meta_param, shard_world_size, dim=0)
-        self._sharded_size = chunks[shard_rank].size()
-        self._padded_sharded_size = padded_chunks[0].size()
-        self._padded_unsharded_size = padded_param.size()
-        padded_chunk_numel = padded_chunks[0].numel()
+        self._unsharded_param = nn.Parameter(unsharded_param)
+        self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
+        # Unsharded accumulated gradient used for gradient accumulation without
+        # reduce-scatter when `reduce_dtype` is specified
+        self.unsharded_accumulated_grad = None
+        self.padded_unsharded_numel = padded_unsharded_param_size.numel()
+        # Compute some additional metadata to use `torch.split` in the
+        # reduce-scatter copy-in
         self.padded_unsharded_chunk_numels: List[List[int]] = []
         self.is_padding_mask: List[List[bool]] = []
         self.unsharded_chunk_numels = []
+        unsharded_param_tensor = (
+            cast(DTensor, unsharded_param)._local_tensor
+            if self.is_dtensor
+            else unsharded_param
+        )
+        chunks = chunk_with_empty(unsharded_param_tensor, world_size, dim=0)
+        padded_chunks = torch.chunk(padded_unsharded_param, world_size, dim=0)
+        padded_chunk_numel = padded_chunks[0].numel()
         for chunk_idx, chunk in enumerate(chunks):
             chunk_numel = chunk.numel()
             self.unsharded_chunk_numels.append(chunk_numel)
@@ -265,84 +280,29 @@ class FSDPParam:
             else:  # no padding
                 self.padded_unsharded_chunk_numels.append([chunk_numel])
                 self.is_padding_mask.append([False])
-        sharded_param_view = self._sharded_param_data[: self._sharded_size[0]]
-        self._sharded_param_data = self._sharded_param_data.view(-1)
-        self._sharded_param = nn.Parameter(
-            self.to_sharded_dtensor(sharded_param_view)
-        )
-        self._sharded_param.requires_grad_(param.requires_grad)
-        self._unsharded_param_data = param_data  # HACK: for `to_sharded()`
-        if not self.offload_to_cpu:
-            assert self._sharded_param.device == device
-        else:
-            assert self._sharded_param.device == torch.device("cpu")
-            self._cpu_sharded_grad = torch.empty_like(
-                self._sharded_param._local_tensor
-            ).pin_memory()  # no padding
-        setattr(self._sharded_param, FSDP_SHARDED, True)
-        self.to_sharded()
-
-    @torch.no_grad()
-    def _init_unsharded_param(self):
-        unsharded_param_dtype = self.param_dtype or self.sharded_param.dtype
-        self._unsharded_param_data = torch.empty(
-            self._padded_unsharded_size,
-            dtype=unsharded_param_dtype,
-            layout=self.sharded_param.layout,
-            device=self.device,
-            requires_grad=False,
-        ).view(-1)
-        self._unsharded_param_view = self._unsharded_param_data[
-            : self._unsharded_size.numel()
-        ].view(self._unsharded_size)
-        if self.is_dtensor:
-            self._unsharded_param = nn.Parameter(
-                from_local_no_grad(
-                    self._unsharded_param_view,
-                    self._tp_spec.mesh,
-                    self._tp_spec.placements,
-                    self._tp_global_size,
-                    self._tp_global_stride,
-                )
-            )
-            self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
-        else:
-            self._unsharded_param = nn.Parameter(self._unsharded_param_view)
-            self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
-        # Unsharded accumulated gradient used for gradient accumulation without
-        # reduce-scatter when `reduce_dtype` is specified
-        self.unsharded_accumulated_grad = None
-        # Precompute these (used for foreach all-gather) to reduce overhead
-        self.padded_unsharded_numel = self._padded_unsharded_size.numel()
-        self.padded_unsharded_bytes = (
-            self.padded_unsharded_numel * self.unsharded_param_data_dtype.itemsize
-        )
-        unsafe_free_storage(self._unsharded_param_data)
 
     def to_sharded(self) -> None:
         self._setattr_on_modules(self.sharded_param)
-        unsafe_free_storage(self._unsharded_param_data)
+        self.free_all_gather_output()
         self.sharded_state = ShardedState.SHARDED
 
     def to_sharded_post_forward(self) -> None:
-        if self.sharded_state != ShardedState.UNSHARDED:
-            print_and_raise_internal(
-                f"Expects state to be unsharded but got {self.sharded_state}"
-            )
+        self._assert_in_unsharded_state()
         assert self.post_forward_mesh_info is not None  # mypy
         shard_world_size = self.post_forward_mesh_info.shard_mesh_size
         shard_rank = self.post_forward_mesh_info.shard_mesh_rank
-        chunks = chunk_with_empty(
-            self._unsharded_param_data.view(self._padded_unsharded_size),
-            shard_world_size,
-            dim=0,
-        )
+        if self.all_gather_output.numel() % shard_world_size != 0:
+            print_and_raise_internal(
+                f"All-gather output size ({self.all_gather_output.numel()}) must "
+                f"be divisible by the shard world size ({shard_world_size})"
+            )
+        chunks = torch.chunk(self.all_gather_output, shard_world_size, dim=0)
         # NOTE: This constructs a new Tensor object.
-        self._sharded_post_forward_param_data = chunks[shard_rank].clone().view(-1)
+        self._sharded_post_forward_param_data = chunks[shard_rank].clone()
         self._setattr_on_modules(self._sharded_post_forward_param_data, as_param=False)
         # Do not strip padding here since this resharded parameter should never
         # be used in any ops and is only meant as a temporary storage
-        unsafe_free_storage(self._unsharded_param_data)
+        self.free_all_gather_output()
         self.sharded_state = ShardedState.SHARDED_POST_FORWARD
 
     def to_unsharded(self) -> None:
@@ -384,8 +344,11 @@ class FSDPParam:
             if hasattr(module, attr_name):
                 delattr(module, attr_name)
 
-    def alloc_unsharded_param(self) -> None:
-        unsafe_alloc_storage(self._unsharded_param_data, self._padded_unsharded_size)
+    def alloc_all_gather_output(self) -> None:
+        unsafe_alloc_storage(self.all_gather_output)
+
+    def free_all_gather_output(self) -> None:
+        unsafe_free_storage(self.all_gather_output)
 
     def to_accumulated_grad_if_needed(self) -> None:
         # Access `_unsharded_param` to bypass the sharded state check since we
@@ -445,17 +408,6 @@ class FSDPParam:
         return torch.empty(0)  # mypy
 
     @property
-    def all_gather_input_numel(self) -> int:
-        # NOTE: This property only exists to avoid recomputing the fp32 ->
-        # fp8 cast in `all_gather_input` to get the numel for the fp8 path.
-        self._assert_in_sharded_state()
-        if self.sharded_state == ShardedState.SHARDED:
-            return self._sharded_param_data.numel()
-        elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
-            return cast(torch.Tensor, self._sharded_post_forward_param_data).numel()
-        return 0  # mypy
-
-    @property
     def sharded_param(self) -> nn.Parameter:
         return self._sharded_param
 
@@ -482,14 +434,6 @@ class FSDPParam:
             grad = cast(DTensor, grad)._local_tensor
         return grad
 
-    @property
-    def unsharded_param_data_dtype(self) -> torch.dtype:
-        # This represents the dtype of the *underlying data* and is used for
-        # all-gathering. For fp8 weight matrices, this is e4m3fn. For non-fp8
-        # parameters, this is `param_dtype` if it was specified and the
-        # original dtype otherwise.
-        return self._unsharded_param.dtype
-
     def _assert_in_sharded_state(self) -> None:
         if self.sharded_state not in (
             ShardedState.SHARDED,
@@ -509,9 +453,10 @@ class FSDPParam:
 # NOTE: Unsafe here refers to not checking whether the storage is already
 # allocated or freed, respectively. We should be safe to use them since we
 # explicitly manage the state transition.
-def unsafe_alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
-    # Skip the already-allocated check to save CPU overhead
-    tensor.untyped_storage().resize_(size.numel() * tensor.element_size())
+def unsafe_alloc_storage(tensor: torch.Tensor) -> None:
+    # Skip the already-allocated check and assume that `tensor` is the base
+    # tensor to save CPU overhead
+    tensor.untyped_storage().resize_(tensor.numel() * tensor.itemsize)
 
 
 def unsafe_free_storage(tensor: torch.Tensor) -> None:

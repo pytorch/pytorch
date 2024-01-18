@@ -141,14 +141,14 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
             async_op=False,
             all_gather_copy_in_stream=current_stream,
             all_gather_stream=current_stream,
-            use_uint8=False,
             device=device,
+            dtype=param_dtype or torch.float32,
         )
         foreach_all_gather_copy_out(
             all_gather_result.all_gather_output,
+            all_gather_result.all_gather_input_numels,
             fsdp_params,
             group,
-            use_uint8=False,
         )
         for fsdp_param in fsdp_params:
             fsdp_param.to_unsharded()
