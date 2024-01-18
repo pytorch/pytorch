@@ -80,6 +80,23 @@ class TestUnbackedSymints(TorchTestCase):
 
         torch.testing.assert_close(actual, expected)
 
+    def test_view_of_slice(self):
+        # Tests View.create(slice, size_with_unbacked_symint)
+        def fn(x):
+            nz = torch.nonzero(x)  # introduce unbacked symint
+            squared = nz * nz  # avoid ReinterpretView when lowering Slice
+            sliced = torch.ops.aten.slice.Tensor(squared, dim=1, start=-2, end=None)
+            view = sliced.unsqueeze(dim=0)
+            return view.squeeze(dim=0)  # make sure no unbacked symint in output's stride
+
+        example_inputs = (torch.randn(1, 1, 1, 1).cuda(),)
+
+        with dynamo_config.patch({"capture_dynamic_output_shape_ops": True}):
+            actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+            expected = fn(*example_inputs)
+
+        torch.testing.assert_close(actual, expected)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
