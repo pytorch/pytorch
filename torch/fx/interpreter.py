@@ -79,7 +79,7 @@ class Interpreter:
         if graph is not None:
             self.graph = graph
         else:
-            self.graph = self.module.graph
+            self.graph = self.module.graph  # type: ignore[assignment]
         self.env : Dict[Node, Any] = {}
         self.name = "Interpreter"
         self.garbage_collect_values = garbage_collect_values
