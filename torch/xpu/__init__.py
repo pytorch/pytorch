@@ -361,6 +361,7 @@ __all__ = [
     "is_bf16_supported",
     "is_initialized",
     "set_device",
+    "set_stream",
     "stream",
     "streams",
     "synchronize",
