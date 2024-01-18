@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
+#include <c10/util/Float8_fnuz_cvt.h>
 #include <cstring>
 #include <limits>
 
@@ -19,7 +20,7 @@ inline C10_HOST_DEVICE Float8_e4m3fnuz::Float8_e4m3fnuz(float value)
 /// Implicit conversions
 
 inline C10_HOST_DEVICE Float8_e4m3fnuz::operator float() const {
-  return detail::fp8e4m3fnuz_to_fp32_value(x);
+  return detail::fp8_fnuz_to_fp32_value<4, 3>(x);
 }
 
 /// Special values helper
