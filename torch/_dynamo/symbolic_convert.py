@@ -435,7 +435,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         else:
             from .source import is_constant_source
 
-            if is_constant_source(value.source):
+            if value.source is not None and is_constant_source(value.source):
                 if truth_fn(value.get_real_value()):
                     push and self.push(value)
                     self.jump(inst)
