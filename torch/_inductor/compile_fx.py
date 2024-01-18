@@ -577,7 +577,7 @@ def fx_codegen_and_compile(
         const_graph = None
         const_code = None
 
-        if aot_mode and config.use_runtime_constant_folding:
+        if aot_mode and config.aot_inductor.use_runtime_constant_folding:
             const_gm, const_output_index = split_const_gm(gm)
 
             const_names = {

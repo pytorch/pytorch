@@ -597,7 +597,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def add_tensor_constant(self, data, name=None):
         def allocate(name):
-            if not config.use_runtime_constant_folding:
+            if not config.aot_inductor.use_runtime_constant_folding:
                 for constant_name, value in self.constants.items():
                     if (
                         not data.is_mkldnn
@@ -739,7 +739,7 @@ class GraphLowering(torch.fx.Interpreter):
         value = getattr(self.module, target)
 
         if (
-            config.use_runtime_constant_folding
+            config.aot_inductor.use_runtime_constant_folding
             or config.always_keep_tensor_constants
             or unsupported_output_tensor(value)
         ):

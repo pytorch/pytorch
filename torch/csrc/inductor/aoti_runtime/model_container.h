@@ -224,6 +224,10 @@ class AOTInductorModelContainer {
 
     if (validate_full_update) {
       for (size_t idx = 0; idx < num_constants; idx++) {
+        if (models_[0]->constant_from_folded(idx)) {
+          continue;
+        }
+
         auto constant_name = std::string(models_[0]->constant_name(idx));
         auto it = constants_map.find(constant_name);
         if (it == constants_map.end()) {

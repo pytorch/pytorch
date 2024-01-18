@@ -6,6 +6,9 @@ import torch.utils._pytree as pytree
 
 aten = torch.ops.aten
 
+# We would like to split modules into two subgraphs for runtime weight updates to work correctly.
+# The use case and more information could be found at:
+# https://docs.google.com/document/d/1inZC-8KarJ6gKB7G9egmYLx1V_dKX_apxon0w4zPC0Q/edit?usp=sharing
 MODULE_TAG = "_MAIN_MODULE"
 CONST_MODULE_TAG = "_CONST_MODULE"
 

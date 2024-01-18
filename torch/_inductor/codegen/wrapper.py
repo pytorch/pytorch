@@ -385,9 +385,8 @@ class WrapperCodeGen(CodeGen):
         self.stack_allocated_buffers = {}
         self.computed_sizes = set()
 
-        if not V.graph.is_const_graph or not V.graph.cpp_wrapper:
-            self.write_header()
-            self.write_prefix()
+        self.write_header()
+        self.write_prefix()
 
         if not V.graph.aot_mode:
             for name, hashed in V.graph.constant_reprs.items():
@@ -1430,6 +1429,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.header.writeline(f"// {name} {hashed}")
 
     def write_header(self):
+        if V.graph.is_const_graph:
+            # We do not write header for constant graph, it will be written by main module.
+            return
+
         if V.graph.aot_mode:
             for header_cpp_file in ("interface.cpp", "implementation.cpp"):
                 with open(
@@ -1495,6 +1498,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.output_is_tensor = output_is_tensor
 
     def write_prefix(self):
+        if V.graph.is_const_graph:
+            # We do not write prefix for constant graph, it will be written by main module.
+            return
+
         if V.graph.aot_mode:
             self.prefix.writeline("namespace torch {")
             self.prefix.writeline("namespace aot_inductor {")
@@ -1558,7 +1565,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     """
                 )
             else:
-                if not config.use_runtime_constant_folding:
+                if not config.aot_inductor.use_runtime_constant_folding:
                     # If we do not split the constant graph, we'll just create
                     # an empty implementation when wrapping the main module.
                     self.prefix.splice(
@@ -1893,7 +1900,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             ) {
             """
         )
-        if not config.use_runtime_constant_folding:
+        if not config.aot_inductor.use_runtime_constant_folding:
             self.prefix.splice(
                 """
                     return {};
