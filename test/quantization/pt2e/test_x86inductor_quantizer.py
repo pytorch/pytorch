@@ -16,6 +16,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoX86,
     skipIfNoDynamoSupport,
 )
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.common_quantized import override_quantized_engine
 from enum import Enum
 import itertools
@@ -1007,6 +1008,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_list,
                 )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d(self):
         """
@@ -1044,6 +1046,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 is_qat=True,
             )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d_unary(self):
         """
@@ -1093,6 +1096,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     is_qat=True,
                 )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d_binary(self):
         """
@@ -1135,6 +1139,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     is_qat=True,
                 )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d_binary2(self):
         """
@@ -1177,6 +1182,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     is_qat=True,
                 )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d_binary_unary(self):
         """
