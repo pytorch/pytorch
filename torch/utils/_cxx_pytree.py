@@ -49,6 +49,7 @@ __all__ = [
     "TreeSpec",
     "LeafSpec",
     "keystr",
+    "key_get",
     "register_pytree_node",
     "tree_flatten",
     "tree_flatten_with_path",

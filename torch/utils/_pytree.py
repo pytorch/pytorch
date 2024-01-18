@@ -21,7 +21,6 @@ import json
 import threading
 import warnings
 from collections import defaultdict, deque, namedtuple, OrderedDict
-from collections.abc import Mapping, Sequence
 from typing import (
     Any,
     Callable,
@@ -34,11 +33,13 @@ from typing import (
     Hashable,
     Iterable,
     List,
+    Mapping,
     NamedTuple,
     Optional,
     OrderedDict as GenericOrderedDict,
     overload,
     Protocol,
+    Sequence,
     Tuple,
     Type,
     TypeVar,
@@ -57,6 +58,7 @@ __all__ = [
     "TreeSpec",
     "LeafSpec",
     "keystr",
+    "key_get",
     "register_pytree_node",
     "tree_flatten",
     "tree_flatten_with_path",
