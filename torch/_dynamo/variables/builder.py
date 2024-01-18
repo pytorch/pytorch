@@ -588,12 +588,8 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, torch._C._SDPAParams):
-            proxy = self.tx.output.root_tracer.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                type(value),
-                source=self.source,
-            )
-            return SDPAParamsVariable(value, proxy, None, source=self.source)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return SDPAParamsVariable.create(self.tx, value, self.source)
         elif isinstance(value, _EventBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EventVariable(
@@ -1554,7 +1550,7 @@ def wrap_fx_proxy_cls(
         from .sdpa import SDPAParamsVariable
 
         proxy.node.meta["example_value"] = example_value
-        return SDPAParamsVariable(example_value, proxy, **options)
+        return SDPAParamsVariable(proxy, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "

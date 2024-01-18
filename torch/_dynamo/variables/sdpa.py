@@ -6,9 +6,39 @@ from .base import VariableTracker
 
 
 class SDPAParamsVariable(VariableTracker):
-    """Represents the c++ params struct for scaled dot product attention"""
+    """Represents the c++ params struct for scaled dot product attention.
+    This is a read-only container."""
 
-    def __init__(self, value, proxy, param_vars, **kwargs):
+    @staticmethod
+    def create(tx, value, source):
+        from torch.backends.cuda import SDPAParams
+        from ..source import AttrSource
+        from .builder import VariableBuilder
+        from .torch import TorchInGraphFunctionVariable
+
+        query_var = VariableBuilder(tx, AttrSource(source, "query"))(value.query)
+        key_var = VariableBuilder(tx, AttrSource(source, "key"))(value.key)
+        value_var = VariableBuilder(tx, AttrSource(source, "value"))(value.value)
+        attn_mask_var = VariableBuilder(tx, AttrSource(source, "attn_mask"))(
+            value.attn_mask
+        )
+        dropout_var = VariableBuilder(tx, AttrSource(source, "dropout"))(value.dropout)
+        is_causal_var = VariableBuilder(tx, AttrSource(source, "is_causal"))(
+            value.is_causal
+        )
+        param_vars = [
+            query_var,
+            key_var,
+            value_var,
+            attn_mask_var,
+            dropout_var,
+            is_causal_var,
+        ]
+        return TorchInGraphFunctionVariable(SDPAParams).call_function(
+            tx, param_vars, {}
+        )
+
+    def __init__(self, proxy, param_vars, **kwargs):
         self.proxy = proxy
         self.param_vars = param_vars
         super().__init__(**kwargs)
