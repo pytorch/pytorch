@@ -1481,6 +1481,29 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         resB = graph(torch.tensor([2]))
         self.assertTrue(torch._dynamo.utils.same(resA, resB))
 
+    def test_export_with_builtin_op_on_assume_constant(self):
+        @torch._dynamo.assume_constant_result
+        def get_y(y) -> torch.Tensor:
+            return y
+
+        class Bob(torch.nn.Module):
+            def __init__(self, p, val) -> None:
+                super().__init__()
+                self.p = p
+                self.y = torch.nn.Parameter(torch.tensor(val))
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # This only looks dynamic but it's actually a constant value
+                if get_y(self.y) < self.p:
+                    return torch.cat([x, x])
+                else:
+                    return x
+
+        model = Bob(0.5, 0.3)
+        inp = torch.ones(3, 4)
+        graph, guards = torch._dynamo.export(model)(inp)
+        self.assertEqual(model(inp), graph(inp))
+
     def test_export_decomp(self):
         def f(x):
             return x.t() + x.t()
