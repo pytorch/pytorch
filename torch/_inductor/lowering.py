@@ -3341,10 +3341,10 @@ def upsample_nearestnd(
     assert len(scales_x) == n
     o_sizes = output_size
 
-    scales = [i / o for i, o in zip(i_sizes, o_sizes)]
+    inv_scales = [i / o for i, o in zip(i_sizes, o_sizes)]
     for i, scale in enumerate(scales_x):
-        if scale:
-            scales[i] = scale
+        if scale is not None:
+            inv_scales[i] = 1.0 / scale
 
     def scale_fn(x, scale, size):
         # Nearest Exact: input_index = round(scale * (output_index + 0.5) - 0.5)
@@ -3361,7 +3361,7 @@ def upsample_nearestnd(
         x = idx[-n:]
         b = idx[:-n]
         return x_loader(
-            [*b, *[scale_fn(i, s, size) for i, s, size in zip(x, scales, i_sizes)]]
+            [*b, *[scale_fn(i, s, size) for i, s, size in zip(x, inv_scales, i_sizes)]]
         )
 
     return Pointwise.create(
