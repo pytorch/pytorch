@@ -96,6 +96,25 @@ if __name__ == "__main__":
         self.assertEqual(high, s1.priority)
         self.assertEqual(torch.device("xpu:0"), s1.device)
 
+    def test_stream_event_repr(self):
+        s = torch.xpu.current_stream()
+        self.assertTrue("torch.xpu.Stream" in s.__repr__())
+        e = torch.xpu.Event()
+        self.assertTrue("torch.xpu.Event" in e.__repr__())
+        s.record_event(e)
+        self.assertTrue("torch.xpu.Event" in e.__repr__())
+
+    def test_events(self):
+        stream = torch.xpu.current_stream()
+        event = torch.xpu.Event()
+        self.assertTrue(event.query())
+        start_event = torch.xpu.Event()
+        stream.record_event(start_event)
+        stream.record_event(event)
+        self.assertFalse(event.query())
+        event.synchronize()
+        self.assertTrue(event.query())
+
 
 if __name__ == "__main__":
     run_tests()
