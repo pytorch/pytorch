@@ -75,7 +75,21 @@ ScalarType promoteTypes(ScalarType a, ScalarType b) {
   }
 
   if (isBarebonesUnsignedType(a) || isBarebonesUnsignedType(b)) {
-    return ScalarType::Undefined;
+    // There are two problems with promotion here:
+    //
+    // - Our promotion rule for uint8 is inconsistent with Numpy; Numpy
+    //   promotes to uint64, but since we never had uint64 for the longest
+    //   time, we promote to int64.  Changing this is BC-breaking
+    //
+    // - We must not promote uint64 to int64 because this will overflow.
+    //
+    // It'll be a bit of work to fix it, so we're punting on it for now.
+    TORCH_CHECK(
+        false,
+        "Promotion for uint16, uint32, uint64 types is not supported, attempted to promote ",
+        toString(a),
+        " and ",
+        toString(b));
   }
 
   auto ix_a = dtype2index[static_cast<int64_t>(a)];
