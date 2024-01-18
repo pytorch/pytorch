@@ -11,8 +11,13 @@ from .constant import ConstantVariable
 
 class DistributedVariable(VariableTracker):
     """
-    The base distributed variable that checks for the distributed existance
-    and hold the value for a distributed object.
+    The base distributed variable that encapsulates common methods
+    for the distributed objects (i.e. ProcessGroup, DeviceMesh, etc.).
+    Concrete distributed objects could inherit this class and add object
+    specific logic.
+
+    i.e. It provides the check on the distributed package existance
+    and hold the tracking value for the corresponding distributed object.
     """
 
     def __init__(self, value, **kwargs):
