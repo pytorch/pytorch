@@ -11,10 +11,13 @@ on:
     branches: [main]
     paths-ignore: [.github]
 
-  # To add labels on ghstack PRs and to allow testing PRs that change workflows.
-  # May be triggered together with pull_request_target, it's OK.
+  # To add labels on ghstack PRs.
+  # Note: as pull_request doesn't trigger on PRs targeting main,
+  # to test changes to the workflow itself one needs to create
+  # a PR that targets a non-main branch.
   pull_request:
     types: [opened, synchronize, reopened]
+    branches-ignore: [main]
 
 jobs:
   triage:
