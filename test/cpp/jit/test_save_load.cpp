@@ -272,7 +272,7 @@ TEST(SerializationTest, SaveLoadTest) {
   torch::Tensor to_load;
   torch::load(to_load, ss);
 
-  ASSERT_TRUE(to_save.equals(to_load));
+  ASSERT_TRUE(to_save.equal(to_load));
 }
 
 TEST(SerializationTest, CalculateNecessaryArgsTest) {
