@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import itertools
 import sys
 import unittest
 from typing import NamedTuple
@@ -58,8 +59,221 @@ class DynamicShapesCudaWrapperCudaTests(TorchTestCase):
 
 
 test_failures_cuda_wrapper = {
+    "test_add_complex_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_add_inplace_permuted_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_buffer_use_after_remove_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_complex_fallback_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_data_type_propogation_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_dropout2_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_dropout3_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_float_index_expression_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_forced_buffer_realize_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_functionalize_rng_wrappers_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_gather2_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_getitem_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_inductor_layout_optimization_input_mutations_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_inplace_add_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_inplace_resize_as_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_input_mutation1_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_input_mutation3_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_input_mutation5_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_linear_mixed_dtype_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_list_clearing_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_mm_mixed_dtype_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_philox_rand_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_pow3_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_rand_like_deterministic_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_randint_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_randint_kernel_count_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_scheduler_vertical_fusion1_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_slice_mutation2_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_slice_view_with_graph_break_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_split_with_sizes_failed_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_uint4x2_mixed_mm_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_unspec_inputs_cuda": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_AllenaiLongformerBase_repro_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_add_complex_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_add_inplace_permuted_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_addmm_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_buffer_use_after_remove_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_complex_fallback_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_conv_inference_heuristics_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_conv2d_backward_channels_last_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",), is_skip=True  # Segfault
+    ),
+    "test_data_type_propogation_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_dropout2_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_dropout3_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_float_index_expression_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_forced_buffer_realize_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_functionalize_rng_wrappers_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_gather2_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_getitem_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_inductor_layout_optimization_input_mutations_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_inplace_add_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_inplace_resize_as_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_input_mutation1_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_input_mutation3_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_input_mutation5_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_linear_mixed_dtype_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_linear_relu_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_list_clearing_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
     "test_mm_plus_mm2_cuda_dynamic_shapes": test_torchinductor.TestFailure(
-        ("cuda_wrapper",), is_skip=True
+        ("cuda_wrapper",),
+    ),
+    "test_mixed_mm_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",), is_skip=True  # Segfault
+    ),
+    "test_mixed_mm2_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",), is_skip=True  # Segfault
+    ),
+    "test_mm_mixed_dtype_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_philox_rand_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_pow3_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_rand_like_deterministic_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_randint_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_randint_kernel_count_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_scheduler_vertical_fusion1_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_slice_mutation2_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_slice_view_with_graph_break_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_split_with_sizes_failed_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_uint4x2_mixed_mm_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
+    ),
+    "test_unspec_inputs_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",),
     ),
 }
 
@@ -150,72 +364,44 @@ if RUN_CUDA:
         tests: TorchTestCase = test_torchinductor.CudaTests()
 
     # Maintain two separate test lists for cuda and cpp for now
-    for item in [
-        BaseTest("test_add_complex2"),
-        BaseTest("test_as_strided"),  # buffer reuse
-        BaseTest("test_batch_norm_2d_2"),
-        BaseTest("test_bernoulli1"),
-        BaseTest("test_bitwise"),  # int32
-        BaseTest("test_bmm1"),
-        BaseTest("test_bmm2"),
-        BaseTest("test_cat"),  # alias
-        BaseTest("test_convolution1"),
-        BaseTest("test_conv_backward"),
-        BaseTest("test_custom_op"),
-        BaseTest("test_embedding_bag"),  # test default FallbackKernel
-        BaseTest("test_index_put_deterministic_fallback"),
-        BaseTest("test_adding_tensor_offsets"),
-        BaseTest("test_index_tensor"),
-        BaseTest("test_layer_norm"),
-        BaseTest("test_linear1"),
-        BaseTest("test_linear2"),
-        BaseTest("test_mm_views"),
-        BaseTest("test_multi_device"),
-        BaseTest("test_multi_threading"),
-        BaseTest("test_profiler_mark_wrapper_call"),
-        BaseTest("test_reduction1"),  # Reduction
-        BaseTest("test_relu"),  # multiple inputs
-        BaseTest("test_repeat_interleave_2"),
-        BaseTest("test_scalar_input"),
-        BaseTest("test_scaled_dot_product_attention"),
-        BaseTest("test_scaled_dot_product_efficient_attention"),
-        BaseTest("test_sort"),
-        BaseTest("test_silu"),  # single input, single output
-        BaseTest("test_sum_dtype"),  # float64
-        BaseTest("test_sum_int"),  # bool, int64, int8, uint8
-        BaseTest("test_transpose"),  # multiple outputs, buffer clear
-        BaseTest(
-            "test_foreach_cpp_wrapper",
-            tests=test_foreach.ForeachTests(),
-        ),  # test foreach
-        BaseTest(
-            "test_cat_slice_cat",
-            tests=test_pattern_matcher.TestPatternMatcher(),
-        ),
-        BaseTest(
-            "test_addmm",
-            tests=test_select_algorithm.TestSelectAlgorithm(),
-        ),
-        BaseTest(
-            "test_linear_relu",
-            tests=test_select_algorithm.TestSelectAlgorithm(),
-        ),
-        # TODO: Re-enable this test after fixing cuda wrapper for conv Triton templates with dynamic shapes.
-        # This test is unstable: it succeeds when an ATEN kernel is used, and fails when a Triton kernel is used.
-        # Currently it passes on CI (an ATEN kernel is chosen) and fails locally (a Triton kernel is chosen).
-        # Ideally, it should succeed for whatever kernels.
-        # BaseTest(
-        #     "test_convolution1",
-        #     device=None,
-        #     tests=test_select_algorithm.TestSelectAlgorithm(),
-        # ),
-        BaseTest(
-            "test_mm_plus_mm2",
-            tests=test_select_algorithm.TestSelectAlgorithm(),
-        ),
-        BaseTest("test_fft_real_input"),
-        BaseTest("test_fft_real_input_real_output"),
-    ]:
+    for item in itertools.chain(
+        [
+            BaseTest(name)
+            for name in dir(test_torchinductor.CommonTemplate)
+            if name.startswith("test_")
+        ],
+        [
+            BaseTest(
+                "test_foreach_cpp_wrapper",
+                tests=test_foreach.ForeachTests(),
+            ),  # test foreach
+            BaseTest(
+                "test_cat_slice_cat",
+                tests=test_pattern_matcher.TestPatternMatcher(),
+            ),
+            BaseTest(
+                "test_addmm",
+                tests=test_select_algorithm.TestSelectAlgorithm(),
+            ),
+            BaseTest(
+                "test_linear_relu",
+                tests=test_select_algorithm.TestSelectAlgorithm(),
+            ),
+            # TODO: Re-enable this test after fixing cuda wrapper for conv Triton templates with dynamic shapes.
+            # This test is unstable: it succeeds when an ATEN kernel is used, and fails when a Triton kernel is used.
+            # Currently it passes on CI (an ATEN kernel is chosen) and fails locally (a Triton kernel is chosen).
+            # Ideally, it should succeed for whatever kernels.
+            # BaseTest(
+            #     "test_convolution1",
+            #     device=None,
+            #     tests=test_select_algorithm.TestSelectAlgorithm(),
+            # ),
+            BaseTest(
+                "test_mm_plus_mm2",
+                tests=test_select_algorithm.TestSelectAlgorithm(),
+            ),
+        ],
+    ):
         make_test_case(item.name, item.device, item.tests)
 
     test_torchinductor.copy_tests(
