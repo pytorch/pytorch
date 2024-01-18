@@ -21,7 +21,8 @@ template <
     typename scalar_type,
     typename opmath_t,
     int depth,
-    ADAM_MODE adam_mode>
+    ADAM_MODE adam_mode,
+    bool amsgrad>
 C10_DEVICE inline void adam_math(
     scalar_type r_args[depth][kILP],
     const float* step_count,
@@ -31,7 +32,6 @@ C10_DEVICE inline void adam_math(
     const double weight_decay,
     const double eps,
     const bool maximize,
-    const bool amsgrad,
     const float* grad_scale_ptr,
     const float* found_inf_ptr) {
   static_assert(depth == 4 || depth == 5);
@@ -103,7 +103,7 @@ C10_DEVICE inline void adam_math(
 // parameter updates accordingly. To be functionally on par with `torch.optim`
 // optimizers and `_multi_tensor` ones, the kernel below writes out gradients
 // only when `grad_scale_ptr != nullptr.
-template <typename scalar_type, int depth, ADAM_MODE adam_mode>
+template <typename scalar_type, int depth, ADAM_MODE adam_mode, bool amsgrad>
 struct FusedAdamMathFunctor {
   static_assert(
       depth == 4 || depth == 5,
@@ -120,7 +120,6 @@ struct FusedAdamMathFunctor {
       const double weight_decay,
       const double eps,
       const bool maximize,
-      const bool amsgrad,
       const float* grad_scale_ptr,
       const float* found_inf_ptr) {
     const index_t tensor_loc = tl.block_to_tensor[blockIdx.x];
@@ -148,7 +147,7 @@ struct FusedAdamMathFunctor {
         for (int i = 0; i < depth; i++) {
           load_store(r_args[i], args[i], static_cast<index_t>(0), i_start);
         }
-        adam_math<scalar_type, opmath_t, depth, adam_mode>(
+        adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
             r_args,
             step_count,
             lr_double,
@@ -157,7 +156,6 @@ struct FusedAdamMathFunctor {
             weight_decay,
             eps,
             maximize,
-            amsgrad,
             grad_scale_ptr,
             found_inf_ptr);
 #pragma unroll
@@ -171,7 +169,7 @@ struct FusedAdamMathFunctor {
       for (index_t i_start = 0; i_start < n && i_start < chunk_size;
            i_start += blockDim.x * kILP) {
         load_args<depth>(r_args, args, i_start, chunk_size, n);
-        adam_math<scalar_type, opmath_t, depth, adam_mode>(
+        adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
             r_args,
             step_count,
             lr_double,
@@ -180,7 +178,6 @@ struct FusedAdamMathFunctor {
             weight_decay,
             eps,
             maximize,
-            amsgrad,
             grad_scale_ptr,
             found_inf_ptr);
 #pragma unroll
