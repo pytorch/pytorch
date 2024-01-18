@@ -66,7 +66,7 @@ def while_loop(cond_fn, body_fn, operands):
     Args:
         cond_fn (Callable): A callable function that returns a boolean Scalar tensor.
 
-        body_fn (Callable): A callable function that takes the same inputs as `cond_fn` and returns a tuple or list of tensors
+        body_fn (Callable): A callable function that takes the same inputs as `cond_fn` and returns a tuple of tensors
 
         operands (Tuple of possibly nested dict/list/tuple of tensors): A tuple of inputs to cond_fn and body_fn. It's also
             the initial value of states that are carried across iterations.
@@ -104,11 +104,26 @@ def while_loop(cond_fn, body_fn, operands):
 @while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def while_loop_dense(cond_fn, body_fn, operands):
     init_val = operands
-    while cond_fn(*init_val):
+
+    def _is_boolean_scalar_tensor(pred):
+        return (
+            isinstance(pred, torch.Tensor)
+            and pred.size() == torch.Size([])
+            and pred.dtype == torch.bool
+        )
+
+    if not isinstance(operands, tuple):
+        raise RuntimeError(f"operands must be a tuple but got {type(operands)}")
+
+    while pred := cond_fn(*init_val):
+        if not _is_boolean_scalar_tensor(pred):
+            raise RuntimeError(
+                f"cond_fn must return a boolean scalar tensor but got {pred}"
+            )
         out = body_fn(*init_val)
         assert isinstance(
-            out, (tuple, list)
-        ), "body_fn should return the same type as operands"
+            out, tuple
+        ), f"body_fn should return a tuple but got {type(out)}"
         assert len(out) == len(
             init_val
         ), "body_fn should return the same number of elements as operands"
