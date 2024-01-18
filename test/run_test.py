@@ -360,6 +360,9 @@ CI_SERIAL_LIST = [
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
     "inductor/test_max_autotune",  # Testing, probably revert later
+    "inductor/test_torchinductor",  # OOM on test_large_block_sizes
+    "inductor/test_torchinductor_dynamic_shapes",  # OOM on test_large_block_sizes
+    "inductor/test_torchinductor_codegen_dynamic_shapes",  # OOM on test_large_block_sizes
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
