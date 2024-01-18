@@ -130,6 +130,7 @@ class Metadata:
     # the metadata of the built-in planner and storage plugins.
     planner_data: Any = None
     storage_data: Any = None
+    serialization_signature: str = ""
 
 
 @dataclass(frozen=True)

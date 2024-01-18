@@ -1,12 +1,13 @@
 import abc
 import os
 from dataclasses import dataclass
-from typing import Any, List, Union
+from typing import Any, List, Optional, Union
 
 from torch.futures import Future
 
 from .metadata import Metadata, MetadataIndex
 from .planner import LoadPlan, LoadPlanner, SavePlan, SavePlanner
+from .serialization import Deserializer, Serializer
 
 __all__ = ["WriteResult", "StorageWriter", "StorageReader"]
 
@@ -52,6 +53,10 @@ class StorageWriter(abc.ABC):
                 storage. It can be a path to a folder or to a file. It can also
                 be a key if the storage is more like a key-value store.
         """
+        ...
+
+    @abc.abstractmethod
+    def set_serializer(self, serializer: Serializer) -> None:
         ...
 
     @abc.abstractmethod
@@ -176,6 +181,10 @@ class StorageReader(abc.ABC):
                 storage. It can be a path to a folder or to a file. It can also
                 be a key if the storage is more like a key-value store.
         """
+        ...
+
+    @abc.abstractmethod
+    def set_deserializer(self, deserializer: Optional[Deserializer]) -> None:
         ...
 
     @abc.abstractmethod

@@ -8,10 +8,13 @@ import torch.distributed as dist
 from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
 from torch.distributed.checkpoint.stateful import Stateful
 
+from .config import _TEST_BC
 from .default_planner import DefaultSavePlanner
+from .default_serialization import _DefaultSerializer
 from .filesystem import FileSystemWriter
 from .metadata import Metadata, STATE_DICT_TYPE
 from .planner import SavePlanner
+from .serialization import Deserializer, Serializer
 from .storage import StorageWriter
 from .utils import _api_bc_check, _DistWrapper, _profile
 
@@ -52,6 +55,7 @@ def save(
     checkpoint_id: Union[str, os.PathLike] = "",
     storage_writer: Optional[StorageWriter] = None,
     planner: Optional[SavePlanner] = None,
+    serializer: Optional[Serializer] = None,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
@@ -138,6 +142,7 @@ def save(
             coordinator_rank,
             no_dist,
             planner,
+            serializer,
         )
 
 
@@ -147,6 +152,7 @@ def _async_save(
     checkpoint_id: Union[str, os.PathLike] = "",
     storage_writer: Optional[StorageWriter] = None,
     planner: Optional[SavePlanner] = None,
+    serializer: Optional[Serializer] = None,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
@@ -183,6 +189,7 @@ def _async_save(
         checkpoint_id=checkpoint_id,
         storage_writer=storage_writer,
         planner=planner,
+        serializer=serializer,
         process_group=process_group,
         coordinator_rank=coordinator_rank,
         no_dist=no_dist,
@@ -209,13 +216,23 @@ def _save_state_dict(
     coordinator_rank: int = 0,
     no_dist: bool = False,
     planner: Optional[SavePlanner] = None,
+    serializer: Optional[Serializer] = None,
 ) -> Metadata:
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save_state_dict")
 
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
     if planner is None:
         planner = DefaultSavePlanner()
-    assert planner is not None
+    if serializer is None and not _TEST_BC:
+        serializer = _DefaultSerializer()
+
+    try:
+        planner.set_serializer(serializer)
+        old_planner = False
+    except NotImplementedError:
+        old_planner = True
+
+    storage_writer.set_serializer(serializer)
 
     global_metatadata = None
 
@@ -233,6 +250,8 @@ def _save_state_dict(
         assert planner is not None
         all_local_plans, global_metatadata = planner.create_global_plan(all_local_plans)
         all_local_plans = storage_writer.prepare_global_plan(all_local_plans)
+        if serializer:
+            global_metatadata.serialization_signature = serializer.signature
         return all_local_plans
 
     central_plan = distW.reduce_scatter("plan", local_step, global_step)

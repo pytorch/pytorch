@@ -27,7 +27,6 @@ from torch import Tensor
 from torch._utils import _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.futures import Future
-
 from .metadata import Metadata, MetadataIndex
 from .planner import (
     LoadItemType,
@@ -39,6 +38,8 @@ from .planner import (
     WriteItem,
     WriteItemType,
 )
+
+from .serialization import Deserializer, Serializer
 from .storage import StorageReader, StorageWriter, WriteResult
 from .utils import _create_file_view
 
@@ -224,12 +225,17 @@ def _write_item(
     data: Union[io.BytesIO, torch.Tensor],
     write_item: WriteItem,
     storage_key: str,
+    serializer: Optional[Serializer],
 ) -> WriteResult:
     offset = stream.tell()
 
     if write_item.type == WriteItemType.BYTE_IO:
         assert isinstance(data, io.BytesIO)
         stream.write(data.getbuffer())
+    elif serializer:
+        assert isinstance(data, torch.Tensor)
+        assert data.device == torch.device("cpu")
+        serializer.serialize_tensor(data, stream)
     else:
         assert isinstance(data, torch.Tensor)
         assert data.device == torch.device("cpu")
@@ -249,6 +255,7 @@ def _write_files_from_queue(
     planner: SavePlanner,
     inflight_threshhold: int,
     use_fsync: bool,
+    serializer: Optional[Serializer],
 ) -> None:
     try:
         while True:
@@ -277,13 +284,13 @@ def _write_files_from_queue(
                 for write_item in bytes_w:
                     data = planner.resolve_data(write_item)
                     write_results.append(
-                        _write_item(stream, data, write_item, storage_key)
+                        _write_item(stream, data, write_item, storage_key, serializer)
                     )
 
                 for tensor, write_item in loader.values():
                     assert tensor.is_cpu
                     write_results.append(
-                        _write_item(stream, tensor, write_item, storage_key)
+                        _write_item(stream, tensor, write_item, storage_key, serializer)
                     )
 
                 if use_fsync:
@@ -333,6 +340,10 @@ class FileSystemWriter(StorageWriter):
         self.sync_files = sync_files
         self.thread_count = thread_count
         self.per_thread_copy_ahead = per_thread_copy_ahead
+        self.serializer: Optional[Deserializer] = None
+
+    def set_serializer(self, serializer: Serializer) -> None:
+        self.serializer = serializer
 
     def _init_path(self, path: Union[str, os.PathLike]) -> None:
         if not isinstance(path, Path):
@@ -392,6 +403,7 @@ class FileSystemWriter(StorageWriter):
                     planner,
                     self.per_thread_copy_ahead,
                     self.sync_files,
+                    self.serializer,
                 ),
             )
             t.start()
@@ -403,6 +415,7 @@ class FileSystemWriter(StorageWriter):
             planner=planner,
             inflight_threshhold=self.per_thread_copy_ahead,
             use_fsync=self.sync_files,
+            serializer=self.serializer,
         )
 
         for t in threads:
@@ -437,6 +450,7 @@ class FileSystemReader(StorageReader):
         super().__init__()
         self._init_path(path)
         self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
+        self.deserializer: Optional[Deserializer] = None
 
     def _init_path(self, path: Union[str, os.PathLike]) -> None:
         if not isinstance(path, Path):
@@ -449,6 +463,9 @@ class FileSystemReader(StorageReader):
     def set_checkpoint_id(self, checkpoint_id: Union[str, os.PathLike]) -> None:
         self.storage_data = dict()
         self._init_path(checkpoint_id)
+
+    def set_deserializer(self, deserializer: Serializer) -> None:
+        self.deserializer = deserializer
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
@@ -469,10 +486,15 @@ class FileSystemReader(StorageReader):
                         read_bytes.seek(0)
                         planner.load_bytes(req, read_bytes)
                     else:
-                        tensor = cast(
-                            Tensor,
-                            torch.load(cast(IO[bytes], file_slice), map_location="cpu"),
-                        )
+                        if self.deserializer:
+                            tensor = self.deserializer.deserialize_tensor(file_slice)
+                        else:
+                            tensor = cast(
+                                Tensor,
+                                torch.load(
+                                    cast(IO[bytes], file_slice), map_location="cpu"
+                                ),
+                            )
                         tensor = narrow_tensor_by_index(
                             tensor, req.storage_offsets, req.lengths
                         )

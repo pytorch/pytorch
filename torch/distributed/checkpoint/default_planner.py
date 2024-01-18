@@ -6,7 +6,7 @@ import logging
 import operator
 from collections import ChainMap
 from functools import reduce
-from typing import Any, cast, Dict, List, Tuple, Union
+from typing import Any, cast, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index
@@ -44,6 +44,8 @@ from torch.distributed.checkpoint.planner_helpers import (
 )
 from torch.distributed.checkpoint.utils import find_state_dict_object
 
+from .serialization import Deserializer, Serializer
+
 logger: logging.Logger = logging.getLogger(__name__)
 
 
@@ -71,6 +73,10 @@ class DefaultSavePlanner(SavePlanner):
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.dedup_replicated_tensors = dedup_replicated_tensors
         self.mappings = {}
+        self.serializer: Optional[Serializer] = None
+
+    def set_serializer(self, serializer: Optional[Serializer]) -> None:
+        self.serializer = serializer
 
     def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
         if self.flatten_state_dict:
@@ -127,6 +133,12 @@ class DefaultSavePlanner(SavePlanner):
 
     def transform_object(self, write_item: WriteItem, object: Any):
         """Extension from the planner interface to make it easy to extend the default planner."""
+        if self.serializer:
+            return (
+                self.serializer.serialize_object(object)
+                if write_item.type == WriteItemType.BYTE_IO
+                else object
+            )
         if write_item.type == WriteItemType.BYTE_IO:
             bytes = io.BytesIO()
             torch.save(object, bytes)
@@ -156,6 +168,10 @@ class DefaultLoadPlanner(LoadPlanner):
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.original_state_dict = {}
         self.mappings = {}
+        self.deserializer: Optional[Deserializer] = None
+
+    def set_deserializer(self, deserializer: Optional[Deserializer] = None) -> None:
+        self.deserializer = deserializer
 
     def set_up_planner(
         self,
@@ -186,14 +202,16 @@ class DefaultLoadPlanner(LoadPlanner):
         return new_plan
 
     def load_bytes(self, read_item: ReadItem, value: io.BytesIO) -> None:
+        if self.deserializer:
+            obj = self.deserializer.deserialize_object(value)
+        else:
+            obj = torch.load(value)
         if self.flatten_state_dict:
             set_element(
-                self.original_state_dict,
-                self.mappings[read_item.dest_index.fqn],
-                torch.load(value),
+                self.original_state_dict, self.mappings[read_item.dest_index.fqn], obj
             )
         else:
-            self.state_dict[read_item.dest_index.fqn] = torch.load(value)
+            self.state_dict[read_item.dest_index.fqn] = obj
 
     def resolve_tensor(self, read_item: ReadItem):
         tensor = self.lookup_tensor(read_item.dest_index)
