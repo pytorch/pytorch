@@ -67,4 +67,6 @@ class Stream(torch._C._XpuStreamBase, _StreamBase):
         return hash((self.sycl_queue, self.device))
 
     def __repr__(self):
-        return f"<torch.xpu.Stream device={self.device} sycl_queue={self.sycl_queue:#x}>"
+        return (
+            f"<torch.xpu.Stream device={self.device} sycl_queue={self.sycl_queue:#x}>"
+        )

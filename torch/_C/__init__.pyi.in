@@ -1905,7 +1905,7 @@ class _XpuStreamBase(Stream):
     device_type: _int
 
     device: _device
-    sycl_queue: Any
+    sycl_queue: _int
     priority: _int
 
     def __new__(
@@ -1917,6 +1917,8 @@ class _XpuStreamBase(Stream):
     ) -> _XpuStreamBase: ...
     def query(self) -> _bool: ...
     def synchronize(self) -> None: ...
+    @staticmethod
+    def priority_range() -> Tuple: ...
 
 # Defined in torch/csrc/DataLoader.cpp
 def _set_worker_signal_handlers(
