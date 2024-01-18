@@ -23,34 +23,8 @@ dynamo_expected_failures = {
     "TestCppExtensionJIT.test_custom_compound_op_autograd",
     "TestCppExtensionJIT.test_cpp_frontend_module_has_up_to_date_attributes",
     "TestCppExtensionOpenRgistration.test_open_device_registration",
-    "TestAutogradFallback.test_supports_tensor_lists_mode_nothing",
-    "TestAutogradFallback.test_post_autograd_returns_mix_of_requires_grad_tensors_mode_warn",
-    "TestAutogradFallback.test_cpu_return_self_mode_warn",
-    "TestAutogradFallback.test_base_does_not_require_grad_mode_warn",
-    "TestAutogradFallback.test_undefined_grads_mode_nothing",
-    "TestAutogradFallback.test_undefined_grads_mode_warn",
-    "TestAutogradFallback.test_autograd_function_registered_to_cpu_mode_warn",
-    "TestAutogradFallback.test_cpu_return_self_mode_nothing",
-    "TestAutogradFallback.test_composite_registered_to_cpu_mode_nothing",
-    "TestAutogradFallback.test_undefined_inputs_outputs_mode_nothing",
-    "TestAutogradFallback.test_no_autograd_kernel_inplace_mode_nothing",
-    "TestAutogradFallback.test_post_autograd_returns_leaf_mode_nothing",
-    "TestAutogradFallback.test_inplace_on_tensor_that_does_not_require_grad_mode_nothing",
-    "TestAutogradFallback.test_no_grad_mode_warn",
     "TestAutogradFallback.test_inplace_autograd_function_registered_to_cpu_mode_warn",
-    "TestAutogradFallback.test_no_autograd_kernel_mode_warn",
-    "TestAutogradFallback.test_base_does_not_require_grad_mode_nothing",
-    "TestAutogradFallback.test_composite_registered_to_cpu_mode_warn",
-    "TestAutogradFallback.test_post_autograd_returns_mix_of_requires_grad_tensors_mode_nothing",
-    "TestAutogradFallback.test_no_autograd_kernel_inplace_mode_warn",
-    "TestAutogradFallback.test_no_grad_mode_nothing",
-    "TestAutogradFallback.test_no_autograd_kernel_mode_nothing",
-    "TestAutogradFallback.test_supports_tensor_lists_mode_warn",
-    "TestAutogradFallback.test_post_autograd_returns_leaf_mode_warn",
-    "TestAutogradFallback.test_undefined_inputs_outputs_mode_warn",
-    "TestAutogradFallback.test_inplace_on_tensor_that_does_not_require_grad_mode_warn",
     "TestAutogradFallback.test_inplace_autograd_function_registered_to_cpu_mode_nothing",
-    "TestAutogradFallback.test_autograd_function_registered_to_cpu_mode_nothing",
     "TestFunctionalOptimParity.test_functional_optim_parity_sgd",
     "TestIndexingCPU.test_invalid_index_cpu",
     "NumpyTestsCPU.test_boolean_shape_mismatch_cpu",
@@ -2883,197 +2857,25 @@ dynamo_expected_failures = {
     "TestNamedTensor.test_mv",  # test_namedtensor
     "TestNamedTensor.test_using_unseen_interned_string_bumps_refcount_permanently",  # test_namedtensor
     "TestNamedTensor.test_resize",  # test_namedtensor
-    "TestFX.test_graph_edit_with_proxy",  # test_fx
-    "TestFX.test_native_callable",  # test_fx
-    "TestFX.test_interpreter_default_args",  # test_fx
-    "TestFX.test_tuple_no_subscript",  # test_fx
-    "TestFX.test_symbolic_trace_assert",  # test_fx
-    "TestFX.test_layout",  # test_fx
-    "TestFX.test_interpreter_onthefly_swap",  # test_fx
     "TestFX.test_pytree_concrete",  # test_fx
-    "TestFX.test_wrapped_retrace",  # test_fx
-    "TestFX.test_wrong_target_type",  # test_fx
-    "TestFX.test_delete_unused_submodules_leaf",  # test_fx
-    "TestFX.test_trace_fn_constant",  # test_fx
-    "TestFX.test_interpreter_not_enough_args",  # test_fx
-    "TestFX.test_ast_rewriter_wrap_fn_directly",  # test_fx
-    "TestFX.test_module_deepcopy_edit_nodes",  # test_fx
-    "TestFX.test_stack_traces_with_transformer",  # test_fx
-    "TestFX.test_trace_multiple_funcs",  # test_fx
-    "TestFX.test_string_literal_return",  # test_fx
-    "TestFX.test_interpreter",  # test_fx
-    "TestFX.test_graph_module",  # test_fx
-    "TestFX.test_pretty_print_targets",  # test_fx
-    "TestFX.test_tensor_constant",  # test_fx
-    "TestFX.test_erase_node_error",  # test_fx
-    "TestFX.test_node_tagging",  # test_fx
-    "TestFX.test_transformer_preserves_nn_module_stack_for_get_attr",  # test_fx
-    "TestFX.test_trace_return_dataclass_nested",  # test_fx
-    "TestFX.test_find_uses",  # test_fx
-    "TestFX.test_varargs_concrete",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_Mutation_cpu",  # test_fx
-    "TestFX.test_deepcopy_graph_with_tracer_cls",  # test_fx
-    "TestFX.test_submodule_manipulation_API",  # test_fx
-    "TestFX.test_annotations_with_non_torch_reference_and_no_internal_forward_references",  # test_fx
     "TestFX.test_custom_traceback_raised_when_exception_source_is_graphmodule",  # test_fx
-    "TestFX.test_single_default_arg",  # test_fx
-    "TestFX.test_partial_trace",  # test_fx
-    "TestFX.test_prepend_self",  # test_fx
-    "TestFX.test_transformer_noop",  # test_fx
-    "TestFX.test_enum",  # test_fx
     "TestConstFold.test_check_skip_folding_quant_dequant_pattern",  # test_fx
-    "TestFX.test_nonetype_annotation",  # test_fx
-    "TestFX.test_profiler_ranges_side_effect",  # test_fx
-    "TestFX.test_unpack_dict_better_error",  # test_fx
-    "TestFX.test_custom_import",  # test_fx
-    "TestFX.test_custom_proxy_type_literal",  # test_fx
-    "TestFX.test_pretty_print_node",  # test_fx
-    "TestFX.test_interpreter_other_graph",  # test_fx
-    "TestFX.test_trace_function",  # test_fx
-    "TestFX.test_custom_proxy_type",  # test_fx
     "TestFX.test_immutable_list_pytree_ops",  # test_fx
-    "TestFX.test_throw_out_variant",  # test_fx
-    "TestFX.test_no_mutation",  # test_fx
-    "TestFX.test_fx_and_or",  # test_fx
-    "TestFX.test_interpreter_star_args",  # test_fx
-    "TestFX.test_pickle_nonetype_annotation",  # test_fx
-    "TestFX.test_all_input_nodes",  # test_fx
-    "TestFX.test_script_tensor_constant",  # test_fx
-    "TestFX.test_pickle_torch_custom_ops",  # test_fx
-    "TestFX.test_deepcopy_no_recursion",  # test_fx
-    "TestFX.test_torch_custom_ops",  # test_fx
-    "TestFX.test_ast_rewriter_wrap_with_submodule",  # test_fx
-    "TestFX.test_torch_fx_len",  # test_fx
-    "TestFX.test_construct_root_dict",  # test_fx
-    "TestFX.test_fx_shifts",  # test_fx
-    "TestFX.test_inf_nan",  # test_fx
-    "TestFX.test_lineno_map",  # test_fx
-    "TestFX.test_pretty_print",  # test_fx
-    "TestFX.test_trace_dict_proxy_keys",  # test_fx
-    "TestFX.test_ast_rewriter_wrapped_via_decorator_and_transformed",  # test_fx
-    "TestFX.test_wrap_decorated_function",  # test_fx
-    "TestFX.test_tensor_attribute",  # test_fx
-    "TestFX.test_user_friendly_call_provenance_with_module",  # test_fx
-    "TestFX.test_pickle_custom_import",  # test_fx
-    "TestFX.test_informative_co_filename",  # test_fx
-    "TestFX.test_remove_uses",  # test_fx
-    "TestFX.test_deepcopy_with_submods_params",  # test_fx
-    "TestFX.test_custom_codegen_with_transformer",  # test_fx
     "TestFX.test_annotation_with_future",  # test_fx
-    "TestFX.test_copy_it",  # test_fx
-    "TestFX.test_getitem_subproc",  # test_fx
-    "TestFX.test_leaf_module",  # test_fx
-    "TestFX.test_update_kwargs_api",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_TakeList_cpu",  # test_fx
     "TestPassManager.test_pass_manager",  # test_fx
-    "TestFX.test_control_flow_tracing",  # test_fx
     "TestFX.test_pytree",  # test_fx
     "TestFX.test_user_friendly_call_provenance_with_function",  # test_fx
-    "TestFX.test_wrap_with_submodule",  # test_fx
-    "TestFX.test_example_shape_prop",  # test_fx
-    "TestFX.test_stack_traces",  # test_fx
-    "TestFX.test_tracing_graphmodules_as_leaf_submodules",  # test_fx
-    "TestFX.test_symbolic_trace_sequential",  # test_fx
-    "TestFX.test_script_method_trace",  # test_fx
-    "TestFX.test_return_type_exists",  # test_fx
-    "TestFX.test_transformer_multi_outputs",  # test_fx
-    "TestFX.test_unpack",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_MutationMetadata_cpu",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_MutationTorchTensorCall_cpu",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_MutationInput_cpu",  # test_fx
-    "TestFX.test_metadata_on_ph",  # test_fx
-    "TestFX.test_shape_prop_aggregate",  # test_fx
-    "TestFX.test_custom_codegen",  # test_fx
-    "TestFX.test_namedtuple_return_trace",  # test_fx
-    "TestFX.test_interpreter_partial_eval",  # test_fx
-    "TestFX.test_reserved_getattr",  # test_fx
-    "TestFX.test_deepcopy_graphmodule_with_transform",  # test_fx
-    "TestFX.test_multi_insert_point",  # test_fx
-    "TestFX.test_pretty_print_graph",  # test_fx
-    "TestFX.test_graph_module_replicate_for_dp",  # test_fx
     "TestFX.test_fn_type_annotation_empty",  # test_fx
     "TestFX.test_immutable_dict_pytree_ops",  # test_fx
-    "TestFX.test_reassign_args_kwargs_uses",  # test_fx
-    "TestFX.test_fn_type_annotations",  # test_fx
-    "TestFX.test_custom_proxy_input_dependent_control_flow",  # test_fx
-    "TestFX.test_interpreter_run_node_override",  # test_fx
-    "TestFX.test_ctx_mgr",  # test_fx
-    "TestFX.test_wrap",  # test_fx
-    "TestFX.test_deepcopy_recursion_depth",  # test_fx
-    "TestFX.test_wrapped_method",  # test_fx
-    "TestFX.test_wrong_topo",  # test_fx
-    "TestFX.test_autowrap_functions",  # test_fx
-    "TestFX.test_fx_create_arg",  # test_fx
-    "TestFX.test_regular_and_default_args",  # test_fx
-    "TestFX.test_inf_nan_kwds",  # test_fx
-    "TestFX.test_wrapped_via_decorator_and_transformed",  # test_fx
-    "TestFX.test_ast_rewriter_reassigns_submodules",  # test_fx
-    "TestFX.test_ast_rewriter_rewrites_assert",  # test_fx
-    "TestFX.test_annotations_with_forward_references",  # test_fx
-    "TestFX.test_ast_rewriter_rewrites_assert_with_message",  # test_fx
-    "TestFX.test_matmul_tracing",  # test_fx
-    "TestFX.test_torch_op_overloads",  # test_fx
-    "TestFX.test_args_kwargs_no_self",  # test_fx
-    "TestFX.test_custom_traceback_not_raised_when_exception_source_is_submodule",  # test_fx
-    "TestFX.test_imul_code_print",  # test_fx
     "TestCommonPass.test_correctness_factory_CSEPass_MutationFactory_cpu",  # test_fx
-    "TestFX.test_inline_graph",  # test_fx
-    "TestFX.test_trace_return_dataclass",  # test_fx
-    "TestFX.test_get_torch_func_signature",  # test_fx
     "TestCommonPass.test_correctness_factory_CSEPass_FactoryFunctionCall_cpu",  # test_fx
-    "TestFX.test_direct_param_use",  # test_fx
-    "TestFX.test_multiple_default_args",  # test_fx
-    "TestFX.test_tensor_attribute_coalseced",  # test_fx
-    "TestFX.test_insertion_point",  # test_fx
-    "TestFX.test_namedtuple_return_qualname",  # test_fx
-    "TestFX.test_annotations_with_non_torch_reference_and_internal_forward_references",  # test_fx
-    "TestFX.test_concrete_arg_none_assert",  # test_fx
-    "TestFX.test_torch_fx_getattr",  # test_fx
-    "TestFX.test_named_tuple_inlined",  # test_fx
-    "TestFX.test_wrap_fn_directly",  # test_fx
-    "TestFX.test_graph_fns",  # test_fx
-    "TestFX.test_args_kwargs",  # test_fx
-    "TestFX.test_return_tuple",  # test_fx
-    "TestFX.test_trace_return_namedtuple",  # test_fx
-    "TestFX.test_ast_rewriter_wrapped_via_decorator",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_ReturnList_cpu",  # test_fx
-    "TestFX.test_replace_input",  # test_fx
-    "TestFX.test_sqrt",  # test_fx
-    "TestFX.test_remove_uses_with_custom_filter",  # test_fx
-    "TestFX.test_empty_graph_codegen",  # test_fx
-    "TestFX.test_deepcopy_tracer",  # test_fx
-    "TestFX.test_insert_arg",  # test_fx
-    "TestFX.test_interpreter_with_codegen",  # test_fx
-    "TestFX.test_torchbind_class_attribute_in_fx",  # test_fx
-    "TestFX.test_pickle_graphmodule",  # test_fx
-    "TestFX.test_graph_module_init_buffer_param_copied_mod_init",  # test_fx
-    "TestFX.test_update_args_api",  # test_fx
-    "TestFX.test_nn_module_stack",  # test_fx
-    "TestFX.test_graph_unique_names",  # test_fx
-    "TestFX.test_trace_dict_int_keys",  # test_fx
-    "TestFX.test_custom_proxy_dynamic_value",  # test_fx
-    "TestFX.test_typename_print",  # test_fx
-    "TestFX.test_move_before",  # test_fx
     "TestFXAPIBackwardCompatibility.test_public_api_surface",  # test_fx
-    "TestFX.test_copy_no_remap",  # test_fx
-    "TestFX.test_shape_prop_layout",  # test_fx
-    "TestFX.test_shape_prop_layout_3d",  # test_fx
-    "TestFX.test_update_args_kwargs_yells_at_you",  # test_fx
-    "TestFX.test_transformer_op_swap",  # test_fx
-    "TestFX.test_unpack_list_better_error",  # test_fx
-    "TestFX.test_graph_module_init_buffer_param_copied_dict_init",  # test_fx
-    "TestFX.test_disallow_override",  # test_fx
-    "TestFX.test_fx_stateless",  # test_fx
-    "TestFX.test_sequential",  # test_fx
-    "TestFX.test_dict",  # test_fx
-    "TestFX.test_snake_case",  # test_fx
-    "TestFX.test_deepcopy_graphmodule",  # test_fx
-    "TestFX.test_annotations_with_no_forward_references",  # test_fx
-    "TestFX.test_wrapped_via_decorator",  # test_fx
-    "TestFX.test_graph_unique_names_manual",  # test_fx
-    "TestFX.test_ast_rewriter_wrap",  # test_fx
-    "TestFX.test_torchbind_class_attribute_in_fx_tensor_arg",  # test_fx
-    "TestFX.test_ellipsis",  # test_fx
     "TestContentStoreCPU.test_repeated_hash_cpu",  # test_content_store
     "TestLazyTensor.test_tensor_ctr",  # lazy/test_ts_opinfo
     "TestAnalyze.test_trace_dependencies",  # test_package
@@ -3436,348 +3238,6 @@ dynamo_expected_failures = {
     "TestComposability.test_q_prep_before_s_prep",  # test_ao_sparsity
     "TestComposability.test_s_prep_before_fusion",  # test_ao_sparsity
     "TestBaseStructuredSparsifier.test_prepare_conv2d",  # test_ao_sparsity
-    "TestPeephole.test_peephole_slice_two_empty_args",  # test_jit
-    "TestUnion.test_union_argument_order_is_ignored_container",  # test_jit
-    "TestUnion.test_union_optional_of_union_is_flattened",  # test_jit
-    "TestTorchbind.test_torchbind_return_instance_from_method",  # test_jit
-    "TestPeephole.test_peephole_dict_getitem_no_optimization_dict_modified",  # test_jit
-    "TestAsync.test_async_script_multi_forks",  # test_jit
-    "TestPeephole.test_peephole_dict_len_no_optimization_overlapping_keys",  # test_jit
-    "TestTorchbind.test_torchbind_getstate",  # test_jit
-    "TestUnion.test_union_does_not_replace_existing_annotated_type_empty_container",  # test_jit
-    "TestList.test_comprehension_iterable",  # test_jit
-    "TestPeephole.test_short_circuit_optimization",  # test_jit
-    "TestTorchbind.test_default_args",  # test_jit
-    "TestTorchbind.test_profiler_custom_op",  # test_jit
-    "TestNnapiBackend.test_pointwise_unary",  # test_jit
-    "TestMisc.test_parse_ir_annotate",  # test_jit
-    "TestTorchbind.test_torchbind_getattr",  # test_jit
-    "TestMisc.test_parse_ir_single_element_tensor_positive",  # test_jit
-    "TestTyping.test_tuple_keyword",  # test_jit
-    "TestCustomOperators.test_script_graph_contains_custom_op",  # test_jit
-    "TestTorchbind.test_torchbind_return_instance",  # test_jit
-    "TestTensorBuiltins.test_tensor_item",  # test_jit
-    "TestIsinstance.test_tuple_no_contained_type",  # test_jit
-    "TestTorchbind.test_torchbind_class_attr_recursive",  # test_jit
-    "TestGenerator.test_script",  # test_jit
-    "TestPeephole.test_peephole_dict_len",  # test_jit
-    "TestRemoveMutation.test_if_output",  # test_jit
-    "TestIsinstance.test_tuple_tensor",  # test_jit
-    "TestTorchbind.test_torchbind_pass_wrong_type",  # test_jit
-    "TestTypesAndAnnotation.test_type_annotate_py3",  # test_jit
-    "TestNnapiBackend.test_slice",  # test_jit
-    "TestTorchbind.test_torchbind_attr_exception",  # test_jit
-    "TestMisc.test_subexpression_Optional",  # test_jit
-    "TestDeviceAnalysis.test_device_apply",  # test_jit
-    "TestWarn.test_warn_once_per_func_in_loop",  # test_jit
-    "TestNnapiBackend.test_qlinear",  # test_jit
-    "TestList.test_list_variance",  # test_jit
-    "TestPythonBuiltinOP.test_pow",  # test_jit
-    "TestTorchbind.test_torchbind_def_property_readwrite",  # test_jit
-    "TestTyping.test_dict_invalid_annotations",  # test_jit
-    "TestIsinstance.test_list_tensor",  # test_jit
-    "TestAwait.test_await_out_of_interpreter",  # test_jit
-    "TestPeephole.test_peephole_list_len",  # test_jit
-    "TestPeephole.test_peephole_dict_getitem_no_optimization_overlapping_keys",  # test_jit
-    "TestRemoveMutation.test_aten_inplace",  # test_jit
-    "TestAsync.test_trace_fork_wait",  # test_jit
-    "TestPythonBuiltinOP.test_inf",  # test_jit
-    "TestTyping.test_bool_list_io",  # test_jit
-    "TestUnion.test_union_redundant_arguments_are_skipped_subtyping",  # test_jit
-    "TestMisc.test_list_literal_infer",  # test_jit
-    "TestHash.test_hash_tuple_nested_unhashable_type",  # test_jit
-    "TestNnapiBackend.test_quantize",  # test_jit
-    "TestGenerator.test_default_generator",  # test_jit
-    "TestPythonBuiltinOP.test_random",  # test_jit
-    "TestScriptDict.test_reference_semantics",  # test_jit
-    "TestPeephole.test_peephole_list_ops",  # test_jit
-    "TestAtenPow.test_aten_pow_zero_negative_exponent",  # test_jit
-    "TestCustomOperators.test_dynamic_op_registry",  # test_jit
-    "TestStringFormatting.test_string_interpolation_with_too_few_arguments",  # test_jit
-    "TestNnapiBackend.test_mean",  # test_jit
-    "TestStringFormatting.test_string_interpolation_with_exponent_placeholder_and_string_variable",  # test_jit
-    "TestTensorBuiltins.test_scalar_to_num_conversions",  # test_jit
-    "TestFrozenOptimizations.test_collapse_adjacent_conversions",  # test_jit
-    "TestRecursiveScript.test_script_basic",  # test_jit
-    "TestComplex.test_complex_parse",  # test_jit
-    "TestUpgraders.test_aten_full_other_variants",  # test_jit
-    "TestParametrization.test_scriptable",  # test_jit
-    "TestSymbolicShapeAnalysis.test_shared_shape_graph",  # test_jit
-    "TestBuiltins.test_del",  # test_jit
-    "TestPeephole.test_peephole_int",  # test_jit
-    "TestPeephole.test_refine_integer_values",  # test_jit
-    "TestNnapiBackend.test_linear",  # test_jit
-    "TestTorchbind.test_torchbind_save_load",  # test_jit
-    "TestAsync.test_async_grad_guard_no_grad",  # test_jit
-    "TestPeephole.test_peephole_dict_getitem_no_optimization_get_input_arg",  # test_jit
-    "TestRemoveMutation.test_special_mapped_op",  # test_jit
-    "TestBatchMM.test_batch_mm_prohibited_mutation_if_node",  # test_jit
-    "TestSymbolicShapeAnalysis.test_register_function_error_checking",  # test_jit
-    "TestIsinstance.test_dict_no_contained_type",  # test_jit
-    "TestRemoveMutation.test_list_indexing_removal",  # test_jit
-    "TestNnapiBackend.test_adaptive_avg_pool2d",  # test_jit
-    "TestAsync.test_async_script_multi_waits",  # test_jit
-    "TestAliasAnalysis.test_recursive_calls",  # test_jit
-    "TestTorchbind.test_torchbind_def_property_getter_setter",  # test_jit
-    "TestTypesAndAnnotation.test_pep585_type",  # test_jit
-    "TestUnion.test_check_union_annotation",  # test_jit
-    "TestUnion.test_union_as_dict_key",  # test_jit
-    "TestPythonBuiltinOP.test_advancedindex",  # test_jit
-    "TestModels.test_vae_quantized",  # test_jit
-    "TestAsync.test_trace_fork_wait_inline",  # test_jit
-    "TestUnion.test_union_type_refinement_statically_true",  # test_jit
-    "TestBackendsWithCompiler.test_errors",  # test_jit
-    "TestTorchbind.test_torchbind_instantiate_missing_class",  # test_jit
-    "TestMisc.test_subexpression_List_Future",  # test_jit
-    "TestPeephole.test_peephole_with_writes",  # test_jit
-    "TestSlice.test_slice_dynamic_index",  # test_jit
-    "TestBatchMM.test_batch_mm_no_mutation",  # test_jit
-    "TestGenerator.test_generator_arg",  # test_jit
-    "TestComplex.test_tensor_attributes",  # test_jit
-    "TestMisc.test_if_returning_any",  # test_jit
-    "TestBatchMM.test_batch_mm_prohibited_mutation_multiple_adds",  # test_jit
-    "TestPeephole.test_peephole_slice_all_three_args",  # test_jit
-    "TestMisc.test_future_isinstance",  # test_jit
-    "TestAwait.test_nowait",  # test_jit
-    "TestTorchbind.test_torchbind_optional_explicit_attr",  # test_jit
-    "TestMisc.test_subexpression_Future_annotate",  # test_jit
-    "TestRecursiveScript.test_inner_traced_module",  # test_jit
-    "TestBackendsWithCompiler.test_execution",  # test_jit
-    "TestTyping.test_optional_conversion",  # test_jit
-    "TestPythonBuiltinOP.test_add",  # test_jit
-    "TestList.test_mutable_list_pop_empty",  # test_jit
-    "TestMisc.test_subexpression_Tuple_int_int_Future",  # test_jit
-    "TestTensorBuiltins.test_method_on_number",  # test_jit
-    "TestUnion.test_union_with_scalar_values",  # test_jit
-    "TestNnapiBackend.test_conv2d_transpose",  # test_jit
-    "TestSaveLoadForOpVersion.test_versioned_div_tensor_inplace",  # test_jit
-    "TestList.test_to_list",  # test_jit
-    "TestTypeSharing.test_script_function_attribute_same",  # test_jit
-    "TestUnion.test_union_subclasses_larger_union",  # test_jit
-    "TestBackends.test_execution",  # test_jit
-    "TestPythonBindings.test_cu_create_function",  # test_jit
-    "TestPeephole.test_peephole_len_list",  # test_jit
-    "TestMisc.test_joined_str",  # test_jit
-    "TestSymbolicShapeAnalysis.test_stitching_concat",  # test_jit
-    "TestCustomOperators.test_calling_scripted_custom_op",  # test_jit
-    "TestTyping.test_dict_type_refinement_annotation_key_mismatch",  # test_jit
-    "TestBatchMM.test_batch_mm_side_prohibited_mutation_uncommon_side",  # test_jit
-    "TestWarn.test_warn_only_once_in_loop_func",  # test_jit
-    "TestUnion.test_union_type_refinement_statically_false",  # test_jit
-    "TestList.test_mutable_list_function_inline",  # test_jit
-    "TestLogging.test_counter_aggregation",  # test_jit
-    "TestStringFormatting.test_string_interpolation_with_char_placeholder_and_true_string_variable",  # test_jit
-    "TestTyping.test_dict_comprehension_scope",  # test_jit
-    "TestTyping.test_singleton_tuple_unpack",  # test_jit
-    "TestNnapiBackend.test_tensor_input",  # test_jit
-    "TestPeephole.test_peephole_type_refinements",  # test_jit
-    "TestPythonBuiltinOP.test_index",  # test_jit
-    "TestSymbolicShapeAnalysis.test_size_and_sizes",  # test_jit
-    "TestMisc.test_str_refine_any",  # test_jit
-    "TestPeephole.test_peephole_slice_optimization_not_applied_list_modified",  # test_jit
-    "TestTorchbind.test_torchbind_no_init",  # test_jit
-    "TestHash.test_hash_tensor",  # test_jit
-    "TestNnapiBackend.test_to",  # test_jit
-    "TestNnapiBackend.test_max_pool2d",  # test_jit
-    "TestUpgraders.test_aten_test_serialization",  # test_jit
-    "TestTorchbind.test_torchbind_tracing_nested",  # test_jit
-    "TestTorchbind.test_torchbind_return_tuple",  # test_jit
-    "TestHash.test_hash_device",  # test_jit
-    "TestAutodiffSubgraphSlicing.test_chunk_constant_script_ad",  # test_jit
-    "TestPythonBindings.test_aliasdb",  # test_jit
-    "TestTorchbind.test_torchbind_class_attribute",  # test_jit
-    "TestPeephole.test_peephole_with_non_output_writes",  # test_jit
-    "TestTyping.test_dict_comprehension_with_type_annotation",  # test_jit
-    "TestNnapiBackend.test_softmax",  # test_jit
-    "TestTyping.test_list_type_refinement_annotation_element_mismatch",  # test_jit
-    "TestPeephole.test_peephole_dict_getitem_simple",  # test_jit
-    "TestRemoveMutation.test_lists_append",  # test_jit
-    "TestAwait.test_await_multiout_save",  # test_jit
-    "TestTyping.test_dict_in_not_in",  # test_jit
-    "TestTorchbind.test_torchbind_take_as_arg",  # test_jit
-    "TestTyping.test_dict_type_refinement_annotation_value_mismatch",  # test_jit
-    "TestOpDecompositions.test_registered_decomposition",  # test_jit
-    "TestUnion.test_union_branching_does_not_autoinfer_undeclared_union",  # test_jit
-    "TestWarn.test_warn_multiple_calls_multiple_warnings",  # test_jit
-    "TestAsync.test_async_python",  # test_jit
-    "TestPythonBuiltinOP.test_mul",  # test_jit
-    "TestSymbolicShapeAnalysis.test_if_propagation",  # test_jit
-    "TestPeephole.test_peephole_slice_one_empty_arg",  # test_jit
-    "TestPythonBuiltinOP.test_triple",  # test_jit
-    "TestNnapiBackend.test_upsample_nearest2d",  # test_jit
-    "TestTyping.test_tuple_specialization",  # test_jit
-    "TestWarn.test_warn_once_per_func",  # test_jit
-    "TestUnion.test_union_argument_order_is_ignored",  # test_jit
-    "TestWarn.test_warn_multiple_calls_same_func_diff_stack",  # test_jit
-    "TestPeephole.test_peephole_optional_refine",  # test_jit
-    "TestPeephole.test_peephole_no_output_aliasing",  # test_jit
-    "TestMisc.test_parse_ir_single_element_tensor_negative",  # test_jit
-    "TestDataclasses.test__post_init__",  # test_jit
-    "TestMisc.test_subexpression_Dict_int_Future",  # test_jit
-    "TestScriptList.test_reference_semantics",  # test_jit
-    "TestUnion.test_union_redundant_arguments_are_skipped_container",  # test_jit
-    "TestList.test_extend_list_immutable",  # test_jit
-    "TestPeephole.test_peephole",  # test_jit
-    "TestBatchMM.test_batch_mm_permitted_mutation",  # test_jit
-    "TestNnapiBackend.test_multi_output",  # test_jit
-    "TestUnion.test_union_redundant_arguments_are_skipped_optional",  # test_jit
-    "TestDataclasses.test_use_unregistered_dataclass_raises",  # test_jit
-    "TestPeephole.test_peephole_slice_optimization_not_applied_non_const_args",  # test_jit
-    "TestNnapiBackend.test_detach",  # test_jit
-    "TestTyping.test_namedtuple_py2",  # test_jit
-    "TestWarn.test_warn",  # test_jit
-    "TestPeephole.test_peephole_dynamic",  # test_jit
-    "TestNnapiBackend.test_prelu",  # test_jit
-    "TestParametrization.test_traceable",  # test_jit
-    "TestFunctionalBlocks.test_subgraph_creation",  # test_jit
-    "TestNnapiBackend.test_hardtanh",  # test_jit
-    "TestFreezing.test_freeze_module_with_fork_calling_module_method",  # test_jit
-    "TestIsinstance.test_list_no_contained_type",  # test_jit
-    "TestDtypeAnalysis.test_unary",  # test_jit
-    "TestMisc.test_unsafe_hacked_twin",  # test_jit
-    "TestNnapiBackend.test_conv2d",  # test_jit
-    "TestUnion.test_union_does_not_replace_existing_annotated_type_union",  # test_jit
-    "TestAsync.test_async_grad_guard_with_grad",  # test_jit
-    "TestTypesAndAnnotation.test_types_as_values",  # test_jit
-    "TestSymbolicShapeAnalysis.test_convolution_backward",  # test_jit
-    "TestPeephole.test_normalized_is_op",  # test_jit
-    "TestSymbolicShapeAnalysis.test_write",  # test_jit
-    "TestUnion.test_unions_of_a_single_argument_vanish",  # test_jit
-    "TestTorchbind.test_torchbind_def_property_just_getter",  # test_jit
-    "TestPythonBuiltinOP.test_str_to_float",  # test_jit
-    "TestIsinstance.test_list_tensor_type_true",  # test_jit
-    "TestRemoveMutation.test_lists_insert",  # test_jit
-    "TestNnapiBackend.test_cat",  # test_jit
-    "TestMKLDNNReinplacing.test_always_alive_values",  # test_jit
-    "TestPeephole.test_normalized_rsub",  # test_jit
-    "TestUnion.test_unions_of_unions_are_flattened",  # test_jit
-    "TestAwait.test_await_isinstance",  # test_jit
-    "TestAsync.test_future_subtyping",  # test_jit
-    "TestComplex.test_complex_constants_and_ops",  # test_jit
-    "TestPeephole.test_normalized_isnot_op",  # test_jit
-    "TestTorchbind.test_torchbind_deepcopy",  # test_jit
-    "TestTorchbind.test_torchbind_python_deepcopy",  # test_jit
-    "TestTyping.test_opt_opt_refinement",  # test_jit
-    "TestList.test_tensor_list_index_not_existing",  # test_jit
-    "TestTyping.test_tuple_io",  # test_jit
-    "TestBackends.test_save_load",  # test_jit
-    "TestNnapiBackend.test_qadd",  # test_jit
-    "TestPythonIr.test_param_strides",  # test_jit
-    "TestPeephole.test_peephole_dict_getitem_no_optimization_missing_key",  # test_jit
-    "TestPythonBindings.test_cu_get_functions",  # test_jit
-    "TestBuiltins.test_del_multiple_operands",  # test_jit
-    "TestBatchMM.test_batch_mm_side_permitted_mutation",  # test_jit
-    "TestList.test_del",  # test_jit
-    "TestPythonBindings.test_graph_iterator_keepalive",  # test_jit
-    "TestPythonBuiltinOP.test_adv_indexing_list",  # test_jit
-    "TestList.test_extend_list_mutable",  # test_jit
-    "TestPeephole.test_peephole_arith",  # test_jit
-    "TestMisc.test_script_many_decorators",  # test_jit
-    "TestPeephole.test_peephole_dict_getitem_no_optimization_unsupported_type",  # test_jit
-    "TestMisc.test_legacy_tensor_constructor",  # test_jit
-    "TestStringFormatting.test_string_interpolation_with_unknown_format_specifier",  # test_jit
-    "TestList.test_list_index_not_existing",  # test_jit
-    "TestTorchbind.test_staticmethod",  # test_jit
-    "TestWith.test_with_no_grad",  # test_jit
-    "TestIgnorableArgs.test_add_out_ignorable_args",  # test_jit
-    "TestBatchMM.test_batch_mm_side_prohibited_mutation_common_side",  # test_jit
-    "TestSlice.test_tuple_slicing",  # test_jit
-    "TestList.test_list_keyword",  # test_jit
-    "TestAsync.test_async_script_error",  # test_jit
-    "TestSlice.test_slice_kwarg",  # test_jit
-    "TestDtypeAnalysis.test_conv_no_mixed_args",  # test_jit
-    "TestNnapiBackend.test_flatten",  # test_jit
-    "TestFreezing.test_freeze_module_with_fork2",  # test_jit
-    "TestNnapiBackend.test_compile_spec_santiy",  # test_jit
-    "TestSlice.test_slice_tensor_multidim",  # test_jit
-    "TestTypeSharing.test_script_function_attribute_different",  # test_jit
-    "TestAwait.test_jit_trace",  # test_jit
-    "TestTyping.test_optional_refinement",  # test_jit
-    "TestUnion.test_union_T_None_is_equivalent_to_optional_T",  # test_jit
-    "TestNnapiBackend.test_pointwise_binary",  # test_jit
-    "TestUnion.test_union_does_not_replace_existing_annotated_type",  # test_jit
-    "TestUnion.test_union_with_collections",  # test_jit
-    "TestDataclasses.test_comparators",  # test_jit
-    "TestRemoveMutation.test_if_output_fail",  # test_jit
-    "TestAwait.test_await_func_arg",  # test_jit
-    "TestPeephole.test_integer_refinement",  # test_jit
-    "TestBatchMM.test_batch_mm_prohibited_mutation",  # test_jit
-    "TestIsinstance.test_optional_no_contained_type",  # test_jit
-    "TestAsync.test_async_parsing",  # test_jit
-    "TestFrozenOptimizations.test_conv_add_folding",  # test_jit
-    "TestAwait.test_script",  # test_jit
-    "TestStringFormatting.test_string_interpolation_with_too_many_arguments",  # test_jit
-    "TestList.test_comprehensions_two_comps",  # test_jit
-    "TestModels.test_time_sequence_prediction",  # test_jit
-    "TestTypesAndAnnotation.test_tuple_no_element_type_annotation",  # test_jit
-    "TestSlice.test_slice_tensor",  # test_jit
-    "TestList.test_copy_list_mutable",  # test_jit
-    "TestUpgraders.test_populated_upgrader_graph",  # test_jit
-    "TestAliasAnalysis.test_nested_list_construct_not_wildcard",  # test_jit
-    "TestTypesAndAnnotation.test_optional_no_element_type_annotation",  # test_jit
-    "TestUnion.test_union_type_refinement_tuple_rhs_union",  # test_jit
-    "TestDtypeAnalysis.test_custom_rules",  # test_jit
-    "TestScriptProfile.test_section",  # test_jit
-    "TestPeephole.test_peephole_add_zero",  # test_jit
-    "TestIsinstance.test_dict_tensor",  # test_jit
-    "TestPythonBuiltinOP.test_gather",  # test_jit
-    "TestPythonBindings.test_invalidation",  # test_jit
-    "TestRecursiveScript.test_script_function_attribute",  # test_jit
-    "TestScriptProfile.test_script",  # test_jit
-    "TestNnapiBackend.test_avg_pool2d",  # test_jit
-    "TestTorchbind.test_torchbind_tracing",  # test_jit
-    "TestList.test_no_element_type_annotation",  # test_jit
-    "TestDtypeAnalysis.test_combined",  # test_jit
-    "TestModels.test_snli_quantized",  # test_jit
-    "TestComplex.test_complex_list_sum",  # test_jit
-    "TestTypesAndAnnotation.test_unimported_type_resolution",  # test_jit
-    "TestUnion.test_union_variable_can_be_reassigned",  # test_jit
-    "TestTorchbind.test_torchbind_take_instance_as_method_arg",  # test_jit
-    "TestTyping.test_namedtuple_good_error",  # test_jit
-    "TestTypesAndAnnotation.test_bad_types",  # test_jit
-    "TestUnion.test_union_redundant_arguments_are_skipped",  # test_jit
-    "TestStringFormatting.test_string_interpolation_with_percent_in_string",  # test_jit
-    "TestUpgraders.test_populated_test_upgrader_graph",  # test_jit
-    "TestWarn.test_warn_only_once",  # test_jit
-    "TestNnapiBackend.test_reshape",  # test_jit
-    "TestSymbolicShapeAnalysis.test_shape_analysis",  # test_jit
-    "TestPeephole.test_peephole_dict_len_no_optimization_keys_might_overlap",  # test_jit
-    "TestSymbolicShapeAnalysis.test_squeeze_dims",  # test_jit
-    "TestMisc.test_broadcasting_list",  # test_jit
-    "TestSlice.test_slice_tensor_multidim_with_dots",  # test_jit
-    "TestFunctionalToInplaceActivation.test_no_functional_to_inplace",  # test_jit
-    "TestNnapiBackend.test_pointwise_binary_const",  # test_jit
-    "TestNnapiBackend.test_seblock_mul",  # test_jit
-    "TestTorchbind.test_torchbind_lambda_method",  # test_jit
-    "TestAsync.test_async_script",  # test_jit
-    "TestTypesAndAnnotation.test_ignore_with_types",  # test_jit
-    "TestStringFormatting.test_string_interpolation_with_digit_placeholder_and_string_variable",  # test_jit
-    "TestTorchbind.test_torchbind_pickle_serialization",  # test_jit
-    "TestBackends.test_errors",  # test_jit
-    "TestAsync.test_async_script_nested",  # test_jit
-    "TestList.test_slice_index",  # test_jit
-    "TestTyping.test_tuple_assignments",  # test_jit
-    "TestAwait.test_await_python",  # test_jit
-    "TestPeephole.test_peephole_dict_len_no_optimization_unsupported_type",  # test_jit
-    "TestTorchbind.test_torchbind",  # test_jit
-    "TestTyping.test_for_tuple_unpack",  # test_jit
-    "TestPeephole.test_peephole_dict_getitem_no_optimization_keys_might_overlap",  # test_jit
-    "TestList.test_copy_list_immutable",  # test_jit
-    "TestPythonBuiltinOP.test_slice",  # test_jit
-    "TestPythonBuiltinOP.test_stepped_tuple_slicing",  # test_jit
-    "TestLogging.test_trace_numeric_counter",  # test_jit
-    "TestNnapiBackend.test_dequantize",  # test_jit
-    "TestNnapiBackend.test_log_softmax",  # test_jit
-    "TestIsinstance.test_type_refinement",  # test_jit
-    "TestOpDecompositions.test_op_decomposition",  # test_jit
-    "TestTorchbind.test_lambda_as_constructor",  # test_jit
-    "TestList.test_mutable_list_remove_not_existing",  # test_jit
-    "TestIsinstance.test_optional",  # test_jit
-    "TestUnion.test_union_branching_does_not_widen_existing_inferred_type",  # test_jit
-    "TestNnapiBackend.test_unsqueeze",  # test_jit
-    "TestTensorMethods.test_getitem",  # test_jit
-    "TestSymbolicShapeAnalysis.test_cross_entropy_loss",  # test_jit
-    "TestTyping.test_list_unification",  # test_jit
     "TestQuantizeFx.test_conv_transpose_relu_not_reference",  # test_quantization
     "TestPT2ERepresentation.test_qdq",  # test_quantization
     "TestQuantizeFx.test_custom_module_class",  # test_quantization
@@ -3806,7 +3266,6 @@ dynamo_expected_failures = {
     "TestQuantizedOps.test_equal",  # test_quantization
     "TestQuantizedOps.test_qelu",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_relu_fusion_no_conv_bias",  # test_quantization
-    "TestQuantizePT2EX86Inductor.test_flatten_recipe",  # test_quantization
     "TestQuantizedTensor.test_qtensor_equal",  # test_quantization
     "TestQuantizedTensor.test_qtensor_index_put_cpu",  # test_quantization
     "TestQuantizedConv.test_qconv3d_relu",  # test_quantization
@@ -3815,7 +3274,6 @@ dynamo_expected_failures = {
     "TestQuantizedTensor.test_choose_qparams_optimized",  # test_quantization
     "TestXNNPACKQuantizer.test_linear_gru",  # test_quantization
     "TestDynamicQuantizedModule.test_cell_api",  # test_quantization
-    "TestFuseFx.test_fuse_conv_bn_add_relu_onednn",  # test_quantization
     "TestQuantizedOps.test_interpolate",  # test_quantization
     "TestQuantizeFx.test_conv_transpose_reference",  # test_quantization
     "TestPT2ERepresentation.test_conv2d",  # test_quantization
@@ -3862,14 +3320,12 @@ dynamo_expected_failures = {
     "TestXNNPACKQuantizer.test_linear_relu",  # test_quantization
     "TestSerialization.test_linear_relu_package_quantization_transforms",  # test_quantization
     "TestDynamicQuantizedModule.test_gru_api",  # test_quantization
-    "TestQuantizeFx.test_torch_unsqueeze_nontensor_args_not_observed",  # test_quantization
     "TestQuantizeFx.test_qconfig_for_call_method",  # test_quantization
     "TestXNNPACKQuantizer.test_conv1d_with_conv2d",  # test_quantization
     "TestQuantizedOps.test_qsoftmax",  # test_quantization
     "TestQuantizedEmbeddingOps.test_embedding_bag_2bit",  # test_quantization
     "TestObserver.test_per_tensor_observers",  # test_quantization
     "TestQuantizedTensor.test_qtensor_per_channel_load_save",  # test_quantization
-    "TestQuantizePT2EX86Inductor.test_cat_recipe_single_input",  # test_quantization
     "TestQuantizedOps.test_max_pool2d_nhwc",  # test_quantization
     "TestFXGraphMatcher.test_simple_fun",  # test_quantization
     "TestEqualizeFx.test_selective_equalization",  # test_quantization
@@ -3884,7 +3340,6 @@ dynamo_expected_failures = {
     "TestPT2ERepresentation.test_add_relu",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_fusion_no_conv_bias",  # test_quantization
     "TestQuantizeFxOps.test_layer_norm",  # test_quantization
-    "TestQuantizeFx.test_quantized_input_quantized_output",  # test_quantization
     "TestQuantizeFxOps.test_add_relu",  # test_quantization
     "TestQuantizedOps.test_qthreshold",  # test_quantization
     "TestXNNPACKQuantizer.test_dynamic_linear_with_conv",  # test_quantization
@@ -3978,15 +3433,12 @@ dynamo_expected_failures = {
     "TestBackendConfig.test_backend_op_config_from_dict",  # test_quantization
     "TestFakeQuantizeOps.test_learnable_backward_per_tensor_cuda",  # test_quantization
     "TestXNNPACKQuantizer.test_linear_with_dynamic_shape",  # test_quantization
-    "TestQuantizeFx.test_backend_config_scale_min",  # test_quantization
     "TestQuantizedOps.test_empty_batch",  # test_quantization
     "TestQuantizeFx.test_symmetric_qnnpack_qconfig_mapping",  # test_quantization
     "TestQuantizedEmbeddingOps.test_embedding_bag_2d_indices",  # test_quantization
-    "TestQuantizeFx.test_fp32_input_fp32_output",  # test_quantization
     "TestQuantizeFx.test_symmetric_qnnpack_qat_qconfig_mapping",  # test_quantization
     "TestQuantizePT2E.test_save_load",  # test_quantization
     "TestPT2ERepresentation.test_qdq_per_channel",  # test_quantization
-    "TestQuantizeFx.test_torch_transpose_nontensor_args_not_observed",  # test_quantization
     "TestQuantizeFxOps.test_prelu",  # test_quantization
     "TestDynamicQuantizedOps.test_dynamic_conv1d",  # test_quantization
     "TestFXNumericSuiteCoreAPIs.test_match_activations_fqn",  # test_quantization
@@ -3995,7 +3447,6 @@ dynamo_expected_failures = {
     "TestQuantizeFx.test_conv_linear_not_reference",  # test_quantization
     "TestFakeQuantizeOps.test_forward_per_channel",  # test_quantization
     "TestQuantizeFx.test_qconfig_none",  # test_quantization
-    "TestQuantizePT2EX86Inductor.test_cat_recipe_same_inputs",  # test_quantization
     "TestQuantizeFx.test__convert_to_reference_decomposed_fx_per_channel_quant",  # test_quantization
     "TestPadding.test_reflection_pad2d",  # test_quantization
     "TestStaticQuantizedModule.test_quant_dequant_api",  # test_quantization
@@ -4007,9 +3458,7 @@ dynamo_expected_failures = {
     "TestQuantizedConv.test_qconv3d_pt2e",  # test_quantization
     "TestQuantizedOps.test_qcelu",  # test_quantization
     "TestReferenceQuantizedModule.test_sparse",  # test_quantization
-    "TestQuantizeFx.test_prepare_custom_config_from_dict",  # test_quantization
     "TestQuantizedOps.test_max_pool3d",  # test_quantization
-    "TestQuantizePT2EX86Inductor.test_maxpool2d_recipe",  # test_quantization
     "TestPadding.test_reflection_pad1d",  # test_quantization
     "TestQuantizedConv.test_qconv2d_sum_relu_pt2e",  # test_quantization
     "TestDynamicQuantizedOps.test_qlstmGRU",  # test_quantization
@@ -4019,7 +3468,6 @@ dynamo_expected_failures = {
     "TestUtils.test_get_fqn_to_example_inputs_default_kwargs",  # test_quantization
     "TestFXNumericSuiteCoreAPIs.test_extract_weights_linear_fun_ptq",  # test_quantization
     "TestQuantizeFxOps.test_cat",  # test_quantization
-    "TestFuseFx.test_fuse_convtranspose_bn_eval",  # test_quantization
     "TestQuantizeFx.test_sequential",  # test_quantization
     "TestFakeQuantizeOps.test_learnable_backward_per_tensor_cpu",  # test_quantization
     "TestQuantizedTensor.test_qtensor_quantize_per_channel",  # test_quantization
@@ -4038,12 +3486,8 @@ dynamo_expected_failures = {
     "TestDynamicQuantizedModule.test_dynamic_convtranspose2d",  # test_quantization
     "TestFuseFx.test_fuse_conv_bn_add_relu_lowering",  # test_quantization
     "TestQuantizedConv.test_qconv2d_sum_pt2e",  # test_quantization
-    "TestFuseFx.test_fuse_linear_tanh_for_onednn_backend",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_match_activations_mod_qat",  # test_quantization
     "TestDynamicQuantizedOps.test_dynamic_convtranspose2d",  # test_quantization
-    "TestFuseFx.test_fuse_conv_bn_add_relu_by_default",  # test_quantization
     "TestPT2ERepresentation.test_maxpool2d",  # test_quantization
-    "TestFuseFx.test_linear_tanh_not_fused_by_default",  # test_quantization
     "TestQuantizeFx.test_lowering_functional_conv_transpose_with_kwargs",  # test_quantization
     "TestQuantizedOps.test_avg_pool3d_nhwc",  # test_quantization
     "TestQuantizeFx.test_qparams_buffers",  # test_quantization
@@ -4053,7 +3497,6 @@ dynamo_expected_failures = {
     "TestQuantizedLinear.test_qlinear",  # test_quantization
     "TestQuantizeFx.test_no_obs_between_unmatched_node_and_copy_node",  # test_quantization
     "TestStaticQuantizedModule.test_conv1d_relu_api",  # test_quantization
-    "TestQuantizeFx.test_quantized_input_fp32_output",  # test_quantization
     "TestXNNPACKQuantizer.test_linear",  # test_quantization
     "TestQuantizeFxOps.test_norm_weight_bias",  # test_quantization
     "TestQuantizeFxOps.test_reshape_fp16",  # test_quantization
@@ -4063,7 +3506,6 @@ dynamo_expected_failures = {
     "TestQuantizeFx.test_conv_bn_relu",  # test_quantization
     "TestQuantizeFx.test_qconfig_for_call_func",  # test_quantization
     "TestQuantizedConv.test_qconv3d_unpack",  # test_quantization
-    "TestQuantizeFx.test_qnnpack_backend_config",  # test_quantization
     "TestFakeQuantizeOps.test_fq_module_per_tensor",  # test_quantization
     "TestDynamicQuantizedOps.test_qlinear",  # test_quantization
     "TestStaticQuantizedModule.test_layer_norm",  # test_quantization
@@ -4103,14 +3545,11 @@ dynamo_expected_failures = {
     "TestQuantizedOps.test_max_pool2d_cudnn",  # test_quantization
     "TestQNNPackOps.test_qnnpack_mul",  # test_quantization
     "TestUtils.test_get_fqn_to_example_inputs_simple",  # test_quantization
-    "TestFuseFx.test_fuse_linear_bn_leaky_relu_onednn",  # test_quantization
     "TestQuantizeEagerQATNumerics.test_conv_bn_folded_vs_unfolded",  # test_quantization
     "TestQNNPackOps.test_qnnpack_maxpool2d",  # test_quantization
     "TestFXNumericSuiteCoreAPIs.test_extract_weights_conv_fun_ptq",  # test_quantization
     "TestQuantizeFx.test_qconfig_module_name_object_type_order",  # test_quantization
     "TestDynamicQuantizedModule.test_dynamic_conv1d",  # test_quantization
-    "TestQuantizePT2EX86Inductor.test_avg_pool2d_recipe",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_match_activations_mod_ptq",  # test_quantization
     "TestEqualizeFx.test_input_weight_equalization_convert",  # test_quantization
     "TestFXNumericSuiteNShadows.test_add_loggers_linear_mod_fp32_quant",  # test_quantization
     "TestQNNPackOps.test_qnnpack_add",  # test_quantization
@@ -4141,14 +3580,12 @@ dynamo_expected_failures = {
     "TestFXGraphMatcher.test_simple_fusion",  # test_quantization
     "TestXNNPACKQuantizer.test_mul_and_inplace_mul",  # test_quantization
     "TestQuantizedOps.test_max_pool2d",  # test_quantization
-    "TestQuantizePT2EX86Inductor.test_cat_recipe",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_preserve_source_fn_stack",  # test_quantization
     "TestQuantizeFx.test_qparams_fqn",  # test_quantization
     "TestFakeQuantizeOps.test_backward_per_channel",  # test_quantization
     "TestQuantizeFx.test_conv_transpose_relu_reference",  # test_quantization
     "TestQuantizedConv.test_qconv2d_hardtanh_pt2e",  # test_quantization
     "TestQuantizedTensor.test_decomposed_quantize_per_tensor",  # test_quantization
-    "TestQuantizePT2E.test_embedding_quantizer",  # test_quantization
     "TestQNNPackOps.test_qnnpack_add_broadcast",  # test_quantization
     "TestQuantizeFxOps.test_linear_module",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_no_bias",  # test_quantization
@@ -4160,7 +3597,6 @@ dynamo_expected_failures = {
     "TestDynamicQuantizedOps.test_dynamic_convtranspose3d",  # test_quantization
     "TestQNNPackOps.test_qnnpack_relu",  # test_quantization
     "TestFXNumericSuiteCoreAPIs.test_int8_shadows_int8_fun",  # test_quantization
-    "TestQuantizePT2EX86Inductor.test_adaptive_avg_pool2d_recipe",  # test_quantization
     "TestStaticQuantizedModule.test_conv1d_api",  # test_quantization
     "TestQuantizationDocs.test_quantization_doc_fx",  # test_quantization
     "TestQuantizedOps.test_channel_shuffle",  # test_quantization
@@ -4173,7 +3609,6 @@ dynamo_expected_failures = {
     "TestQuantizeFxOps.test_mul_relu",  # test_quantization
     "TestQuantizePT2E.test_groupwise_per_channel_quant",  # test_quantization
     "TestQuantizeFxOps.test_hardswish",  # test_quantization
-    "TestQuantizeFx.test_fp32_input_quantized_output",  # test_quantization
     "TestQuantizedTensor.test_qtensor_cpu",  # test_quantization
     "TestQuantizedConv.test_qconv_transpose1d",  # test_quantization
     "TestEqualizeFx.test_input_weight_equalization_results",  # test_quantization
@@ -4190,14 +3625,12 @@ dynamo_expected_failures = {
     "TestQuantizedTensor.test_qtensor_reshape",  # test_quantization
     "TestQuantizeFx.test_ref_linear_module",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_bn_relu_fusion_no_conv_bias",  # test_quantization
-    "TestQuantizeFx.test_prepare_custom_config_to_dict",  # test_quantization
     "TestReferenceQuantizedModule.test_rnn",  # test_quantization
     "TestQuantizedConv.test_qconv1d",  # test_quantization
     "TestQuantizedTensor.test_choose_qparams",  # test_quantization
     "TestQuantizedConv.test_qconv1d_relu",  # test_quantization
     "TestFXNumericSuiteNShadows.test_conv_bn_relu_mod",  # test_quantization
     "TestQuantizedConv.test_qconv2d_add_relu",  # test_quantization
-    "TestQuantizeFx.test_backend_config_quantization_range",  # test_quantization
     "TestStaticQuantizedModule.test_group_norm",  # test_quantization
     "TestStaticQuantizedModule.test_leaky_relu",  # test_quantization
     "TestQuantizedTensor.test_torch_qtensor_deepcopy",  # test_quantization
@@ -4208,6 +3641,11 @@ dynamo_expected_failures = {
     "TestQuantizedOps.test_qmul_relu_same_qparams",  # test_quantization
     "TestQuantizeFxOps.test_instance_norm",  # test_quantization
     "TestQuantizedTensor.test_qtensor_legacy_new_failure",  # test_quantization
+    "TestXNNPACKQuantizerModels.test_resnet18",  # test_quantization.py
+    "TestFXGraphMatcherModels.test_mobilenet_v2_qat",  # test_quantization.py
+    "TestQuantizePT2EQATModels.test_qat_resnet18",  # test_quantization.py
+    "TestQuantizePT2EQATModels.test_qat_mobilenet_v2",  # test_quantization.py
+    "TestObserver.test_per_channel_observers",  # test_quantization.py
 }
 
 dynamo_skips = {
@@ -8674,6 +8112,26 @@ dynamo_skips = {
     "TestQuantizeFxOps.test_rnn",  # known py38 fail
     "TestQuantizeFxOps.test_linear_dynamic_fp16",  # known py38 fail
     "TestQuantizeFxOps.test_linear_static_fp16",  # known py38 fail
+    "TestAutogradFallback.test_no_grad_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_no_autograd_kernel_inplace_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_no_autograd_kernel_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_undefined_grads_mode_nothing",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_post_autograd_returns_mix_of_requires_grad_tensors_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_no_autograd_kernel_inplace_mode_nothing",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_undefined_inputs_outputs_mode_nothing",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_inplace_on_tensor_that_does_not_require_grad_mode_nothing",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_post_autograd_returns_mix_of_requires_grad_tensors_mode_nothing",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_supports_tensor_lists_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_post_autograd_returns_leaf_mode_nothing",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_inplace_on_tensor_that_does_not_require_grad_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_no_grad_mode_nothing",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_post_autograd_returns_leaf_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_undefined_grads_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_no_autograd_kernel_mode_nothing",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_undefined_inputs_outputs_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_supports_tensor_lists_mode_nothing",  # test_autograd_fallback.py
+    "TestReductionsCPU.test_logcumsumexp_complex_cpu_complex128",  # test_reductions.py
+    "TestReductionsCPU.test_logcumsumexp_complex_cpu_complex64",  # test_reductions.py
 }
 
 
