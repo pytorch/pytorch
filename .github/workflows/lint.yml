@@ -228,7 +228,18 @@ jobs:
           pip install pytest-rerunfailures==11.1.* pytest-shard==0.1.* pytest-flakefinder==1.1.* pytest-xdist==3.3.* expecttest==0.1.* numpy==1.24.*
           pip install torch --pre --index-url https://download.pytorch.org/whl/nightly/cpu/
       - name: Run run_test.py (nonretryable)
+        shell: bash
         run: |
+          set -ex
+
+          pushd /tmp
+          TORCH_PATH=$(python -c 'import torch; import os; print(os.path.dirname(torch.__file__))')
+          popd
+
+          # Overwrite nightly torch/testing with local checkout files to get the changes there
+          rm -rf "${TORCH_PATH}/testing"
+          cp -r torch/testing "${TORCH_PATH}"
+
           # Run test_vulkan, which is a fast noop on Linux
           python3 test/run_test.py --include test_vulkan --verbose
 
