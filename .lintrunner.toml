@@ -246,8 +246,7 @@ code = 'CLANGTIDY'
 include_patterns = [
     'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
-    'c10/core/**/*.h',
-    'c10/util/**/*.h',
+    'c10/**/*.h',
     # Enable coverage of headers in torch/csrc and excluding sub-directories for now.
     'torch/csrc/*.h',
     'torch/csrc/**/*.cpp',
@@ -258,10 +257,10 @@ exclude_patterns = [
     # CUDA files are also excluded.
     '**/fb/**',
     '**/*pb.h',
-    '**/*CUDA*',
     '**/cuda/*pp',
     '**/*XPU*',
     '**/xpu/*pp',
+    'c10/cuda/CUDAAlgorithm.h',
     'c10/util/complex_math.h',
     'c10/util/complex_utils.h',
     'c10/util/flat_hash_map.h',
@@ -272,6 +271,7 @@ exclude_patterns = [
     'c10/util/SmallVector.h',
     'c10/util/win32-headers.h',
     'c10/util/*inl.h',
+    'c10/test/**/*.h',
     'aten/src/ATen/core/TensorImpl_test.cpp',
     'third_party/**/*',
     'torch/csrc/api/**',
