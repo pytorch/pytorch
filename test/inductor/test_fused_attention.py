@@ -746,9 +746,6 @@ if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
         test_sdpa_rewriter_15_cuda = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_15
         )
-        test_sdpa_rewriter_16_cuda = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16
-        )
         test_sdpa_rewriter_17_cuda = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_17
         )

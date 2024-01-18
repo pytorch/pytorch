@@ -476,13 +476,19 @@ def _sfdp_params_check(match):
     return True
 
 
-def _sfdp_scale_factor_check(scale_factor_op):
+def _sfdp_extra_check(scale_factor_op, disable_cuda=False):
     def fn(match):
         scale_factor_node = filter_nodes(match.nodes, scale_factor_op)[0]
         # Note: args[1] of the scale_factor_node is always the scale_factor for the current patterns.
         scale_factor = scale_factor_node.args[1]
         # make sure the scale_factor a float/int. SymInt?
         if not isinstance(scale_factor, (float, int)):
+            return False
+        if (
+            disable_cuda
+            and "query" in match.kwargs
+            and "cuda" in str(match.kwargs["query"].meta["val"].device)
+        ):
             return False
         return _sfdp_params_check(match)
 
@@ -555,28 +561,28 @@ def _get_sfdp_patterns():
                 _sfdp_replacement_1,
                 [g(), g(), g(), c()],
                 {},
-                _sfdp_scale_factor_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor),
             ),
             (
                 _sfdp_pattern_2,
                 _sfdp_replacement_2,
                 [g(), g(), g(), c()],
                 {},
-                _sfdp_scale_factor_check(aten.mul.Tensor),
+                _sfdp_extra_check(aten.mul.Tensor),
             ),
             (
                 _sfdp_pattern_3,
                 _sfdp_replacement_3,
                 [g(), g(), g(), c()],
                 d,
-                _sfdp_scale_factor_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor),
             ),
             (
                 _sfdp_pattern_4,
                 _sfdp_replacement_4,
                 [g(), g(), g(), c()],
                 d,
-                _sfdp_scale_factor_check(aten.mul.Tensor),
+                _sfdp_extra_check(aten.mul.Tensor),
             ),
             (
                 _sfdp_pattern_5,
@@ -625,14 +631,14 @@ def _get_sfdp_patterns():
                 _sfdp_replacement_11,
                 [g(), g(), g(), c()],
                 {},
-                _sfdp_scale_factor_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor),
             ),
             (
                 _sfdp_pattern_12,
                 _sfdp_replacement_12,
                 [g(), g(), g(), c()],
                 d,
-                _sfdp_scale_factor_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor),
             ),
             (
                 _sfdp_pattern_13,
@@ -646,28 +652,29 @@ def _get_sfdp_patterns():
                 _sfdp_replacement_14,
                 [g(), g(), g(), m(), c()],
                 {},
-                _sfdp_scale_factor_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor),
             ),
             (
                 _sfdp_pattern_15,
                 _sfdp_replacement_15,
                 [g(), g(), g(), m(), c()],
                 {},
-                _sfdp_scale_factor_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor),
             ),
+            # TODO: Enable CUDA after solving Bert accuracy issue of calling efficient attention
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
                 [g(), g(), g(), m(), c()],
                 d,
-                _sfdp_scale_factor_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
             ),
             (
                 _sfdp_pattern_17,
                 _sfdp_replacement_17,
                 [g(), g(), g(), m(), c()],
                 d,
-                _sfdp_scale_factor_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor),
             ),
         ]:
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
