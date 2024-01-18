@@ -49,7 +49,7 @@ thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 
 using StreamIdIndex = uint8_t;
 enum class StreamIdType : uint8_t {
-  // The type number higher, the priority higher
+  // The higher the type number, the higher the priority.
   NORMAL = 0x0,
   HIGH = 0X1,
 };
@@ -230,6 +230,7 @@ XPUStream getCurrentXPUStream(DeviceIndex device) {
 
 XPUStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
   initXPUStreamsOnce();
+  // If isHighPriority is true, return the stream with the highest priority.
   int priority = isHighPriority ? -max_compile_time_stream_priorities + 1 : 0;
   return getStreamFromPool(priority, device);
 }
