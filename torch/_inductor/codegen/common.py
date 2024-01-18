@@ -144,6 +144,9 @@ DTYPE_TO_COMPUTATION_DTYPE = {
             torch.int32,
             torch.int64,
             torch.uint8,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
         ]
     },
 }
@@ -399,6 +402,42 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) >= 2
         return f"min({', '.join(map(self._print, expr.args))})"
 
+    def _print_cos(self, expr):
+        assert len(expr.args) == 1
+        return f"math.cos({self._print(expr.args[0])})"
+
+    def _print_cosh(self, expr):
+        assert len(expr.args) == 1
+        return f"math.cosh({self._print(expr.args[0])})"
+
+    def _print_acos(self, expr):
+        assert len(expr.args) == 1
+        return f"math.acos({self._print(expr.args[0])})"
+
+    def _print_sin(self, expr):
+        assert len(expr.args) == 1
+        return f"math.sin({self._print(expr.args[0])})"
+
+    def _print_sinh(self, expr):
+        assert len(expr.args) == 1
+        return f"math.sinh({self._print(expr.args[0])})"
+
+    def _print_asin(self, expr):
+        assert len(expr.args) == 1
+        return f"math.asin({self._print(expr.args[0])})"
+
+    def _print_tan(self, expr):
+        assert len(expr.args) == 1
+        return f"math.tan({self._print(expr.args[0])})"
+
+    def _print_tanh(self, expr):
+        assert len(expr.args) == 1
+        return f"math.tanh({self._print(expr.args[0])})"
+
+    def _print_atan(self, expr):
+        assert len(expr.args) == 1
+        return f"math.atan({self._print(expr.args[0])})"
+
     def _print_Round(self, expr):
         assert len(expr.args) == 1
         return f"round({self._print(expr.args[0])})"
@@ -495,6 +534,7 @@ class DeferredLine(DeferredLineBase):
     def __init__(self, name, line):
         super().__init__(line)
         self.name = name
+        assert not isinstance(line, DeferredLineBase)
 
     def __call__(self):
         if all(
@@ -627,10 +667,10 @@ class KernelArgs:
         )
 
     def wrap_ptr_arg(self, buf, dtype):
-        return f"c_void_p({buf}.data_ptr())"
+        return buf
 
     def wrap_size_arg(self, size):
-        return f"c_long({size})"
+        return str(size)
 
     def cpp_argdefs(self):
         from .cpp import DTYPE_TO_CPP, INDEX_TYPE
@@ -668,6 +708,8 @@ class KernelArgs:
             arg_defs.append(f"const {INDEX_TYPE} {inner}")
             call_args.append(self.wrap_size_arg(outer))
             arg_types.append(f"const {INDEX_TYPE}")
+            if V.graph.wrapper_code:
+                V.graph.wrapper_code.ensure_size_computed(outer)
         return arg_defs, call_args, arg_types
 
     def python_argdefs(self):
@@ -701,6 +743,8 @@ class KernelArgs:
             arg_defs.append(inner)
             call_args.append(outer)
             precompile_args.append(SizeArg(inner, outer))
+            if V.graph.wrapper_code:
+                V.graph.wrapper_code.ensure_size_computed(outer)
 
         return arg_defs, call_args, precompile_args
 
