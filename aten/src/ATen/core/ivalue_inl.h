@@ -2219,7 +2219,6 @@ inline IValue::IValue(std::vector<T>&& v) : IValue(c10::List<T>()) {
     for (auto e : v) {
       list.push_back(e);
     }
-
   } else {
     for (auto& e : v) {
       list.push_back(std::move(e));
