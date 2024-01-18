@@ -233,7 +233,8 @@ class FSDPParamGroup:
         with the next all-gather, we save a reference to the current all-gather
         result to free after the next copy-out.
         2. Otherwise (explicit prefetching or in backward), we free the
-        all-gather result immediately after the current copy-out.
+        all-gather result immediately after the current copy-out since we can
+        only overlap the current copy-out with the previous reduce-scatter.
         """
         if not self._all_gather_result:
             return  # no preceding `_unshard()`
@@ -252,6 +253,7 @@ class FSDPParamGroup:
             self._all_gather_process_group,
         )
         for fsdp_param in self.fsdp_params:
+            fsdp_param.init_unsharded_param()  # no-op after 1st call
             fsdp_param.to_unsharded()
         all_gather_copy_out_event = torch.cuda.Event()
         all_gather_copy_out_event.record()

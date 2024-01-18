@@ -4,25 +4,12 @@ import torch
 import torch.distributed as dist
 from torch.utils._contextlib import _DecoratorContextManager
 
-from ._fsdp_common import print_and_raise_internal, to_dtype_if_needed
+from ._fsdp_common import (
+    get_dim0_padded_size,
+    print_and_raise_internal,
+    to_dtype_if_needed,
+)
 from ._fsdp_param import FSDPParam, ShardedState
-
-
-"""
-[Note: ``.data`` Usage in Per-Parameter FSDP]
-In the copy-out part of the foreach all-gather, we cat the all-gathered
-parameter shards, writing the result out to the newly allocated unsharded
-parameter data. Autograd detects this as an extra in-place op, e.g.:
-    RuntimeError: one of the variables needed for gradient computation has been
-modified by an inplace operation: [torch.cuda.FloatTensor [15, 3]], which is
-output 0 of AsStridedBackward0, is at version 3; expected version 2 instead.
-
-Using ``.data`` is one way to avoid this version counter increase from the cat
-(see NOTE [ Version Counter Sharing ] in the pytorch repo). However, we can
-also do so with the new ``_unsafe_preserve_version_counter`` context, avoiding
-the ``.data`` usage and being more explicit with our intention. Thus, this is
-the approach that we take.
-"""
 
 
 class AllGatherResult(NamedTuple):
@@ -134,9 +121,8 @@ def foreach_all_gather_copy_out(
     for all_gather_input_numel, fsdp_param in zip(all_gather_input_numels, fsdp_params):
         fsdp_param.init_all_gather_output(
             all_gather_input_numel, world_size, dtype, device
-        )
+        )  # no-op after 1st call
         fsdp_param.alloc_all_gather_output()
-        fsdp_param.init_unsharded_param(world_size)
     # TODO: Replace with foreach copy to prepare for custom kernel.
     split_sizes = all_gather_input_numels * world_size
     splits = torch.split(all_gather_output, split_sizes, dim=0)
@@ -186,26 +172,26 @@ def foreach_reduce_scatter(
     grad_dtype = unsharded_grads[0].dtype
     reduce_dtype = reduce_dtype or grad_dtype
     world_size = group.size()
-    total_padded_unsharded_numel = sum(
-        fsdp_param.padded_unsharded_numel for fsdp_param in fsdp_params
+    padded_unsharded_sizes = tuple(
+        get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
     )
-    total_sharded_numel = total_padded_unsharded_numel // world_size
+    reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
+    reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
     current_stream = torch.cuda.current_stream()
     reduce_scatter_stream.wait_stream(current_stream)
     with torch.cuda.stream(reduce_scatter_stream):
         reduce_scatter_input = torch.empty(
-            (total_padded_unsharded_numel,), dtype=reduce_dtype, device=device
+            (reduce_scatter_input_numel,), dtype=reduce_dtype, device=device
         )
         foreach_reduce_scatter_copy_in(
             fsdp_params, unsharded_grads, reduce_scatter_input, world_size
         )
         _div_if_needed(reduce_scatter_input, predivide_factor)
-        # Record a CUDA event in the reduce-scatter stream to mark the end of
-        # the copy-in for the reduce-scatter input
+        # Record to mark the end of the reduce-scatter copy-in in the RS stream
         copy_in_event = torch.cuda.Event()
         copy_in_event.record()
         reduce_scatter_output = torch.empty(
-            (total_sharded_numel,), dtype=reduce_dtype, device=device
+            (reduce_scatter_output_numel,), dtype=reduce_dtype, device=device
         )
         dist.reduce_scatter_tensor(
             output=reduce_scatter_output, input=reduce_scatter_input, group=group
@@ -213,14 +199,15 @@ def foreach_reduce_scatter(
         _div_if_needed(reduce_scatter_output, postdivide_factor)
         reduce_scatter_output = to_dtype_if_needed(reduce_scatter_output, orig_dtype)
         # - View out and accumulate
-        flat_grad_offset = 0  # [0, total_sharded_numel - 1]
-        for fsdp_param in fsdp_params:
-            # TODO: Get rid of `_padded_sharded_size`
-            padded_sharded_numel = fsdp_param._padded_sharded_size.numel()
-            sharded_numel = fsdp_param._sharded_size.numel()
+        flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
+        for padded_unsharded_size, fsdp_param in zip(
+            padded_unsharded_sizes, fsdp_params
+        ):
+            padded_sharded_numel = padded_unsharded_size.numel() // world_size
+            sharded_numel = fsdp_param.sharded_size.numel()
             new_sharded_grad = reduce_scatter_output[
                 flat_grad_offset : flat_grad_offset + sharded_numel
-            ].view(fsdp_param._sharded_size)
+            ].view(fsdp_param.sharded_size)
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
             if fsdp_param.offload_to_cpu:
                 # TODO: If we want to overlap the D2H copy while accumulating
@@ -230,7 +217,7 @@ def foreach_reduce_scatter(
                 # memory for now.
                 gpu_sharded_grad = new_sharded_grad
                 cpu_sharded_grad = (
-                    fsdp_param._cpu_sharded_grad
+                    fsdp_param.cpu_sharded_grad
                     if not to_accumulate_grad
                     else torch.empty_like(new_sharded_grad, device="cpu")
                 )
@@ -259,7 +246,7 @@ def foreach_reduce_scatter(
     # computed in the default stream
     current_stream.wait_event(copy_in_event)
     unsharded_grads.clear()
-    # The flat gradient shard is allocated in the RS stream and used in the
+    # The reduce-scatter output is allocated in the RS stream and used in the
     # default stream (for optimizer). We need to make sure that its memory is
     # not reused in the RS stream for subsequent RSs. We do so without extra
     # synchronization since the sharded parameters hold references to the data

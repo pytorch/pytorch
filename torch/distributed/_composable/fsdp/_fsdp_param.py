@@ -56,14 +56,13 @@ class FSDPParam:
     reduce_dtype: Optional[torch.dtype]
     # Sharded/unsharded parameter attributes
     _orig_size: torch.Size  # ND
-    _padded_sharded_size: torch.Size  # ND
-    _sharded_size: torch.Size  # ND
+    sharded_size: torch.Size  # ND
     _sharded_param_data: torch.Tensor  # 1D
     _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
-    _sharded_param: nn.Parameter  # ND
+    sharded_param: nn.Parameter  # ND
     all_gather_output: torch.Tensor  # 1D
     _unsharded_param: nn.Parameter  # ND
-    _cpu_sharded_grad: torch.Tensor  # unpadded, ND, pinned memory
+    cpu_sharded_grad: torch.Tensor  # unpadded, ND, pinned memory
     # For splitting autograd-computed gradient
     unsharded_chunk_numels: List[int]
     # For splitting reduce-scatter input: the next two lists have N elements
@@ -72,7 +71,6 @@ class FSDPParam:
     padded_unsharded_chunk_numels: List[List[int]]
     is_padding_mask: List[List[bool]]
     unsharded_accumulated_grad: Optional[torch.Tensor]
-    padded_unsharded_numel: int
     # DTensor attributes (only defined for DTensor `param`):
     _tp_spec: DTensorSpec
     _tp_global_size: torch.Size
@@ -189,24 +187,24 @@ class FSDPParam:
         shard_world_size = self.mesh_info.shard_mesh_size
         chunks = chunk_with_empty(param_data, shard_world_size, dim=0)
         sharded_param = chunks[shard_rank]
-        self._sharded_size = sharded_param.size()
-        self._padded_sharded_size = chunks[0].size()  # 0th always padded
-        padded_sharded_param = param_data.new_zeros(self._padded_sharded_size)
+        self.sharded_size = sharded_param.size()
+        padded_sharded_size = chunks[0].size()  # 0th always padded
+        padded_sharded_param = param_data.new_zeros(padded_sharded_size)
         if sharded_param.numel() > 0:
             padded_sharded_param[: sharded_param.size(0)].copy_(sharded_param)
         if self.offload_to_cpu:
             padded_sharded_param = padded_sharded_param.cpu().pin_memory()
-            self._cpu_sharded_grad = sharded_param.new_zeros(
+            self.cpu_sharded_grad = sharded_param.new_zeros(
                 sharded_param.size(), device="cpu"
             ).pin_memory()
         self._sharded_param_data = padded_sharded_param.view(-1)
-        self._sharded_param = nn.Parameter(
+        self.sharded_param = nn.Parameter(
             self.to_sharded_dtensor(padded_sharded_param[: sharded_param.size(0)])
         )
-        self._sharded_param.requires_grad_(param.requires_grad)
+        self.sharded_param.requires_grad_(param.requires_grad)
         unsafe_free_storage(param_data)  # free immediately
         del param_data  # delete PyObject reference to avoid warning
-        setattr(self._sharded_param, FSDP_SHARDED, True)
+        setattr(self.sharded_param, FSDP_SHARDED, True)
         self._setattr_on_modules(self.sharded_param)
         self.sharded_state = ShardedState.SHARDED
 
@@ -226,11 +224,12 @@ class FSDPParam:
         )
 
     @torch.no_grad()
-    def init_unsharded_param(self, world_size: int):
+    def init_unsharded_param(self):
         if hasattr(self, "_unsharded_param"):
             return  # already initialized
         # For the default path (no post-all-gather), the all-gather output
         # gives the unsharded parameter data directly
+        world_size = self.mesh_info.shard_mesh_size
         padded_unsharded_param_size = get_dim0_padded_size(self._orig_size, world_size)
         padded_unsharded_param = self.all_gather_output.view(
             padded_unsharded_param_size
@@ -249,7 +248,6 @@ class FSDPParam:
         # Unsharded accumulated gradient used for gradient accumulation without
         # reduce-scatter when `reduce_dtype` is specified
         self.unsharded_accumulated_grad = None
-        self.padded_unsharded_numel = padded_unsharded_param_size.numel()
         # Compute some additional metadata to use `torch.split` in the
         # reduce-scatter copy-in
         self.padded_unsharded_chunk_numels: List[List[int]] = []
@@ -376,13 +374,13 @@ class FSDPParam:
         Converts a local tensor representing either the *sharded* parameter or
         *sharded* gradient to DTensor.
         """
-        if tensor.shape != self._sharded_size and not (
+        if tensor.shape != self.sharded_size and not (
             # For size-0 padding, DTensor can flatten from (0, *) to (0)
             tensor.numel() == 0
-            and self._sharded_size.numel() == 0
+            and self.sharded_size.numel() == 0
         ):
             print_and_raise_internal(
-                f"Expects a tensor with the sharded size {self._sharded_size} "
+                f"Expects a tensor with the sharded size {self.sharded_size} "
                 f"but got {tensor.shape}"
             )
         return from_local_no_grad(
@@ -406,10 +404,6 @@ class FSDPParam:
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             return cast(torch.Tensor, self._sharded_post_forward_param_data)
         return torch.empty(0)  # mypy
-
-    @property
-    def sharded_param(self) -> nn.Parameter:
-        return self._sharded_param
 
     @property
     def unsharded_param(self) -> nn.Parameter:

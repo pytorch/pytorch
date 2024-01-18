@@ -135,17 +135,16 @@ def _cast_floating_point_tensor(
 
 
 def get_dim0_padded_size(tensor_size: torch.Size, dim0_factor: int) -> torch.Size:
-    non_dim0_size = list(tensor_size[1:])
     if tensor_size[0] < dim0_factor:
-        padded_size = torch.Size([dim0_factor] + non_dim0_size)
+        padded_size = torch.Size([dim0_factor]) + tensor_size[1:]
     elif tensor_size[0] % dim0_factor != 0:
-        padded_size = torch.Size(
-            [tensor_size[0] + dim0_factor - (tensor_size[0] % dim0_factor)]
-            + non_dim0_size
+        padded_size = (
+            torch.Size([tensor_size[0] + dim0_factor - (tensor_size[0] % dim0_factor)])
+            + tensor_size[1:]
         )
     else:
         padded_size = tensor_size
-    return padded_size
+    return cast(torch.Size, padded_size)
 
 
 def from_local_no_grad(
