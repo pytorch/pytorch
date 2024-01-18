@@ -21,14 +21,14 @@ jobs:
           fetch-depth: 0
       - name: update-xla-commit-hash
         continue-on-error: true
-        uses: ./.github/actions/update-commit-hash
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
         with:
           repo-name: xla
           branch: master
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
       - name: update-triton-commit-hash
-        uses: ./.github/actions/update-commit-hash
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
         with:
           repo-owner: openai
           repo-name: triton
