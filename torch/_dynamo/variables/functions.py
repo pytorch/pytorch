@@ -652,7 +652,7 @@ class FunctoolsPartialVariable(VariableTracker):
         if self.args:
             codegen.foreach(self.args)
         if not self.keywords:
-            create_call_function(len(self.args) + 1, False)
+            return create_call_function(len(self.args) + 1, False)
 
         codegen.foreach(self.keywords.values())
         keys = tuple(self.keywords.keys())
