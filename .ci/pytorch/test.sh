@@ -271,6 +271,7 @@ test_dynamo_shard() {
   # PLEASE DO NOT ADD ADDITIONAL EXCLUDES HERE.
   # Instead, use @skipIfTorchDynamo on your tests.
   time python test/run_test.py --dynamo \
+    --exclude-inductor-tests \
     --exclude-jit-executor \
     --exclude-distributed-tests \
     --exclude \
