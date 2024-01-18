@@ -65,6 +65,7 @@ from torch.hub import _Faketqdm, tqdm
 
 _HERE = os.path.abspath(__file__)
 _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
+_LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
 
 if config.is_fbcode():
     from triton.fb import build_paths
@@ -1425,14 +1426,17 @@ def cpp_compile_command(
         if aot_mode and not use_absolute_path:
             inp_name = input
             out_name = output
+            linker_script = _LINKER_SCRIPT
         else:
             # We need to copy any absolute-path torch includes
             inp_name = [os.path.basename(i) for i in input]
             out_name = os.path.basename(output)
+            linker_script = os.path.basename(_LINKER_SCRIPT)
         assert is_clang()
         # Use clang runtime instead of libgcc
         clang_flags += " --rtlib=compiler-rt"
         clang_flags += " -fuse-ld=lld"
+        clang_flags += f" -Wl,--script={linker_script}"
         linker_paths = "-B" + build_paths.glibc_lib()
         linker_paths += " -L" + build_paths.glibc_lib()
     else:
@@ -1709,12 +1713,11 @@ def compile_file(
             # When we build remotely, we need to make sure to carefully copy any files
             # that are required during the compilation process into our build directly.
             # This is where all of the ATen/c10/Torch includes come from.
-            torch_includes_path = os.path.join(
-                torch.utils.cpp_extension._TORCH_PATH, "include"
-            )
+            torch_includes_path = os.path.join(_TORCH_PATH, "include")
             with tempfile.TemporaryDirectory() as tmp_dir:
                 # Copy everything to tmp compilation folder
                 shutil.copy(header_path, os.path.join(tmp_dir, header_name))
+                shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
                 for p, f in zip(input_paths, input_files):
                     shutil.copy(p, os.path.join(tmp_dir, f))
                 dest_include_path = os.path.join(tmp_dir, "include")
@@ -1819,9 +1822,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         // Python bindings to call kernel():
         #define PY_SSIZE_T_CLEAN
         #include <Python.h>
+        #include <sstream>
+        #include <cstdlib>
 
-        // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow
-        extern "C" void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj);
+        // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow.
+        // We manually link it below to workaround issues with fbcode build.
+        static void* (*_torchinductor_pyobject_tensor_data_ptr)(PyObject* obj);
 
         template <typename T> static inline T parse_arg(PyObject* args, size_t n) {
             static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
@@ -1845,6 +1851,9 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             } catch(std::exception const& e) {
                 PyErr_SetString(PyExc_RuntimeError, e.what());
                 return nullptr;
+            } catch(...) {
+                PyErr_SetString(PyExc_RuntimeError, "unhandled error");
+                return nullptr;
             }
         }
 
@@ -1856,6 +1865,16 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             {PyModuleDef_HEAD_INIT, "kernel", NULL, -1, py_methods};
 
         PyMODINIT_FUNC PyInit_kernel(void) {
+            const char* str_addr = std::getenv("_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR");
+            if(!str_addr) {
+                PyErr_SetString(PyExc_RuntimeError, "_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR must be set");
+                return nullptr;
+            }
+            std::istringstream iss(str_addr);
+            uintptr_t addr = 0;
+            iss >> addr;
+            _torchinductor_pyobject_tensor_data_ptr =
+                reinterpret_cast<decltype(_torchinductor_pyobject_tensor_data_ptr)>(addr);
             return PyModule_Create(&py_module);
         }
         """
@@ -1863,6 +1882,9 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
     @classmethod
     def _load_library_inner(cls, path: str, key: str) -> ModuleType:
+        os.environ["_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR"] = str(
+            torch._C._dynamo.guards._torchinductor_pyobject_tensor_data_ptr  # type: ignore[attr-defined]
+        )
         return importlib.machinery.ExtensionFileLoader(
             f"{key}.kernel", path
         ).load_module()  # type: ignore[call-arg]
@@ -2388,6 +2410,17 @@ def _async_compile_initializer(orig_ppid) -> None:
 
 _watchdog_thread: Optional[Thread] = None
 
+# Used to keep track of all process pools invoked so far.
+_pool_set: Set[ProcessPoolExecutor] = set()
+
+
+def shutdown_compile_workers() -> None:
+    """Shut down all outstanding compile-worker pools."""
+    global _pool_set
+    for pool in _pool_set:
+        pool.shutdown()
+    _pool_set = set()
+
 
 class AsyncCompile:
     def __init__(self) -> None:
@@ -2414,6 +2447,10 @@ class AsyncCompile:
             mp_context=ctx,
             initializer=partial(_async_compile_initializer, orig_ppid),
         )
+
+        global _pool_set
+        _pool_set.add(pool)
+
         # when this pool is created in a subprocess object, the normal exit handler
         # doesn't run, and we need to register our own handler.
         # exitpriority has to be high, because another one of the finalizers will

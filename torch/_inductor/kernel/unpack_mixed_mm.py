@@ -51,7 +51,7 @@ uint4x2_mixed_mm_template = TritonTemplate(
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
         b = ((b >> b_shifts[:, None]) & 0xF) - 8
         b = b.to(B_PROLOGUE_CAST_TYPE)
-        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
         A += BLOCK_K * stride_ak
         B += BLOCK_K//2 * stride_bk
 

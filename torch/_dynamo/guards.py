@@ -62,9 +62,10 @@ from .utils import (
     dict_keys_repr,
     guard_failures,
     istype,
+    key_is_id,
+    key_to_id,
     orig_code_map,
     tensor_always_has_static_shape,
-    tensor_or_module_to_id,
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
@@ -109,7 +110,7 @@ CLOSURE_VARS = {
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
     ),
     "___odict_getitem": collections.OrderedDict.__getitem__,
-    "___tensor_or_module_to_id": tensor_or_module_to_id,
+    "___key_to_id": key_to_id,
     "___dict_version": dict_version,
     "___dict_contains": lambda a, b: a in b,
     "___dict_keys_getitem": dict_keys_getitem,
@@ -524,15 +525,13 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        any_tensor_or_module = any(
-            isinstance(k, (torch.Tensor, torch.nn.Module)) for k in value.keys()
-        )
+        any_key_is_id = any(key_is_id(k) for k in value.keys())
         const_keys_repr = dict_keys_repr(
-            tensor_or_module_to_id(value),
+            key_to_id(value),
             local=is_from_local_source(guard.originating_source),
         )
-        if any_tensor_or_module:
-            code.append(f"___tensor_or_module_to_id({ref}) == {const_keys_repr}")
+        if any_key_is_id:
+            code.append(f"___key_to_id({ref}) == {const_keys_repr}")
         else:
             code.append(f"list({ref}.keys()) == {const_keys_repr}")
 
@@ -898,7 +897,11 @@ class PyExprCSEPass:
     def count(self, exprs: List[str]) -> None:
         counter = self.ExprCounter(self._config)
         for e in exprs:
-            counter.visit(ast.parse(e))
+            try:
+                counter.visit(ast.parse(e))
+            except SyntaxError as ex:
+                log.exception("Failed to visit expr at line %s.\n%s", ex.lineno, e)
+                raise
 
     def replace(self, expr: str) -> Tuple[List[str], str]:
         replacer = self.Replacer(self._config, self._new_var)
@@ -1163,7 +1166,11 @@ class CheckFunctionManager:
             print("GUARDS\n", guard_body)
 
         out: Dict[str, Any] = dict()
-        exec(pycode, builder.scope, out)
+        try:
+            exec(pycode, builder.scope, out)
+        except SyntaxError as ex:
+            log.exception("Failed to exec guard at line %s.\n%s", ex.lineno, pycode)
+            raise
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
