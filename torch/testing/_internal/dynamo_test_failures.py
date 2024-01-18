@@ -3742,6 +3742,9 @@ dynamo_expected_failures = {
     "LoggingTests.test_dynamo_info",  # dynamo/test_logging
     "LoggingTests.test_graph_breaks",  # dynamo/test_logging
     "LoggingTests.test_aot",  # dynamo/test_logging
+    "TestFrozenOptimizations.test_collapse_adjacent_conversions",  # test_jit.py
+    "TestFrozenOptimizations.test_conv_bn_folding",  # test_jit.py
+    "TestFrozenOptimizations.test_conv_add_folding",  # test_jit.py
 }
 
 # see NOTE [dynamo_test_failures.py] for more details
@@ -8596,6 +8599,36 @@ dynamo_skips = {
     "TestUnion.test_union_does_not_replace_existing_annotated_type_empty_container",  # test_jit
     "TestNnapiBackend.test_pointwise_binary",  # test_jit
     "TestTypesAndAnnotation.test_tuple_no_element_type_annotation",  # test_jit
+    "TestNnapiBackend.test_seblock_mul",  # test_jit.py
+    "TestNnapiBackend.test_pointwise_binary_const",  # test_jit.py
+    "TestNnapiBackend.test_conv2d_transpose",  # test_jit.py
+    "TestNnapiBackend.test_tensor_input",  # test_jit.py
+    "TestNnapiBackend.test_qlinear",  # test_jit.py
+    "TestNnapiBackend.test_detach",  # test_jit.py
+    "TestNnapiBackend.test_prelu",  # test_jit.py
+    "TestNnapiBackend.test_pointwise_binary",  # test_jit.py
+    "TestNnapiBackend.test_flatten",  # test_jit.py
+    "TestNnapiBackend.test_to",  # test_jit.py
+    "TestNnapiBackend.test_quantize",  # test_jit.py
+    "TestNnapiBackend.test_reshape",  # test_jit.py
+    "TestNnapiBackend.test_qadd",  # test_jit.py
+    "TestNnapiBackend.test_cat",  # test_jit.py
+    "TestNnapiBackend.test_log_softmax",  # test_jit.py
+    "TestNnapiBackend.test_multi_output",  # test_jit.py
+    "TestNnapiBackend.test_softmax",  # test_jit.py
+    "TestNnapiBackend.test_mean",  # test_jit.py
+    "TestNnapiBackend.test_avg_pool2d",  # test_jit.py
+    "TestNnapiBackend.test_linear",  # test_jit.py
+    "TestNnapiBackend.test_max_pool2d",  # test_jit.py
+    "TestNnapiBackend.test_upsample_nearest2d",  # test_jit.py
+    "TestNnapiBackend.test_adaptive_avg_pool2d",  # test_jit.py
+    "TestNnapiBackend.test_slice",  # test_jit.py
+    "TestNnapiBackend.test_conv2d",  # test_jit.py
+    "TestNnapiBackend.test_dequantize",  # test_jit.py
+    "TestNnapiBackend.test_hardtanh",  # test_jit.py
+    "TestNnapiBackend.test_compile_spec_santiy",  # test_jit.py
+    "TestNnapiBackend.test_unsqueeze",  # test_jit.py
+    "TestNnapiBackend.test_pointwise_unary",  # test_jit.py
 }
 
 
