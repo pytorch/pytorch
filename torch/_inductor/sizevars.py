@@ -343,6 +343,23 @@ class SizeVarAllocator:
         else:
             return self.guard_equals(left, right)
 
+    def guarded_order(self, seq):
+        """
+        Return the order of a sequence as a permutation of range(len(seq)) and guard on that order not changing.
+        Used for generating block_ptrs.
+        """
+        seq = [*map(self.remove_precomputed_replacements, seq)]
+        seq = [(self.size_hint(var), orig_idx, var) for orig_idx, var in enumerate(seq)]
+        seq.sort()
+        order = [-1] * len(seq)
+        last_var = None
+        for new_index, (_, orig_index, var) in enumerate(seq):
+            order[orig_index] = new_index
+            if last_var is not None:
+                self.guard_leq(last_var, var)
+            last_var = var
+        return order
+
     # The evaluate functions evaluate some symbolic sympy expression
     # (NB: not necessarily an Expr) and return what the concrete result
     # is, guarding on the expression being that result
@@ -365,6 +382,13 @@ class SizeVarAllocator:
         else:
             self.guard_leq(right, left)
             return right
+
+    def evaluate_max(self, left: Expr, right: Expr) -> Expr:
+        """return the larger of left and right, and guard on that choice"""
+        # Always choose the opposite of eval min for consistency
+        # This means min(a, b) and max(a, b) produce the same guards
+        min_val = self.evaluate_min(left, right)
+        return right if min_val is left else left
 
     def evaluate_static_shape(self, left: Expr) -> int:
         right = self.size_hint(left)
