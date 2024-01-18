@@ -8,6 +8,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._tensor.api as dtensor
 import torch.distributed._tensor.random as random
+from torch.distributed._tensor._utils import try_find_mesh_from_args
 from torch.distributed._tensor.op_schema import (
     _is_inplace_op,
     _is_out_variant_op,
@@ -86,6 +87,12 @@ class OpDispatcher:
             aten.convolution.default: convolution_handler,
             aten.convolution_backward.default: convolution_backward_handler,
         }
+
+        # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
+        # as implicitly replicated or we throw error to user.
+        # NOTE: It is EXTREMELY UNSAFE to turn this flag on by default so we intentionally leave
+        # it as False by default.
+        self._allow_implicit_replication = False
 
     def dispatch(
         self,
@@ -293,7 +300,8 @@ class OpDispatcher:
                 else:
                     mesh = arg.device_mesh
             elif isinstance(arg, torch.Tensor):
-                if arg.ndim == 0 and mesh is not None:
+                if arg.ndim == 0 or self._allow_implicit_replication:
+                    mesh = mesh or try_find_mesh_from_args(op_call, args_list)
                     # scalar tensor can be safely treated as replicated
                     args_schema.append(
                         DTensorSpec(

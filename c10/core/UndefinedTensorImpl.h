@@ -1,6 +1,11 @@
 #pragma once
 
+#include <c10/core/MemoryFormat.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/macros/Export.h>
+#include <c10/util/ArrayRef.h>
+#include <cstdint>
 
 namespace c10 {
 

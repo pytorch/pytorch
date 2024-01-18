@@ -1,41 +1,20 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
-import sys
 import shutil
+import sys
 import tempfile
 from typing import Dict
 
 import torch
 import torch.distributed as dist
 from torch.distributed._shard import sharded_tensor
-from torch.distributed._shard.sharded_tensor import (
-    ShardedTensor,
-    state_dict_hook,
-)
+from torch.distributed._shard.sharded_tensor import ShardedTensor, state_dict_hook
 from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
     EnumerableShardingSpec,
     ShardingSpec,
     ShardMetadata,
-)
-from torch.testing._internal.common_distributed import (
-    requires_nccl,
-    skip_if_lt_x_gpu,
-)
-from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.distributed._shard.sharded_tensor import (
-    ShardedTensorTestBase,
-    with_comms,
-)
-from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common import (
-    MyShardedModel1,
-)
-
-
-from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
-    run_tests,
 )
 
 from torch.distributed.checkpoint import (
@@ -43,6 +22,20 @@ from torch.distributed.checkpoint import (
     FileSystemWriter,
     load_state_dict,
     save_state_dict,
+)
+from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
+)
+from torch.testing._internal.distributed._shard.sharded_tensor import (
+    ShardedTensorTestBase,
+    with_comms,
+)
+from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common import (
+    MyShardedModel1,
 )
 
 
@@ -122,9 +115,7 @@ class TestDistributedStateDictSaveLoad(TestCase):
             state_dict_to_load_to = MyTestModule().state_dict()
 
             with self.assertRaises(AssertionError):
-                assert_state_dict_equal(
-                    self, state_dict_to_load_to, state_dict_to_save
-                )
+                assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
             # Load from file without any resharding
             fs_reader = FileSystemReader(path=path)
@@ -134,9 +125,7 @@ class TestDistributedStateDictSaveLoad(TestCase):
                 no_dist=True,
             )
 
-            assert_state_dict_equal(
-                self, state_dict_to_load_to, state_dict_to_save
-            )
+            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
         with tempfile.TemporaryDirectory() as path:
             state_dict_to_save = MyTestModule().state_dict()
@@ -151,9 +140,7 @@ class TestDistributedStateDictSaveLoad(TestCase):
             state_dict_to_load_to = MyTestModule().state_dict()
 
             with self.assertRaises(AssertionError):
-                assert_state_dict_equal(
-                    self, state_dict_to_load_to, state_dict_to_save
-                )
+                assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
             # Load from file without any resharding
             fs_reader = FileSystemReader(path=path)
@@ -163,9 +150,7 @@ class TestDistributedStateDictSaveLoad(TestCase):
                 no_dist=True,
             )
 
-            assert_state_dict_equal(
-                self, state_dict_to_load_to, state_dict_to_save
-            )
+            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
 
 class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
@@ -212,15 +197,11 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
         dist.barrier()
 
         with self.assertRaises(AssertionError):
-            assert_state_dict_equal(
-                self, state_dict_to_load_to, state_dict_to_save
-            )
+            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
         # Test load.
         fs_reader = FileSystemReader(path=path)
-        load_state_dict(
-            state_dict=state_dict_to_load_to, storage_reader=fs_reader
-        )
+        load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
 
         assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
         dist.barrier()
@@ -238,9 +219,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
     def load_tensor(self, tensor: ShardedTensor) -> torch.Tensor:
         res = (
-            torch.zeros(tensor.shape, device="cuda:0")
-            if dist.get_rank() == 0
-            else None
+            torch.zeros(tensor.shape, device="cuda:0") if dist.get_rank() == 0 else None
         )
         tensor.gather(out=res)
         return res
@@ -335,9 +314,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 state_dict_to_save = model_to_save.state_dict()
 
                 fs_writer = FileSystemWriter(path=path)
-                save_state_dict(
-                    state_dict=state_dict_to_save, storage_writer=fs_writer
-                )
+                save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
                 dist.barrier()
 
@@ -404,9 +381,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
         fs_reader = FileSystemReader(path=path)
 
-        load_state_dict(
-            state_dict=state_dict_to_load_to, storage_reader=fs_reader
-        )
+        load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
 
         # We can't use torch.allclose since each ST has a different sharding spec
         store_tensor = self.load_tensor(model_to_save.sharded_tensor)
@@ -516,9 +491,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                         f"save-spec {save_spec} load-spec {load_spec}",
                     )
                     self.assertTrue(
-                        torch.allclose(
-                            save_dict["replicated"], load_dict_replicated
-                        ),
+                        torch.allclose(save_dict["replicated"], load_dict_replicated),
                         f"save-spec {save_spec} load-spec {load_spec}",
                     )
 

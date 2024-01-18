@@ -541,7 +541,8 @@ auto handle_torch_function(
     const char* func_name_override) -> PyObject* {
   py::object torch_api_function = PyObject_FastGetAttrString(
       torch_api,
-      (char*)(func_name_override ? func_name_override : r.get_func_name().c_str()));
+      (char*)(func_name_override ? func_name_override
+                                 : r.get_func_name().c_str()));
   TORCH_INTERNAL_ASSERT(
       torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::tuple args_ = combine_self_args(self, args);
@@ -1648,7 +1649,21 @@ at::Tensor PythonArgs::tensor_slow(int i) {
   if (PyBool_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackBool(obj));
   } else if (THPUtils_checkLong(obj)) {
-    scalar = at::Scalar(THPUtils_unpackLong(obj));
+    int overflow = -1;
+    long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
+    if (value == -1 && PyErr_Occurred()) {
+      throw python_error();
+    }
+    if (overflow != 0) {
+      // try unsigned
+      unsigned long long value = PyLong_AsUnsignedLongLong(obj);
+      if (value == static_cast<unsigned long long>(-1) && PyErr_Occurred()) {
+        throw python_error();
+      }
+      scalar = at::Scalar(static_cast<uint64_t>(value));
+    } else {
+      scalar = at::Scalar(static_cast<int64_t>(value));
+    }
   } else if (PyComplex_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
   } else if (THPUtils_checkDouble(obj)) {
@@ -1711,7 +1726,21 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
   }
 
   if (THPUtils_checkLong(arg)) {
-    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(arg)));
+    int overflow = -1;
+    long long value = PyLong_AsLongLongAndOverflow(arg, &overflow);
+    if (value == -1 && PyErr_Occurred()) {
+      throw python_error();
+    }
+    if (overflow != 0) {
+      // try unsigned
+      unsigned long long value = PyLong_AsUnsignedLongLong(arg);
+      if (value == static_cast<unsigned long long>(-1) && PyErr_Occurred()) {
+        throw python_error();
+      }
+      return at::Scalar(static_cast<uint64_t>(value));
+    } else {
+      return at::Scalar(static_cast<int64_t>(value));
+    }
   }
 
   if (PyBool_Check(arg)) {

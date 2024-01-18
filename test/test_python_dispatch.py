@@ -465,7 +465,7 @@ class TestPythonRegistration(TestCase):
 
         # check rest of functional_result is the mutated args
         mutated_args = [maybe_mutated_arg for maybe_mutated_arg, arg in zip(cloned_args, args)
-                        if not(maybe_mutated_arg is not None and arg is not None and torch.allclose(maybe_mutated_arg, arg))]
+                        if not (maybe_mutated_arg is not None and arg is not None and torch.allclose(maybe_mutated_arg, arg))]
         self.assertEqual(flat_functional_result[len(flat_mutable_result):], mutated_args)
 
         # check that functionalization kernel was indeed registered

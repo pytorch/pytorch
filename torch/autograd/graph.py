@@ -1,12 +1,18 @@
 import abc
+import collections
 import contextlib
+import logging
 import weakref
 from collections import defaultdict, namedtuple
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Deque, Dict, List, Optional, Sequence, Set, Tuple
 
 import torch
+from torch.autograd.variable import Variable
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.hooks import RemovableHandle
+
+log = logging.getLogger(__name__)
+
 
 __all__ = [
     "saved_tensors_hooks",
@@ -135,6 +141,13 @@ class Node(abc.ABC):
         return NotImplemented
 
 
+def _get_grad_fn_or_grad_acc(t):
+    if t.requires_grad and t.grad_fn is None:
+        return t.view_as(t).grad_fn.next_functions[0][0]
+    else:
+        return t.grad_fn
+
+
 GradientEdge = namedtuple("GradientEdge", ("node output_nr"))
 GradientEdge.__doc__ = """\
 Object representing a given gradient edge within the autograd graph.
@@ -153,10 +166,7 @@ def get_gradient_edge(tensor):
         raise RuntimeError(
             "It is not possible to get the gradient edge for a Tensor that does not require gradients"
         )
-    grad_fn = tensor.grad_fn
-    if grad_fn is None:
-        # Do an op to force AccumulateGrad lazy creation and get it
-        grad_fn = tensor.view_as(tensor).grad_fn.next_functions[0][0]
+    grad_fn = _get_grad_fn_or_grad_acc(tensor)
 
     # Note that output_nr default to 0 which is the right value
     # for the AccumulateGrad node.
@@ -407,14 +417,7 @@ def register_multi_grad_hook(
     nb_calls = None
     buffer: Dict[int, List[Optional[torch.Tensor]]] = dict()
 
-    def get_grad_fn(t):
-        # or grad accumulator
-        if t.requires_grad and t.grad_fn is None:
-            return t.expand_as(t).grad_fn.next_functions[0][0]
-        else:
-            return t.grad_fn
-
-    grad_fns = list(map(get_grad_fn, tensors))
+    grad_fns = list(map(_get_grad_fn_or_grad_acc, tensors))
     len_tensors = len(tensors)
 
     def get_inner_hook(idx):
@@ -629,3 +632,64 @@ def allow_mutation_on_saved_tensors():
         finally:
             ctx.clear()
             _allow_mutation_on_saved_tensors_enabled = False
+
+
+def _register_logging_hooks_on_whole_graph(t_outputs: List[torch.Tensor]):
+    grad_fns = list(map(_get_grad_fn_or_grad_acc, t_outputs))
+
+    def iter_graph(roots):
+        if not roots:
+            return
+        seen = set()
+        q: Deque = collections.deque()
+        for node in roots:
+            if node is not None:
+                seen.add(node)
+                q.append(node)
+
+        while q:
+            node = q.popleft()
+            for fn, _idx in node.next_functions:
+                if fn in seen or fn is None:
+                    continue
+                seen.add(fn)
+                q.append(fn)
+
+            yield node
+
+    def fmt(t):
+        # Avoid circular import
+        from torch.testing._internal.common_utils import dtype_abbrs
+
+        if t is None:
+            return "None"
+        return f"{dtype_abbrs[t.dtype]}[{', '.join(map(str, t.shape))}]"
+
+    def prehook(grad_outputs):
+        node = torch._C._current_autograd_node()
+        grad_outputs_str = f"[{','.join(fmt(t) for t in grad_outputs)}]"
+        log_str = f"Executing: {node} with grad_outputs: {grad_outputs_str}"
+        log.debug(log_str)
+
+    handles = []
+    for node in iter_graph(grad_fns):
+        handles.append(node.register_prehook(prehook))
+
+    def unregister_hooks():
+        for handle in handles:
+            handle.remove()
+
+    return unregister_hooks
+
+
+def _engine_run_backward(t_outputs, *args, **kwargs):
+    attach_logging_hooks = log.getEffectiveLevel() <= logging.DEBUG
+    if attach_logging_hooks:
+        unregister_hooks = _register_logging_hooks_on_whole_graph(t_outputs)
+    try:
+        return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+            t_outputs, *args, **kwargs
+        )  # Calls into the C++ engine to run the backward pass
+    finally:
+        if attach_logging_hooks:
+            unregister_hooks()

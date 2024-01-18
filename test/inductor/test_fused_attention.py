@@ -19,7 +19,7 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 def checkpoint_wrapper(fn):
     def inner(*args):
-        return torch.utils.checkpoint.checkpoint(fn, *args)
+        return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=True)
 
     return inner
 
@@ -127,7 +127,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         when an intermediate result is being used / returned downstream
         """
 
-        @skipIfRocm
         @torch.compile(fullgraph=True)
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor

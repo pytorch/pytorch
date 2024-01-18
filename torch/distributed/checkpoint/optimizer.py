@@ -1,49 +1,41 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import dataclasses
-from typing import Dict, List, Optional, Sequence, Tuple, Union, cast
-from torch.distributed.checkpoint.planner import LoadPlan
+from typing import cast, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.distributed as dist
+from torch._utils import _get_device_module
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 from torch.distributed._shard.sharded_tensor.shard import Shard
-from torch.distributed._shard.sharding_spec.chunk_sharding_spec import (
-    ChunkShardingSpec,
-)
-
-import torch.distributed.checkpoint as dist_cp
+from torch.distributed._shard.sharding_spec.chunk_sharding_spec import ChunkShardingSpec
+from torch.distributed._tensor import DTensor
+from torch.distributed.checkpoint._nested_dict import unflatten_state_dict
+from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
+    ChunkStorageMetadata,
     Metadata,
     MetadataIndex,
     STATE_DICT_TYPE,
     TensorStorageMetadata,
-    ChunkStorageMetadata,
 )
-from torch.distributed.distributed_c10d import _get_default_group
-from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
+from torch.distributed.checkpoint.planner import LoadPlan, LoadPlanner
 from torch.distributed.checkpoint.planner_helpers import (
-    create_read_items_for_chunk_list,
     _create_read_items,
+    create_read_items_for_chunk_list,
 )
-from torch.distributed.remote_device import _remote_device
-
-from torch.distributed._tensor import DTensor
-from torch.distributed.checkpoint.default_planner import (
-    DefaultLoadPlanner,
-)
-from torch.distributed.checkpoint.planner import LoadPlanner
-
-from torch.distributed.checkpoint._nested_dict import unflatten_state_dict
+from torch.distributed.checkpoint.state_dict_loader import load_state_dict
+from torch.distributed.checkpoint.storage import StorageReader
 from torch.distributed.checkpoint.utils import (
     _element_wise_add,
     _element_wise_sub,
-    _normalize_device_info
+    _normalize_device_info,
 )
-
-from torch._utils import _get_device_module
+from torch.distributed.distributed_c10d import _get_default_group
+from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
+from torch.distributed.remote_device import _remote_device
 
 STATE_DICT_2D_LAYOUT = Dict[str, Tuple[Optional[Sequence[int]], Sequence[int]]]
 
@@ -59,7 +51,9 @@ def _gen_rank_device(global_rank: int, device_type: str = "cuda") -> str:
         return "cpu"
     device_module = _get_device_module(device_type)
     if device_module.is_available():
-        return _normalize_device_info(device_type, global_rank % device_module.device_count())
+        return _normalize_device_info(
+            device_type, global_rank % device_module.device_count()
+        )
     return "cpu"
 
 
@@ -90,18 +84,17 @@ def _is_nested_tensor(val: torch.Tensor) -> bool:
         if type(val.local_shards()[0].tensor) is ShardedTensor:
             return True
         if type(val.local_shards()[0].tensor) is DTensor:
-            raise ValueError(
-                "Cannot handle DTensor nested insided ShardedTensor"
-            )
+            raise ValueError("Cannot handle DTensor nested insided ShardedTensor")
     elif type(val) is DTensor and (
-        type(val._local_tensor) is DTensor
-        or type(val._local_tensor) is ShardedTensor
+        type(val._local_tensor) is DTensor or type(val._local_tensor) is ShardedTensor
     ):
         raise ValueError("Cannot handle nested DTensor")
     return False
 
 
-def _alloc_tensor(props: TensorProperties, size: Sequence[int], device_type: str = "cuda") -> torch.Tensor:
+def _alloc_tensor(
+    props: TensorProperties, size: Sequence[int], device_type: str = "cuda"
+) -> torch.Tensor:
     return torch.empty(
         size=size,
         dtype=props.dtype,
@@ -181,9 +174,7 @@ class _ReaderWithOffset(DefaultLoadPlanner):
             local_chunks = [
                 ChunkStorageMetadata(
                     offsets=torch.Size(
-                        _element_wise_add(
-                            original_shard.metadata.shard_offsets, offset
-                        )
+                        _element_wise_add(original_shard.metadata.shard_offsets, offset)
                     ),
                     sizes=torch.Size(original_shard.metadata.shard_sizes),
                 )
@@ -196,9 +187,7 @@ class _ReaderWithOffset(DefaultLoadPlanner):
             # TODO: we should change _create_sharded_read_items to have more ergonomic API
             for ri in reqs:
                 assert ri.dest_index.offset is not None
-                original_offset = _element_wise_sub(
-                    ri.dest_index.offset, offset
-                )
+                original_offset = _element_wise_sub(ri.dest_index.offset, offset)
                 original_index = dataclasses.replace(
                     ri.dest_index, offset=torch.Size(original_offset)
                 )
@@ -214,7 +203,7 @@ class _ReaderWithOffset(DefaultLoadPlanner):
 def load_sharded_optimizer_state_dict(
     model_state_dict: STATE_DICT_TYPE,
     optimizer_key: str,
-    storage_reader: dist_cp.StorageReader,
+    storage_reader: StorageReader,
     planner: Optional[LoadPlanner] = None,
 ) -> STATE_DICT_TYPE:
     """
@@ -273,7 +262,9 @@ def load_sharded_optimizer_state_dict(
     if dp_pg is None:
         placements = []
         for i in range(dist.get_world_size()):
-            device_info = _normalize_device_info(dp_pg_device_type, i % device_module.device_count())
+            device_info = _normalize_device_info(
+                dp_pg_device_type, i % device_module.device_count()
+            )
             placements.append(f"rank:{i}/{device_info}")
         sharding_spec = ChunkShardingSpec(dim=0, placements=placements)  # type: ignore[arg-type]
     else:
@@ -294,7 +285,9 @@ def load_sharded_optimizer_state_dict(
 
         # value: TensorStorageMetadata
         if value.size.numel() == 1:
-            state_dict[key] = _alloc_tensor(value.properties, value.size, dp_pg_device_type)
+            state_dict[key] = _alloc_tensor(
+                value.properties, value.size, dp_pg_device_type
+            )
         elif dp_pg is None:
             state_dict[key] = _create_chunk_sharded_tensor(
                 _alloc_tensor(value.properties, value.size, dp_pg_device_type),
@@ -313,10 +306,7 @@ def load_sharded_optimizer_state_dict(
             local_shards = []
             current_rank = dist.get_rank(dp_pg)
             for shard_md in st_md.shards_metadata:
-                if (
-                    cast(_remote_device, shard_md.placement).rank()
-                    != current_rank
-                ):
+                if cast(_remote_device, shard_md.placement).rank() != current_rank:
                     continue
                 local_shards.append(
                     Shard(
@@ -331,18 +321,13 @@ def load_sharded_optimizer_state_dict(
                 local_shards, st_md, process_group=dp_pg
             )
 
-            if (
-                spec_key in layout_specs
-                and layout_specs[spec_key][0] is not None
-            ):
-                fqn_to_offset[key] = cast(
-                    Sequence[int], layout_specs[spec_key][0]
-                )
+            if spec_key in layout_specs and layout_specs[spec_key][0] is not None:
+                fqn_to_offset[key] = cast(Sequence[int], layout_specs[spec_key][0])
 
             state_dict[key] = st
 
     # Whether we unflatten before or after doesn't matter
-    dist_cp.load_state_dict(
+    load_state_dict(
         state_dict=state_dict,
         storage_reader=storage_reader,
         # FIXME the type of planner is wrong in load_state_dict

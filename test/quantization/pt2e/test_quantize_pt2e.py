@@ -1,9 +1,10 @@
 # Owner(s): ["oncall: quantization"]
-import copy
 from typing import List, Tuple
 
 import torch
-from torch._export import capture_pre_autograd_graph
+from torch._export import (
+    capture_pre_autograd_graph,
+)
 from torch import Tensor
 from torch.ao.quantization import (
     observer,
@@ -34,13 +35,9 @@ from torch.ao.quantization.quantizer.embedding_quantizer import (  # noqa: F811
 )
 
 from torch.ao.quantization.quantize_pt2e import (
-    _convert_to_reference_decomposed_fx,
     convert_pt2e,
     prepare_pt2e,
     prepare_qat_pt2e,
-)
-from torch.ao.quantization.backend_config import (
-    get_executorch_backend_config,
 )
 
 from torch.ao.quantization.qconfig import (
@@ -50,127 +47,18 @@ from torch.ao.quantization.qconfig import (
     QConfig,
     weight_observer_range_neg_127_to_127,
 )
-from torch.ao.quantization.quantize_fx import (
-    prepare_fx,
-)
 from torch.fx import Node
 
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
-    QuantizationTestCase,
+    PT2EQuantizationTestCase,
     skipIfNoQNNPACK,
     TestHelperModules,
 )
 from torch.testing._internal.common_utils import (
     TemporaryFileName,
 )
-from torch._export import dynamic_dim
 
-
-class PT2EQuantizationTestCase(QuantizationTestCase):
-    """
-    Base QuantizationTestCase for PT2 with some helper methods.
-    """
-    _MAP_TO_FX_TRACED_OPS = {
-        torch.ops.quantized_decomposed.quantize_per_tensor: torch.ops.quantized_decomposed.quantize_per_tensor.default,
-        torch.ops.quantized_decomposed.dequantize_per_tensor: torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-        torch.ops.quantized_decomposed.quantize_per_channel: torch.ops.quantized_decomposed.quantize_per_channel.default,
-        torch.ops.quantized_decomposed.dequantize_per_channel: torch.ops.quantized_decomposed.dequantize_per_channel.default,
-        torch.ops.quantized_decomposed.quantize_per_tensor.tensor: torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
-        torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
-    }
-
-    def _test_quantizer(
-        self,
-        model,
-        example_inputs,
-        quantizer,
-        expected_node_occurrence,
-        expected_node_list=None,
-        check_against_fx_quant=False,
-        fx_qconfig_mapping=None,
-        export_with_dynamic_shape=False,
-        is_qat=False,
-    ):
-        # resetting dynamo cache
-        torch._dynamo.reset()
-        m_eager = model.eval()
-
-        # program capture
-        m = copy.deepcopy(m_eager)
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-            constraints=[dynamic_dim(example_inputs[0], 0)] if export_with_dynamic_shape else [],
-        )
-
-        if is_qat:
-            m = prepare_qat_pt2e(m, quantizer)
-        else:
-            m = prepare_pt2e(m, quantizer)
-        # Calibrate
-        m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
-
-        pt2_quant_output = m(*example_inputs)
-        node_occurrence = {
-            ns.call_function(k): v for k, v in expected_node_occurrence.items()
-        }
-        if expected_node_list is None:
-            expected_node_list = []
-        node_list = [ns.call_function(n) for n in expected_node_list]
-        self.checkGraphModuleNodes(
-            m, expected_node_occurrence=node_occurrence, expected_node_list=node_list
-        )
-        if check_against_fx_quant:
-            qconfig_mapping = fx_qconfig_mapping
-            backend_config = get_executorch_backend_config()
-            m_copy = copy.deepcopy(m_eager)
-            m_fx = prepare_fx(
-                m_copy, qconfig_mapping, example_inputs, backend_config=backend_config
-            )
-            m_fx(*example_inputs)
-            m_fx = _convert_to_reference_decomposed_fx(
-                m_fx, backend_config=backend_config
-            )
-            m_fx = capture_pre_autograd_graph(
-                m_fx,
-                example_inputs,
-                constraints=[dynamic_dim(example_inputs[0], 0)] if export_with_dynamic_shape else [],
-            )
-            node_occurrence = {}
-            for k, v in PT2EQuantizationTestCase._MAP_TO_FX_TRACED_OPS.items():
-                if k in expected_node_occurrence:
-                    node_occurrence[ns.call_function(v)] = expected_node_occurrence[k]
-            self.checkGraphModuleNodes(m_fx, expected_node_occurrence=node_occurrence)
-            fx_quant_output = m_fx(*example_inputs)
-            self.assertEqual(fx_quant_output, pt2_quant_output)
-
-    def _quantize(self, m, quantizer, example_inputs):
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, quantizer)
-        m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
-        return m
-
-    def _get_pt2e_quantized_linear(self, is_per_channel=False) -> torch.fx.GraphModule:
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(2, 2)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=is_per_channel)
-        quantizer.set_global(operator_config)
-        example_inputs = (torch.randn(2, 2),)
-        m = M().eval()
-        return self._quantize(m, quantizer, example_inputs)
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(PT2EQuantizationTestCase):
@@ -436,7 +324,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         ) -> Tuple[Tensor, Tensor]:
                             assert (
                                 len(obs_or_fqs) == 2
-                            ), f"Expecting two obs/fqs, one for activation and one for weight, got: {len(obs_or_fq)}"
+                            ), f"Expecting two obs/fqs, one for activation and one for weight, got: {len(obs_or_fqs)}"
                             act_obs_or_fq = obs_or_fqs[0]
                             weight_obs_or_fq = obs_or_fqs[1]
                             act_scale, act_zp = act_obs_or_fq.calculate_qparams()
@@ -539,7 +427,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         ) -> Tuple[Tensor, Tensor]:
                             assert (
                                 len(obs_or_fqs) == 1
-                            ), f"Expecting one weight obs/fq, got: {len(obs_or_fq)}"
+                            ), f"Expecting one weight obs/fq, got: {len(obs_or_fqs)}"
                             weight_obs_or_fq = obs_or_fqs[0]
                             (
                                 weight_scale,
@@ -773,7 +661,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         conv_output_obs = []
         for n in m.graph.nodes:
             if n.op == "call_function" and n.target == torch.ops.aten.conv2d.default:
-                conv_output_obs.append(getattr(m, list(n.users)[0].target))
+                conv_output_obs.append(getattr(m, next(iter(n.users)).target))
             if n.op == "call_function" and n.target == torch.ops.aten.cat.default:
                 inputs = n.args[0]
                 input0 = inputs[0]
@@ -830,7 +718,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         conv_output_obs = []
         for n in m.graph.nodes:
             if n.op == "call_function" and n.target == torch.ops.aten.conv2d.default:
-                conv_output_obs.append(getattr(m, list(n.users)[0].target))
+                conv_output_obs.append(getattr(m, next(iter(n.users)).target))
             if n.op == "call_function" and n.target == torch.ops.aten.cat.default:
                 inputs = n.args[0]
                 input0 = inputs[0]
@@ -841,7 +729,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 obs_ins1 = getattr(m, input1.target)
                 assert obs_ins0 == obs_ins1
 
-                output_obs = list(n.users)[0]
+                output_obs = next(iter(n.users))
                 assert output_obs.op == "call_module"
                 obs_ins2 = getattr(m, output_obs.target)
                 assert obs_ins0 == obs_ins2, "input observer does not match output"
@@ -1132,7 +1020,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             if n.target == torch.ops.aten.add.Tensor:
                 input_obs1 = getattr(m, n.args[0].target)
                 input_obs2 = getattr(m, n.args[1].target)
-                output_obs = getattr(m, list(n.users)[0].target)
+                output_obs = getattr(m, next(iter(n.users)).target)
                 self.assertIs(input_obs1, input_obs2)
                 self.assertIs(input_obs1, output_obs)
                 observers.append(input_obs1)
@@ -1307,7 +1195,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         )
         weight_meta = None
         for n in m.graph.nodes:
-            if n.op == "get_attr" and list(n.users)[0].target == torch.ops.aten.linear.default:
+            if n.op == "get_attr" and next(iter(n.users)).target == torch.ops.aten.linear.default:
                 weight_meta = n.meta
                 break
         assert weight_meta is not None, "Expect to find metadata for weight node"
@@ -1865,3 +1753,46 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             node_occurrence,
             node_list,
         )
+
+    def test_speed(self):
+        import time
+
+        def dynamic_quantize_pt2e(model, example_inputs):
+            torch._dynamo.reset()
+            model = capture_pre_autograd_graph(model, example_inputs)
+            # Per channel quantization for weight
+            # Dynamic quantization for activation
+            # Please read a detail: https://fburl.com/code/30zds51q
+            embedding_quantizer = EmbeddingQuantizer()
+            dynamic_quantizer = XNNPACKQuantizer()
+            operator_config_dynamic = get_symmetric_quantization_config(
+                is_per_channel=True, is_dynamic=True
+            )
+            dynamic_quantizer.set_global(operator_config_dynamic)
+            composed_quantizer = ComposableQuantizer([embedding_quantizer, dynamic_quantizer])
+            prev = time.time()
+            model = prepare_qat_pt2e(model, composed_quantizer)
+            cur = time.time()
+            # print("prepare time:", cur - prev)
+            # Without Calibraiton, scale/zero value will have an initialized value of 1.0
+            # Per channel quantization needs a proper scale/zero shape/value to work properly.
+            # So we need to run calibration before converting to quantized model.
+            model(*example_inputs)
+            prev = time.time()
+            model = convert_pt2e(model)
+            cur = time.time()
+            # uncomment to see the time
+            # print("convert time:", cur - prev)
+            return model
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M().eval()
+        example_inputs = (torch.randn(5, 5),)
+        _ = dynamic_quantize_pt2e(m, example_inputs)

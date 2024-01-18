@@ -609,11 +609,16 @@ def has_incompatible_cudagraph_ops(gm):
     return False
 
 
-instance_descriptor = collections.namedtuple(
-    "instance_descriptor",
-    ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
-    defaults=[tuple(), tuple(), tuple(), tuple()],
-)
+try:
+    from triton.compiler.compiler import AttrsDescriptor as instance_descriptor
+except ImportError:
+    # To support older version of triton which does not have AttrsDescriptor
+    # class
+    instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
+        "instance_descriptor",
+        ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
+        defaults=[tuple(), tuple(), tuple(), tuple()],
+    )
 
 
 @functools.lru_cache(None)
@@ -1118,14 +1123,14 @@ def get_device_tflops(dtype):
         # Triton API change in https://github.com/openai/triton/pull/2293
         from triton.testing import nvsmi
 
-        cur_sm_clock = nvsmi(["clocks.current.sm"])[0]
+        sm_clock = nvsmi(["clocks.max.sm"])[0]
         if dtype in (torch.float16, torch.bfloat16):
-            return get_max_tensorcore_tflops(dtype, cur_sm_clock)
+            return get_max_tensorcore_tflops(dtype, sm_clock)
 
         if torch.backends.cuda.matmul.allow_tf32:
-            return get_max_tensorcore_tflops(torch.float32, cur_sm_clock)
+            return get_max_tensorcore_tflops(torch.float32, sm_clock)
         else:
-            return get_max_simd_tflops(torch.float32, cur_sm_clock)
+            return get_max_simd_tflops(torch.float32, sm_clock)
     else:
         if dtype in (torch.float16, torch.bfloat16):
             return get_max_tensorcore_tflops(dtype)
@@ -1189,37 +1194,3 @@ class Placeholder(enum.Enum):
     # The descriptive name of the triton kernel; when unique_kernel_names = False, this
     # placeholder will be replaced with a string with more information.
     DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
-
-
-# A utility function for easier AOTInductor testing
-def aot_inductor_launcher(so_path: str, device: str):
-    if device == "cuda":
-        return f"""
-            #include <torch/csrc/inductor/aoti_model_container_runner_cuda.h>
-
-            torch::inductor::AOTIModelContainerRunnerCuda runner("{so_path}");
-
-            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
-                return runner.run(input_tensors);
-            }}
-
-            std::vector<const char*> get_call_spec() {{
-                return runner.get_call_spec();
-            }}
-        """
-    elif device == "cpu":
-        return f"""
-            #include <torch/csrc/inductor/aoti_model_container_runner.h>
-
-            torch::inductor::AOTIModelContainerRunnerCpu runner("{so_path}");
-
-            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
-                return runner.run(input_tensors);
-            }}
-
-            std::vector<const char*> get_call_spec() {{
-                return runner.get_call_spec();
-            }}
-        """
-    else:
-        raise RuntimeError(f"Unsupported device: {device}")
