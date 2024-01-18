@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import run_tests
 
 
 class TestFullyShardState(FSDPTestMultiThread):
-
     @property
     def world_size(self) -> int:
         return 1

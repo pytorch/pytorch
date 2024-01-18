@@ -2,7 +2,6 @@ from typing import Any
 
 import torch.nn as nn
 
-
 from torch.distributed._composable import contract
 from torch.distributed._composable_state import _insert_module_state
 
@@ -23,6 +22,7 @@ def fully_shard(
     new_cls = type(f"FSDP{cls.__name__}", (FSDP, cls), dct)
     module.__class__ = new_cls
     return module
+
 
 def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> None:
     raise AssertionError(
