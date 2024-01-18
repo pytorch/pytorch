@@ -714,7 +714,7 @@ class WrapperHandler:
 
 MockHandler._init_cls()
 
-_ops: Virtualized[OpsHandler] = Virtualized("ops", MockHandler)
+_ops: Virtualized[OpsHandler[Any]] = Virtualized("ops", MockHandler)
 _graph: Virtualized[GraphLowering] = Virtualized("graph", NullHandler)
 _real_inputs: Virtualized[List[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
 _fake_mode: Virtualized[FakeTensorMode] = Virtualized("fake_mode", NullHandler)
@@ -837,7 +837,7 @@ class _V:
     get_current_node: Callable[[], Any] = _current_node._get_handler
 
     @property
-    def ops(self) -> _MockHandler:
+    def ops(self) -> OpsHandler:
         """The operator handler specific to the current codegen task"""
         return _ops._get_handler()
 
