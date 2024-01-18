@@ -61,8 +61,9 @@ struct FusedSgdMathFunctor {
   static_assert(
       depth == 2 || depth == 3,
       "depth of 2 for SGD w/ momentum == 0, 3 for SGD w/ momentum != 0");
+  template <typename index_t>
   C10_DEVICE __forceinline__ void operator()(
-      int chunk_size,
+      const index_t chunk_size,
       TensorListMetadata<depth>& tl,
       const double weight_decay,
       const double momentum,
@@ -77,15 +78,14 @@ struct FusedSgdMathFunctor {
     if (found_inf_ptr && *found_inf_ptr == 1) {
       return;
     }
-    auto tensor_loc = tl.block_to_tensor[blockIdx.x];
-    auto chunk_idx = tl.block_to_chunk[blockIdx.x];
-    auto n = tl.numel_for_tensor[tensor_loc];
+    const index_t tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const index_t chunk_idx = tl.block_to_chunk[blockIdx.x];
 
     scalar_t* args[depth];
     scalar_t r_args[depth][kILP];
     const auto all_aligned{
         init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)};
-    n -= chunk_idx * chunk_size;
+    const index_t n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size;
 
 #ifndef USE_ROCM
     const auto use_faster_load_store =
@@ -94,12 +94,12 @@ struct FusedSgdMathFunctor {
     const auto use_faster_load_store{false};
 #endif
     if (use_faster_load_store) {
-      for (auto i_start = threadIdx.x;
+      for (index_t i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
 #pragma unroll
         for (auto i = 0; i < depth; i++) {
-          load_store(r_args[i], args[i], 0, i_start);
+          load_store(r_args[i], args[i], static_cast<index_t>(0), i_start);
         }
         sgd_math<scalar_t, depth>(
             r_args,
@@ -112,16 +112,16 @@ struct FusedSgdMathFunctor {
             maximize,
             is_first_step,
             grad_scale_ptr);
-        load_store(args[0], r_args[0], i_start, 0);
+        load_store(args[0], r_args[0], i_start, static_cast<index_t>(0));
         if (grad_scale_ptr) {
-          load_store(args[1], r_args[1], i_start, 0);
+          load_store(args[1], r_args[1], i_start, static_cast<index_t>(0));
         }
         if (depth > 2) {
-          load_store(args[2], r_args[2], i_start, 0);
+          load_store(args[2], r_args[2], i_start, static_cast<index_t>(0));
         }
       }
     } else {
-      for (auto i_start = 0; i_start < n && i_start < chunk_size;
+      for (index_t i_start = 0; i_start < n && i_start < chunk_size;
            i_start += blockDim.x * kILP) {
         load_args<depth>(r_args, args, i_start, chunk_size, n);
         sgd_math<scalar_t, depth>(
