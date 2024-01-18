@@ -33,7 +33,12 @@ from torch._inductor.utils import timed
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import IS_MACOS, slowTest
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_MACOS,
+    parametrize,
+    slowTest,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
 
 try:
@@ -83,6 +88,7 @@ class LstmModule(torch.nn.Module):
         return x, h
 
 
+@instantiate_parametrized_tests
 class CPUReproTests(TestCase):
     common = check_model
 
@@ -2764,6 +2770,23 @@ class CPUReproTests(TestCase):
             FileCheck().check_count(
                 "Vectorized<float>::loadu(tmpbuf.data())", 0, exactly=True
             ).run(code)
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float))
+    @parametrize("shape", ("15,3,13", "4,2048,4096"))
+    def test_fp8_cast(self, dtype: torch.dtype, shape: str):
+        def fp8_cast(x):
+            y0 = x.to(dtype=torch.float8_e4m3fn).to(dtype)
+            y1 = x.to(dtype=torch.float8_e5m2).to(dtype)
+            return y0, y1
+
+        compiled_fp8_cast = torch.compile(fp8_cast, backend="inductor", dynamic=True)
+
+        shape = [int(dim) for dim in shape.split(",")]
+        x = torch.rand(*shape, device="cpu", dtype=dtype)
+        y0_fp8, y1_fp8 = compiled_fp8_cast(x)
+
+        torch.testing.assert_close(y0_fp8, x, rtol=5e-1, atol=5e-1)
+        torch.testing.assert_close(y1_fp8, x, rtol=5e-1, atol=5e-1)
 
 
 if __name__ == "__main__":
