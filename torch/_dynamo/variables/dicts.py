@@ -22,9 +22,9 @@ from ..utils import dict_keys, dict_values, istype, specialize_symnode
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
-# [Adding a new supported class the keys of ConstDictVarialble]
-# - Add its tracker type to `is_hashable` in this file
-# - (perhaps) Define how they are compared  _HashableTracker._eq_impl
+# [Adding a new supported class within the keys of ConstDictVarialble]
+# - Add its tracker type to is_hashable
+# - (perhaps) Define how it is compared in _HashableTracker._eq_impl
 
 
 def is_hashable(x):
