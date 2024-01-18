@@ -45,7 +45,9 @@ jobs:
 
           conda activate tdenv
 
-          cd "${GITHUB_WORKSPACE}"/llm-target-determinator 
+          ls
+          pwd
+          cd llm-target-determinator 
           pip install -r requirements.txt
 
       - name: Fetch CodeLlama Checkpoint
