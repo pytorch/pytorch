@@ -63,8 +63,10 @@ class SDPAParamsVariable(VariableTracker):
         try:
             getattr_static(torch._C._SDPAParams, name)
         except AttributeError:
-            # noqa: TRY200
-            raise Unsupported(f"Unsupported torch._C._SDPAParams attribute {name}")
+            # Using raise from is too verbose here
+            raise Unsupported(
+                f"Unsupported torch._C._SDPAParams attribute {name}"
+            )  # noqa: TRY200
 
         proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), name)
         if self.source is not None:
