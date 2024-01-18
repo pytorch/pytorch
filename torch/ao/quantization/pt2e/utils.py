@@ -58,6 +58,12 @@ _conv2d_bn_example_inputs = (
     torch.randn(1),           # bn_running_var
 )
 
+_conv2d_example_inputs = (
+    torch.randn(1, 1, 3, 3),  # x
+    torch.randn(1, 1, 1, 1),  # conv_weight
+    torch.randn(1),           # conv_bias
+)
+
 def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
     """
     Assuming dest is one of the ops inserted by quant workflow, this function
