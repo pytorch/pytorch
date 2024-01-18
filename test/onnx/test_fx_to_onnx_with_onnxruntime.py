@@ -95,8 +95,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
 
     @pytorch_test_common.xfail(
-        error_message="graph-captured input #2, of type <class 'torch.Tensor'>, "
-        "is not among original inputs of types: (<class 'torch.Tensor'>)",
+        error_message="Unexpectedly found a <class 'torch.Tensor'> in the inputs.",
         reason="https://github.com/pytorch/pytorch/issues/96379",
     )
     def test_func_with_args_and_tensor_kwargs(self):
