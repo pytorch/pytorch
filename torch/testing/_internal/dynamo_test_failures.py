@@ -1039,7 +1039,6 @@ dynamo_expected_failures = {
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_seq_len_1030_n_head_3_head_dim_8_causal_False_train_False_cpu_bfloat16",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float32_batch_size_12_seq_len_1030_n_head_3_head_dim_16_causal_True_train_False_cpu_float32",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float32_batch_size_12_seq_len_1030_n_head_3_head_dim_16_causal_True_train_True_cpu_float32",
-    "TestSDPAFailureModesCPU.test_invalid_inputs_1_dimensional_inputs_kernel2_cpu",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_seq_len_267_n_head_3_head_dim_16_causal_True_train_True_cpu_bfloat16",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float32_batch_size_12_seq_len_1030_n_head_1_head_dim_16_causal_True_train_False_cpu_float32",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_seq_len_267_n_head_1_head_dim_8_causal_True_train_False_cpu_bfloat16",
@@ -3147,7 +3146,6 @@ dynamo_expected_failures = {
     "TestProfiler.test_kineto_profiler_multiple_steppers",  # profiler/test_profiler
     "TestProfiler.test_profiler_tracing",  # profiler/test_profiler
     "TestProfiler.test_is_profiler_enabled",  # profiler/test_profiler
-    "TestExperimentalUtils.test_utils_compute_idle_time",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_optimizer_parameters_sgd",  # profiler/test_profiler
     "TestExperimentalUtils.test_profiler_name_pattern",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_extra_fields",  # profiler/test_profiler
