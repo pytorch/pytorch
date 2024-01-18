@@ -1863,9 +1863,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         // Python bindings to call kernel():
         #define PY_SSIZE_T_CLEAN
         #include <Python.h>
+        #include <sstream>
+        #include <cstdlib>
 
-        // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow
-        extern "C" void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj);
+        // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow.
+        // We manually link it below to workaround issues with fbcode build.
+        static void* (*_torchinductor_pyobject_tensor_data_ptr)(PyObject* obj);
 
         template <typename T> static inline T parse_arg(PyObject* args, size_t n) {
             static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
@@ -1889,6 +1892,9 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             } catch(std::exception const& e) {
                 PyErr_SetString(PyExc_RuntimeError, e.what());
                 return nullptr;
+            } catch(...) {
+                PyErr_SetString(PyExc_RuntimeError, "unhandled error");
+                return nullptr;
             }
         }
 
@@ -1900,6 +1906,16 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             {PyModuleDef_HEAD_INIT, "kernel", NULL, -1, py_methods};
 
         PyMODINIT_FUNC PyInit_kernel(void) {
+            const char* str_addr = std::getenv("_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR");
+            if(!str_addr) {
+                PyErr_SetString(PyExc_RuntimeError, "_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR must be set");
+                return nullptr;
+            }
+            std::istringstream iss(str_addr);
+            uintptr_t addr = 0;
+            iss >> addr;
+            _torchinductor_pyobject_tensor_data_ptr =
+                reinterpret_cast<decltype(_torchinductor_pyobject_tensor_data_ptr)>(addr);
             return PyModule_Create(&py_module);
         }
         """
@@ -1907,6 +1923,9 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
     @classmethod
     def _load_library_inner(cls, path: str, key: str) -> ModuleType:
+        os.environ["_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR"] = str(
+            torch._C._dynamo.guards._torchinductor_pyobject_tensor_data_ptr  # type: ignore[attr-defined]
+        )
         return importlib.machinery.ExtensionFileLoader(
             f"{key}.kernel", path
         ).load_module()  # type: ignore[call-arg]
