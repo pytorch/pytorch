@@ -29,7 +29,6 @@ class ExperimentConfig:
     enable_math: bool
     enable_flash: bool
     enable_mem_efficient: bool
-    enable_cudnn: bool
 
     def get_entries(self) -> List:
         return [
@@ -42,7 +41,6 @@ class ExperimentConfig:
             self.enable_math,
             self.enable_flash,
             self.enable_mem_efficient,
-            self.enable_cudnn,
         ]
 
     @classmethod
@@ -57,7 +55,6 @@ class ExperimentConfig:
             "enable_math",
             "enable_flash",
             "enable_mem_efficient",
-            "enable_cudnn",
         ]
 
 
@@ -209,7 +206,6 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
         enable_math=config.enable_math,
         enable_flash=config.enable_flash,
         enable_mem_efficient=config.enable_mem_efficient,
-        enable_cudnn=config.enable_cudnn,
     ) as kernel_choice, torch.inference_mode() as inference_mode:
         dropout_p = 0.0
         mask = None
@@ -290,7 +286,6 @@ def generate_experiments(
                 enable_math=False,
                 enable_flash=True,
                 enable_mem_efficient=True,
-                enable_cudnn=True,
             )
         )
     return configs
@@ -312,7 +307,6 @@ def main(save_path: Optional[Path]):
         enable_math=False,
         enable_flash=True,
         enable_mem_efficient=True,
-        enable_cudnn=True,
     )
 
     experiment = run_single_experiment(config)
