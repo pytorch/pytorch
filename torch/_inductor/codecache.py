@@ -64,6 +64,7 @@ from torch.hub import _Faketqdm, tqdm
 
 _HERE = os.path.abspath(__file__)
 _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
+_LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
 
 if config.is_fbcode():
     from triton.fb import build_paths
@@ -1418,14 +1419,17 @@ def cpp_compile_command(
         if aot_mode and not use_absolute_path:
             inp_name = input
             out_name = output
+            linker_script = _LINKER_SCRIPT
         else:
             # We need to copy any absolute-path torch includes
             inp_name = [os.path.basename(i) for i in input]
             out_name = os.path.basename(output)
+            linker_script = os.path.basename(_LINKER_SCRIPT)
         assert is_clang()
         # Use clang runtime instead of libgcc
         clang_flags += " --rtlib=compiler-rt"
         clang_flags += " -fuse-ld=lld"
+        clang_flags += f" -Wl,--script={linker_script}"
         linker_paths = "-B" + build_paths.glibc_lib()
         linker_paths += " -L" + build_paths.glibc_lib()
     else:
@@ -1702,12 +1706,11 @@ def compile_file(
             # When we build remotely, we need to make sure to carefully copy any files
             # that are required during the compilation process into our build directly.
             # This is where all of the ATen/c10/Torch includes come from.
-            torch_includes_path = os.path.join(
-                torch.utils.cpp_extension._TORCH_PATH, "include"
-            )
+            torch_includes_path = os.path.join(_TORCH_PATH, "include")
             with tempfile.TemporaryDirectory() as tmp_dir:
                 # Copy everything to tmp compilation folder
                 shutil.copy(header_path, os.path.join(tmp_dir, header_name))
+                shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
                 for p, f in zip(input_paths, input_files):
                     shutil.copy(p, os.path.join(tmp_dir, f))
                 dest_include_path = os.path.join(tmp_dir, "include")
