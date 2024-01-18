@@ -18,6 +18,7 @@ import torch._refs
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._logging import warning_once
 
 from .. import config, polyfill, variables
 from ..device_interface import get_registered_device_interfaces
@@ -193,7 +194,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
         ):
-            log.warning("Profiler function %s will be ignored", self.value)
+            warning_once(log, "Profiler function %s will be ignored", self.value)
             return NullContextVariable()
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
