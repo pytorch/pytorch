@@ -2388,6 +2388,17 @@ def _async_compile_initializer(orig_ppid) -> None:
 
 _watchdog_thread: Optional[Thread] = None
 
+# Used to keep track of all process pools invoked so far.
+_pool_set: Set[ProcessPoolExecutor] = set()
+
+
+def shutdown_compile_workers() -> None:
+    """Shut down all outstanding compile-worker pools."""
+    global _pool_set
+    for pool in _pool_set:
+        pool.shutdown()
+    _pool_set = set()
+
 
 class AsyncCompile:
     def __init__(self) -> None:
@@ -2414,6 +2425,10 @@ class AsyncCompile:
             mp_context=ctx,
             initializer=partial(_async_compile_initializer, orig_ppid),
         )
+
+        global _pool_set
+        _pool_set.add(pool)
+
         # when this pool is created in a subprocess object, the normal exit handler
         # doesn't run, and we need to register our own handler.
         # exitpriority has to be high, because another one of the finalizers will
