@@ -658,7 +658,7 @@ class GuardBuilder(GuardBuilderBase):
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
-        if guard.is_nn_module():
+        if guard.is_nn_module() or guard.originating_source.is_dict_key():
             self.ID_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
