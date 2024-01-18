@@ -241,6 +241,19 @@ def fake_tensor_prop(
     return fake_mode
 
 
+def get_mutating_use_stack_trace(placeholder_node) -> Optional[str]:
+    # reinplaced uses might have a single, non-copy_ use
+    if len(placeholder_node.users) == 1:
+        return next(placeholder_node.users).meta.get("stack_trace", None)
+
+    for use in placeholder_node.users:
+        if use.target == torch.ops.aten.copy_.default:
+            if stack_trace := use.meta.get("stack_trace", None):
+                return stack_trace
+
+    return None
+
+
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
 @time_and_log(attr="compilation time (in seconds)")
@@ -347,9 +360,26 @@ def compile_fx_inner(
         # doesnt work for non-trees because the warmup run would apply mutation twice
         if config.triton.cudagraph_trees:
             # checking if mutation is only on parameters/static inputs
-            has_mutation = not all(
-                idx < num_fixed for idx in compiled_graph.mutated_input_idxs
-            )
+            mutation_indices = [
+                idx for idx in compiled_graph.mutated_input_idxs if idx >= num_fixed
+            ]
+            has_mutation = len(mutation_indices) != 0
+            if has_mutation:
+                stack_trace: Optional[str] = ""
+                placeholders = [
+                    node for node in gm.graph.nodes if node.op == "placeholder"
+                ]
+
+                for idx in mutation_indices:
+                    placeholder = placeholders[idx]
+                    if stack_trace := get_mutating_use_stack_trace(placeholder):
+                        break
+
+                if stack_trace:
+                    msg = f"skipping cudagraphs due to mutaton on input. Found from : \n {stack_trace}"
+                    V.graph.disable_cudagraphs_reason = msg
+
+                V.graph.disable_cudagraphs = True
         else:
             has_mutation = len(compiled_graph.mutated_inputs) != 0
 
@@ -422,9 +452,14 @@ def compile_fx_inner(
                 compiled_graph.current_callable = compiled_artifact
 
             if "cuda" in compiled_graph.device_types:
-                perf_hint_log.warning(
-                    "skipping cudagraphs due to %s", cudagraph_fail_reasons
-                )
+                # prefer better disable_cudagraphs_reason bc stack trace
+                # TODO: migrate all disable reasons to stack trace
+                if V.graph.disable_cudagraphs_reason:
+                    perf_hint_log.warning(V.graph.disable_cudagraphs_reason)
+                else:
+                    perf_hint_log.warning(
+                        "skipping cudagraphs due to %s", cudagraph_fail_reasons
+                    )
 
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
