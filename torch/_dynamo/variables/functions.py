@@ -648,7 +648,7 @@ class FunctoolsPartialVariable(VariableTracker):
 
     def reconstruct(self, codegen):
         codegen.load_import_from("functools", "partial")
-        codegen(self.func.source)
+        codegen(self.func)
         if self.args and self.keywords:
             # TODO(voz): Is there a util to help with this? neither the existing ones suffice?
             unimplemented("Reconstruction of mixed args and keywords NYI")

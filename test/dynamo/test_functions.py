@@ -1574,6 +1574,40 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_partials_graph_break_reconstruct_mix_no_source(self):
+        def fn(udf_mul_0, x):
+            udf_add_1 = lambda x, y: x + y
+
+            lambda0 = functools.partial(udf_mul_0, y=x)
+            lambda1 = functools.partial(udf_add_1, x)
+
+            print("break")
+            return torch.mul(lambda0(x), lambda1(x))
+
+        backend = EagerAndRecordGraphs()
+        cnts = CompileCounterWithBackend(backend)
+        x = torch.randn(2, 2)
+        dynamo_result = torch._dynamo.optimize(cnts)(fn)(udf_mul, x)
+
+        eager_result = fn(udf_mul, x)
+        gm = backend.graphs[0]
+        self.assertEqual(eager_result, dynamo_result)
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_lambda0_keywords_y_ : torch.Tensor):
+        l_lambda0_keywords_y_ = L_lambda0_keywords_y_
+
+        mul = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+
+        add = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+
+        mul_1 = torch.mul(mul, add);  mul = add = None
+        return (mul_1,)
+""",
+        )
+
     def test_partials_recompilation(self):
         def fn(f0, f1, x):
             return f0(x) * f1(x)
