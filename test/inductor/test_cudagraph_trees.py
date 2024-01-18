@@ -708,6 +708,26 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(node.cached_tensor_outputs, [None])
             self.assertEqual(node.unaliased_in_all_paths, [False])
 
+        def test_warmup_stream_sync(self):
+            def foo(args):
+                x = args[0]
+                args.clear()
+                x_orig = x
+                for _ in range(100):
+                    x = x @ x
+                return (x,)
+
+            inp = torch.rand([4096, 4096], device="cuda")
+            ref = foo([inp])[0]
+            torch.cuda.synchronize()
+
+            user_stream = torch.cuda.Stream()
+            with torch.cuda.stream(user_stream):
+                foo_cg = self.cudagraphify_impl(foo, [inp], (0,))
+                out = foo_cg([inp])[0]
+                y = out + 1
+                self.assertEqual(y, ref + 1)
+
         def test_unaligned_static_parameter(self):
             def gen_inp():
                 inp = torch.ones([20], device="cuda")
