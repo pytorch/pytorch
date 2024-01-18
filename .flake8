@@ -8,8 +8,6 @@ max-line-length = 120
 # E501 is not flexible enough, we're using B950 instead
 ignore =
     E203,E305,E402,E501,E721,E741,F405,F841,F999,W503,W504,C408,E302,W291,E303,
-    # fix these lints in the future
-    E275,
     # shebang has extra meaning in fbcode lints, so I think it's not worth trying
     # to line this up with executable bit
     EXE001,

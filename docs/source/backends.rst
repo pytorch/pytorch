@@ -12,6 +12,7 @@ These backends include:
 - ``torch.backends.cpu``
 - ``torch.backends.cuda``
 - ``torch.backends.cudnn``
+- ``torch.backends.mha``
 - ``torch.backends.mps``
 - ``torch.backends.mkl``
 - ``torch.backends.mkldnn``
@@ -83,6 +84,10 @@ torch.backends.cuda
 
 .. autofunction:: torch.backends.cuda.enable_math_sdp
 
+.. autofunction:: torch.backends.cuda.cudnn_sdp_enabled
+
+.. autofunction:: torch.backends.cuda.enable_cudnn_sdp
+
 .. autofunction:: torch.backends.cuda.can_use_flash_attention
 
 .. autofunction:: torch.backends.cuda.can_use_efficient_attention
@@ -125,6 +130,15 @@ torch.backends.cudnn
     cuDNN v8 API.
 
 .. py:module:: torch.backends.cudnn.rnn
+
+
+torch.backends.mha
+^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.mha
+
+.. autofunction::  torch.backends.mha.get_fastpath_enabled
+.. autofunction::  torch.backends.mha.set_fastpath_enabled
+
 
 torch.backends.mps
 ^^^^^^^^^^^^^^^^^^

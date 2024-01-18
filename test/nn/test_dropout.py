@@ -65,8 +65,8 @@ class TestDropoutNN(NNTestCase):
                     o_ref = torch.dropout(x_ref, p, train)
                     o.sum().backward()
                     o_ref.sum().backward()
-                    assert(o.equal(o_ref))
-                    assert(x.grad.equal(x_ref.grad))
+                    assert o.equal(o_ref)
+                    assert x.grad.equal(x_ref.grad)
 
     def test_invalid_dropout_p(self):
         v = torch.ones(1)

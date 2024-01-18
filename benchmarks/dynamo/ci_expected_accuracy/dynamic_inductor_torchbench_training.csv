@@ -142,6 +142,10 @@ hf_clip,eager_fail_to_run,0
 
 
 
+hf_distil_whisper,model_fail_to_load,0
+
+
+
 lennard_jones,pass,7
 
 
@@ -282,7 +286,7 @@ vgg16,pass,8
 
 
 
-vision_maskrcnn,pass,36
+vision_maskrcnn,pass,35
 
 
 
