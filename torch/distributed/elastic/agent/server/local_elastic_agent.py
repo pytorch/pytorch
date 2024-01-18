@@ -145,6 +145,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         self._start_method = start_method
         self._pcontext: Optional[PContext] = None
         rdzv_run_id = spec.rdzv_handler.get_run_id()
+        self._rdzv_handler = spec.rdzv_handler
         self._log_dir = self._make_log_dir(log_dir, rdzv_run_id)
         self._log_line_prefix_template = log_line_prefix_template
         self._worker_watchdog: Optional[timer.FileTimerServer] = None
@@ -309,6 +310,8 @@ class LocalElasticAgent(SimpleElasticAgent):
             self._worker_watchdog = None
         if self._pcontext:
             self._pcontext.close(death_sig)
+        if self._rdzv_handler:
+            self._rdzv_handler.shutdown()
 
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.
