@@ -152,6 +152,18 @@ void asyncMemCopy(sycl::queue& queue, int* dst, int* src, size_t numBytes) {
   queue.memcpy(dst, src, numBytes);
 }
 
+void clearHostData(int* hostData, int numel) {
+  for (const auto i : c10::irange(numel)) {
+    hostData[i] = 0;
+  }
+}
+
+void validateHostData(int* hostData, int numel) {
+  for (const auto i : c10::irange(numel)) {
+    ASSERT_EQ_XPU(hostData[i], i);
+  }
+}
+
 TEST(XPUStreamTest, StreamFunction) {
   if (!has_xpu()) {
     return;
@@ -170,16 +182,22 @@ TEST(XPUStreamTest, StreamFunction) {
   asyncMemCopy(stream, deviceData, hostData, sizeof(int) * numel);
   c10::xpu::device_synchronize();
 
-  for (const auto i : c10::irange(numel)) {
-    hostData[i] = 0;
-  }
+  clearHostData(hostData, numel);
 
   // D2H
   asyncMemCopy(stream, hostData, deviceData, sizeof(int) * numel);
   c10::xpu::device_synchronize();
 
-  for (const auto i : c10::irange(numel)) {
-    ASSERT_EQ_XPU(hostData[i], i);
-  }
+  validateHostData(hostData, numel);
+
+  stream = c10::xpu::getStreamFromPool(-1);
+
+  clearHostData(hostData, numel);
+
+  // D2H
+  asyncMemCopy(stream, hostData, deviceData, sizeof(int) * numel);
+  c10::xpu::device_synchronize();
+
+  validateHostData(hostData, numel);
   sycl::free(deviceData, c10::xpu::get_device_context());
 }
