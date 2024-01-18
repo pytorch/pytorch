@@ -63,7 +63,7 @@ def _while_loop_tests():
             return x.sum() < 10
 
         def body_fn(x):
-            return [x + 1]
+            return (x + 1,)
 
         return while_loop(cond_fn, body_fn, (x, ))
 
@@ -74,7 +74,7 @@ def _while_loop_tests():
 
         def body_fn(x):
             y = x.clone().add_(1).add_(-1)
-            return [y + 1]
+            return (y + 1,)
 
         return while_loop(cond_fn, body_fn, (x, ))
 
@@ -83,14 +83,14 @@ def _while_loop_tests():
             return it.sum() < 10
 
         def body_fn(out_iter, it, y):
-            return [out_iter.clone(), it + y, y + 1]
+            return (out_iter.clone(), it + y, y + 1)
 
         def outer_cond_fn(out_iter, it, y):
             return out_iter.sum() < 2
 
         def outer_body_fn(out_iter, it, y):
             out_iter, it, y = while_loop(cond_fn, body_fn, (out_iter, it, y))
-            return [out_iter + 1, it, y]
+            return (out_iter + 1, it, y)
 
         return while_loop(outer_cond_fn, outer_body_fn, (out_iter, it, y))
 
@@ -178,7 +178,7 @@ class TestControlFlow(TestCase):
             return x.sum() < 10
 
         def body_fn(x):
-            return [x + 1]
+            return (x + 1,)
 
         x = torch.zeros(1, device="cuda")
         res = while_loop(cond_fn, body_fn, (x, ))
@@ -363,7 +363,7 @@ def forward(self, out_iter_1, it_1, y_1):
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
     getitem_2 = while_loop[2];  while_loop = None
-    return [getitem, getitem_1, getitem_2]
+    return (getitem, getitem_1, getitem_2)
     """)  # noqa: B950
         self.assertExpectedInline(graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"), """\
 def forward(self, arg0_1, arg1_1, arg2_1):
@@ -410,7 +410,7 @@ def forward(self, x_1):
     while_loop_body_graph_0 = self.while_loop_body_graph_0
     while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (x_1,));  while_loop_cond_graph_0 = while_loop_body_graph_0 = x_1 = None
     getitem = while_loop[0];  while_loop = None
-    return [getitem]
+    return (getitem,)
     """)  # noqa: B950
             self.assertExpectedInline(graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"), """\
 def forward(self, arg0_1):
@@ -436,7 +436,7 @@ def forward(self, arg0_1):
     while_loop_body_graph_0 = self.while_loop_body_graph_0
     while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1,));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = None
     getitem = while_loop[0];  while_loop = None
-    return [getitem]
+    return (getitem,)
     """)  # noqa: B950
             self.assertExpectedInline(graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"), """\
 def forward(self, arg0_1):
@@ -462,7 +462,7 @@ def forward(self, x_1):
     while_loop_body_graph_0 = self.while_loop_body_graph_0
     while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (x_1,));  while_loop_cond_graph_0 = while_loop_body_graph_0 = x_1 = None
     getitem = while_loop[0];  while_loop = None
-    return [getitem]
+    return (getitem,)
     """)  # noqa: B950
             self.assertExpectedInline(graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"), """\
 def forward(self, arg0_1):
