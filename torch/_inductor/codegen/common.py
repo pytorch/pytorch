@@ -667,10 +667,10 @@ class KernelArgs:
         )
 
     def wrap_ptr_arg(self, buf, dtype):
-        return f"c_void_p({buf}.data_ptr())"
+        return buf
 
     def wrap_size_arg(self, size):
-        return f"c_long({size})"
+        return str(size)
 
     def cpp_argdefs(self):
         from .cpp import DTYPE_TO_CPP, INDEX_TYPE
