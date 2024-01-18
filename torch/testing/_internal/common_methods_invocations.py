@@ -5075,18 +5075,20 @@ def sample_inputs__unsafe_masked_index(op_info, device, dtype, requires_grad, **
         ((S, S, S), S, M),
     ]
 
+    fill_value = make_tensor([], dtype=dtype, device="cpu").item()
+
     for c in cases:
         self_shape, high, idx_size = c
         dim = len(self_shape)
         indices = [make_idx(idx_size, high, dim, d) for d in range(dim)]
         masks = [torch.logical_and(idx >= 0, idx < self_shape[i]) for i, idx in enumerate(indices) if idx is not None]
         mask = functools.reduce(torch.logical_and, masks)
-        args = (mask, indices, 1)
+        args = (mask, indices, fill_value)
         yield SampleInput(make_arg(self_shape), args=args)
 
         masks = [torch.logical_and(idx >= 1, idx < self_shape[i] - 1) for i, idx in enumerate(indices) if idx is not None]
         mask = functools.reduce(torch.logical_and, masks)
-        args = (mask, indices, 1)
+        args = (mask, indices, fill_value)
         yield SampleInput(make_arg(self_shape), args=args)
 
 
