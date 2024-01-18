@@ -9,15 +9,14 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened]
     branches: [main]
-    paths-ignore: [.github]
 
   # To add labels on ghstack PRs.
   # Note: as pull_request doesn't trigger on PRs targeting main,
   # to test changes to the workflow itself one needs to create
-  # a PR that targets a non-main branch.
+  # a PR that targets a gh/**/base branch.
   pull_request:
     types: [opened, synchronize, reopened]
-    branches-ignore: [main]
+    branches: [gh/**/base]
 
 jobs:
   triage:
@@ -26,7 +25,7 @@ jobs:
       pull-requests: write
     runs-on: ubuntu-latest
     # Do not auto-label nightly builds PR
-    if: ${{ github.event.pull_request.number != 26921 }}
+    if: ${{ github.event.pull_request.number != 26921 && github.repository_owner == 'pytorch' }}
     steps:
     - uses: actions/labeler@v4
       with:
