@@ -10,6 +10,11 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 from torch.fx.node import has_side_effect
 from torch.utils import _pytree as pytree
 
+# The call_torchbind operator represents a method invocation on a torchbind
+# object. The calling convention is:
+#   call_torchbind(self: ScriptObject, method_name: str, *method_args, **method_kwargs)
+# We do not expect users to write this operator directly. Instead it will be
+# emitted by Dynamo when tracing encounters a torchbind object.
 call_torchbind = HigherOrderOperator("call_torchbind")
 
 # Register this operator as side-effectful with FX.
@@ -56,7 +61,6 @@ def inner(mode, *args, **kwargs):
         proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, args)
         proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
 
-        # TODO kwargs handling?
         out_proxy = mode.tracer.create_proxy(
             "call_function",
             call_torchbind,
