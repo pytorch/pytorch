@@ -630,12 +630,7 @@ class WrapperCodeGen(CodeGen):
         if config.profile_bandwidth:
             self.write_triton_header_once()
         result = IndentedBuffer()
-        if (
-            not V.graph.aot_mode
-            or not V.graph.is_const_graph
-            or not V.graph.cpp_wrapper
-        ):
-            result.splice(self.header)
+        result.splice(self.header)
 
         with contextlib.ExitStack() as stack:
             stack.enter_context(self.wrapper_call.indent())
@@ -1550,8 +1545,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     """
                 )
 
-            if V.graph.const_graph:
-                self.header.splice(V.graph.const_graph.wrapper_code.header)
+            if V.graph.const_module:
+                self.header.splice(V.graph.const_module.wrapper_code.header)
                 self.prefix.splice(V.graph.const_code)
 
             if V.graph.is_const_graph:
@@ -1915,9 +1910,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 V.graph.const_output_index
             )
             for idx, (name, _) in enumerate(V.graph.constants.items()):
-                if name not in V.graph.const_output_index:
-                    continue
-                else:
+                if name in V.graph.const_output_index:
                     const_index_mapping[V.graph.const_output_index[name]] = (idx, name)  # type: ignore[call-overload]
             assert (
                 None not in const_index_mapping
@@ -2955,6 +2948,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self.cuda = True
 
     def write_header(self):
+        if V.graph.is_const_graph:
+            # We do not write header for constant graph, it will be written by main module.
+            return
+
         super().write_header()
 
         self.header.splice("#include <filesystem>")

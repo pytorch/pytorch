@@ -620,7 +620,7 @@ def fx_codegen_and_compile(
             is_inference=is_inference,
             const_output_index=const_output_index,
             const_code=const_code,
-            const_graph=const_graph,
+            const_module=const_graph,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)

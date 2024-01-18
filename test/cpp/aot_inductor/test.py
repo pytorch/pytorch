@@ -38,7 +38,7 @@ for device in ["cpu", "cuda"]:
                 model,
                 (x,),
                 constraints=constraints,
-                options={"use_runtime_constant_folding": use_runtime_constant_folding})
+                options={"aot_inductor.use_runtime_constant_folding": use_runtime_constant_folding})
 
         suffix = f"{device}"
         if use_runtime_constant_folding:

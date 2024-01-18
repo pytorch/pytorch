@@ -191,7 +191,7 @@ class GraphLowering(torch.fx.Interpreter):
         is_const_graph=False,
         const_output_index=None,
         const_code=None,
-        const_graph=None,
+        const_module=None,
     ):
         super().__init__(gm)
 
@@ -205,7 +205,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.is_inference = is_inference
         self.is_const_graph = is_const_graph
         self.const_code = const_code
-        self.const_graph = const_graph
+        self.const_module = const_module
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -218,21 +218,23 @@ class GraphLowering(torch.fx.Interpreter):
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
-        self.device_types: Set[str] = const_graph.device_types if const_graph else set()
-        self.device_idxs: Set[int] = const_graph.device_idxs if const_graph else set()
+        self.device_types: Set[str] = (
+            const_module.device_types if const_module else set()
+        )
+        self.device_idxs: Set[int] = const_module.device_idxs if const_module else set()
         self.cuda = False
         self.buffers: List[ir.Buffer] = []
         self.const_output_index: Dict[str, int] = (
             const_output_index if const_output_index else {}
         )
         self.const_kernels: Set[str] = (
-            const_graph.wrapper_code.src_to_kernel.values() if const_graph else set()
+            const_module.wrapper_code.src_to_kernel.values() if const_module else set()
         )
         self.folded_constants: Set[str] = (
             set(const_output_index.keys()) if const_output_index else set()
         )
         self.constants: Dict[str, torch.Tensor] = (
-            const_graph.constants if const_graph else {}
+            const_module.constants if const_module else {}
         )
         self.used_constants: Set[str] = set()
         self.constant_reprs: Dict[str, str] = {}
