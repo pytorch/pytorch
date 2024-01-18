@@ -706,6 +706,14 @@ class cuda:
         os.environ.get("INDUCTOR_CUDA_BACKEND_RE_TUNE_AFTER_FUSION", "1") == "1"
     )
 
+    # Keep only Cutlass op configs which contain this regular expression pattern
+    # Set this to "warpspecialized_cooperative_epi_tma" to enable only SM90 TMA Cutlass Kernels for large GEMMs
+    cutlass_op_whitelist_regex = None
+
+    # Filter Cutlass configs which contain this regular expression pattern
+    # Set this to "pingpong" to avoid nondeterministic numerical issues
+    cutlass_op_blacklist_regex = "pingpong"
+
 
 # create a directory containing lots of debug information
 class trace:
