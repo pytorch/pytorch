@@ -2232,6 +2232,35 @@ class ReinterpretView(BaseView):
 
 class SliceView(View):
     @classmethod
+    def normalize_start_end(cls, x, dim, start, end):
+        """
+        Normalize start and end such that both are in the range
+        [0, x.get_size()[dim]] and start <= end.
+        """
+        sizevars = V.graph.sizevars
+        dim_size = x.get_size()[dim]
+
+        if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
+
+            def clamp(x, lower, upper):
+                return sympy.Min(sympy.Max(x, lower), upper)
+
+        else:
+
+            def clamp(x, lower, upper):
+                return sizevars.evaluate_min(sizevars.evaluate_max(x, lower), upper)
+
+        def clamp_wrap(val, lower, upper, default):
+            if val is None:
+                return default
+            val = cls.handle_negative_index(val, dim_size)
+            return clamp(val, lower, upper)
+
+        start = clamp_wrap(start, 0, dim_size, 0)
+        end = clamp_wrap(end, start, dim_size, dim_size)
+        return start, end
+
+    @classmethod
     def create(cls, x, dim, start, end, step=1):
         step = sympy.expand(step)
         assert step > 0
@@ -2244,15 +2273,7 @@ class SliceView(View):
         sizevars = V.graph.sizevars
         new_size = list(x.get_size())
 
-        start = cls.handle_negative_index(start, new_size[dim])
-        end = cls.handle_negative_index(end, new_size[dim])
-
-        if free_unbacked_symbols(start) or free_unbacked_symbols(end):
-            end = sympy.Min(end, new_size[dim])
-            start = sympy.Min(start, end)
-        else:
-            end = sizevars.evaluate_min(end, new_size[dim])
-            start = sizevars.evaluate_min(start, end)
+        start, end = cls.normalize_start_end(x, dim, start, end)
 
         new_size[dim] = FloorDiv(end - start + (step - 1), step)
 
@@ -4288,13 +4309,8 @@ class IndexPutFallback(ExternKernel):
             else:
                 indices.append(V.graph.wrapper_code.none_str)
 
-        indices_str = f"{V.graph.wrapper_code.open_bracket}{', '.join(indices)}{V.graph.wrapper_code.closed_bracket}"
-        args = [x, indices_str, values, *self.codegen_const_args()]
-        wrapper.writeline(
-            wrapper.wrap_kernel_call(
-                self.get_kernel_name(),
-                args,
-            )
+        wrapper.generate_index_put_fallback(
+            self.get_kernel_name(), x, indices, values, *self.codegen_const_args()
         )
 
     def should_allocate(self):
@@ -4317,8 +4333,8 @@ class IndexPutFallback(ExternKernel):
             (accumulate,),
         )
         self.name = V.graph.register_buffer(self)
-        self.cpp_kernel_name = "at::index_put_"
         self.python_kernel_name = "aten.index_put_"
+        self.cpp_kernel_name = "at::index_put_out"
         mark_node_as_mutating(self, x)
 
 
@@ -4366,7 +4382,7 @@ class DynamicScalar(ExternKernel):
 
     # TODO: handle bools carefully
     def __init__(self, sym, data):
-        super().__init__(None, NoneLayout(torch.device("cpu")), [data])  # type: ignore[arg-type]
+        super().__init__(None, NoneLayout(torch.device("cpu")), self.unwrap_storage([data]))  # type: ignore[arg-type]
         if isinstance(sym, sympy.Symbol):
             self.sym = sym
             self.is_bool = False
