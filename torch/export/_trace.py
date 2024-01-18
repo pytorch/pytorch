@@ -5,7 +5,7 @@ import logging
 import re
 from collections import OrderedDict
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch._dynamo
@@ -18,7 +18,7 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
-from torch._export.passes.lift_constant_tensor_pass import lift_constant_tensor_pass
+from torch._export.passes.lift_constants_pass import lift_constants_pass
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module, GraphSignature
 from torch._guards import detect_fake_mode
@@ -452,18 +452,20 @@ def _export_non_strict(
         input_specs=input_specs, output_specs=output_specs
     )
 
-    tensor_constants = lift_constant_tensor_pass(gm, export_graph_signature)
+    constants: Dict[
+        str, Union[torch.Tensor, torch._C.ScriptObject]
+    ] = lift_constants_pass(gm, export_graph_signature)
 
     @dataclasses.dataclass
     class _ExportedProgramNonStrict:
         gm: torch.fx.GraphModule
         sig: ExportGraphSignature
-        tensor_constants: Dict[str, torch.Tensor]
+        constants: Dict[str, Union[torch.Tensor, torch._C.ScriptObject]]
 
     return _ExportedProgramNonStrict(
         gm,
         export_graph_signature,
-        tensor_constants,
+        constants,
     )
 
 
@@ -594,7 +596,7 @@ def _export(
                 )
             ],
             example_inputs=(args, kwargs),
-            tensor_constants=ep_non_strict.tensor_constants,
+            constants=ep_non_strict.constants,
         )
 
     gm_torch_level = _export_to_torch_ir(
@@ -727,7 +729,7 @@ def _export(
 
     gm = ep_non_strict.gm
     export_graph_signature = ep_non_strict.sig
-    tensor_constants = ep_non_strict.tensor_constants
+    constants = ep_non_strict.constants
 
     # After aot_export, set the param/buffer metadata back into placeholders
     # Technically, users can still construct this data from param names
@@ -804,7 +806,7 @@ def _export(
         ]
         + [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
         example_inputs=(args, kwargs),
-        tensor_constants=tensor_constants,
+        constants=constants,
     )
     log.debug("Exported program from AOTAutograd:\n%s", exported_program)
 
