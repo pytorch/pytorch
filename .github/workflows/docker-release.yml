@@ -27,9 +27,10 @@ env:
   NO_BUILD_SUFFIX: true
   USE_BUILDX: 1
   WITH_PUSH: |
-    ${{ (github.event_name == 'push' &&
-        (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/')))) ||
-        (github.event_name == 'workflow_dispatch' && github.event.ref == 'refs/heads/release/2.2')
+    ${{
+      (github.event_name == 'push' &&
+      (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/')))) ||
+      (github.event_name == 'workflow_dispatch' && github.event.ref == 'refs/heads/release/2.2')
      }}
 
 jobs:
@@ -56,8 +57,7 @@ jobs:
     runs-on: [self-hosted, linux.2xlarge]
     environment: |
       ${{
-        (github.ref == 'refs/heads/main' ||
-        startsWith(github.event.ref, 'refs/tags/v') ||
+        (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v') ||
         (github.event_name == 'workflow_dispatch' && github.event.ref == 'refs/heads/release/2.2'))
         && 'docker-build' || ''
       }}
