@@ -340,7 +340,7 @@ _autograd_backward_strict_mode_banned_ops.extend(
 )
 
 # Enables caching of dispatches to fake tensors.
-fake_tensor_cache_enabled = False)
+fake_tensor_cache_enabled = False
 
 # Enables cross checking between the fake tensor cache and dispatch.
 fake_tensor_cache_crosscheck_enabled = (
