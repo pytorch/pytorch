@@ -13,11 +13,6 @@
 # always execute the test and then suppress the signal, if necessary.
 # If your tests crashes, or is slow, please use @skipIfTorchDynamo instead.
 
-# tests in this list will run without Dynamo strict mode by default.
-FIXME_default_non_strict = {
-    "dynamo/test_logging",
-}
-
 # Tests that run without strict mode in PYTORCH_TEST_WITH_INDUCTOR=1.
 # Please don't add anything to this list.
 FIXME_inductor_non_strict = {
@@ -3701,6 +3696,29 @@ dynamo_expected_failures = {
     "TestPythonDispatch.test_subclass_priority",  # test_python_dispatch
     "TestPythonDispatch.test_exception_handling",  # test_python_dispatch
     "TestPythonDispatch.test_list_ret",  # test_python_dispatch
+    "LoggingTests.test_trace_source_nested",  # dynamo/test_logging
+    "LoggingTests.test_guards_recompiles",  # dynamo/test_logging
+    "LoggingTests.test_inductor_info",  # dynamo/test_logging
+    "LoggingTests.test_output_code",  # dynamo/test_logging
+    "LoggingTests.test_graph_code",  # dynamo/test_logging
+    "LoggingTests.test_graph_sizes",  # dynamo/test_logging
+    "LoggingTests.test_recompiles",  # dynamo/test_logging
+    "LoggingTests.test_inductor_error",  # dynamo/test_logging
+    "LoggingTests.test_graph",  # dynamo/test_logging
+    "LoggingTests.test_custom_format_exc",  # dynamo/test_logging
+    "LoggingTests.test_custom_format",  # dynamo/test_logging
+    "LoggingTests.test_trace_source_cond",  # dynamo/test_logging
+    "LoggingTests.test_multiline_format",  # dynamo/test_logging
+    "LoggingTests.test_aot_joint_graph",  # dynamo/test_logging
+    "LoggingTests.test_inductor_debug",  # dynamo/test_logging
+    "LoggingTests.test_bytecode",  # dynamo/test_logging
+    "LoggingTests.test_graph_sizes_dynamic",  # dynamo/test_logging
+    "LoggingTests.test_dynamo_error",  # dynamo/test_logging
+    "LoggingTests.test_dynamo_debug",  # dynamo/test_logging
+    "LoggingTests.test_aot_graphs",  # dynamo/test_logging
+    "LoggingTests.test_dynamo_info",  # dynamo/test_logging
+    "LoggingTests.test_graph_breaks",  # dynamo/test_logging
+    "LoggingTests.test_aot",  # dynamo/test_logging
 }
 
 # see NOTE [dynamo_test_failures.py] for more details
@@ -8208,6 +8226,11 @@ dynamo_skips = {
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpySplitCopyWithIntCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_view_cpu_float32",  # known py38 fail
     "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpySplitCopyCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "LoggingTests.test_logs_out",  # known py38 fail
+    "LoggingTests.test_distributed_rank_logging",  # known py38 fail
+    "LoggingTests.test_trace_call",  # known py311 fail
+    "LoggingTests.test_trace_call_graph_break",  # known py311 fail
+    "LoggingTests.test_trace_call_inline_call",  # known py311 fail
 }
 
 

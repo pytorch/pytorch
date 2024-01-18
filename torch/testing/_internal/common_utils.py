@@ -80,7 +80,6 @@ from torch.nn import (
 from .dynamo_test_failures import (
     dynamo_expected_failures,
     dynamo_skips,
-    FIXME_default_non_strict,
     FIXME_inductor_non_strict,
 )
 from torch.onnx import (
@@ -2711,7 +2710,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                     if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
                         strict_default = filename not in FIXME_inductor_non_strict
                     else:
-                        strict_default = filename not in FIXME_default_non_strict
+                        strict_default = True
             # inspect.getfile can fail with these
             except (OSError, TypeError):
                 pass
