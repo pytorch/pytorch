@@ -200,9 +200,6 @@ test_failures = {
     "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
         ("cpu", "cuda")
     ),
-    "test_custom_op_fixed_layout_channels_last_dynamic_shapes": TestFailure(
-        ("cpu", "cuda")
-    ),
     "test_cat_uint8_dynamic_shapes": TestFailure(
         ("cpu",)
     ),  # cat on uint8 input is using aten fallback on cpu
