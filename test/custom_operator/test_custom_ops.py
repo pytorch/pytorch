@@ -30,6 +30,16 @@ class TestCustomOperators(TestCase):
         with self.assertRaisesRegex(RuntimeError, "pointwise"):
             torch.ops.custom.cos(x)
 
+    def test_dynamo_pystub_suggestion(self):
+        x = torch.randn(3)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return torch.ops.custom.asin(x)
+
+        with self.assertRaisesRegex(RuntimeError, "unsupported operator: .* \(you may need to `import nonexistent`"):
+            f(x)
+
     def test_abstract_impl_pystub_faketensor(self):
         from functorch import make_fx
         x = torch.randn(3, device='cpu')
