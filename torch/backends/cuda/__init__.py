@@ -15,6 +15,8 @@ __all__ = [
     "matmul",
     "SDPBackend",
     "SDPAParams",
+    "enable_cudnn_sdp",
+    "cudnn_sdp_enabled",
     "enable_flash_sdp",
     "flash_sdp_enabled",
     "enable_mem_efficient_sdp",
@@ -306,11 +308,30 @@ def can_use_efficient_attention(params: SDPAParams, debug: bool = False) -> bool
     return torch._C._can_use_mem_efficient_attention(params, debug)
 
 
+def cudnn_sdp_enabled():
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Returns whether cuDNN scaled dot product attention is enabled or not.
+    """
+    return torch._C._get_cudnn_sdp_enabled()
+
+
+def enable_cudnn_sdp(enabled: bool):
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Enables or disables cuDNN scaled dot product attention.
+    """
+    torch._C._set_sdp_use_cudnn(enabled)
+
+
 @contextlib.contextmanager
 def sdp_kernel(
     enable_flash: bool = True,
     enable_math: bool = True,
     enable_mem_efficient: bool = True,
+    enable_cudnn: bool = True,
 ):
     r"""
     .. warning:: This flag is beta and subject to change.
@@ -321,15 +342,18 @@ def sdp_kernel(
     previous_flash: bool = flash_sdp_enabled()
     previous_mem_efficient: bool = mem_efficient_sdp_enabled()
     previous_math: bool = math_sdp_enabled()
+    previous_cudnn: bool = cudnn_sdp_enabled()
     try:
         enable_flash_sdp(enable_flash)
         enable_mem_efficient_sdp(enable_mem_efficient)
         enable_math_sdp(enable_math)
+        enable_cudnn_sdp(enable_cudnn)
         yield {}
     finally:
         enable_flash_sdp(previous_flash)
         enable_mem_efficient_sdp(previous_mem_efficient)
         enable_math_sdp(previous_math)
+        enable_cudnn_sdp(previous_cudnn)
 
 
 cufft_plan_cache = cuFFTPlanCacheManager()
