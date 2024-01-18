@@ -26,12 +26,16 @@ There are a few distinct usage patterns for virtualized global variables:
    We install these objects at the beginning of compilation and then you can
    conveniently access them without having to pass them around.
 
-3. Alternate define-by-run interpretations.  Examples: ``V.ops``, ``V.kernel``.  Inductor's
-   IR is define-by-run: instead of maintaining explicit syntax data structures,
-   we instead represent loop bodies as callable functions, which internally invoke
-   operations defined on ``V.ops``.  To perform semantic analysis, print or code
-   generate these operations, we dynamically patch ``V.ops`` with an alternate
-   handler with the intended semantics and then run the callable function.
+3. Alternate define-by-run interpretations.  Examples: ``V.ops``, ``V.kernel``.
+   A commonly used IR in Inductor is define-by-run: instead of maintaining
+   explicit syntax data structures, we instead represent loop bodies as
+   callable functions, which internally invoke operations defined on
+   ``V.ops``.  To perform semantic analysis, print or code generate these
+   operations, we dynamically patch ``V.ops`` with an alternate handler with
+   the intended semantics and then run the callable function.  For example, to
+   extract out a traditional (FX) graph representation of the define-by-run
+   IR, simply install a handler that records each ``ops`` call to a graph.
+
    TODO: Define a parent class / protocol that defines all of the operations
    V.ops is expected to support.
 
@@ -78,7 +82,7 @@ T = TypeVar("T")
 class NullHandler:
     """
     Sentinel indicating that a global variable is unset ala None.  Typically,
-    attempting to access the global variable when it is an error, but with
+    attempting to access the global variable before it's set is an error, but with
     NullHandler it won't fail until you try to access an attribute on it.
     """
 
@@ -93,7 +97,8 @@ class Virtualized(Generic[T]):
 
     This allows us to swap in different op implementations in codegen.
 
-    NB: Despite the handler naming, we sometimes use these variables to
+    NB: Despite the fact that we typically call these "handlers" (e.g., NullHandler is
+    the default value of the variable), we sometimes use these variables to
     store other things, like booleans.
     """
 
