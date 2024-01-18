@@ -1331,6 +1331,7 @@ class TestBinaryUfuncs(TestCase):
                 self.assertEqual(res1, res2)
                 self.assertEqual(res1.dtype, expected_dtype)
 
+    @skipIfTorchDynamo("ConstantVariable(list) is banned")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_pow(self, device, dtype):
         m1 = torch.empty(0, dtype=dtype, device=device)
@@ -1646,6 +1647,7 @@ class TestBinaryUfuncs(TestCase):
             cpu_out = t.cpu().pow(2)
             self.assertEqual(cpu_out, cuda_out)
 
+    @skipIfTorchDynamo()
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half))
     def test_complex_scalar_pow_tensor(self, device, dtype):
@@ -2980,17 +2982,17 @@ class TestBinaryUfuncs(TestCase):
     @onlyCPU
     @dtypes(torch.float)
     def test_cdiv(self, device, dtype):
-        self._test_cop(torch.div, lambda x, y: x / y, dtype, device)
+        self._test_cop(torch.div, operator.truediv, dtype, device)
 
     @onlyCPU
     @dtypes(torch.float)
     def test_cremainder(self, device, dtype):
-        self._test_cop(torch.remainder, lambda x, y: x % y, dtype, device)
+        self._test_cop(torch.remainder, operator.mod, dtype, device)
 
     @onlyCPU
     @dtypes(torch.float)
     def test_cmul(self, device, dtype):
-        self._test_cop(torch.mul, lambda x, y: x * y, dtype, device)
+        self._test_cop(torch.mul, operator.mul, dtype, device)
 
     @onlyCPU
     @dtypes(torch.float)
@@ -3487,7 +3489,7 @@ class TestBinaryUfuncs(TestCase):
         )
         _test_helper(a, b)
 
-    @skipIfTorchDynamo     # complex infs/nans differ under Dynamo/Inductor
+    @skipIfTorchDynamo()    # complex infs/nans differ under Dynamo/Inductor
     @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16)
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128)
     def test_logaddexp(self, device, dtype):
@@ -3980,6 +3982,7 @@ class TestBinaryUfuncs(TestCase):
             doubles, sz, lambda input, out: torch.pow(42, input, out=out)
         )
 
+    @skipIfTorchDynamo("ConstantVariable(list) is banned")
     @dtypes(
         *list(
             product(
@@ -4087,6 +4090,7 @@ class TestBinaryUfuncs(TestCase):
             torch.float_power(i, exp, out=out)
             self.assertEqual(expected_scalar_base, out)
 
+    @skipIfTorchDynamo("ConstantVariable(list) is banned")
     def test_float_power_exceptions(self, device):
         def _promo_helper(x, y):
             for i in (x, y):

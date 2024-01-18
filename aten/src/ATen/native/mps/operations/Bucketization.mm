@@ -250,10 +250,6 @@ static void searchsorted_mps_contiguous(Tensor& result,
   int64_t right_i64 = right;
   int64_t is_1d_boundaries = boundaries.dim() == 1;
 
-  id<MTLBuffer> inputBuffer = getMTLBufferStorage(input);
-  id<MTLBuffer> boundariesBuffer = getMTLBufferStorage(boundaries);
-  id<MTLBuffer> sorterBuffer = sorter.defined() ? getMTLBufferStorage(sorter) : nullptr;
-  id<MTLBuffer> outputBuffer = getMTLBufferStorage(result);
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync(mpsStream->queue(), ^() {
@@ -268,18 +264,16 @@ static void searchsorted_mps_contiguous(Tensor& result,
       getMPSProfiler().beginProfileKernel(bucketizationPSO, kernel, {input, boundaries, sorter});
 
       [computeEncoder setComputePipelineState:bucketizationPSO];
-      [computeEncoder setBuffer:inputBuffer offset:input.storage_offset() * input.element_size() atIndex:0];
-      [computeEncoder setBuffer:boundariesBuffer
-                         offset:boundaries.storage_offset() * boundaries.element_size()
-                        atIndex:1];
-      [computeEncoder setBuffer:outputBuffer offset:result.storage_offset() * result.element_size() atIndex:2];
+      mtl_setBuffer(computeEncoder, input, 0);
+      mtl_setBuffer(computeEncoder, boundaries, 1);
+      mtl_setBuffer(computeEncoder, result, 2);
       [computeEncoder setBytes:&idim_in length:sizeof(int64_t) atIndex:3];
       [computeEncoder setBytes:&idim_bd length:sizeof(int64_t) atIndex:4];
       [computeEncoder setBytes:&numel_in length:sizeof(int64_t) atIndex:5];
       [computeEncoder setBytes:&right_i64 length:sizeof(int64_t) atIndex:6];
       [computeEncoder setBytes:&is_1d_boundaries length:sizeof(int64_t) atIndex:7];
       if (sorter.defined())
-        [computeEncoder setBuffer:sorterBuffer offset:sorter.storage_offset() * sorter.element_size() atIndex:8];
+        mtl_setBuffer(computeEncoder, sorter, 8);
 
       // A threadGroup is equivalent to a cuda's block.
       int64_t maxThreadgroups = 1024;

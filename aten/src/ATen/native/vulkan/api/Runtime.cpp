@@ -110,7 +110,7 @@ VkInstance create_instance(const RuntimeConfiguration& config) {
 }
 
 std::vector<Runtime::DeviceMapping> create_physical_devices(
-    const VkInstance instance) {
+    VkInstance instance) {
   if (VK_NULL_HANDLE == instance) {
     return std::vector<Runtime::DeviceMapping>();
   }
@@ -123,7 +123,7 @@ std::vector<Runtime::DeviceMapping> create_physical_devices(
 
   std::vector<Runtime::DeviceMapping> device_mappings;
   device_mappings.reserve(device_count);
-  for (const VkPhysicalDevice physical_device : devices) {
+  for (VkPhysicalDevice physical_device : devices) {
     device_mappings.emplace_back(PhysicalDevice(physical_device), -1);
   }
 
@@ -159,7 +159,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debug_report_callback_fn(
 }
 
 VkDebugReportCallbackEXT create_debug_report_callback(
-    const VkInstance instance,
+    VkInstance instance,
     const RuntimeConfiguration config) {
   if (VK_NULL_HANDLE == instance || !config.enableValidationMessages) {
     return VkDebugReportCallbackEXT{};
@@ -201,7 +201,7 @@ VkDebugReportCallbackEXT create_debug_report_callback(
 //
 
 uint32_t select_first(const std::vector<Runtime::DeviceMapping>& devices) {
-  if (devices.size() == 0) {
+  if (devices.empty()) {
     TORCH_WARN(
         "Pytorch Vulkan Runtime: no device devices are available for selection!");
     return devices.size() + 1; // return out of range to signal invalidity
@@ -354,7 +354,7 @@ Runtime::Runtime(Runtime&& other) noexcept
 
 uint32_t Runtime::create_adapter(const Selector& selector) {
   TORCH_CHECK(
-      device_mappings_.size() > 0,
+      !device_mappings_.empty(),
       "Pytorch Vulkan Runtime: Could not initialize adapter because no "
       "devices were found by the Vulkan instance.");
 
@@ -371,7 +371,7 @@ uint32_t Runtime::create_adapter(const Selector& selector) {
     return adapter_i;
   }
   // Otherwise, create an adapter for the selected physical device
-  adapter_i = utils::safe_downcast<uint32_t>(adapters_.size());
+  adapter_i = utils::safe_downcast<int32_t>(adapters_.size());
   adapters_.emplace_back(
       new Adapter(instance_, device_mapping.first, config_.numRequestedQueues));
   device_mapping.second = adapter_i;

@@ -130,12 +130,7 @@
 #include <utility>
 #include <vector>
 
-namespace at {
-namespace native {
-
-} // namespace native
-
-namespace meta {
+namespace at::meta {
 
 static ScalarType infer_dtype_from_optional(
     const Tensor& self,
@@ -402,9 +397,9 @@ TORCH_META_FUNC(amin)
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(aminmax_stub);
 DEFINE_DISPATCH(aminmax_allreduce_stub);
@@ -429,10 +424,6 @@ TORCH_IMPL_FUNC(aminmax_out)
     aminmax_allreduce_stub(self.device().type(), self.contiguous(), mutable_min, mutable_max);
   }
 }
-
-} // namespace native
-
-namespace native {
 
 DEFINE_DISPATCH(sum_stub);
 DEFINE_DISPATCH(nansum_stub);
@@ -1009,7 +1000,12 @@ static void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacin
   // Helper for gradient function to make sure input data satisfies prerequisites
   TORCH_CHECK(self.scalar_type() != ScalarType::Byte, "torch.gradient does not support uint8 input.");
   if (spacing_size.has_value() && !dim.has_value()) {
-    TORCH_CHECK(spacing_size.value() == 1 || spacing_size.value() == self.dim(), "torch.gradient expected spacing to be unspecified, a scalar or a list of length ", self.dim(), " but got a list of length ", spacing_size.value());
+    // NOTE: If spacing was given as a scalar, the callers of this function
+    // create a spacing vector of the expected size, and this check passes
+    TORCH_CHECK(spacing_size.value() == self.dim(),
+      "torch.gradient expected spacing to be unspecified, a scalar, or a list ",
+      "of length equal to 'self.dim() = ", self.dim(), "', since dim argument ",
+      "was not given, but got a list of length ", spacing_size.value());
   }
   if (spacing_size.has_value() && dim.has_value()) {
     TORCH_CHECK(spacing_size.value() == static_cast<int64_t>(dim.value().size()),
@@ -1642,16 +1638,16 @@ Tensor any_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdi
 
 Tensor& all_dims_out_default(
     const Tensor &self, OptionalIntArrayRef dim, bool keepdim, Tensor &result) {
-  TORCH_CHECK(self.device() == result.device(), "all: Output must be on the same device as input");
-  auto tmp = self.all(dim, keepdim);
+  TORCH_CHECK(self.device() == result.device(), "all.dims: output must be on the same device as input");
+  auto tmp = all_dims_default(self, dim, keepdim);
   at::native::resize_output(result, tmp.sizes());
   return result.copy_(tmp);
 }
 
 Tensor& any_dims_out_default(
     const Tensor &self, OptionalIntArrayRef dim, bool keepdim, Tensor &result) {
-  TORCH_CHECK(self.device() == result.device(), "any: Output must be on the same device as input");
-  auto tmp = self.any(dim, keepdim);
+  TORCH_CHECK(self.device() == result.device(), "any.dims: output must be on the same device as input");
+  auto tmp = any_dims_default(self, dim, keepdim);
   at::native::resize_output(result, tmp.sizes());
   return result.copy_(tmp);
 }
@@ -2327,5 +2323,4 @@ Tensor sum_sparse_compressed(
   return at::_sparse_csr_sum(self, *dim, keepdim, dtype);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

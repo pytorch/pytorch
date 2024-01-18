@@ -20,7 +20,8 @@ bool check_has_torch_function(PyObject* obj, bool ignore_mode = false);
 
 struct DisableTorchDispatch {
   DisableTorchDispatch()
-      : guard_(c10::DispatchKey::Python),
+      : guard_(c10::DispatchKeySet(
+            {c10::DispatchKey::Python, c10::DispatchKey::PreDispatch})),
         guard_tls_snapshot_(c10::DispatchKey::PythonTLSSnapshot) {}
   c10::impl::ExcludeDispatchKeyGuard guard_;
   c10::impl::ExcludeDispatchKeyGuard guard_tls_snapshot_;

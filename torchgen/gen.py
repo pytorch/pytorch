@@ -1382,8 +1382,7 @@ def get_grouped_by_view_native_functions(
             )
         # Take the remaining functions that weren't part of the view group
         # and emit them separately
-        for func in d.values():
-            funcs.append(func)
+        funcs.extend(d.values())
         return funcs
 
     grouped_by_views: Dict[

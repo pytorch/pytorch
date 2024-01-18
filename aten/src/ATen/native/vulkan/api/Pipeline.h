@@ -1,5 +1,7 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Common.h>
@@ -45,7 +47,7 @@ VkImageLayout vk_layout(const PipelineStageFlags, const MemoryAccessFlags);
 
 class PipelineLayout final {
  public:
-  explicit PipelineLayout(const VkDevice, const VkDescriptorSetLayout);
+  explicit PipelineLayout(VkDevice, VkDescriptorSetLayout);
 
   PipelineLayout(const PipelineLayout&) = delete;
   PipelineLayout& operator=(const PipelineLayout&) = delete;
@@ -79,9 +81,9 @@ class ComputePipeline final {
   };
 
   explicit ComputePipeline(
-      const VkDevice device,
+      VkDevice device,
       const Descriptor& descriptor,
-      const VkPipelineCache pipeline_cache);
+      VkPipelineCache pipeline_cache);
 
   ComputePipeline(const ComputePipeline&) = delete;
   ComputePipeline& operator=(const ComputePipeline&) = delete;
@@ -108,7 +110,7 @@ class ComputePipeline final {
 
 class PipelineLayoutCache final {
  public:
-  explicit PipelineLayoutCache(const VkDevice device);
+  explicit PipelineLayoutCache(VkDevice device);
 
   PipelineLayoutCache(const PipelineLayoutCache&) = delete;
   PipelineLayoutCache& operator=(const PipelineLayoutCache&) = delete;
@@ -122,8 +124,7 @@ class PipelineLayoutCache final {
   using Value = PipelineLayout;
 
   struct Hasher {
-    inline size_t operator()(
-        const VkDescriptorSetLayout descriptor_layout) const {
+    inline size_t operator()(VkDescriptorSetLayout descriptor_layout) const {
       return c10::get_hash(descriptor_layout);
     }
   };
@@ -143,7 +144,7 @@ class PipelineLayoutCache final {
 
 class ComputePipelineCache final {
  public:
-  explicit ComputePipelineCache(const VkDevice device);
+  explicit ComputePipelineCache(VkDevice device);
 
   ComputePipelineCache(const ComputePipelineCache&) = delete;
   ComputePipelineCache& operator=(const ComputePipelineCache&) = delete;
@@ -165,7 +166,7 @@ class ComputePipelineCache final {
           descriptor.local_work_group.data[0u],
           descriptor.local_work_group.data[1u],
           descriptor.local_work_group.data[2u]);
-    };
+    }
   };
 
  private:

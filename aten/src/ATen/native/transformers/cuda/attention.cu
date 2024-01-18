@@ -750,6 +750,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
       c10::nullopt,
       c10::nullopt,
       c10::nullopt,
+      c10::nullopt,
       dropout_p,
       static_cast<int64_t>(custom_mask_type),
       compute_log_sumexp,
@@ -886,6 +887,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     const c10::optional<at::Tensor>& seqstart_k,
     // (Mode 1MHK only) Maximum sequence length across batches
     const c10::optional<int64_t> max_seqlen_q_,
+    const c10::optional<int64_t> max_seqlen_k_,
     double dropout_p, // attention matrix dropout probability
     int64_t custom_mask_type,
     bool compute_logsumexp,
@@ -927,7 +929,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     TORCH_CHECK(query.size(0) == 1, "cu_seqlen only supports batch_size=1");
     TORCH_CHECK(max_seqlen_q_.has_value());
     max_seqlen_q = *max_seqlen_q_;
-    max_seqlen_k = 0; // Will be set inside the kernel
+    max_seqlen_k = 0; // TODO: is this actually being set inside the kernel anywhere?
+                      // see https://github.com/pytorch/pytorch/issues/115590s
   } else {
     max_seqlen_q = query.size(1);
     max_seqlen_k = key.size(1);
@@ -1165,7 +1168,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       std::move(seed_t),
       std::move(offset_t),
       max_seqlen_q,
-      max_seqlen_k);
+      // TODO: why isn't this being set in the kernel?
+      max_seqlen_k_.has_value() ? max_seqlen_k_.value() : max_seqlen_k);
 #endif
   TORCH_CHECK(false, "USE_MEM_EFF_ATTENTION was not enabled for build.")
   return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{}, 0, 0);

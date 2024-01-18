@@ -168,83 +168,37 @@ Tensor pool2d(
   }
 
   api::UniformParamsBuffer params;
-  if (v_self.is_quantized()) {
-    const struct Block final {
-      uvec3 extents;
-      int32_t range;
-      ivec4 kernel;
-      ivec2 stride;
-      ivec2 padding;
-      ivec2 dilation;
-      vec2 scale;
-      ivec2 zero_point;
-    } block{
-        v_output.extents(),
-        safe_downcast<int32_t>(
-            kernel[Layout::Parameter::width] *
-            kernel[Layout::Parameter::height]),
-        {
-            safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
-            safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
-            safe_downcast<int32_t>(self_arg.size(Layout::Activation4D::width)),
-            safe_downcast<int32_t>(self_arg.size(Layout::Activation4D::height)),
-        },
-        {
-            safe_downcast<int32_t>(stride[Layout::Parameter::width]),
-            safe_downcast<int32_t>(stride[Layout::Parameter::height]),
-        },
-        {
-            safe_downcast<int32_t>(padding[Layout::Parameter::width]),
-            safe_downcast<int32_t>(padding[Layout::Parameter::height]),
-        },
-        {
-            safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
-            safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
-        },
-        {
-            safe_downcast<float>(v_self.get_scale()),
-            0.0f,
-        },
-        {
-            safe_downcast<int32_t>(v_self.get_zero_point()),
-            0u,
-        },
-    };
-    params = api::UniformParamsBuffer(context, block);
-  } else {
-    const struct Block final {
-      uvec3 extents;
-      int32_t range;
-      ivec4 kernel;
-      ivec2 stride;
-      ivec2 padding;
-      ivec2 dilation;
-    } block{
-        v_output.extents(),
-        safe_downcast<int32_t>(
-            kernel[Layout::Parameter::width] *
-            kernel[Layout::Parameter::height]),
-        {
-            safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
-            safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
-            safe_downcast<int32_t>(self_arg.size(Layout::Activation4D::width)),
-            safe_downcast<int32_t>(self_arg.size(Layout::Activation4D::height)),
-        },
-        {
-            safe_downcast<int32_t>(stride[Layout::Parameter::width]),
-            safe_downcast<int32_t>(stride[Layout::Parameter::height]),
-        },
-        {
-            safe_downcast<int32_t>(padding[Layout::Parameter::width]),
-            safe_downcast<int32_t>(padding[Layout::Parameter::height]),
-        },
-        {
-            safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
-            safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
-        },
-    };
-    params = api::UniformParamsBuffer(context, block);
-  }
+  const struct Block final {
+    uvec3 extents;
+    int32_t range;
+    ivec4 kernel;
+    ivec2 stride;
+    ivec2 padding;
+    ivec2 dilation;
+  } block{
+      v_output.extents(),
+      safe_downcast<int32_t>(
+          kernel[Layout::Parameter::width] * kernel[Layout::Parameter::height]),
+      {
+          safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
+          safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
+          safe_downcast<int32_t>(self_arg.size(Layout::Activation4D::width)),
+          safe_downcast<int32_t>(self_arg.size(Layout::Activation4D::height)),
+      },
+      {
+          safe_downcast<int32_t>(stride[Layout::Parameter::width]),
+          safe_downcast<int32_t>(stride[Layout::Parameter::height]),
+      },
+      {
+          safe_downcast<int32_t>(padding[Layout::Parameter::width]),
+          safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+      },
+      {
+          safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
+          safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
+      },
+  };
+  params = api::UniformParamsBuffer(context, block);
 
   api::PipelineBarrier pipeline_barrier{};
 

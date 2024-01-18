@@ -63,6 +63,7 @@ aten::_copy_from_and_resize
 aten::_copy_from_and_resize.out
 aten::_cslt_compress
 aten::_cslt_sparse_mm
+aten::_cslt_sparse_mm_search
 aten::_ctc_loss
 aten::_ctc_loss.Tensor
 aten::_ctc_loss.Tensor_out
@@ -373,6 +374,7 @@ aten::_int_mm
 aten::_int_mm.out
 aten::_is_all_true
 aten::_is_any_true
+aten::_lazy_clone
 aten::_linalg_check_errors
 aten::_linalg_det
 aten::_linalg_det.result
@@ -465,7 +467,9 @@ aten::_sample_dirichlet
 aten::_sample_dirichlet.out
 aten::_scaled_dot_product_efficient_attention
 aten::_scaled_dot_product_efficient_attention_backward
+aten::_scaled_dot_product_flash_attention
 aten::_scaled_dot_product_flash_attention_backward
+aten::_scaled_dot_product_flash_attention_for_cpu_backward
 aten::_scaled_mm
 aten::_scaled_mm.out
 aten::_segment_reduce_backward
@@ -665,8 +669,6 @@ aten::blackman_window
 aten::blackman_window.out
 aten::blackman_window.periodic
 aten::blackman_window.periodic_out
-aten::block_diag
-aten::block_diag.out
 aten::bmm
 aten::bmm.out
 aten::ccol_indices
@@ -1299,8 +1301,6 @@ aten::sspaddmm.out
 aten::t_
 aten::t_copy
 aten::t_copy.out
-aten::take
-aten::take.out
 aten::to_mkldnn
 aten::to_mkldnn.out
 aten::to_padded_tensor

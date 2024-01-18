@@ -1,5 +1,7 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Adapter.h>
@@ -185,7 +187,7 @@ class Context final {
       const api::utils::uvec3&,
       const api::utils::uvec3&,
       const api::utils::uvec3&,
-      const VkFence fence_handle);
+      VkFence fence_handle);
 
   template <typename... Arguments>
   bool submit_compute_job(
@@ -193,11 +195,11 @@ class Context final {
       const PipelineBarrier&,
       const utils::uvec3&,
       const utils::uvec3&,
-      const VkFence fence_handle,
+      VkFence fence_handle,
       Arguments&&...);
 
   void submit_cmd_to_gpu(
-      const VkFence fence_handle = VK_NULL_HANDLE,
+      VkFence fence_handle = VK_NULL_HANDLE,
       const bool final_use = false);
 
   void flush();
@@ -309,7 +311,7 @@ inline bool any_arg_is_empty(Arguments&&... arguments) {
 template <size_t... Indices, typename... Arguments>
 inline void bind(
     DescriptorSet& descriptor_set,
-    const std::index_sequence<Indices...>,
+    const std::index_sequence<Indices...>&,
     Arguments&&... arguments) {
   C10_UNUSED const int _[]{
       0,
@@ -391,7 +393,7 @@ inline bool Context::submit_copy(
     const api::utils::uvec3& copy_range,
     const api::utils::uvec3& src_offset,
     const api::utils::uvec3& dst_offset,
-    const VkFence fence_handle) {
+    VkFence fence_handle) {
   // If any of the provided arguments does not have memory associated with it,
   // then exit early as there is no work to be done. However, if a fence has
   // been passed the command buffer is not empty, then the current command
@@ -455,7 +457,7 @@ inline bool Context::submit_compute_job(
     const PipelineBarrier& pipeline_barrier,
     const utils::uvec3& global_work_group,
     const utils::uvec3& local_work_group_size,
-    const VkFence fence_handle,
+    VkFence fence_handle,
     Arguments&&... arguments) {
   // If any of the provided arguments does not have memory associated with it,
   // then exit early as there is no work to be done. However, if a fence has

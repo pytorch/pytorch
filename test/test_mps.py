@@ -44,6 +44,7 @@ import numpy as np
 import torch
 import torch.utils._pytree as pytree
 from itertools import product
+import operator
 
 test_consistency_op_db = copy.deepcopy(op_db)
 test_error_inputs_op_db = copy.deepcopy(op_db)
@@ -178,9 +179,6 @@ def mps_ops_grad_modifier(ops):
         'nn.functional.conv_transpose1d': [torch.float16],
         'nn.functional.conv_transpose2d': [torch.float16],
         'nn.functional.conv_transpose3d': [torch.float16],
-        # Segfaults
-        'all': [torch.float16, torch.float32],
-        'any': [torch.float16, torch.float32],
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
@@ -228,34 +226,63 @@ def mps_ops_modifier(ops):
     SUPPORTED_COMPLEX_OPS = {
         '__radd__',
         '__rmul__',
+        '__getitem__',
         'add',
         'atleast_1d',
         'atleast_2d',
         'atleast_3d',
+        'as_strided',
+        'as_strided_scatter',
+        'broadcast_tensors',
+        'broadcast_to',
+        'cfloat',
+        'chunk',
         'clone',
         'contiguous',
+        'diag',
+        'diag_embed',
+        'diagflat',
+        'diagonal',
+        'diagonal_copy',
+        'diagonal_scatter',
+        'dsplit',
         'empty',
         'empty_permuted',
         'empty_strided',
         'eye',
+        'expand',
+        'expand_as',
         'flatten',
         'fill',
         'full',
+        'hsplit',
         'imag',
         'isfinite',
         'isinf',
         'isreal',
         'item',
         'kron',
+        'linalg.diagonal',
+        'linalg.svd',
         'linspace',
         'logspace',
         'linspacetensor_overload',
         'logspacetensor_overload',
+        'mT',
+        'masked_scatter',
+        'masked_select',
+        'meshgridlist_of_tensors',
+        'meshgridvariadic_tensors',
+        'movedim',
         'mul',
+        'narrow',
+        'narrow_copy',
+        'nn.functional.padcircular',
         'nn.functional.feature_alpha_dropoutwithout_train',
         'nn.functional.unfold',
         'ones',
         'outer',
+        'permute',
         'positive',
         'randn',
         'ravel',
@@ -265,13 +292,24 @@ def mps_ops_modifier(ops):
         'resolve_conj',
         'resolve_neg',
         'scalar_tensor',
+        'select',
         'sgn',
+        'slice',
         'split',
+        'split_with_sizes',
+        'splitlist_args',
         'squeeze',
         'squeezemultiple',
         'sub',
         't',
+        'tensor_split',
+        'transpose',
+        'T',
+        'unbind',
         'unflatten',
+        'unfold',
+        'unfold_copy',
+        'unsafe_chunk',
         'unsafe_split',
         'unsqueeze',
         'view_as',
@@ -280,6 +318,82 @@ def mps_ops_modifier(ops):
         'vsplit',
         'zero_',
         'zeros',
+    }
+
+    AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS = {
+        '__rdiv__',
+        'acos',
+        'acosh',
+        'all',
+        'any',
+        'argwhere',
+        'asin',
+        'atan',
+        'atanh',
+        'bool',
+        'cartesian_prod',
+        'cat',
+        'chalf',
+        'char',
+        'column_stack',
+        'combinations',
+        'constant_pad_nd',
+        'cos',
+        'cosh',
+        'count_nonzero',
+        'diff',
+        'dot',
+        'dstack',
+        'exp2',
+        'exp',
+        'expm1',
+        'fft.fftshift',
+        'fft.ifftshift',
+        'flip',
+        'fliplr',
+        'flipud',
+        'float',
+        'half',
+        'hstack',
+        'int',
+        'ldexp',
+        'log10',
+        'log1p',
+        'log2',
+        'log',
+        'logical_not',
+        'long',
+        'masked.prod',
+        'masked.sum',
+        'mean',
+        'neg',
+        'nn.functional.padconstant',
+        'nn.functional.padreflect',
+        'nn.functional.padreplicate',
+        'nn.functional.pixel_shuffle',
+        'nn.functional.pixel_unshuffle',
+        'nn.functional.tanhshrink',
+        'nonzero',
+        'prod',
+        'reciprocal',
+        'roll',
+        'rot90',
+        'rsqrt',
+        'short',
+        'sigmoid',
+        'sin',
+        'sinh',
+        'sqrt',
+        'stack',
+        'sum',
+        'sum_to_size',
+        'tan',
+        'tanh',
+        'trace',
+        'tril',
+        'triu',
+        'vstack',
+        'where',
     }
     # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
     MACOS_12_3_XFAILLIST = {
@@ -438,6 +552,12 @@ def mps_ops_modifier(ops):
         'linalg.vander': [torch.int64],
     }
 
+    MACOS_BEFORE_14_0_XFAILLIST = {
+        'cfloat': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.float16, torch.float32],
+        'chalf': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.float16, torch.float32],
+    }
+
+
     MACOS_AFTER_13_1_XFAILLIST = {
         # before macOS 13.2 it falls back to cpu and pass the forward pass
         'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
@@ -581,7 +701,8 @@ def mps_ops_modifier(ops):
         'nn.functional.interpolatelinear': None,
         'nn.functional.interpolatetrilinear': None,
         # TODO: max_pool2d for integral types fails the numerical test
-        'nn.functional.max_pool2d': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'nn.functional.max_pool2d': (integral_types() if product_version < 14.0 else
+                                     [torch.int64, torch.int32, torch.int16, torch.int8]),
         'nn.functional.max_unpool1dgrad': None,
         'nn.functional.max_unpool2dgrad': None,
         'nn.functional.max_unpool3dgrad': None,
@@ -664,10 +785,7 @@ def mps_ops_modifier(ops):
         'log_normal': None,
         'bfloat16': None,
         'cdouble': None,
-        'cfloat': None,
-        'complex': None,
         'double': None,
-        'chalf': None,
         'nn.functional.softminwith_dtype': None,
         'log_softmaxwith_dtype': None,
         'softmaxwith_dtype': None,
@@ -818,8 +936,9 @@ def mps_ops_modifier(ops):
     }
 
     SKIPLIST = {
-        'all': None,
-        'any': None,
+        # Unsupported
+        # input types 'tensor<1x3x9x9xf16>' and 'tensor<1xf32>' are not broadcast compatible
+        'nn.functional.avg_pool2d': [torch.float16],
     }
 
     def addDecorator(op, d) -> None:
@@ -859,8 +978,14 @@ def mps_ops_modifier(ops):
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
                          dtypes=MACOS_12_3_XFAILLIST[key]))
+
+        if key in MACOS_BEFORE_14_0_XFAILLIST and product_version < 14.0:
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_BEFORE_14_0_XFAILLIST[key]))
+
         # If ops is not supported for complex types, expect it to fail
-        if key not in SUPPORTED_COMPLEX_OPS:
+        if key not in SUPPORTED_COMPLEX_OPS and (key not in AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS or product_version < 14.0):
             addDecorator(op, DecorateInfo(unittest.expectedFailure, dtypes=[torch.complex32, torch.complex64]))
 
         yield op
@@ -890,8 +1015,6 @@ def mps_ops_error_inputs_modifier(ops):
 
         # unsupported complex dtypes
         'masked_fill',
-        'fft.hfft',
-        'fft.irfft',
 
         # MPS does not support tensor dimensions > 16
         'amax',
@@ -904,6 +1027,12 @@ def mps_ops_error_inputs_modifier(ops):
         # unimplemented
         'logcumsumexp',
     }
+    if product_version < 14.0:
+        XFAILLIST.update({
+            # unsupported complex dtypes
+            'fft.hfft',
+            'fft.irfft',
+        })
 
     def addDecorator(op, d) -> None:
         op.decorators = list(op.decorators) if op.decorators is not None else []
@@ -985,7 +1114,7 @@ class MpsMemoryLeakCheck:
             if driver_mem_allocated > self.driver_before:
                 driver_discrepancy = True
 
-            if not(caching_allocator_discrepancy or driver_discrepancy):
+            if not (caching_allocator_discrepancy or driver_discrepancy):
                 # Leak was false positive, exit loop
                 discrepancy_detected = False
                 break
@@ -1342,11 +1471,11 @@ class TestAvgPool(TestCaseMPS):
         return joined_x.view(1, joined_x.numel())
 
     def _avg_pool2d(self, x, kernel_size):
-        size = reduce((lambda x, y: x * y), kernel_size)
+        size = reduce(operator.mul, kernel_size)  # noqa: F821
         return self._sum_pool2d(x, kernel_size) / size
 
     def _avg_pool3d(self, x, kernel_size):
-        size = reduce((lambda x, y: x * y), kernel_size)
+        size = reduce(operator.mul, kernel_size)  # noqa: F821
         return self._sum_pool3d(x, kernel_size) / size
 
     def test_avg_pool2d_with_zero_divisor(self):
@@ -2639,8 +2768,38 @@ class TestMPS(TestCaseMPS):
                 cpu_norm = torch.nn.utils.weight_norm(cpu_conv, dim=dim)
                 norm = torch.nn.utils.weight_norm(conv, dim=dim)
 
-                cpu_out = cpu_conv(cpu_x)
-                out = conv(x)
+                cpu_out = cpu_norm(cpu_x)
+                out = norm(x)
+
+                self.assertEqual(cpu_out, out)
+
+                cpu_grad = torch.randn(cpu_out.shape)
+                grad = cpu_grad.to('mps')
+                cpu_out.backward(gradient=cpu_grad)
+                out.backward(gradient=grad)
+
+                self.assertEqual(cpu_conv.weight_g.grad, conv.weight_g.grad)
+                self.assertEqual(cpu_conv.weight_v.grad, conv.weight_v.grad)
+
+                self.assertEqual(x.grad, cpu_x.grad)
+
+                # conv layer
+            if layer == 'conv3d':
+                cpu_x = torch.randn((3, 5, 5, 4), device='cpu', dtype=dtype, requires_grad=True)
+                x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+                cpu_conv = torch.nn.Conv3d(3, 3, 3, device='cpu')
+                conv = torch.nn.Conv3d(3, 3, 3, device='mps')
+
+                with torch.no_grad():
+                    conv.weight.copy_(cpu_conv.weight)
+                    conv.bias.copy_(cpu_conv.bias)
+
+                cpu_norm = torch.nn.utils.weight_norm(cpu_conv, dim=dim)
+                norm = torch.nn.utils.weight_norm(conv, dim=dim)
+
+                cpu_out = cpu_norm(cpu_x)
+                out = norm(x)
 
                 self.assertEqual(cpu_out, out)
 
@@ -2663,6 +2822,15 @@ class TestMPS(TestCaseMPS):
         helper(2, layer='conv')
         helper(3, layer='conv')
         helper(-1, layer='conv')
+
+        if product_version >= 13.2:
+            # Conv3d is only available from MacOS 13 onwards
+            helper(0, layer='conv3d')
+            helper(1, layer='conv3d')
+            helper(2, layer='conv3d')
+            helper(3, layer='conv3d')
+            helper(4, layer='conv3d')
+            helper(-1, layer='conv3d')
 
     # Test conv2d
     def test_conv2d_unit(self):
@@ -4036,7 +4204,7 @@ class TestMPS(TestCaseMPS):
         def helper(dtype):
             # Test with axis -1
             cpu_x = None
-            if(dtype == torch.float32):
+            if dtype == torch.float32:
                 cpu_x = torch.randn(10, 3, device='cpu', dtype=torch.float32)
             else:
                 cpu_x = torch.randint(0, 20, (10, 3), device='cpu', dtype=torch.float32)
@@ -4071,7 +4239,7 @@ class TestMPS(TestCaseMPS):
         def helper(dtype):
             # Test with axis -1
             cpu_x = None
-            if(dtype == torch.float32):
+            if dtype == torch.float32:
                 cpu_x = torch.randn(10, 3, device='cpu', dtype=torch.float32)
             else:
                 cpu_x = torch.randint(0, 20, (10, 3), device='cpu', dtype=torch.float32)
@@ -4527,6 +4695,14 @@ class TestMPS(TestCaseMPS):
         out2 = nn.BCELoss(weight)(sigmoid(output), target)
 
         self.assertEqual(out1, out2)
+
+    def test_cross_entropy_loss(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/116095
+        loss = nn.CrossEntropyLoss()
+        pred = torch.randn(3, 5, requires_grad=True, dtype=torch.float16, device='mps')
+        target = torch.ones(3, dtype=torch.long, device='mps')
+        output = loss(pred, target)
+        output.backward()
 
     def test_log_softmax(self):
         values = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
@@ -6434,7 +6610,7 @@ class TestMPS(TestCaseMPS):
             devices += ['mps']
 
             def _gelu_ref(X):
-                return X * stats.norm.cdf(X)
+                return X * stats.norm.cdf(X)  # noqa: F821
 
             for d in devices:
                 X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
@@ -6674,6 +6850,24 @@ class TestMPS(TestCaseMPS):
         helper(2, 0, 1, 1, 6)
         # test float16
         helper((2,), 0, [1], (1,), 6.0, x_dtype=torch.float16)
+
+    def test_index_64bit(self):
+        """ Test that index operations work for 4Gb+ tensors """
+        if product_version < 14.0:
+            raise unittest.SkipTest("Sonoma is needed for large tensors, see https://github.com/pytorch/pytorch/issues/84039")
+        # Cleanup memory
+        gc.collect()
+        torch.mps.empty_cache()
+        # Check that index operations work for 4+GB tensors
+        x = torch.rand(16000, 67120, device="mps")
+        self.assertGreater(x.element_size() * x.numel(), 2**32)
+        idx = torch.arange(0, 2, device="mps")
+        x_sampled = x[:, idx]
+        self.assertEqual(x[:, 0], x_sampled[:, 0])
+        # Reclaim memory after running the tests
+        del x
+        gc.collect()
+        torch.mps.empty_cache()
 
     # Test flip
     def test_flip(self):
@@ -7555,6 +7749,23 @@ class TestMPS(TestCaseMPS):
                 cpu_x = torch.randint(0, 1000, shape, device='cpu', dtype=dtypei, requires_grad=False)
                 mps_x = cpu_x.to('mps')
                 self.assertEqual(op(cpu_x), op(mps_x), rtol=1e-4, atol=1e-4)
+            # test slice
+            for dtypef in [torch.float32]:
+                cpu_x = torch.randn(shape, device='cpu', dtype=dtypef, requires_grad=False)
+                mps_x = cpu_x.detach().clone().to('mps')
+                cpu_slice = cpu_x[:, ::2, :, :]
+                mps_slice = mps_x[:, ::2, :, :]
+                self.assertEqual(op(cpu_slice), op(mps_slice))
+            # test view
+            for dtypef in [torch.float32]:
+                cpu_x = torch.randn(shape, device='cpu', dtype=dtypef, requires_grad=False)
+                mps_x = cpu_x.detach().clone().to('mps')
+                # create view of tensor by reducing the 3rd and 4th dimension
+                combined_dim = shape[-1] * shape[-2]
+                reshaped_dims = list(shape[:-2]) + [combined_dim]
+                cpu_view = cpu_x.view(*reshaped_dims)
+                mps_view = mps_x.view(*reshaped_dims)
+                self.assertEqual(op(cpu_view), op(mps_view))
 
         helper((2, 8, 4, 5), torch.exp)
         helper((2, 8, 3, 5), torch.exp2)
@@ -8227,6 +8438,17 @@ class TestNNMPS(NNTestCase):
         # This used to crash with MPSNDArrayConvolutionA14.mm:4352: failed assertion
         y2.sum().backward()
 
+    @unittest.skipIf(product_version < 13.2, "Skipped on macOS 12")
+    def test_conv3d_backward_collision(self):
+        # Conv3D is only available from MacOS 13.2 onwards
+        x = torch.rand(1, 1, 10, 10, 20, device="mps", requires_grad=True)
+        m1 = nn.Conv3d(1, 1, 3, stride=2, padding=1).to("mps")
+        m2 = nn.Conv3d(1, 1, 4, stride=2, padding=1).to("mps")
+        y1, y2 = m1(x), m2(x)
+        self.assertEqual(y1.shape, y2.shape)
+        y1.sum().backward()
+        # This used to crash with MPSNDArrayConvolutionA14.mm:4352: failed assertion
+        y2.sum().backward()
 
     def test_gemm_permute_transpose(self):
         batch_size = 32
@@ -9549,6 +9771,18 @@ class TestConvolutionMPS(TestCaseMPS):
         y_gpu = y_cpu.to(device='mps')
         for stride in range(1, 4):
             conv_cpu = torch.nn.Conv2d(in_channels=2, out_channels=2, kernel_size=3, stride=stride)
+            conv_gpu = copy.deepcopy(conv_cpu).to(device='mps')
+            x_cpu = conv_cpu(y_cpu)
+            x_gpu = conv_gpu(y_gpu)
+            self.assertEqual(x_cpu, x_gpu.cpu(), rtol=1e-03, atol=1e-05)
+
+    @unittest.skipIf(product_version < 13.2, "Skipped on macOS 12")
+    def test_conv3d_single_stride(self):
+        # Conv3d is only available from MacOS 13.2 onwards
+        y_cpu = torch.randn(2, 2, 3, 6)
+        y_gpu = y_cpu.to(device='mps')
+        for stride in range(1, 4):
+            conv_cpu = torch.nn.Conv3d(in_channels=2, out_channels=2, kernel_size=2, stride=stride)
             conv_gpu = copy.deepcopy(conv_cpu).to(device='mps')
             x_cpu = conv_cpu(y_cpu)
             x_gpu = conv_gpu(y_gpu)
@@ -10979,6 +11213,8 @@ class TestConsistency(TestCaseMPS):
         'cross', 'linalg.cross',
         'prod', 'masked.prod',
         'nextafter',
+        'native_layer_norm',
+        'nn.functional.layer_norm',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',

@@ -57,13 +57,14 @@ from .eval_frame import set_guard_error_hook
 from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
-    dict_const_keys,
-    dict_const_keys_repr,
-    dict_param_key_ids,
+    common_constant_types,
+    dict_keys_getitem,
+    dict_keys_repr,
     guard_failures,
     istype,
     orig_code_map,
     tensor_always_has_static_shape,
+    tensor_or_module_to_id,
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
@@ -107,15 +108,11 @@ CLOSURE_VARS = {
     "___skip_backend_check": (
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
     ),
-    "___compile_config_hash": (
-        lambda: torch._dynamo.eval_frame.get_saved_else_current_config_hash().hex()
-    ),
-    "___needs_nopython": (lambda: torch._dynamo.eval_frame.config_cache.nopython),
     "___odict_getitem": collections.OrderedDict.__getitem__,
-    "___dict_param_key_ids": dict_param_key_ids,
-    "___dict_const_keys": dict_const_keys,
+    "___tensor_or_module_to_id": tensor_or_module_to_id,
     "___dict_version": dict_version,
     "___dict_contains": lambda a, b: a in b,
+    "___dict_keys_getitem": dict_keys_getitem,
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
@@ -246,7 +243,6 @@ class GuardBuilder(GuardBuilderBase):
         # info is stored alongside optimized_code and check_fn and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
         self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
-        self.config_hash: Optional[bytes] = None
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -383,23 +379,19 @@ class GuardBuilder(GuardBuilderBase):
             )
         else:
             np_types = ()
-        ok_types = (
-            int,
-            float,
-            bool,
-            type(None),
-            str,
-            type,
-            list,
-            tuple,
-            set,
-            slice,
-            frozenset,
-            range,
-            torch.Size,
-            torch.device,
-            torch.dtype,
-            *np_types,
+        ok_types = tuple(
+            common_constant_types
+            | {
+                type,
+                list,
+                tuple,
+                set,
+                frozenset,
+                slice,
+                range,
+                torch.Size,
+                *np_types,
+            }
         )
         if istype(val, dict):
             assert all(
@@ -409,7 +401,7 @@ class GuardBuilder(GuardBuilderBase):
             assert istype(
                 val,
                 ok_types,
-            ), t.__name__
+            ), f"Unexpected type {type(val)}, not in {ok_types}"
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
@@ -525,22 +517,24 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def DICT_KEYS(self, guard):
+        # Guard on the keys and their order
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        param_key_ids = set(dict_param_key_ids(value))
-        const_keys = set(dict_const_keys(value))
-        const_keys_repr = dict_const_keys_repr(
-            const_keys, local=is_from_local_source(guard.originating_source)
+        any_tensor_or_module = any(
+            isinstance(k, (torch.Tensor, torch.nn.Module)) for k in value.keys()
         )
-        if param_key_ids:
-            code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
-            code.append(f"___dict_const_keys({ref}) == {const_keys_repr}")
+        const_keys_repr = dict_keys_repr(
+            tensor_or_module_to_id(value),
+            local=is_from_local_source(guard.originating_source),
+        )
+        if any_tensor_or_module:
+            code.append(f"___tensor_or_module_to_id({ref}) == {const_keys_repr}")
         else:
-            code.append(f"set({ref}.keys()) == {const_keys_repr}")
+            code.append(f"list({ref}.keys()) == {const_keys_repr}")
 
         self._produce_guard_code(guard, code)
 
@@ -601,22 +595,6 @@ class GuardBuilder(GuardBuilderBase):
         code = [
             f"(___skip_backend_check() or ___current_backend() == ___lookup_backend({backend_id}))"
         ]
-        self._produce_guard_code(guard, code)
-
-    def CONFIG_HASH_MATCH(self, guard: Guard):
-        """Guard on the hash of the compiled function's dynamo config"""
-
-        config_hash = torch._dynamo.eval_frame.get_saved_else_current_config_hash()
-        assert guard.source is GuardSource.GLOBAL
-        code = [f"___compile_config_hash() == '{config_hash.hex()}'"]
-        self.config_hash = config_hash
-        self._produce_guard_code(guard, code)
-
-    def HAS_GRAPH_BREAK(self, guard: Guard):
-        # If this compiled entry has a graph break / is not a single graph, it is a cache miss
-        # if the compiled object needs nopython. We only need to install this guard if
-        # there is a graph break.
-        code = ["not ___needs_nopython()"]
         self._produce_guard_code(guard, code)
 
     def SHAPE_ENV(self, guard: Guard):
@@ -993,8 +971,15 @@ class CheckFunctionManager:
             output_graph.global_scope,
             self,
         )
+
+        # Break retain cycle. See test_release_scope_memory
+        def cleanup_builder(weak_b):
+            b = weak_b()
+            if b:
+                b.scope = None
+
         # Break retain cycle. See test_release_input_memory
-        w_builder = weakref.ref(builder)
+        w_builder = weakref.ref(builder, cleanup_builder)
 
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
@@ -1020,7 +1005,6 @@ class CheckFunctionManager:
         # queryable data structure such that this information is already present
         # in some form.
         self.check_fn.id_matched_objs = builder.id_matched_objs
-        self.check_fn.config_hash = builder.config_hash
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
