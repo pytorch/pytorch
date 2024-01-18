@@ -630,12 +630,7 @@ class WrapperCodeGen(CodeGen):
         if config.profile_bandwidth:
             self.write_triton_header_once()
         result = IndentedBuffer()
-        if (
-            not V.graph.aot_mode
-            or not V.graph.is_const_graph
-            or not V.graph.cpp_wrapper
-        ):
-            result.splice(self.header)
+        result.splice(self.header)
 
         with contextlib.ExitStack() as stack:
             stack.enter_context(self.wrapper_call.indent())
