@@ -12,7 +12,7 @@ test_classes = {}
 
 def mocked_retraceability_export(*args, **kwargs):
     ep = export(*args, **kwargs)
-    ep = export(ep, *(args[1:]), **kwargs)
+    ep = export(ep.module(), *(args[1:]), **kwargs)
     return ep
 
 
