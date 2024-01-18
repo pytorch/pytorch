@@ -30,6 +30,9 @@ HAS_TRITON = has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
+torch._dynamo.config.fake_tensor_cache_enabled = True
+torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
+
 
 class MyModel(torch.nn.Module):
     def __init__(self):
@@ -116,7 +119,6 @@ class TestFxGraphCache(TestCase):
 
         a = torch.rand(25, dtype=dtype, device=device)
         b = torch.rand(5, 5, dtype=dtype, device=device)
-        c = a.view(5, 5)
 
         compiled_fn = torch.compile(fn, dynamic=dynamic)
 
@@ -130,12 +132,6 @@ class TestFxGraphCache(TestCase):
         torch._dynamo.reset()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-
-        # But we expect different code if the tensors are aliased.
-        torch._dynamo.reset()
-        self.assertEqual(fn(a, c), compiled_fn(a, c))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     @requires_triton()

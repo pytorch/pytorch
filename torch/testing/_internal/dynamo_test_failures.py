@@ -1,22 +1,6 @@
 # tests in this list will run without Dynamo strict mode by default.
 FIXME_default_non_strict = {
     "dynamo/test_logging",
-    "export/test_db",
-    "export/test_experimental",
-    "export/test_export",
-    "export/test_export_nonstrict",
-    "export/test_functionalized_assertions",
-    "export/test_pass_infra",
-    "export/test_passes",
-    "export/test_retraceability",
-    "export/test_serdes",
-    "export/test_serialize",
-    "export/test_unflatten",
-    "export/test_upgrade",
-    "export/test_verifier",
-    "functorch/test_aotdispatch",
-    "functorch/test_ops",
-    "functorch/test_vmap",
     "inductor/test_aot_inductor",
     "inductor/test_aot_inductor_utils",
     "inductor/test_benchmark_fusion",
@@ -72,27 +56,12 @@ FIXME_default_non_strict = {
     "inductor/test_triton_heuristics",
     "inductor/test_triton_wrapper",
     "inductor/test_unbacked_symints",
-    "profiler/test_memory_profiler",
-    "profiler/test_profiler",
-    "profiler/test_profiler_tree",
     "test_ao_sparsity",
     "test_autograd",
     "test_custom_ops",
     "test_jit",
-    "test_jit_fuser_te",
-    "test_jit_llga_fuser",
-    "test_modules",
-    "test_ops",
-    "test_ops_fwd_gradients",
-    "test_ops_gradients",
-    "test_ops_jit",
     "test_python_dispatch",
     "test_quantization",
-    "test_tensorexpr",
-    "test_tensorexpr_pybind",
-    "test_torch",
-    "test_vulkan",
-    "test_xnnpack_integration",
 }
 
 # Tests that run without strict mode in PYTORCH_TEST_WITH_INDUCTOR=1.
@@ -2824,7 +2793,6 @@ dynamo_expected_failures = {
     "TestGradNewOnesOverride.test_newones",  # test_overrides
     "TestTorchFunctionOverride.test_precedence_semantics",  # test_overrides
     "TestNamedTupleAPI.test_namedtuple_return",  # test_namedtuple_return_api
-    "TestAnalyze.test_trace_dependencies",  # test_package
     "TestVmapOperatorsLegacy.test_contiguous",  # test_legacy_vmap
     "TestVmapAPILegacy.test_accepts_nested_inputs",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nested_out_dims",  # test_legacy_vmap
@@ -3153,13 +3121,258 @@ dynamo_expected_failures = {
     "TestFX.test_ellipsis",  # test_fx
     "TestContentStoreCPU.test_repeated_hash_cpu",  # test_content_store
     "TestLazyTensor.test_tensor_ctr",  # lazy/test_ts_opinfo
+    "TestAnalyze.test_trace_dependencies",  # test_package
+    "TestProfilerTree.test_profiler_experimental_tree_with_memory",  # profiler/test_profiler_tree
+    "TestProfilerTree.test_profiler_experimental_tree_with_memory_and_stack",  # profiler/test_profiler_tree
+    "TestProfilerTree.test_profiler_experimental_tree_with_record_function",  # profiler/test_profiler_tree
+    "TestProfilerTree.test_profiler_experimental_tree_with_stack_and_torch_dispatch",  # profiler/test_profiler_tree
+    "TestProfilerTree.test_profiler_experimental_tree_with_stack_and_torch_function",  # profiler/test_profiler_tree
+    "TestTorchTidyProfiler.test_allocation_ids_with_other_ops",  # profiler/test_profiler
+    "TestExperimentalUtils.test_profiler_synchronized_dataloader_pattern",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_impl_reuse",  # profiler/test_profiler
+    "TestExperimentalUtils.test_profiler_pattern_matcher_json_report",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_tensorimpl_invalidation_full",  # profiler/test_profiler
+    "TestProfiler.test_kineto_profiler_multiple_steppers",  # profiler/test_profiler
+    "TestProfiler.test_profiler_tracing",  # profiler/test_profiler
+    "TestProfiler.test_is_profiler_enabled",  # profiler/test_profiler
+    "TestExperimentalUtils.test_utils_compute_idle_time",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_optimizer_parameters_sgd",  # profiler/test_profiler
+    "TestExperimentalUtils.test_profiler_name_pattern",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_extra_fields",  # profiler/test_profiler
+    "TestProfiler.test_flops",  # profiler/test_profiler
+    "TestProfiler.test_profiler_correlation_id",  # profiler/test_profiler
+    "TestProfiler.test_source_multithreaded_open_in_scope_work_in_main_thread_True",  # profiler/test_profiler
+    "TestProfiler.test_source_multithreaded_close_in_scope_work_in_main_thread_True",  # profiler/test_profiler
+    "TestProfiler.test_source",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_allocation_ids",  # profiler/test_profiler
+    "TestRecordFunction.test_record_function",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_optimizer_parameters_adam",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_tensor_properties",  # profiler/test_profiler
+    "TestProfiler.test_record_function_fast",  # profiler/test_profiler
+    "TestProfiler.test_profiler_fwd_bwd_link",  # profiler/test_profiler
+    "TestProfiler.test_concrete_inputs_profiling",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_tensorimpl_invalidation_scalar_args",  # profiler/test_profiler
+    "TestProfiler.test_guarded_record_function_fast",  # profiler/test_profiler
+    "TestExperimentalUtils.test_profiler_optimizer_single_tensor_pattern",  # profiler/test_profiler
+    "TestExperimentalUtils.test_utils_compute_self_time",  # profiler/test_profiler
+    "TestProfiler.test_high_level_trace",  # profiler/test_profiler
+    "TestRecordFunction.test_datapipe_with_record_function_fork",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_allocations",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_module_and_optimizer_ids",  # profiler/test_profiler
+    "TestExperimentalUtils.test_utils_compute_queue_depth_when_no_cuda_events",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_allocation_id_uniqueness",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_sparse_tensors",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_optimizer",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_tensorimpl_invalidation_keep_alive",  # profiler/test_profiler
+    "TestExperimentalUtils.test_utils_compute_queue_depth",  # profiler/test_profiler
+    "TestExperimentalUtils.test_profiler_pattern_match_helper",  # profiler/test_profiler
+    "TestProfiler.test_export_stacks",  # profiler/test_profiler
+    "TestProfiler.test_source_multithreaded_basic_work_in_main_thread_True",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_mkldnn_tensors",  # profiler/test_profiler
+    "TestRecordFunction.test_datapipe_with_record_function",  # profiler/test_profiler
+    "TestProfiler.test_memory_profiler",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_tensor_lists",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_pointers_and_ids",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_nnmodule_params",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_tensorimpl_invalidation_set",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_scalar_ins",  # profiler/test_profiler
+    "TestProfiler.test_profiler_op_event_args",  # profiler/test_profiler
+    "TestProfiler.test_source_multithreaded_complex_work_in_main_thread_True",  # profiler/test_profiler
+    "TestProfiler.test_source_multithreaded_multiple_preexisting_work_in_main_thread_True",  # profiler/test_profiler
+    "TestAOTAutograd.test_input_mutation_aliases_and_output_alias",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_aliases_bases_out_of_order",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_inference_mode",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_is_output",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_set__input_mutation",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_multiple_mixed",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_some_outputs_dont_require_grad_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_data_and_metadata_mutation_aliases_other_input",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_output_view_metadata_mutate_multiple",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_data_and_metadata_mutation",  # functorch/test_aotdispatch
+    "TestPythonKeyCPU.test_make_fx_vjp_cpu",  # functorch/test_aotdispatch
+    "TestPartitioning.test_min_cut_partitioner_output_tensor_shape_tensor",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_subclass_metadata_mutation_req_grad_False",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_output_view_simple",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_multi_output_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_returned_multiple_times",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_metadata_mutation_aliases",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_input_multi_output_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_subclass_metadata_mutation_req_grad_True",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_aliases_other_input2",  # functorch/test_aotdispatch
+    "TestAOTDispatch.test_aot_dispatch_input_mutation_and_output_alias",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_aliased_with_mutation_output_alias",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_invalid_dupe_left_bias",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_multiple_inputs_get_correct_one",  # functorch/test_aotdispatch
+    "TestAOTDispatch.test_aot_dispatch_input_mutation",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_new_inp_requires_grad_now",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_view_detach",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_false_aliasing",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_default_partitioner_saves_symints_not_tensors_for_bw",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_invalid_dupe",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_and_returned_different_grad",  # functorch/test_aotdispatch
+    "TestPartitioning.test_min_cut_partitioner_recomputable_ops",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_all_alias_types",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_set__and_data_mutation_good",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_set__and_data_mutation_bad",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_set__nop",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_dupe_arg_torture",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_noncontiguous",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_output_view_mutate_multiple",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_and_returned",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_some_outputs_dont_require_grad_non_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_some_output_requires_grad_input_doesnt",  # functorch/test_aotdispatch
+    "TestAOTDispatch.test_aot_dispatch_output_alias",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_and_output_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_invalid_dupe_fake",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_multiple",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_alias_everything",  # functorch/test_aotdispatch
+    "TestPythonKeyCPU.test_make_fx_jacrev_cpu",  # functorch/test_aotdispatch
+    "TestPartitioning.test_default_partitioner_output_tensor_shape_tensor",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_aliases_other_input",  # functorch/test_aotdispatch
+    "TestPartitioning.test_contiguous",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_outputs_are_aliased",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_aliases_and_none_require_gradients",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_and_returned_flipped",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_view_and_inplace_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_metadata",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_dict",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_op_depending_on_symint",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_output_view_multiple",  # functorch/test_aotdispatch
+    "TestUnflatten.test_unflatten_container_type",  # export/test_unflatten
+    "TestDeserialize.test_tensor_tensor_list",  # export/test_serialize
+    "SerDesExportTestExport.test_constrain_size_with_constrain_value_serdes",  # export/test_serdes
+    "SerDesExportTestDynamismExpression.test_export_inline_constraints_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_nn_module_stack_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_basic_non_strict_real_tensor_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_external_call_non_strict_real_tensor_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_constrain_size_with_various_cases_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_constrain_size_in_eager_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_non_strict_dynamic_shapes_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_basic_non_strict_fake_tensor_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_non_strict_dynamic_shapes_suggested_fixes_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_cond_with_module_stack_export_with_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_nn_module_stack_shared_submodule_serdes",  # export/test_serdes
+    "RetraceExportTestExport.test_constrain_size_in_eager_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_cond_with_module_stack_export_with_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_non_strict_dynamic_shapes_suggested_fixes_retraceability",  # export/test_retraceability  # noqa: B950
+    "RetraceExportTestExport.test_constrain_size_with_constrain_value_retraceability",  # export/test_retraceability
+    "RetraceExportTestDynamismExpression.test_export_inline_constraints_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_nn_module_stack_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_nn_module_stack_shared_submodule_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_constrain_size_with_various_cases_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_non_strict_dynamic_shapes_retraceability",  # export/test_retraceability
+    "TestPasses.test_views_op_having_view_copy",  # export/test_passes
+    "TestPasses.test_functionalize_inline_contraints",  # export/test_passes
+    "NonStrictExportTestExport.test_non_strict_dynamic_shapes_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_basic_non_strict_fake_tensor_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_nn_module_stack_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_param_util_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_cond_with_module_stack_export_with_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_non_strict_dynamic_shapes_suggested_fixes_non_strict",  # export/test_export_nonstrict  # noqa: B950
+    "NonStrictExportTestExport.test_raise_user_error_when_guard_on_data_dependent_operation_non_strict",  # export/test_export_nonstrict  # noqa: B950
+    "NonStrictExportTestExport.test__scaled_dot_product_flash_attention_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_to_module_with_mutated_buffer_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_basic_non_strict_real_tensor_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_external_call_non_strict_real_tensor_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_export_decomps_dynamic_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_to_module_with_mutated_buffer_multiple_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_export_with_wrong_inputs_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_fqn_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_sym_sqrt_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_nn_module_stack_shared_submodule_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_buffer_util_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_export_decomps_simple_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_to_module_with_mutated_buffer_multiple_update_sub_later_non_strict",  # export/test_export_nonstrict  # noqa: B950
+    "TestExport.test_non_strict_dynamic_shapes",  # export/test_export
+    "TestExport.test_cond_with_module_stack_export_with",  # export/test_export
+    "TestExport.test_constrain_size_in_eager",  # export/test_export
+    "TestExport.test_nn_module_stack",  # export/test_export
+    "TestExport.test_basic_non_strict_fake_tensor",  # export/test_export
+    "TestExport.test_constrain_size_with_various_cases",  # export/test_export
+    "TestExport.test_external_call_non_strict_real_tensor",  # export/test_export
+    "TestDynamismExpression.test_export_inline_constraints",  # export/test_export
+    "TestExport.test_basic_non_strict_real_tensor",  # export/test_export
+    "TestExport.test_constrain_size_with_constrain_value",  # export/test_export
+    "TestExport.test_nn_module_stack_shared_submodule",  # export/test_export
+    "TestExport.test_non_strict_dynamic_shapes_suggested_fixes",  # export/test_export
+    "TestExperiment.test_with_buffer_as_submodule",  # export/test_experimental
+    "ExampleTests.test_exportdb_supported_case_constrain_as_size_example",  # export/test_db
+    "ExampleTests.test_exportdb_supported_case_assume_constant_result",  # export/test_db
+    "TestOpCPU.test_addmm_cpu_bfloat16",  # test_jit_llga_fuser
+    "TestOpCPU.test_cat_cpu_float32",  # test_jit_llga_fuser
+    "TestOpCPU.test_addmm_cpu_float32",  # test_jit_llga_fuser
+    "TestOpCPU.test_add_scalar_cpu_bfloat16",  # test_jit_llga_fuser
+    "TestOpCPU.test_add_scalar_cpu_float32",  # test_jit_llga_fuser
+    "TestOpCPU.test_cat_cpu_bfloat16",  # test_jit_llga_fuser
+    "TestOpCPU.test_identity_binary_cpu_bfloat16",  # test_jit_llga_fuser
+    "TestOpCPU.test_identity_binary_cpu_float32",  # test_jit_llga_fuser
+    "TestTorch.test_type",  # test_torch
+    "TestTorch.test_cuda_not_built",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint4x2",  # test_torch
+    "TestTorch.test_map",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_fmod_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_float16",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_lerp_cpu",  # test_torch
+    "TestTorch.test_parsing_int64",  # test_torch
+    "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_bfloat16",  # test_torch
+    "TestTorch.test_parsing_intlist",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_eq_cpu",  # test_torch
+    "TestTorch.test_contains",  # test_torch
+    "TestTorch.test_new",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_map2_cpu",  # test_torch
+    "TestTorch.test_newaxis_numpy_comparison",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_ne_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_gt_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_bfloat16",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_div_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint8",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_lt_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_memory_format_operators_cpu",  # test_torch
+    "TestTorch.test_pin_memory",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_masked_fill_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool2d_cpu_float64",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_sub_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_le_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_qint32",  # test_torch
+    "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float16",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_qint8",  # test_torch
+    "TestTorchDeviceTypeCPU.test_untyped_storage_meta_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_remainder_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool1d_cpu_float32",  # test_torch
+    "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_float64",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_add_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_addcmul_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint2x4",  # test_torch
+    "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float64",  # test_torch
+    "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_float32",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool2d_cpu_float32",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool3d_cpu_float32",  # test_torch
+    "TestTorchDeviceTypeCPU.test_where_scalar_handcrafted_values_cpu",  # test_torch
+    "TestTorch.test_upsample_nearest2d_meta",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_map_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool1d_cpu_float64",  # test_torch
+    "TestTorch.test_upsample_nearest1d_meta",  # test_torch
+    "TestTorchDeviceTypeCPU.test_normal_kstest_cpu_float32",  # test_torch
+    "TestTorchDeviceTypeCPU.test_normal_kstest_cpu_float64",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_pow_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_copy_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool3d_cpu_float64",  # test_torch
+    "TestTorchDeviceTypeCPU.test_normal_kstest_cpu_float16",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_masked_scatter_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_ge_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_atan2_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_mul_cpu",  # test_torch
+    "TestTorch.test_tensoriterator_output_setup",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_addcdiv_cpu",  # test_torch
+    "TestTorch.test_parsing_double",  # test_torch
+    "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float32",  # test_torch
+    "TestTorchDeviceTypeCPU.test_deterministic_empty_cpu_uint64",  # test_torch
 }
 
 dynamo_skips = {
     "TestMatmulOperator.test_matmul_raises",
     "TestMatmulOperator.test_exceptions",
     "TestMatmulOperator.test_matmul_inplace",
-    "TestMonitorTensorboard.test_event_handler",  # weird
     "TestMethods.test_diagonal",
     "TestMethods.test_searchsorted_complex",
     "TestMethods.test_round",
@@ -7561,8 +7774,21 @@ dynamo_skips = {
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int16",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int8",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_uint8",  # known py38 fail
-    "TestRepackage.test_repackage_import_indirectly_via_parent_module",  # known py311 fail
-    "TestPackageScript.test_load_shared_tensors_repackaged",  # known py311 fail
+    "TestProfiler.test_source_multithreaded_basic_work_in_main_thread_False",
+    "TestProfiler.test_source_multithreaded_complex_work_in_main_thread_False",
+    "TestProfiler.test_source_multithreaded_open_in_scope_work_in_main_thread_False",
+    "TestProfiler.test_source_multithreaded_multiple_preexisting_work_in_main_thread_False",
+    "TestProfiler.test_source_multithreaded_close_in_scope_work_in_main_thread_False",
+    "TestProfiler.test_profiler_disable_fwd_bwd_link",
+    "TestProfiler.test_profiler_metadata",
+    "TestSerializeCustomClass.test_custom_class",
+    "TestTensorExprPyBind.test_kernel_with_transpose",
+    "TestTensorExprPyBind.test_kernel_with_custom_lowering",
+    "TestTensorExprPyBind.test_kernel_with_expand",
+    "TestTensorExprPyBind.test_kernel_with_permute",
+    "TestTensorExprPyBind.test_kernel_with_scalar_inputs",
+    "TestTensorExprPyBind.test_kernel_with_t",
+    "TestTensorExprPyBind.test_kernel_with_tensor_inputs",
     "TestFX.test_assert",  # known py38 fail
     "TestFX.test_annotations_empty_tuple",  # known py38 fail
     "TestDataLoaderPersistentWorkers.test_early_exit",  # known py38 fail
@@ -7570,6 +7796,18 @@ dynamo_skips = {
     "TestDataLoaderPersistentWorkers.test_fd_limit_exceeded",  # known py38 fail
     "TestLazyDynamicOps.test_nonzero_dynamic",  # known py311 fail
     "TestLazyTensor.test_view_mark_step_preserved",  # known py311 fail
+    "TestRepackage.test_repackage_import_indirectly_via_parent_module",  # known py311 fail
+    "TestPackageScript.test_load_shared_tensors_repackaged",  # known py311 fail
+    "TestFXExperimental.test_optimize_for_inference_cpu_torchvision",
+    "TestXNNPACKOps.test_linear_1d_input",  # flaky
+    "TestXNNPACKOps.test_conv2d",  # flaky
+    "TestXNNPACKOps.test_conv2d_transpose",  # flaky
+    "TestProfilerTree.test_profiler_experimental_tree",  # known py311 fail
+    "TestExperiment.test_mark_strict_with_container_type",  # known py311 fail
+    "TestExprHandlePyBind.test_unary_ops",  # known py38 fail
+    "TestTorch.test_bmm_multithreaded",
+    "TestTorch.test_terminate_handler_on_crash",  # known py38 fail
+    "TestTorch.test_storage_casts",  # known py311 fail
 }
 
 
