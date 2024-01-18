@@ -1527,11 +1527,27 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         eager_result = fn(udf_mul, udf_mul, x)
         gm = backend.graphs[0]
         self.assertEqual(eager_result, dynamo_result)
-        self.assertExpectedInline(
-            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
-            """\
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+    class GraphModule(torch.nn.Module):
+        def forward(self, L_lambda0_keywords_y_ : torch.Tensor):
+            l_lambda0_keywords_y_ = L_lambda0_keywords_y_
+
+            mul = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+            mul_1 = l_lambda0_keywords_y_ * l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+
+            mul_2 = torch.mul(mul, mul_1);  mul = mul_1 = None
+            return (mul_2,)
+    """,
+            )
+        else:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_lambda0_keywords_y_ : torch.Tensor):
+    def forward(self, s0 : torch.SymInt, L_lambda0_keywords_y_ : torch.Tensor):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
         mul = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
@@ -1540,7 +1556,7 @@ class GraphModule(torch.nn.Module):
         mul_2 = torch.mul(mul, mul_1);  mul = mul_1 = None
         return (mul_2,)
 """,
-        )
+            )
 
     def test_partials_graph_break_reconstruct_mix(self):
         def fn(udf_mul_0, udf_add_1, x):
@@ -1558,11 +1574,28 @@ class GraphModule(torch.nn.Module):
         eager_result = fn(udf_mul, udf_add, x)
         gm = backend.graphs[0]
         self.assertEqual(eager_result, dynamo_result)
-        self.assertExpectedInline(
-            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
-            """\
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+    class GraphModule(torch.nn.Module):
+        def forward(self, L_lambda0_keywords_y_ : torch.Tensor):
+            l_lambda0_keywords_y_ = L_lambda0_keywords_y_
+
+            mul = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+
+            add = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+
+            mul_1 = torch.mul(mul, add);  mul = add = None
+            return (mul_1,)
+    """,
+            )
+        else:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_lambda0_keywords_y_ : torch.Tensor):
+    def forward(self, s0 : torch.SymInt, L_lambda0_keywords_y_ : torch.Tensor):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
         mul = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
@@ -1572,7 +1605,7 @@ class GraphModule(torch.nn.Module):
         mul_1 = torch.mul(mul, add);  mul = add = None
         return (mul_1,)
 """,
-        )
+            )
 
     def test_partials_graph_break_reconstruct_mix_no_source(self):
         def fn(udf_mul_0, x):
@@ -1592,11 +1625,28 @@ class GraphModule(torch.nn.Module):
         eager_result = fn(udf_mul, x)
         gm = backend.graphs[0]
         self.assertEqual(eager_result, dynamo_result)
-        self.assertExpectedInline(
-            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
-            """\
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+    class GraphModule(torch.nn.Module):
+        def forward(self, L_lambda0_keywords_y_ : torch.Tensor):
+            l_lambda0_keywords_y_ = L_lambda0_keywords_y_
+
+            mul = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
+
+            add = l_lambda0_keywords_y_ + l_lambda0_keywords_y_;  l_lambda0_keywords_y_ = None
+
+            mul_1 = torch.mul(mul, add);  mul = add = None
+            return (mul_1,)
+    """,
+            )
+        else:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_lambda0_keywords_y_ : torch.Tensor):
+    def forward(self, s0 : torch.SymInt, L_lambda0_keywords_y_ : torch.Tensor):
         l_lambda0_keywords_y_ = L_lambda0_keywords_y_
 
         mul = l_lambda0_keywords_y_ * l_lambda0_keywords_y_
@@ -1606,7 +1656,7 @@ class GraphModule(torch.nn.Module):
         mul_1 = torch.mul(mul, add);  mul = add = None
         return (mul_1,)
 """,
-        )
+            )
 
     def test_partials_graph_break_reconstruct_args_and_kwargs(self):
         def fn(udf_mul_0, x):
@@ -1623,11 +1673,28 @@ class GraphModule(torch.nn.Module):
         eager_result = fn(udf_mul2, x)
         gm = backend.graphs[0]
         self.assertEqual(eager_result, dynamo_result)
-        self.assertExpectedInline(
-            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
-            """\
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+    class GraphModule(torch.nn.Module):
+        def forward(self, L_x_ : torch.Tensor):
+            l_x_ = L_x_
+
+            mul = l_x_ * 4
+            mul_1 = mul * l_x_;  mul = None
+            mul_2 = 20 * l_x_;  l_x_ = None
+
+            mul_3 = torch.mul(mul_1, mul_2);  mul_1 = mul_2 = None
+            return (mul_3,)
+    """,
+            )
+        else:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor):
+    def forward(self, s0 : torch.SymInt, L_x_ : torch.Tensor):
         l_x_ = L_x_
 
         mul = l_x_ * 4
@@ -1637,7 +1704,7 @@ class GraphModule(torch.nn.Module):
         mul_3 = torch.mul(mul_1, mul_2);  mul_1 = mul_2 = None
         return (mul_3,)
 """,
-        )
+            )
 
     def test_partials_recompilation(self):
         def fn(f0, f1, x):
