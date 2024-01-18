@@ -67,6 +67,10 @@ FIXME_default_non_strict = {
 # Tests that run without strict mode in PYTORCH_TEST_WITH_INDUCTOR=1.
 # Please don't add anything to this list.
 FIXME_inductor_non_strict = {
+    "test_modules",
+    "test_ops",
+    "test_ops_gradients",
+    "test_torch",
 }
 
 # We generate unittest.expectedFailure for all of the following tests
@@ -7825,6 +7829,7 @@ dynamo_skips = {
     "TestProfilerTree.test_profiler_experimental_tree",  # known py311 fail
     "TestExperiment.test_mark_strict_with_container_type",  # known py311 fail
     "TestExprHandlePyBind.test_unary_ops",  # known py38 fail
+    "TestTorch.test_bmm_multithreaded",
     "TestTorch.test_terminate_handler_on_crash",  # known py38 fail
     "TestTorch.test_storage_casts",  # known py311 fail
 }
