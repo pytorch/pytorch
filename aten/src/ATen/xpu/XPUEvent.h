@@ -85,16 +85,8 @@ struct TORCH_XPU_API XPUEvent {
           ".");
       event_.reset();
     }
-    if (enable_timing_) {
-      // TODO: provides the ability to time the execution of commands in a SYCL
-      // queue without enabling profiling on the entire queue.
-      TORCH_CHECK_NOT_IMPLEMENTED(
-          false,
-          "XPUEvent can NOT record stream with argument 'enable_timing=True'.");
-    } else {
-      event_ = std::make_unique<sycl::event>(
-          stream.queue().ext_oneapi_submit_barrier());
-    }
+    event_ = std::make_unique<sycl::event>(
+        stream.queue().ext_oneapi_submit_barrier());
   }
 
   void block(const XPUStream& stream) {
@@ -106,7 +98,6 @@ struct TORCH_XPU_API XPUEvent {
   }
 
   float elapsed_time(const XPUEvent& other) const {
-    using namespace sycl::info::event_profiling;
     TORCH_CHECK(
         isCreated() && other.isCreated(),
         "Both events must be recorded before calculating elapsed time.");
@@ -116,12 +107,10 @@ struct TORCH_XPU_API XPUEvent {
     TORCH_CHECK(
         enable_timing_ && other.enable_timing_,
         "Both events must be created with argument 'enable_timing=True'.");
-    float time_ms = 0;
-    auto self_time = event().template get_profiling_info<command_end>();
-    auto other_time = other.event().template get_profiling_info<command_end>();
-    // Convert nanoseconds to milliseconds.
-    time_ms = (other_time - self_time) * 1e-6;
-    return time_ms;
+    // TODO: provides the ability to time the execution of commands in a SYCL
+    // queue without enabling profiling on the entire queue
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "elapsed_time is not supported by XPUEvent.");
   }
 
   void synchronize() const {

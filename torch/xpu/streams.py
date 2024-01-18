@@ -107,10 +107,14 @@ class Event(torch._C._XpuEventBase, _EventBase):
     The underlying XPU events are lazily initialized when the event is first
     recorded. After creation, only streams on the same device may record the
     event. However, streams on any device can wait on the event.
+
+    Args:
+        enable_timing (bool, optional): indicates if the event should measure time
+            (default: ``False``)
     """
 
-    def __new__(cls):
-        return super().__new__(cls)
+    def __new__(cls, enable_timing=False):
+        return super().__new__(cls, enable_timing=enable_timing)
 
     def record(self, stream=None):
         r"""Record the event in a given stream.
@@ -146,8 +150,7 @@ class Event(torch._C._XpuEventBase, _EventBase):
         Time reported in milliseconds after the event was recorded and
         before the end_event was recorded.
         """
-        # TODO: Support for creating Event with the argument `enable_timing=True`.
-        return NotImplementedError
+        return super().elapsed_time(end_event)
 
     def synchronize(self):
         r"""Wait for the event to complete.
@@ -163,6 +166,6 @@ class Event(torch._C._XpuEventBase, _EventBase):
 
     def __repr__(self):
         if self.sycl_event:
-            return f"<torch.xpu.Event {self._as_parameter_.value:#x}>"
+            return f"<torch.xpu.Event {self.sycl_event:#x}>"
         else:
             return "<torch.xpu.Event uninitialized>"

@@ -17,6 +17,15 @@ static PyObject* THXPEvent_pynew(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
+  unsigned char enable_timing = 0;
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  constexpr const char* kwlist[] = {"enable_timing", nullptr};
+  if (!PyArg_ParseTupleAndKeywords(
+          args, kwargs, "|b", const_cast<char**>(kwlist), &enable_timing)) {
+    return nullptr;
+  }
+
   THPObjectPtr ptr(type->tp_alloc(type, 0));
   if (!ptr) {
     return nullptr;
@@ -24,7 +33,7 @@ static PyObject* THXPEvent_pynew(
 
   THXPEvent* self = (THXPEvent*)ptr.get();
 
-  new (&self->xpu_event) at::xpu::XPUEvent(false);
+  new (&self->xpu_event) at::xpu::XPUEvent(enable_timing);
 
   return (PyObject*)ptr.release();
   END_HANDLE_TH_ERRORS
@@ -61,11 +70,10 @@ static PyObject* THXPEvent_record(PyObject* _self, PyObject* _stream) {
 }
 
 static PyObject* THXPEvent_wait(PyObject* _self, PyObject* _stream) {
-  HANDLE_TH_ERRORS {
-    auto self = (THXPEvent*)_self;
-    auto stream = (THXPStream*)_stream;
-    self->xpu_event.block(stream->xpu_stream);
-  }
+  HANDLE_TH_ERRORS
+  auto self = (THXPEvent*)_self;
+  auto stream = (THXPStream*)_stream;
+  self->xpu_event.block(stream->xpu_stream);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -74,6 +82,14 @@ static PyObject* THXPEvent_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = (THXPEvent*)_self;
   return PyBool_FromLong(self->xpu_event.query());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THXPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
+  HANDLE_TH_ERRORS
+  auto self = (THXPEvent*)_self;
+  auto other = (THXPEvent*)_other;
+  return PyFloat_FromDouble(self->xpu_event.elapsed_time(other->xpu_event));
   END_HANDLE_TH_ERRORS
 }
 
@@ -100,6 +116,7 @@ static PyMethodDef THXPEvent_methods[] = {
     {(char*)"record", THXPEvent_record, METH_O, nullptr},
     {(char*)"wait", THXPEvent_wait, METH_O, nullptr},
     {(char*)"query", THXPEvent_query, METH_NOARGS, nullptr},
+    {(char*)"elapsed_time", THXPEvent_elapsed_time, METH_O, nullptr},
     {(char*)"synchronize", THXPEvent_synchronize, METH_NOARGS, nullptr},
     {nullptr}};
 

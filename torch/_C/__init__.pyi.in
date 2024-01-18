@@ -1923,7 +1923,7 @@ class _XpuStreamBase(Stream):
 # Defined in torch/csrc/xpu/Event.cpp
 class _XpuEventBase:
     device: _device
-    sycl_event: Any
+    sycl_event: _int
 
     def __new__(cls, enable_timing: _bool = False) -> _XpuEventBase: ...
     def record(self, stream: _XpuEventBase) -> None: ...
