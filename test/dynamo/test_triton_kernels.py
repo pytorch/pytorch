@@ -963,6 +963,18 @@ class MutationTests(torch._dynamo.test_case.TestCase):
                 # patch the imported tl functions
                 ["in_ptr0", "in_ptr1", "out_ptr"],
             ],
+            [
+                cond_op_kernel,
+                {
+                    "in_ptr0": t,
+                    "in_ptr1": t,
+                    "out_ptr": t,
+                    "n_elements": 4,
+                    "BLOCK_SIZE": 4,
+                },
+                # Dynamic control flow, bail out
+                ["in_ptr0", "in_ptr1", "out_ptr"],
+            ],
         ]
         for kernel, inputs, outputs in tests:
             self.assertListEqual(

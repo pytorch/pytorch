@@ -90,6 +90,9 @@ class Scalar:
             return o
         return self
 
+    def __bool__(self):
+        raise IdentifyMutationException("Casting to bool is not allowed")
+
 
 # This operation is only needed when triton is available
 if has_triton():
@@ -101,7 +104,7 @@ if has_triton():
         return self
 
     for name, _ in inspect.getmembers(triton.language.core.tensor, inspect.isfunction):
-        if name in ["__init__", "__radd__"]:
+        if name in ["__init__", "__radd__", "__bool__"]:
             continue
 
         setattr(Scalar, name, replacement_fn)
