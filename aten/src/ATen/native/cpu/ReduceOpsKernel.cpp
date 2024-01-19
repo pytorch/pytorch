@@ -291,7 +291,7 @@ static void and_kernel_impl(TensorIterator& iter) {
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a && b) ? 1 : 0; },
         [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
-          return a & b;
+          return (a != 0) & (b != 0);
         },
         /*ident=*/true);
   } else {
@@ -327,7 +327,7 @@ static void or_kernel_impl(TensorIterator& iter) {
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a || b) ? 1 : 0; },
         [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
-          return a | b;
+          return (a != 0) | (b != 0);
         },
         /*ident=*/false);
   } else {
