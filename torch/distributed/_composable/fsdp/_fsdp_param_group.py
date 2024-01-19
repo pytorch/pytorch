@@ -6,6 +6,7 @@ import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 
 from ._fsdp_common import FSDPMeshInfo, ParamModuleInfo
+from ._fsdp_param import FSDPParam
 
 
 class FSDPParamGroup:
@@ -20,7 +21,10 @@ class FSDPParamGroup:
     ):
         self.module = module  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, module)
-
+        self.fsdp_params = [
+            FSDPParam(param, module_info, mesh_info, device)
+            for param, module_info in zip(params, param_module_infos)
+        ]
         self.mesh_info = mesh_info
         self.device = device
 
