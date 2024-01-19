@@ -128,6 +128,12 @@ class NestedTensor(torch.Tensor):
     def lengths(self):
         return self._lengths
 
+    def set_max_seqlen(self, max_seqlen):
+        self._metadata_cache["max_seqlen"] = max_seqlen
+
+    def set_min_seqlen(self, min_seqlen):
+        self._metadata_cache["min_seqlen"] = min_seqlen
+
     @property
     def _max_seqlen(self):
         if "max_seqlen" not in self._metadata_cache:
