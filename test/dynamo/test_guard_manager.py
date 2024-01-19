@@ -27,31 +27,31 @@ def equals_match(x, expected):
     return x == expected
 
 
-def equals_match_failure_fn(x, expected):
-    return f"expected {expected} found {x}"
+def equals_match_failure_fn(expected):
+    return f"x == {expected}"
 
 
 def ge_match(x, expected):
     return x >= expected
 
 
-def ge_match_failure_fn(x, expected):
-    return f"expected >= {expected} found {x}"
+def ge_match_failure_fn(expected):
+    return f"expected >= {expected}"
 
 
 def less_match(x, expected):
     return x < expected
 
 
-def less_match_failure_fn(x, expected):
-    return f"expected < {expected} found {x}"
+def less_match_failure_fn(expected):
+    return f"expected < {expected}"
 
 
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
     def test_python_lambda_leaf_guard(self):
         const_guard = guards.PythonLambdaGuard(
             functools.partial(equals_match, expected=5),
-            functools.partial(equals_match_failure_fn, expected=5),
+            equals_match_failure_fn(5),
         )
         self.assertTrue(const_guard(5))
         self.assertFalse(const_guard(4))
@@ -61,15 +61,15 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         guard_manager = RootGuardManager()
         guard_manager.add_lambda_guard(
             lambda x: isinstance(x, int),
-            lambda x: f"Expected int but got {type(x)}",
+            "Expected int",
         )
         guard_manager.add_lambda_guard(
             functools.partial(ge_match, expected=5),
-            functools.partial(ge_match_failure_fn, expected=5),
+            ge_match_failure_fn(expected=5),
         )
         guard_manager.add_lambda_guard(
             functools.partial(less_match, expected=10),
-            functools.partial(less_match_failure_fn, expected=10),
+            less_match_failure_fn(expected=10),
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 3)
         self.assertEqual(len(guard_manager.get_accessors()), 0)
@@ -85,17 +85,14 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         foo = Foo(1, 2)
         guard_manager = RootGuardManager()
-        guard_manager.add_lambda_guard(
-            lambda x: isinstance(x, Foo),
-            lambda x: f"Expected Foo but got {type(x)}",
-        )
+        guard_manager.add_lambda_guard(lambda x: isinstance(x, Foo), "type(x) is Foo")
         guard_manager.x.add_lambda_guard(
             functools.partial(equals_match, expected=foo.x),
-            functools.partial(equals_match_failure_fn, expected=foo.x),
+            equals_match_failure_fn(foo.x),
         )
         guard_manager.y.add_lambda_guard(
             functools.partial(equals_match, expected=foo.y),
-            functools.partial(equals_match_failure_fn, expected=foo.y),
+            equals_match_failure_fn(foo.y),
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 1)
         # 2 child managers, one for x and one for y
@@ -130,17 +127,14 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         foo = Foo(1, 2)
         guard_manager = RootGuardManager()
-        guard_manager.add_lambda_guard(
-            lambda x: isinstance(x, Foo),
-            lambda x: f"Expected Foo but got {type(x)}",
-        )
+        guard_manager.add_lambda_guard(lambda x: isinstance(x, Foo), "type(x) is Foo")
         guard_manager["x"].add_lambda_guard(
             functools.partial(equals_match, expected=foo["x"]),
-            functools.partial(equals_match_failure_fn, expected=foo["x"]),
+            equals_match_failure_fn(foo["x"]),
         )
         guard_manager["y"].add_lambda_guard(
             functools.partial(equals_match, expected=foo["y"]),
-            functools.partial(equals_match_failure_fn, expected=foo["y"]),
+            equals_match_failure_fn(foo["y"]),
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 1)
         # 2 child managers, one for x and one for y
@@ -165,11 +159,11 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         guard_manager = RootGuardManager()
         guard_manager.add_lambda_guard(
             lambda x: isinstance(x, tuple),
-            lambda x: f"Expected tuple but got {type(x)}",
+            "Expected tuple",
         )
         guard_manager[0].add_lambda_guard(
             lambda x: x == 1,
-            lambda x: f"Expected int but got {type(x)}",
+            "Expected int",
         )
 
         self.assertTrue(guard_manager.check(foo))
@@ -180,11 +174,11 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         guard_manager = RootGuardManager()
         guard_manager.add_lambda_guard(
             lambda x: isinstance(x, list),
-            lambda x: f"Expected tuple but got {type(x)}",
+            "Expected tuple",
         )
         guard_manager[slice(2)].add_lambda_guard(
             lambda x: x[0] == 1,
-            lambda x: f"Expected int but got {type(x)}",
+            "Expected int",
         )
 
         self.assertTrue(guard_manager.check(foo))
@@ -204,15 +198,15 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         guard_manager = RootGuardManager()
         guard_manager.add_lambda_guard(
             lambda x: isinstance(x, dict),
-            lambda x: f"Expected dict but got {type(x)}",
+            "Expected dict",
         )
         guard_manager[MyEnum.FOO].add_lambda_guard(
             lambda x: x == 1,
-            lambda x: f"Expected int but got {type(x)}",
+            "Expected int",
         )
         guard_manager[MyEnum.BAR].add_lambda_guard(
             lambda x: x == 2,
-            lambda x: f"Expected int but got {type(x)}",
+            "Expected int",
         )
         self.assertTrue(guard_manager.check(foo))
         self.assertFalse(guard_manager.check("foo"))
@@ -225,15 +219,15 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         guard_manager = RootGuardManager()
         guard_manager.add_lambda_guard(
             lambda x: isinstance(x, dict),
-            lambda x: f"Expected dict but got {type(x)}",
+            "type(x) is dict",
         )
         guard_manager.dict_get_item_manager("x").add_lambda_guard(
             functools.partial(equals_match, expected=foo["x"]),
-            functools.partial(equals_match_failure_fn, expected=foo["x"]),
+            equals_match_failure_fn(foo["x"]),
         )
         guard_manager.dict_get_item_manager("y").add_lambda_guard(
             functools.partial(equals_match, expected=foo["y"]),
-            functools.partial(equals_match_failure_fn, expected=foo["y"]),
+            equals_match_failure_fn(foo["y"]),
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 1)
         # 2 child managers, one for x and one for y
@@ -261,15 +255,15 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         guard_manager = RootGuardManager()
         guard_manager.add_lambda_guard(
             lambda x: isinstance(x, OrderedDict),
-            lambda x: f"Expected OrderedDict but got {type(x)}",
+            "Expected OrderedDict",
         )
         guard_manager.dict_get_item_manager("x").add_lambda_guard(
             lambda x: x == 1,
-            lambda x: f"Expected int but got {type(x)}",
+            "Expected int",
         )
         guard_manager.dict_get_item_manager("y").add_lambda_guard(
             lambda x: x == 2,
-            lambda x: f"Expected int but got {type(x)}",
+            "Expected int",
         )
         # self.assertEqual(len(guard_manager.get_leaf_guards()), 1)
         self.assertTrue(guard_manager.check(foo))
@@ -332,7 +326,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         install_no_tensor_aliasing_guard(x_guard_mgr, z_guard_mgr)
         y_guard_mgr.add_lambda_guard(
             lambda x: x == 4,
-            lambda x: f"Expected int but got {type(x)}",
+            "Expected int",
         )
 
         # first use check_verbose as it does not shuffle the guards on failures.
@@ -377,34 +371,34 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         guard_manager.dict_get_item_manager("foo").add_lambda_guard(
             lambda x: isinstance(x, int),
-            lambda x: f"Expected int but got {type(x)}",
+            "Expected int",
         )
         # Just add same guard to test if guard reshuffling happens on failure
         for _ in range(5):
             guard_manager.dict_get_item_manager("foo").add_lambda_guard(
                 functools.partial(equals_match, expected=5),
-                functools.partial(equals_match_failure_fn, expected=5),
+                equals_match_failure_fn(5),
             )
 
         guard_manager.dict_get_item_manager("bar").add_lambda_guard(
             lambda x: isinstance(x, Pair),
-            lambda x: f"Expected Pair but got {type(x)}",
+            "Expected Pair",
         )
         guard_manager.dict_get_item_manager("bar").x.add_lambda_guard(
             lambda x: isinstance(x, int),
-            lambda x: f"Expected int but got {type(x)}",
+            "Expected int",
         )
         guard_manager.dict_get_item_manager("bar").x.add_lambda_guard(
             functools.partial(equals_match, expected=1),
-            functools.partial(equals_match_failure_fn, expected=1),
+            equals_match_failure_fn(1),
         )
         guard_manager.dict_get_item_manager("bar").y.add_lambda_guard(
             lambda x: isinstance(x, int),
-            lambda x: f"Expected int but got {type(x)}",
+            "Expected int",
         )
         guard_manager.dict_get_item_manager("bar").y.add_lambda_guard(
             functools.partial(equals_match, expected=2),
-            functools.partial(equals_match_failure_fn, expected=2),
+            equals_match_failure_fn(2),
         )
 
         # Check structure
@@ -460,7 +454,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         }
         first_debug_info = guard_manager.check_verbose(f_locals_perturbed)
         self.assertFalse(first_debug_info.result)
-        self.assertTrue("Expected Pair but got" in first_debug_info.failure_reason)
+        self.assertTrue("Expected Pair" in first_debug_info.failed_guard)
 
         guard_manager.check(f_locals_perturbed)
 
@@ -480,7 +474,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
             lambda x: isinstance(x, dict)
             and isinstance(x["x"], torch.Tensor)
             and isinstance(x["y"], int),
-            lambda x: "global guard fail",
+            "global guard fail",
         )
 
         global global_pair
@@ -511,7 +505,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         )
         mro_manager.add_lambda_guard(
             lambda x: len(x) == 3,
-            lambda x: f"Expected length 2 but got {len(x)}",
+            "Expected length 2",
         )
 
         # type(foo).__mro__[0].a = 4
@@ -525,7 +519,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         )
         attr_manager.add_lambda_guard(
             lambda x: x == 4,
-            lambda x: f"Expected value 4 but got {x}",
+            "Expected value 4",
         )
 
         self.assertTrue(guard_manager.check(f_locals))
@@ -536,21 +530,18 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
             return a + b + c
 
         guard_manager = RootGuardManager()
-        guard_manager.add_lambda_guard(
-            lambda x: callable(x),
-            lambda x: f"Expected callable but got {type(x)}",
-        )
+        guard_manager.add_lambda_guard(lambda x: callable(x), "Expected callable")
 
         # Guard on b = 1
         guard_manager.__defaults__[0].add_lambda_guard(
             lambda x: x == 1,
-            lambda x: f"Expected int but got {type(x)}",
+            "Expected int",
         )
 
         # Guard on c = 2
         guard_manager.__kwdefaults__.dict_get_item_manager("c").add_lambda_guard(
             lambda x: x == 2,
-            lambda x: f"Expected int but got {type(x)}",
+            "Expected int",
         )
 
         self.assertTrue(guard_manager.check(foo))
@@ -568,7 +559,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         guard_manager = RootGuardManager()
         guard_manager.add_lambda_guard(
             lambda x: isinstance(x, type(iter(tuple()))),
-            lambda x: f"Expected iterator but got {type(x)}",
+            "Expected iterator",
         )
 
         def tuple_iterator_getitem(it, index):
@@ -582,14 +573,14 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         foo_mgr = guard_manager.lambda_manager(accessor)
         foo_mgr.add_lambda_guard(
             lambda x: x == 3,
-            lambda x: f"Expected value 3 but got {x}",
+            "Expected value 3",
         )
 
         # Check that we can use the same accessor
         foo_mgr = guard_manager.lambda_manager(accessor)
         foo_mgr.add_lambda_guard(
             lambda x: x - 1 == 2,
-            lambda x: f"Expected value 3 but got {x}",
+            "Expected value 3",
         )
         self.assertEqual(len(guard_manager.get_accessors()), 1)
 
@@ -597,7 +588,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         foo_mgr = guard_manager.lambda_manager(accessor)
         foo_mgr.add_lambda_guard(
             lambda x: x == 1,
-            lambda x: f"Expected value 3 but got {x}",
+            "Expected value 3",
         )
 
         self.assertEqual(len(guard_manager.get_accessors()), 2)

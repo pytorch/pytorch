@@ -40,26 +40,31 @@ from torch.testing._internal.common_utils import (
 
 
 def get_filtered_export_db_tests():
-    unsupported_test_names = {
-        "dynamic_shape_constructor",  # 'NoneType' object has no attribute 'from_tensor'
-        "dictionary",  # Graph output must be a tuple()
-        "fn_with_kwargs",  # export doesn't support kwargs yet
-        "scalar_output",  # Tracing through 'f' must produce a single graph
-        "user_input_mutation",  # TODO(zhxchen17) Support serializing user inputs mutation.
-    }
-
     return [
         (name, case)
         for name, case in all_examples().items()
-        if (
-            case.support_level == SupportLevel.SUPPORTED and
-            name not in unsupported_test_names
-        )
+        if case.support_level == SupportLevel.SUPPORTED
     ]
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
+    def test_predispatch_export_with_autograd_op(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                with torch.enable_grad():
+                    return x + x
+
+        with torch.no_grad():
+            from torch.export._trace import _export
+            ep = _export(Foo(), (torch.ones(10),), pre_dispatch=True)
+
+        with self.assertRaisesRegex(SerializeError, "Failed serializing node _set_grad_enabled"):
+            torch.export.save(ep, io.BytesIO())
+
     def test_serialize_multiple_returns_from_node(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -573,6 +578,21 @@ class TestOpVersioning(TestCase):
 
 unittest.expectedFailure(
     TestDeserialize.test_exportdb_supported_case_tensor_setattr
+)
+
+# We didn't set up kwargs input yet
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_fn_with_kwargs
+)
+
+# Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph.
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_scalar_output
+)
+
+# TODO(zhxchen17) Support serializing user inputs mutation.
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_user_input_mutation
 )
 
 
