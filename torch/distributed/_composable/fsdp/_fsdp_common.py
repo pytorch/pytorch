@@ -16,7 +16,6 @@ class DataParallelMeshInfo:
             raise AssertionError(
                 "At least one of shard_mesh_dim and replicate_mesh_dim must not be None"
             )
-        self.mesh_size: int = self.mesh.size()
 
 
 @dataclass
