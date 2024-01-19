@@ -68,6 +68,8 @@ KERNEL_COUNTS = {
     Adadelta: KernelCounts(multitensor=1, singletensor=4),
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=12),
+    SGD: KernelCounts(multitensor=2, singletensor=8),
+    Adamax: KernelCounts(
         multitensor=2, singletensor=None
     ),  # Single tensor eager needs to be refactored to enable tracing
 }
