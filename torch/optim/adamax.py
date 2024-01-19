@@ -74,11 +74,8 @@ class Adamax(Optimizer):
 
             # State initialization
             if len(state) == 0:
-                state['step'] = (
-                        torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
-                        if group['capturable']
-                        else torch.tensor(0.0, dtype=_get_scalar_dtype())
-                )
+                state['step'] = (torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
+                                 if group['capturable'] else torch.tensor(0.0, dtype=_get_scalar_dtype()))
                 state["exp_avg"] = torch.zeros_like(
                     p, memory_format=torch.preserve_format
                 )
