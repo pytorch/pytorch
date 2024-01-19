@@ -585,7 +585,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(linalg_lstsq, linalg_lstsq_batch_rule);  // custom errors and sometimes empty return
   VMAP_SUPPORT(linalg_lu_factor_ex, linalg_lu_factor_ex_batch_rule);
   VMAP_SUPPORT(linalg_matrix_exp, matrix_exp_batch_rule);
-  VMAP_SUPPORT(matrix_exp, matrix_exp_batch_rule);
   VMAP_SUPPORT(_linalg_solve_ex, solve_ex_batch_rule);
   VMAP_SUPPORT(linalg_cross, cross_batch_rule);
   VMAP_SUPPORT2(linalg_pinv, atol_rtol_tensor, pinv_batch_rule);

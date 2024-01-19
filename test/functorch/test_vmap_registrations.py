@@ -119,7 +119,7 @@ xfail_not_implemented = {
     "aten::lu_solve",
     "aten::margin_ranking_loss",
     "aten::masked_select_backward",
-    "aten::matrix_exp",
+    # "aten::matrix_exp",
     "aten::matrix_exp_backward",
     "aten::max.names_dim",
     "aten::max.names_dim_max",
@@ -292,6 +292,7 @@ class TestFunctorchDispatcher(TestCase):
         "FuncTorchBatchedDecomposition", xfail_functorch_batched_decomposition
     )
     def test_register_functorch_batched_decomposition(self, registration):
+        print(get_registrations_for_dispatch_key)
         assert registration in CompositeImplicitAutogradRegistrations, (
             f"The registrations in BatchedDecompositions.cpp must be for CompositeImplicitAutograd "
             f"operations. If your operation {registration} is not CompositeImplicitAutograd, "
