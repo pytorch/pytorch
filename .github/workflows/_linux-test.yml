@@ -207,6 +207,7 @@ jobs:
             -e GITHUB_RUN_NUMBER \
             -e GITHUB_RUN_ATTEMPT \
             -e JOB_ID \
+            -e JOB_NAME \
             -e BASE_SHA \
             -e BRANCH \
             -e SHA1 \

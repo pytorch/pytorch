@@ -5,8 +5,7 @@
 #include <cstring>
 #include <optional>
 
-namespace c10 {
-namespace utils {
+namespace c10::utils {
 // Reads an environment variable and returns
 // - optional<true>,              if set equal to "1"
 // - optional<false>,             if set equal to "0"
@@ -39,5 +38,4 @@ inline std::optional<bool> check_env(const char* name) {
   }
   return std::nullopt;
 }
-} // namespace utils
-} // namespace c10
+} // namespace c10::utils

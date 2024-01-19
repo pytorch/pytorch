@@ -3,7 +3,7 @@ import copy
 import dataclasses
 import inspect
 import io
-import pathlib
+import os
 import sys
 import typing
 import warnings
@@ -59,6 +59,7 @@ __all__ = [
     "unflatten",
     "FlatArgsAdapter",
     "UnflattenedModule",
+    "WrapperModule",
 ]
 
 
@@ -66,6 +67,7 @@ from .dynamic_shapes import Constraint, Dim, dims, dynamic_dim
 from .exported_program import ExportedProgram, ModuleCallEntry, ModuleCallSignature
 from .graph_signature import ExportBackwardSignature, ExportGraphSignature
 from .unflatten import FlatArgsAdapter, unflatten, UnflattenedModule
+from .wrapper import WrapperModule
 
 
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
@@ -200,7 +202,7 @@ def export(
 
 def save(
     ep: ExportedProgram,
-    f: Union[str, pathlib.Path, io.BytesIO],
+    f: Union[str, os.PathLike, io.BytesIO],
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     opset_version: Optional[Dict[str, int]] = None,
@@ -217,7 +219,7 @@ def save(
     Args:
         ep (ExportedProgram): The exported program to save.
 
-        f (Union[str, pathlib.Path, io.BytesIO): A file-like object (has to
+        f (Union[str, os.PathLike, io.BytesIO): A file-like object (has to
          implement write and flush) or a string containing a file name.
 
         extra_files (Optional[Dict[str, Any]]): Map from filename to contents
@@ -256,7 +258,7 @@ def save(
 
 
 def load(
-    f: Union[str, pathlib.Path, io.BytesIO],
+    f: Union[str, os.PathLike, io.BytesIO],
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     expected_opset_version: Optional[Dict[str, int]] = None,
@@ -273,7 +275,7 @@ def load(
     Args:
         ep (ExportedProgram): The exported program to save.
 
-        f (Union[str, pathlib.Path, io.BytesIO): A file-like object (has to
+        f (Union[str, os.PathLike, io.BytesIO): A file-like object (has to
          implement write and flush) or a string containing a file name.
 
         extra_files (Optional[Dict[str, Any]]): The extra filenames given in

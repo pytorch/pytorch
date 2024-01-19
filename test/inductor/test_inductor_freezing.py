@@ -23,8 +23,8 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
-    skipIfRocm,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
 
@@ -43,7 +43,6 @@ importlib.import_module("filelock")
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
-HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
 prims = torch.ops.prims
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
@@ -471,7 +470,6 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod_eager = mod(x)
                 self.assertEqual(foo(mod, x), mod_eager)
 
-    @skipIfRocm
     def test_cpp_wrapper(self):
         mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
 
@@ -635,6 +633,10 @@ class OptimizeForInferenceTemplate(TestCase):
         # may be an extra copy
         self.assertTrue(num_diff_stride == 1, f"num_diff_stride is {num_diff_stride}")
 
+
+if TEST_WITH_ROCM:
+    torch._inductor.config.force_layout_optimization = 1
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
 
 if HAS_CPU and not torch.backends.mps.is_available():
 
