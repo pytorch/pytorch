@@ -240,7 +240,6 @@ class StreamContext:
     cur_stream: Optional["torch.xpu.Stream"]
 
     def __init__(self, stream: Optional["torch.xpu.Stream"]):
-        assert not torch.jit.is_scripting()
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if self.idx is None:
