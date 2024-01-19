@@ -31,7 +31,7 @@ def fully_shard(
         mesh_info = FSDPMeshInfo(mesh, shard_mesh_dim=0)
     elif mesh.ndim == 2:
         mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
-    if device.type != mesh.device_type:
+    if device.type != "meta" and device.type != mesh.device_type:
         raise ValueError(
             f"device and mesh must be of the same type but got {device.type} "
             f"for device and {mesh.device_type} for mesh"
