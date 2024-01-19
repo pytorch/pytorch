@@ -795,7 +795,6 @@ dynamo_expected_failures = {
     "TestDLPack.test_higher_dims_ndim_19",  # torch_np/numpy_tests/core/test_dlpack
     "TestDLPack.test_higher_dims_ndim_26",  # torch_np/numpy_tests/core/test_dlpack
     "TestDLPack.test_higher_dims_ndim_8",  # torch_np/numpy_tests/core/test_dlpack
-    "WeakTest.test_make_weak_keyed_dict_from_weak_keyed_dict",  # test_weak
     "TestViewOpsLAZY.test_advanced_indexing_assignment_lazy",  # test_view_ops
     "TestOldViewOpsCPU.test_crow_col_indices_cpu",  # test_view_ops
     "TestViewOpsLAZY.test_advanced_indexing_nonview_lazy",  # test_view_ops
