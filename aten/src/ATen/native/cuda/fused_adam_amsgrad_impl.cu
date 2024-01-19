@@ -30,11 +30,11 @@ void _fused_adam_amsgrad_cuda_impl_(
       exp_avg_sqs.vec(),
       max_exp_avg_sqs.vec()};
 
-  float* grad_scale_ptr =
+  const float* grad_scale_ptr =
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
-  float* found_inf_ptr =
+  const float* found_inf_ptr =
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
-  float* lr_ptr = nullptr;
+  const float* lr_ptr = nullptr;
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
@@ -81,11 +81,11 @@ void _fused_adam_amsgrad_cuda_impl_(
       exp_avg_sqs.vec(),
       max_exp_avg_sqs.vec()};
 
-  float* grad_scale_ptr =
+  const float* grad_scale_ptr =
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
-  float* found_inf_ptr =
+  const float* found_inf_ptr =
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
-  float* lr_ptr = lr.data_ptr<float>();
+  const float* lr_ptr = lr.data_ptr<float>();
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
