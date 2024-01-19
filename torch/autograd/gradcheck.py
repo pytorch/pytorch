@@ -873,7 +873,7 @@ def _get_analytical_jacobian(inputs, outputs, input_idx, output_idx):
 def _compute_analytical_jacobian_rows(
     vjp_fn, sample_output
 ) -> List[List[Optional[torch.Tensor]]]:
-    # Computes Jacobian row-by-row by projecting `vjp_fn` = v^T J on standard basis 
+    # Computes Jacobian row-by-row by projecting `vjp_fn` = v^T J on standard basis
     # vectors: vjp_fn(e) = e^T J is a corresponding row of the Jacobian.
     # NB: this function does not assume vjp_fn(v) to return tensors with the same
     # number of elements for different v. This is checked when we later combine the
@@ -886,7 +886,7 @@ def _compute_analytical_jacobian_rows(
     jacobians_rows: List[List[Optional[torch.Tensor]]] = []
     for j in range(flat_grad_out.numel()):
         flat_grad_out.zero_()
-        flat_grad_out[j] = 1.0 # projection for jth row of Jacobian
+        flat_grad_out[j] = 1.0  # projection for jth row of Jacobian
         grad_inputs = vjp_fn(grad_out_base)
         for i, d_x in enumerate(grad_inputs):
             if j == 0:
