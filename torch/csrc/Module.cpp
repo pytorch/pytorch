@@ -331,13 +331,10 @@ PyObject* THPModule_setDefaultDtype(PyObject* _unused, PyObject* dtype) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule__tensor_use_count(PyObject* _unused, PyObject* cdata) {
+PyObject* THPModule__tensor_use_count(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  auto tensor_impl_ptr = THPUtils_unpackLong(cdata);
-  // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  auto tensor_impl = (c10::TensorImpl*)tensor_impl_ptr;
-  return THPUtils_packUInt64(
-      c10::raw::weak_intrusive_ptr::use_count(tensor_impl));
+  const auto& t = THPVariable_Unpack(arg);
+  return THPUtils_packUInt64(t.use_count());
   END_HANDLE_TH_ERRORS
 }
 
