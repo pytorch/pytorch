@@ -431,6 +431,30 @@ def optim_error_inputs_func_adam(device, dtype):
 
 
 def optim_inputs_func_adamax(device=None):
+    cuda_supported_configs = [
+        OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.9, "maximize": True, "capturable": True},
+            desc="capturable, maximize, weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0, "maximize": True, "capturable": True},
+            desc="capturable, maximize",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.9, "maximize": False, "capturable": True},
+            desc="capturable, weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0, "maximize": False, "capturable": True},
+            desc="capturable",
+        ),
+    ]
+
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 0.001}, desc="non-default lr"),
@@ -442,7 +466,7 @@ def optim_inputs_func_adamax(device=None):
             kwargs={"weight_decay": 0.9, "maximize": True},
             desc="maximize",
         ),
-    ]
+    ] + cuda_supported_configs
 
 
 def optim_error_inputs_func_adamax(device, dtype):
