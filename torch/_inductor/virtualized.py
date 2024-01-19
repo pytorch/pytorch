@@ -206,6 +206,11 @@ class MockHandler:
             setattr(cls, name, make_handler(format_string))
 
 
+# Use mypy to check protocol implemented correctly
+def _typecheck_MockHandler(h: MockHandler) -> OpsHandler[str]:
+    return h
+
+
 # NB: This is not done as a parent class, because our ops handlers
 # implementations make heavy use of __getattr__ magic, and pre-existing
 # stubs for methods would interfere with this mechanism.
@@ -704,12 +709,22 @@ class KernelFormatterHandler:
         return self.output.getvalue()
 
 
-class WrapperHandler:
-    def __init__(self, inner):
+# Use mypy to check protocol implemented correctly
+def _typecheck_KernelFormatterHandler(h: KernelFormatterHandler) -> OpsHandler[str]:
+    return h
+
+
+class WrapperHandler(Generic[T]):
+    def __init__(self, inner: OpsHandler[T]):
         self._inner = inner
 
     def __getattr__(self, item):
         return getattr(self._inner, item)
+
+
+# Use mypy to check protocol implemented correctly
+def _typecheck_WrapperHandler(h: WrapperHandler[T]) -> OpsHandler[T]:
+    return h
 
 
 MockHandler._init_cls()
@@ -837,7 +852,7 @@ class _V:
     get_current_node: Callable[[], Any] = _current_node._get_handler
 
     @property
-    def ops(self) -> OpsHandler:
+    def ops(self) -> OpsHandler[Any]:
         """The operator handler specific to the current codegen task"""
         return _ops._get_handler()
 
