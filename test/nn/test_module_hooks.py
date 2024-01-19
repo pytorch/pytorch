@@ -281,17 +281,23 @@ class TestModuleHooks(TestCase):
         self.assertEqual(fired_hooks, expected + expected)
 
         # Backward pre hook can affect subsequent gradient computation
-        a = torch.ones(2, requires_grad=True)
-        model = nn.Linear(2, 2)
+        for rg in [True, False]:
+            a = torch.ones(2, requires_grad=rg)
+            model = nn.Linear(2, 2)
 
-        def fn(_unused_module, grad_output):
-            return (grad_output[0] * 0,)
+            def fn(_unused_module, grad_output):
+                return (grad_output[0] * 0,)
 
-        model.register_full_backward_pre_hook(fn)
+            model.register_full_backward_pre_hook(fn)
 
-        out = model(a)
-        out.sum().backward()
-        self.assertEqual(a.grad, torch.zeros_like(a))
+            out = model(a)
+            out.sum().backward()
+            self.assertEqual(model.weight.grad, torch.zeros(2, 2))
+            if rg:
+                self.assertEqual(a.grad, torch.zeros_like(a))
+            else:
+                self.assertIsNone(a.grad)
+
 
     @parametrize_test("named_tuple", (True, False))
     def test_mixed_hooks(self, named_tuple):

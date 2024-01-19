@@ -981,7 +981,7 @@ class TestFPGMPruner(TestCase):
         pruner.prepare(model, config)
         pruner.enable_mask_update = True
         pruner.step()
-        assert pruner.groups[0]["module"].parametrizations.weight[0].mask[-1].item() is not False,\
+        assert pruner.groups[0]["module"].parametrizations.weight[0].mask[-1].item() is not False, \
             "do not prune the least-norm filter"
 
         # fusion step
