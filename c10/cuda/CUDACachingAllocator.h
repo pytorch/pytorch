@@ -1,17 +1,22 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
-#include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/ApproximateClock.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
 #include <array>
-#include <mutex>
-#include <set>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <string>
 #include <unordered_set>
+#include <utility>
 
 namespace c10 {
 
@@ -101,7 +106,7 @@ struct DeviceStats {
   int64_t max_split_size = 0;
 };
 
-typedef std::shared_ptr<GatheredContext> (*CreateContextFn)(void);
+typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
 
 // Struct containing info of an allocation block (i.e. a fractional part of a
 // cudaMalloc)..
@@ -123,7 +128,7 @@ struct SegmentInfo {
   int64_t requested_size = 0; // unrounded, actually requested size
   int64_t allocated_size = 0;
   int64_t active_size = 0;
-  cudaStream_t stream = 0;
+  cudaStream_t stream = nullptr;
   bool is_large = false;
   bool is_expandable = false;
   MempoolId_t owner_private_pool_id = {0, 0};
@@ -170,16 +175,16 @@ struct TraceEntry {
         addr_(addr),
         context_(std::move(context)),
         stream_(stream),
-        size_(size) {
+        size_(static_cast<int64_t>(size)) {
     time_.approx_t_ = time;
   }
   Action action_;
   int device_;
   int64_t addr_; // for OOM, this is the amount of free bytes reported by cuda
   std::shared_ptr<GatheredContext> context_;
-  cudaStream_t stream_;
+  cudaStream_t stream_{};
   int64_t size_;
-  trace_time_ time_;
+  trace_time_ time_{};
 };
 
 struct SnapshotInfo {
@@ -372,7 +377,7 @@ inline std::shared_ptr<AllocatorState> getCheckpointState(
 inline CheckpointDelta setCheckpointPoolState(
     int device,
     std::shared_ptr<AllocatorState> pps) {
-  return get()->setCheckpointPoolState(device, pps);
+  return get()->setCheckpointPoolState(device, std::move(pps));
 }
 
 // CUDAGraph interactions
@@ -409,11 +414,11 @@ inline bool checkPoolLiveAllocations(
 }
 
 inline void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
-  return get()->attachOutOfMemoryObserver(observer);
+  return get()->attachOutOfMemoryObserver(std::move(observer));
 }
 
 inline void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
-  return get()->attachAllocatorTraceTracker(tracker);
+  return get()->attachAllocatorTraceTracker(std::move(tracker));
 }
 
 inline void releasePool(int device, MempoolId_t mempool_id) {
@@ -421,7 +426,7 @@ inline void releasePool(int device, MempoolId_t mempool_id) {
 }
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
 inline std::shared_ptr<void> getIpcDevPtr(std::string handle) {
-  return get()->getIpcDevPtr(handle);
+  return get()->getIpcDevPtr(std::move(handle));
 }
 
 inline std::string name() {

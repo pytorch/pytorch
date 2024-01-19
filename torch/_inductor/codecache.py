@@ -49,7 +49,11 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import cache_dir, developer_warning, is_linux
-from torch._prims_common import suggest_memory_format
+from torch._subclasses.fake_tensor import (
+    extract_tensor_metadata,
+    FakeTensor,
+    TensorMetadata,
+)
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 
 if TYPE_CHECKING:
@@ -60,6 +64,7 @@ from torch.hub import _Faketqdm, tqdm
 
 _HERE = os.path.abspath(__file__)
 _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
+_LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
 
 if config.is_fbcode():
     from triton.fb import build_paths
@@ -388,28 +393,6 @@ def write_atomic(path: str, content: Union[str, bytes]) -> None:
 
 
 @dataclasses.dataclass
-class TensorMetadata:
-    """
-    The Tensor metadata relevant when hashing FxGraph cache keys.
-    """
-
-    dtype: torch.dtype
-    shape: torch.Size
-    stride: Tuple[Any, ...]
-    device: torch.device
-    layout: torch.layout
-    memory_format: Optional[torch.memory_format]
-    storage_offset: int
-    requires_grad: bool
-    is_quantized: bool
-    is_conj: bool
-    is_neg: bool
-    is_coalesced: bool
-    dense_dim: int
-    sparse_dim: int
-
-
-@dataclasses.dataclass
 class TensorMetadataAndValues:
     """
     TensorMetadata plus the elements as a list of raw values.
@@ -418,32 +401,6 @@ class TensorMetadataAndValues:
 
     tensor_metadata: TensorMetadata
     values: List[Any]
-
-
-def extract_tensor_metadata(t: torch.Tensor) -> TensorMetadata:
-    """
-    Extract the TensorMetadata of a tensor.
-    """
-    memory_format: Optional[torch.memory_format] = suggest_memory_format(t)
-    if not t.is_contiguous(memory_format=memory_format):
-        memory_format = None
-
-    return TensorMetadata(
-        dtype=t.dtype,
-        shape=t.shape,
-        stride=t.stride() if t.layout == torch.strided else (),
-        device=t.device,
-        layout=t.layout,
-        memory_format=memory_format,
-        storage_offset=t.storage_offset(),
-        requires_grad=t.requires_grad,
-        is_quantized=t.is_quantized,
-        is_conj=t.is_conj(),
-        is_neg=t.is_neg(),
-        is_coalesced=t.is_coalesced() if t.is_sparse else False,
-        dense_dim=t.dense_dim() if t.is_sparse else False,
-        sparse_dim=t.sparse_dim() if t.is_sparse else False,
-    )
 
 
 def _ident(x: Any) -> Any:
@@ -494,7 +451,7 @@ class FxGraphCachePickler(pickle.Pickler):
     """
 
     dispatch_table = copyreg.dispatch_table.copy()
-    dispatch_table[torch._subclasses.fake_tensor.FakeTensor] = _reduce_fake_tensor
+    dispatch_table[FakeTensor] = _reduce_fake_tensor
     dispatch_table[torch.Tensor] = _reduce_tensor
     dispatch_table[torch.SymInt] = _reduce_symint
 
@@ -1468,14 +1425,17 @@ def cpp_compile_command(
         if aot_mode and not use_absolute_path:
             inp_name = input
             out_name = output
+            linker_script = _LINKER_SCRIPT
         else:
             # We need to copy any absolute-path torch includes
             inp_name = [os.path.basename(i) for i in input]
             out_name = os.path.basename(output)
+            linker_script = os.path.basename(_LINKER_SCRIPT)
         assert is_clang()
         # Use clang runtime instead of libgcc
         clang_flags += " --rtlib=compiler-rt"
         clang_flags += " -fuse-ld=lld"
+        clang_flags += f" -Wl,--script={linker_script}"
         linker_paths = "-B" + build_paths.glibc_lib()
         linker_paths += " -L" + build_paths.glibc_lib()
     else:
@@ -1753,12 +1713,11 @@ def compile_file(
             # When we build remotely, we need to make sure to carefully copy any files
             # that are required during the compilation process into our build directly.
             # This is where all of the ATen/c10/Torch includes come from.
-            torch_includes_path = os.path.join(
-                torch.utils.cpp_extension._TORCH_PATH, "include"
-            )
+            torch_includes_path = os.path.join(_TORCH_PATH, "include")
             with tempfile.TemporaryDirectory() as tmp_dir:
                 # Copy everything to tmp compilation folder
                 shutil.copy(header_path, os.path.join(tmp_dir, header_name))
+                shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
                 for p, f in zip(input_paths, input_files):
                     shutil.copy(p, os.path.join(tmp_dir, f))
                 dest_include_path = os.path.join(tmp_dir, "include")
@@ -1860,14 +1819,19 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         "shared": True,
     }
     entry_function = "kernel"
+    call_entry_function = "kernel(%s);Py_RETURN_NONE"
+    extra_parse_arg = ""
     suffix_template = textwrap.dedent(
         """
-        // Python bindings to call kernel():
+        // Python bindings to call ENTRY_FUNCTION():
         #define PY_SSIZE_T_CLEAN
         #include <Python.h>
+        #include <sstream>
+        #include <cstdlib>
 
-        // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow
-        extern "C" void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj);
+        // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow.
+        // We manually link it below to workaround issues with fbcode build.
+        static void* (*_torchinductor_pyobject_tensor_data_ptr)(PyObject* obj);
 
         template <typename T> static inline T parse_arg(PyObject* args, size_t n) {
             static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
@@ -1880,28 +1844,42 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             return result;
         }
 
-        static PyObject* kernel_py(PyObject* self, PyObject* args) {
+        %s
+
+        static PyObject* ENTRY_FUNCTION_py(PyObject* self, PyObject* args) {
             try {
                 if(!PyTuple_CheckExact(args))
                     [[unlikely]] throw std::runtime_error("tuple args required");
                 if(PyTuple_GET_SIZE(args) != %s)
                     [[unlikely]] throw std::runtime_error("requires %s args");
-                kernel(%s);
-                Py_RETURN_NONE;
+                CALL_ENTRY_FUNCTION;
             } catch(std::exception const& e) {
                 PyErr_SetString(PyExc_RuntimeError, e.what());
+                return nullptr;
+            } catch(...) {
+                PyErr_SetString(PyExc_RuntimeError, "unhandled error");
                 return nullptr;
             }
         }
 
         static PyMethodDef py_methods[] = {
-            {"kernel", kernel_py, METH_VARARGS, ""},
+            {"ENTRY_FUNCTION", ENTRY_FUNCTION_py, METH_VARARGS, ""},
             {NULL, NULL, 0, NULL}};
 
         static struct PyModuleDef py_module =
-            {PyModuleDef_HEAD_INIT, "kernel", NULL, -1, py_methods};
+            {PyModuleDef_HEAD_INIT, "ENTRY_FUNCTION", NULL, -1, py_methods};
 
-        PyMODINIT_FUNC PyInit_kernel(void) {
+        PyMODINIT_FUNC PyInit_ENTRY_FUNCTION(void) {
+            const char* str_addr = std::getenv("_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR");
+            if(!str_addr) {
+                PyErr_SetString(PyExc_RuntimeError, "_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR must be set");
+                return nullptr;
+            }
+            std::istringstream iss(str_addr);
+            uintptr_t addr = 0;
+            iss >> addr;
+            _torchinductor_pyobject_tensor_data_ptr =
+                reinterpret_cast<decltype(_torchinductor_pyobject_tensor_data_ptr)>(addr);
             return PyModule_Create(&py_module);
         }
         """
@@ -1909,6 +1887,9 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
     @classmethod
     def _load_library_inner(cls, path: str, key: str) -> ModuleType:
+        os.environ["_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR"] = str(
+            torch._C._dynamo.guards._torchinductor_pyobject_tensor_data_ptr  # type: ignore[attr-defined]
+        )
         return importlib.machinery.ExtensionFileLoader(
             f"{key}.{cls.entry_function}", path
         ).load_module()  # type: ignore[call-arg]
@@ -1921,17 +1902,24 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         Wrap a C++ function in fast Python bindings.
 
         Args:
-            argtypes: The types of args to kernel(), e.g. ["float*", "long"]
-            source_code: C++ source code containing a kernel() function
+            argtypes: The types of args to ENTRY_FUNCTION(), e.g. ["float*", "long"]
+            source_code: C++ source code containing a ENTRY_FUNCTION() function
 
         Returns:
-            A python version of kernel()
+            A python version of ENTRY_FUNCTION()
         """
         parseargs = ", ".join(
             f"parse_arg<{argtype.replace('const ', '')}>(args, {n})"
             for n, argtype in enumerate(argtypes)
         )
-        suffix = cls.suffix_template % (len(argtypes), len(argtypes), parseargs)
+        suffix = cls.suffix_template.replace(
+            "CALL_ENTRY_FUNCTION", cls.call_entry_function
+        ).replace("ENTRY_FUNCTION", cls.entry_function) % (
+            cls.extra_parse_arg,
+            len(argtypes),
+            len(argtypes),
+            parseargs,
+        )
         result = cls.load(source_code + suffix, cuda)
         assert isinstance(result, ModuleType)
         return getattr(result, cls.entry_function)
@@ -1945,55 +1933,13 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         "shared": True,
     }
     entry_function = "inductor_entry_cpp"
-    # suffix_template has a different entry function name and signature from the base class
-    suffix_template = textwrap.dedent(
+    call_entry_function = "return THPVariable_WrapList(inductor_entry_cpp(%s))"
+    extra_parse_arg = textwrap.dedent(
         """
-        // Python bindings to call inductor_entry_cpp():
-        #define PY_SSIZE_T_CLEAN
-        #include <Python.h>
         #include <torch/csrc/autograd/python_variable.h>
-
-        // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow
-        extern "C" void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj);
-
-        template <typename T> static inline T parse_arg(PyObject* args, size_t n) {
-            static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
-            return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
-        }
 
         template <> inline std::vector<at::Tensor> parse_arg<std::vector<at::Tensor>>(PyObject* args, size_t n) {
             return THPVariable_UnpackList(PyTuple_GET_ITEM(args, n));
-        }
-
-        template <> inline long parse_arg<long>(PyObject* args, size_t n) {
-            auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
-            if(result == -1 && PyErr_Occurred())
-                [[unlikely]] throw std::runtime_error("expected int arg");
-            return result;
-        }
-
-        static PyObject* inductor_entry_cpp_py(PyObject* self, PyObject* args) {
-            try {
-                if(!PyTuple_CheckExact(args))
-                    [[unlikely]] throw std::runtime_error("tuple args required");
-                if(PyTuple_GET_SIZE(args) != %s)
-                    [[unlikely]] throw std::runtime_error("requires %s arg");
-                return THPVariable_WrapList(inductor_entry_cpp(%s));
-            } catch(std::exception const& e) {
-                PyErr_SetString(PyExc_RuntimeError, e.what());
-                return nullptr;
-            }
-        }
-
-        static PyMethodDef py_methods[] = {
-            {"inductor_entry_cpp", inductor_entry_cpp_py, METH_VARARGS, ""},
-            {NULL, NULL, 0, NULL}};
-
-        static struct PyModuleDef py_module =
-            {PyModuleDef_HEAD_INIT, "inductor_entry_cpp", NULL, -1, py_methods};
-
-        PyMODINIT_FUNC PyInit_inductor_entry_cpp(void) {
-            return PyModule_Create(&py_module);
         }
         """
     )
@@ -2423,6 +2369,17 @@ def _async_compile_initializer(orig_ppid) -> None:
 
 _watchdog_thread: Optional[Thread] = None
 
+# Used to keep track of all process pools invoked so far.
+_pool_set: Set[ProcessPoolExecutor] = set()
+
+
+def shutdown_compile_workers() -> None:
+    """Shut down all outstanding compile-worker pools."""
+    global _pool_set
+    for pool in _pool_set:
+        pool.shutdown()
+    _pool_set = set()
+
 
 class AsyncCompile:
     def __init__(self) -> None:
@@ -2449,6 +2406,10 @@ class AsyncCompile:
             mp_context=ctx,
             initializer=partial(_async_compile_initializer, orig_ppid),
         )
+
+        global _pool_set
+        _pool_set.add(pool)
+
         # when this pool is created in a subprocess object, the normal exit handler
         # doesn't run, and we need to register our own handler.
         # exitpriority has to be high, because another one of the finalizers will
@@ -2513,6 +2474,18 @@ class AsyncCompile:
             return TritonFuture(kernel_name, source_code, future)
         else:
             return _load_kernel(kernel_name, source_code)
+
+    def multi_kernel(self, *args, **kwargs) -> ModuleType:
+        """
+        Async compile the python shim for multi-kernel.
+        """
+
+        def task():
+            from torch._inductor.codegen.multi_kernel import MultiKernelCall
+
+            return MultiKernelCall(*args, **kwargs)
+
+        return self.submit(task)
 
     def cpp(self, source_code: str) -> ModuleType:
         def task():
