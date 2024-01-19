@@ -1,6 +1,7 @@
 import traceback
-
 from dataclasses import dataclass, field
+
+from enum import auto, Enum
 from typing import Any, cast, List, Optional, Tuple
 
 import torch
@@ -70,6 +71,13 @@ class ParamModuleInfo:
     param_name: str
     shared_modules: List[nn.Module] = field(default_factory=list)
     shared_param_names: List[str] = field(default_factory=list)
+
+
+class TrainingState(Enum):
+    FORWARD = auto()
+    PRE_BACKWARD = auto()
+    POST_BACKWARD = auto()
+    IDLE = auto()
 
 
 def _raise_assert_with_print(*args: Any, **kwargs: Any):

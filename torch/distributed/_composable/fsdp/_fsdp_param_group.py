@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
@@ -27,6 +27,7 @@ class FSDPParamGroup:
         ]
         self.mesh_info = mesh_info
         self.device = device
+        self._module_fqn: Optional[str] = None  # prefixed from root module
 
 
 def _get_param_module_infos(

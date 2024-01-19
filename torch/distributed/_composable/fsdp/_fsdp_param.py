@@ -1,5 +1,5 @@
 from enum import auto, Enum
-from typing import cast, List, Tuple
+from typing import cast, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -69,6 +69,7 @@ class FSDPParam:
         self.mesh_info = mesh_info
         self.device = device
         self._init_sharded_param(param, device)
+        self._param_fqn: Optional[str] = None  # prefixed from root module
 
     @torch.no_grad()
     def _init_sharded_param(self, param: nn.Parameter, device: torch.device):
