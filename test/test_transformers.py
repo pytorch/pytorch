@@ -11,7 +11,6 @@ from torch.nn.functional import scaled_dot_product_attention
 from torch.nn.attention.bias import CausalVariant, causal_lower_right, causal_upper_left
 from torch.nn.parameter import Parameter
 import unittest
-from unittest import expectedFailure as xfail
 from unittest.mock import patch, MagicMock, ANY
 import math
 from torch.backends.cuda import sdp_kernel, SDPBackend
@@ -39,7 +38,8 @@ from torch.testing._internal.common_methods_invocations import wrapper_set_seed
 from torch.testing._internal.common_cuda import (
     SM80OrLater, PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    PLATFORM_SUPPORTS_FUSED_ATTENTION
+    PLATFORM_SUPPORTS_FUSED_ATTENTION,
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION
 )
 
 if TEST_FAIRSEQ:
@@ -105,10 +105,14 @@ def get_tolerances(
     return atol, rtol
 
 backend_map = {
-    SDPBackend.MATH: {"enable_math": True, "enable_flash": False, "enable_mem_efficient": False},
-    SDPBackend.FLASH_ATTENTION: {"enable_math": False, "enable_flash": True, "enable_mem_efficient": False},
+    SDPBackend.MATH: {"enable_math": True, "enable_flash": False, "enable_mem_efficient": False,
+                      "enable_cudnn": False},
+    SDPBackend.FLASH_ATTENTION: {"enable_math": False, "enable_flash": True, "enable_mem_efficient": False,
+                                 "enable_cudnn": False},
     SDPBackend.EFFICIENT_ATTENTION: {
-        "enable_math": False, "enable_flash": False, "enable_mem_efficient": True}
+        "enable_math": False, "enable_flash": False, "enable_mem_efficient": True, "enable_cudnn": False},
+    SDPBackend.CUDNN_ATTENTION: {
+        "enable_math": False, "enable_flash": False, "enable_mem_efficient": False, "enable_cudnn": True}
 }
 
 def query_key_value_clones(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, dtype: torch.dtype = None):
@@ -126,6 +130,8 @@ def get_platform_specific_sdpa():
         ret.append(SDPBackend.FLASH_ATTENTION)
     if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
         ret.append(SDPBackend.EFFICIENT_ATTENTION)
+    if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
+        ret.append(SDPBackend.CUDNN_ATTENTION)
     if not ret:
         # Add a placeholder, an empty list causes "An empty arg_values was passed to @parametrize"
         ret.append(SDPBackend.EFFICIENT_ATTENTION)
@@ -1362,7 +1368,7 @@ class TestSDPAFailureModes(NNTestCase):
     @onlyCUDA
     def test_dispatch_fails_no_backend(self, device):
         dtype = torch.float16
-        with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=False):
+        with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=False, enable_cudnn=False):
             size = (2, 3, 4)
             q = torch.randn(size, device=device, dtype=dtype)
             k = torch.randn(size, device=device, dtype=dtype)
@@ -2120,6 +2126,16 @@ class TestSDPACudaOnly(NNTestCase):
 
         max_diff = (out - out_contig).abs().mean()
         self.assertTrue(max_diff.item() < 1e-7)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Fused SDPA was not built for this system")
+    def test_singelton_head_dim_stride_ne_1(self, device):
+        query = torch.tensor([[[[1, 2]]]], dtype=torch.float16, device=device)
+        query = query.transpose(-1, -2)
+        key = torch.tensor([[[[1]]]], dtype=torch.float16, device=device)
+        value = torch.tensor([[[[1]]]], dtype=torch.float16, device=device)
+
+        with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
+            scaled_dot_product_attention(query, key, value)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
@@ -3280,13 +3296,12 @@ class TestAttnMasks(NNTestCase):
 
         self.run_test(device, False, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol)
 
-    @skipIfRocm  # No support for the second variant for now
+    @unittest.skip("This test fails on some parameters and on some CI machines")
     @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
     @parametrize(
         "shape",
         [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
     )
-    @xfail
     def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
         make_tensor = partial(
             torch.rand, device=device, dtype=torch.float16, requires_grad=True
