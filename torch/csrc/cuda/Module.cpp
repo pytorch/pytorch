@@ -1025,7 +1025,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
 
   m.def(
       "_cuda_changeCurrentAllocator",
-      [](std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
+      [](const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
              allocator) {
         torch::cuda::CUDAPluggableAllocator::changeCurrentAllocator(allocator);
       });
@@ -1231,8 +1231,8 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       "_cuda_setCheckpointPoolState",
       [](c10::DeviceIndex device,
          std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
-         std::vector<size_t> stale_storages_ptr,
-         std::vector<size_t> storages_to_add_deleters_to_ptr = {}) {
+         const std::vector<size_t>& stale_storages_ptr,
+         const std::vector<size_t>& storages_to_add_deleters_to_ptr = {}) {
         std::unordered_set<c10::StorageImpl*> ptr_set;
         // iterate on std::vector for determinism
         std::vector<c10::StorageImpl*> ptrs;
@@ -1270,7 +1270,8 @@ static void registerCudaPluggableAllocator(PyObject* module) {
 
         removeStorageDeleterFns(ptrs, freed_pointer_set);
         std::vector<c10::StorageImpl*> storages_to_add_deleters_to;
-        storages_to_add_deleters_to.reserve(storages_to_add_deleters_to_ptr.size());
+        storages_to_add_deleters_to.reserve(
+            storages_to_add_deleters_to_ptr.size());
         for (size_t ptr_int : storages_to_add_deleters_to_ptr) {
           storages_to_add_deleters_to.push_back((c10::StorageImpl*)ptr_int);
         }
