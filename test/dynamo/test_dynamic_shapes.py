@@ -17,6 +17,7 @@ try:
         test_misc,
         test_modules,
         test_repros,
+        test_sdpa,
         test_subgraphs,
     )
 except ImportError:
@@ -28,6 +29,7 @@ except ImportError:
     import test_misc
     import test_modules
     import test_repros
+    import test_sdpa
     import test_subgraphs
 
 
@@ -69,6 +71,7 @@ tests = [
     test_higher_order_ops.HigherOrderOpTests,
     test_higher_order_ops.FuncTorchHigherOrderOpTests,
     test_aot_autograd.AotAutogradFallbackTests,
+    test_sdpa.TestSDPA,
 ]
 for test in tests:
     make_dynamic_cls(test)
