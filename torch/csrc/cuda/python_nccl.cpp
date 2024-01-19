@@ -21,7 +21,7 @@ using namespace torch::cuda::nccl::detail;
 static const char* COMM_CAPSULE_NAME = "torch.cuda.nccl.Communicator";
 
 PyObject* THCPModule_nccl_version(PyObject* self, PyObject* args) {
-  return PyInt_FromLong(version());
+  return PyLong_FromUnsignedLongLong(version());
 }
 
 PyObject* THCPModule_nccl_version_suffix(PyObject* self, PyObject* args) {
