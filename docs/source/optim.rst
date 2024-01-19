@@ -39,7 +39,7 @@ For example, this is very useful when one wants to specify per-layer learning ra
                 ], lr=1e-3, momentum=0.9)
 
 This means that ``model.base``'s parameters will use a learning rate of ``1e-2``, whereas
-``model.classifier``'s parameters will stick to the default learning rate of ``1e-3``. 
+``model.classifier``'s parameters will stick to the default learning rate of ``1e-3``.
 Finally a momentum of ``0.9`` will be used for all parameters.
 
 .. note::
@@ -50,8 +50,8 @@ Finally a momentum of ``0.9`` will be used for all parameters.
     between parameter groups.
 
 Also consider the following example related to the distinct penalization of parameters.
-Remember that :func:`~torch.nn.Module.parameters` returns an iterable that 
-contains all learnable parameters, including biases and other 
+Remember that :func:`~torch.nn.Module.parameters` returns an iterable that
+contains all learnable parameters, including biases and other
 parameters that may prefer distinct penalization. To address this, one can specify
 individual penalization weights for each parameter group::
 
