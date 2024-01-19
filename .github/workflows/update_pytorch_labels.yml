@@ -3,6 +3,7 @@ name: Update PyTorch Labels in S3
 on:
   label:
   workflow_dispatch:
+  pull_request:
 
 concurrency:
   group: 1
