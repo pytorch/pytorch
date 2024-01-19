@@ -3907,7 +3907,6 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_pickle", dtypes=[torch.float16], device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", dtypes=[torch.float16],
                                 device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_to", dtypes=[torch.float16], device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_multiple_device_transfer", dtypes=[torch.float16],
                                 device_type='cuda'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
@@ -4252,7 +4251,9 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=True),
                module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # RNNBase overrides `_apply` and adds weakrefs to params
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap'])),
                decorators=rnn_gru_lstm_module_info_decorators
                ),
     ModuleInfo(torch.nn.GRU,
@@ -4260,7 +4261,9 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=False),
                module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # RNNBase overrides `_apply` and adds weakrefs to params
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap'])),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.LSTM,
                train_and_eval_differ=True,
@@ -4268,7 +4271,9 @@ module_db: List[ModuleInfo] = [
                module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
                    # LSTM with projections is not currently supported with MPS
-                   DecorateInfo(skipMPS),),
+                   DecorateInfo(skipMPS),
+                   # RNNBase overrides `_apply` and adds weakrefs to params
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap'])),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.ReflectionPad1d,
                module_inputs_func=module_inputs_torch_nn_ReflectionPad1d,

@@ -1614,6 +1614,18 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         finally:
             torch.__future__.set_overwrite_module_params_on_conversion(False)
 
+    def test_swap_module_params_fails_after_forward(self):
+        torch.nn.utils.set_swap_module_params_on_conversion(True)
+        try:
+            m = torch.nn.Linear(2, 3)
+            inp = torch.randn(2, 2)
+            # forward will init AccumulateGrad nodes, which bumps use_count of parameters
+            out = m(inp)
+            with self.assertRaisesRegex(RuntimeError, "Couldn't swap weight"):
+                m.half()
+        finally:
+            torch.nn.utils.set_swap_module_params_on_conversion(False)
+
     def test_type(self):
         l = nn.Linear(10, 20)
         net = nn.Module()

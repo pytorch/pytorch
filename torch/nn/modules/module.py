@@ -13,7 +13,6 @@ from torch import Tensor, device, dtype
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from typing_extensions import Self
 from ...utils.hooks import RemovableHandle
-from weakref import getweakrefcount
 
 __all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook',
            'register_module_full_backward_pre_hook', 'register_module_backward_hook',
@@ -816,13 +815,7 @@ class Module:
             else:
                 return False
 
-        def compute_should_use_swap_tensors(tensor):
-            if torch.__future__.get_swap_module_params_on_conversion():
-                swap_param = torch._C._tensor_use_count(tensor._cdata) == 1 and getweakrefcount(tensor) == 0
-                swap_grad = torch._C._tensor_use_count(tensor.grad._cdata) == 1 and getweakrefcount(tensor.grad) == 0
-                return (swap_param, swap_grad)
-            else:
-                return (False, False)
+        should_use_swap_tensors = torch.nn.utils.get_swap_module_params_on_conversion()
 
         for key, param in self._parameters.items():
             if param is None:
@@ -833,16 +826,18 @@ class Module:
             with torch.no_grad():
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
-            p_should_use_swap_tensors, g_should_use_swap_tensors = compute_should_use_swap_tensors(param)
             param_grad = param.grad
-            if g_should_use_swap_tensors:
-                # grad use_count was 1 according to g_should_use_swap_tensors but
-                # was bumped by param_grad = param.grad, decrement it so swapping grad works
-                param.grad = None
             if p_should_use_set_data:
-                if p_should_use_swap_tensors:
+                if should_use_swap_tensors:
+                    if param_grad is not None:
+                        # Accessing param.grad makes its use_count 2, which will prevent swapping.
+                        # Decrement use count of the gradient by setting to None
+                        param.grad = None
                     param_applied = torch.nn.Parameter(param_applied, requires_grad=param.requires_grad)
-                    torch.utils.swap_tensors(param, param_applied)
+                    try:
+                        torch.utils.swap_tensors(param, param_applied)
+                    except Exception as e:
+                        raise RuntimeError(f"Couldn't swap {key}") from e
                     out_param = param
                 else:
                     param.data = param_applied
@@ -858,17 +853,16 @@ class Module:
                     grad_applied = fn(param_grad)
                 g_should_use_set_data = compute_should_use_set_data(param_grad, grad_applied)
                 if g_should_use_set_data:
-                    if g_should_use_swap_tensors:
+                    if should_use_swap_tensors:
                         grad_applied.requires_grad_(param_grad.requires_grad)
-                        torch.utils.swap_tensors(param_grad, grad_applied)
+                        try:
+                            torch.utils.swap_tensors(param_grad, grad_applied)
+                        except Exception as e:
+                            raise RuntimeError(f"Couldn't swap {key}.grad") from e
                         out_param.grad = param_grad
                     else:
-                        if p_should_use_swap_tensors:
-                            param_grad.data = grad_applied
-                            out_param.grad = grad_applied
-                        else:
-                            assert out_param.grad is not None
-                            out_param.grad.data = grad_applied
+                        assert out_param.grad is not None
+                        out_param.grad.data = grad_applied
                 else:
                     assert param_grad.is_leaf
                     out_param.grad = grad_applied.requires_grad_(param_grad.requires_grad)

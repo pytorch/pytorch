@@ -15,9 +15,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck)
+    gradgradcheck, parametrize)
 from unittest.mock import patch, call
-import weakref
 
 
 class TestModule(TestCase):
@@ -855,7 +854,9 @@ class TestModule(TestCase):
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
     @modules([module for module in module_db if not module.is_lazy])
-    def test_to(self, device, dtype, module_info, training):
+    @parametrize('swap', [True, False])
+    @parametrize('set_grad', [True, False])
+    def test_to(self, device, dtype, module_info, training, swap, set_grad):
         module_cls = module_info.module_cls
         devices = ['cpu']
         if torch.cuda.is_available():
@@ -863,79 +864,71 @@ class TestModule(TestCase):
         if torch.backends.mps.is_available():
             devices += ['mps']
         dtypes = module_info.dtypes
-
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False, training=training)
+        torch.nn.utils.set_swap_module_params_on_conversion(swap)
 
-        for module_input in module_inputs:
-            c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
-            fw_args, fw_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+        try:
+            for module_input in module_inputs:
+                c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+                fw_args, fw_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
 
-            m = module_cls(*c_args, **c_kwargs)
-            m_forward_pass_ran = module_cls(*c_args, **c_kwargs)
+                m = module_cls(*c_args, **c_kwargs)
 
-            # RNNBase overrides `_apply` and adds weakrefs to params
-            is_rnn_base = isinstance(m, torch.nn.RNNBase)
+                def _to(m, set_grad=False):
+                    for c in m.children():
+                        _to(c, set_grad=set_grad)
+                    for n, p in m.named_parameters(recurse=False):
+                        new_p = torch.nn.Parameter(p.detach().clone().to(device, dtype))
+                        setattr(m, n, new_p)
+                        if set_grad:
+                            new_p.grad = torch.randn_like(new_p)
+                    for n, b in m.named_buffers(recurse=False):
+                        new_b = b.detach().clone().to(device, dtype)
+                        setattr(m, n, new_b)
+                _to(m, set_grad=set_grad)
 
-            def _to(m):
-                for c in m.children():
-                    _to(c)
-                for n, p in m.named_parameters(recurse=False):
-                    new_p = torch.nn.Parameter(p.detach().clone().to(device, dtype))
-                    setattr(m, n, new_p)
-                    new_p.grad = torch.randn_like(new_p)
-                for n, b in m.named_buffers(recurse=False):
-                    new_b = b.detach().clone().to(device, dtype)
-                    setattr(m, n, new_b)
-            _to(m)
-            _to(m_forward_pass_ran)
-            # forward pass to init AccumulateGrad Nodes which increments params' use_count
-            out = m_forward_pass_ran(*fw_args, **fw_kwargs)
-
-            prev_device, prev_dtype = device, dtype
-            for swap in [False, True, None]:
-                if swap is None:
-                    torch.__future__.set_swap_module_params_on_conversion(True)
-                    m = m_forward_pass_ran
-                    prev_device, prev_dtype = device, dtype
-                else:
-                    torch.__future__.set_swap_module_params_on_conversion(swap)
+                prev_device, prev_dtype = device, dtype
                 for device_, dtype_ in product(devices, dtypes):
                     if device_ == 'mps' and dtype_ == torch.float64:
                         continue
-                    no_cdata_change = device_ == prev_device and dtype_ == prev_dtype
-                    p_no_swap, g_no_swap = is_rnn_base or no_cdata_change, no_cdata_change
+                    # if device/dtype do not change, grad.to(device, dtype) is a no-op so
+                    # swapping will not change ._cdata
+                    # parameters will be wrapped in an nn.Parameter before swapping
+                    # which will cause the ._cdata to change
+                    g_no_swap = device_ == prev_device and dtype_ == prev_dtype
                     prev_device, prev_dtype = device_, dtype_
 
-                    p_ids_before = [(weakref.getweakrefcount(p), p._cdata) for p in m.parameters()]
-                    g_ids_before = [(weakref.getweakrefcount(p.grad), p.grad._cdata) for p in m.parameters()]
+                    p_ids_before = [p._cdata for p in m.parameters()]
+                    if set_grad:
+                        g_ids_before = [p.grad._cdata for p in m.parameters()]
 
                     m.to(device=device_, dtype=dtype_)
 
                     self.assertTrue(isinstance(p, torch.nn.Parameter) for p in m.parameters())
                     self.assertTrue(all(p.device.type == device_ for p in m.parameters()))
                     self.assertTrue(all(p.dtype == dtype_ for p in m.parameters()))
-                    self.assertTrue(all(p.grad.device.type == device_ for p in m.parameters()))
-                    self.assertTrue(all(p.grad.dtype == dtype_ for p in m.parameters()))
-
                     p_ids_after = [p._cdata for p in m.parameters()]
-                    g_ids_after = [p.grad._cdata for p in m.parameters()]
+
+                    if set_grad:
+                        self.assertTrue(all(p.grad.device.type == device_ for p in m.parameters()))
+                        self.assertTrue(all(p.grad.dtype == dtype_ for p in m.parameters()))
+                        g_ids_after = [p.grad._cdata for p in m.parameters()]
+
                     if swap:
-                        # ._cdata differs --> swapped TensorImpls
+                        # ._cdata differs --> swapped cdata of THPVariable
                         self.assertTrue(all(
-                            a == b if wr or p_no_swap else a != b for (wr, a), b in zip(p_ids_before, p_ids_after)))
-                        self.assertTrue(
-                            all(a == b if wr or g_no_swap else a != b for (wr, a), b in zip(g_ids_before, g_ids_after)))
-                    elif swap is None:
-                        # swap=None is swap=True with forward pass run once,
-                        # .data setting should be used for param but not for grad
-                        self.assertTrue(all(a == b for (_, a), b in zip(p_ids_before, p_ids_after)))
-                        self.assertTrue(
-                            all(a == b if wr or g_no_swap else a != b for (wr, a), b in zip(g_ids_before, g_ids_after)))
+                            a != b for a, b in zip(p_ids_before, p_ids_after)))
+                        if set_grad:
+                            self.assertTrue(
+                                all(a == b if g_no_swap else a != b for a, b in zip(g_ids_before, g_ids_after)))
                     else:
                         # _cdata remains the same --> .data setting
-                        self.assertTrue(all(a == b for (_, a), b in zip(p_ids_before, p_ids_after)))
-                        self.assertTrue(all(a == b for (_, a), b in zip(g_ids_before, g_ids_after)))
+                        self.assertTrue(all(a == b for a, b in zip(p_ids_before, p_ids_after)))
+                        if set_grad:
+                            self.assertTrue(all(a == b for a, b in zip(g_ids_before, g_ids_after)))
+        finally:
+            torch.nn.utils.set_swap_module_params_on_conversion(False)
 
 
 instantiate_device_type_tests(TestModule, globals(), allow_mps=True)

@@ -417,6 +417,16 @@ Utility functions for initializing Module parameters.
 
     skip_init
 
+Utility functions for setting whether :func:`~torch.utils.swap_tensors` is used
+when changing the device or dtype of an ``nn.Module``.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    get_swap_module_params_on_conversion
+    set_swap_module_params_on_conversion
+
 Utility classes and functions for pruning Module parameters.
 
 .. autosummary::
