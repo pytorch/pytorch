@@ -604,12 +604,12 @@ def create_functional_call(mod, params_spec, params_len):
             else:
                 out = mod(*args[params_len:], **kwargs)
 
-        if not isinstance(out, (tuple, list)):
-            raise RuntimeError(
-                "Graph output must be a tuple(). This is so that we can avoid "
-                "pytree processing of the outputs. Please change the module to "
-                "have tuple outputs or use aot_module instead."
-            )
+        # if not isinstance(out, (tuple, list)):
+        #     raise RuntimeError(
+        #         "Graph output must be a tuple(). This is so that we can avoid "
+        #         "pytree processing of the outputs. Please change the module to "
+        #         "have tuple outputs or use aot_module instead."
+        #     )
         return out
 
     return functional_call
