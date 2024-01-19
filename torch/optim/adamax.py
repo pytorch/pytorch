@@ -1,8 +1,7 @@
 import torch
 from torch import Tensor
 
-from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
-                        _default_to_fused_or_foreach, _get_scalar_dtype, _differentiable_doc, _maximize_doc, _foreach_doc,
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _default_to_fused_or_foreach, _get_scalar_dtype, _differentiable_doc, _maximize_doc, _foreach_doc,
                         _view_as_real, _capturable_doc)
 from typing import List, Optional
 
@@ -382,5 +381,5 @@ def _multi_tensor_adamax(
             torch._foreach_addcdiv_(grouped_params, numerator, grouped_exp_infs)
         else:
             bias_corrections = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
-            step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_corrections])
+            step_size = [(lr / bc) * -1 for bc in bias_corrections]
             torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, grouped_exp_infs, step_size)

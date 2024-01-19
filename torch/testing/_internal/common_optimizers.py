@@ -448,11 +448,6 @@ def optim_inputs_func_adamax(device=None):
             kwargs={"weight_decay": 0.9, "maximize": False, "capturable": True},
             desc="capturable, weight_decay",
         ),
-        OptimizerInput(
-            params=None,
-            kwargs={"weight_decay": 0, "maximize": False, "capturable": True},
-            desc="capturable",
-        ),
     ]
 
     return [
@@ -466,7 +461,7 @@ def optim_inputs_func_adamax(device=None):
             kwargs={"weight_decay": 0.9, "maximize": True},
             desc="maximize",
         ),
-    ] + cuda_supported_configs
+    ] + (cuda_supported_configs if str(device) == "cuda" else [])
 
 
 def optim_error_inputs_func_adamax(device, dtype):
