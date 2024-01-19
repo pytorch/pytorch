@@ -72,6 +72,9 @@ def handlers():
         Round: "round",
         RoundDecimal: "round",
     }
+    for name in ["cos", "sin", "tan", "sinh", "cosh", "tanh", "asin", "acos", "atan"]:
+        HANDLERS[getattr(sympy, name)] = name
+
     return HANDLERS
 
 
