@@ -962,7 +962,7 @@ def compile_fx(
         with config.patch(
             {
                 "cpp_wrapper": False,
-                "triton.multi_kernel": False,  # don't enable multi-kernel if cpp_wrapper is used
+                "triton.multi_kernel": 0,  # don't enable multi-kernel if cpp_wrapper is used
                 "triton.autotune_cublasLt": False,
                 "triton.cudagraphs": False,
                 "triton.store_cubin": True,
