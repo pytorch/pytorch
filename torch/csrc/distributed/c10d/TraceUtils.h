@@ -16,22 +16,6 @@
 
 namespace c10d {
 
-/* Helper used by work::getDuration() and nccl flight recorder */
-float getDurationFromFirstEvent(
-    const std::vector<at::cuda::CUDAEvent>& ncclStartEvents,
-    const std::vector<at::cuda::CUDAEvent>& ncclEndEvents) {
-  TORCH_CHECK(
-      ncclStartEvents.size() == 1,
-      "getDuration only works for single device per ProcessGroup, but found multiple start events.");
-  TORCH_CHECK(
-      ncclEndEvents.size() == 1,
-      "getDuration only works for single device per ProcessGroup, but found multiple end events.");
-  TORCH_CHECK(
-      ncclEndEvents[0].query(),
-      "getDuration can only be called after work is succeeded.")
-  return ncclStartEvents[0].elapsed_time(ncclEndEvents[0]);
-}
-
 /* Trace Utils Related to TORCH_NCCL_DESYNC_DEBUG */
 
 inline std::string getTraceStartKey(const std::string& pgName, int rank) {
@@ -284,6 +268,22 @@ inline std::string retrieveDesyncReport(
  * wasn't done that way, so isn't expected to be fully general at the moment) */
 
 #ifdef USE_C10D_NCCL
+
+/* Helper used by work::getDuration() and nccl flight recorder */
+float getDurationFromFirstEvent(
+    const std::vector<at::cuda::CUDAEvent>& ncclStartEvents,
+    const std::vector<at::cuda::CUDAEvent>& ncclEndEvents) {
+  TORCH_CHECK(
+      ncclStartEvents.size() == 1,
+      "getDuration only works for single device per ProcessGroup, but found multiple start events.");
+  TORCH_CHECK(
+      ncclEndEvents.size() == 1,
+      "getDuration only works for single device per ProcessGroup, but found multiple end events.");
+  TORCH_CHECK(
+      ncclEndEvents[0].query(),
+      "getDuration can only be called after work is succeeded.")
+  return ncclStartEvents[0].elapsed_time(ncclEndEvents[0]);
+}
 
 DebugInfoWriter::~DebugInfoWriter() = default;
 
