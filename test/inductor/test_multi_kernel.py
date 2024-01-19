@@ -8,7 +8,7 @@ import torch
 from torch import nn
 from torch._dynamo.testing import reset_rng_state
 
-from torch._inductor import config
+from torch._inductor import config, test_operators
 from torch._inductor.codegen.multi_kernel import MultiKernelCall
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
@@ -132,10 +132,6 @@ class MultiKernelTest(TestCase):
         self.assertTrue(torch.allclose(ref, act))
 
     def test_transformer_snippet(self):
-        """
-        Test a snippet of transformer that will cause different arglist for
-        the persistent and non-persistent flavor of reductions.
-        """
         model = TransformerSnippet().cuda()
         x = model.example_inputs()
 
@@ -212,6 +208,27 @@ class MultiKernelTest(TestCase):
         ref = f(x, y_ref)
         act = torch.compile(f)(x, y)
         self.assertTrue(torch.allclose(y_ref, y))
+
+    def test_reduction_scratch_buffer(self):
+        """
+        The explicited realized buffer in the test function will be passed in
+        as a scratch buffer for the non-persistent reduction kernel but
+        can be skipped for the persistent reduction kernel.
+
+        This causes different argument lists for non-persistent reduction kernel and
+        persistent reduction kernel.
+        """
+
+        def f(x):
+            x = x.sum(dim=-1, keepdim=True) + x
+            x = test_operators.realize(x)
+            x = x.sum(dim=-1, keepdim=True) + x
+            return x
+
+        x = torch.rand(16, 16, device="cuda")
+        ref = f(x)
+        act = torch.compile(f)(x)
+        self.assertTrue(torch.allclose(ref, act))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Any, Dict, List
+from typing import Any, List
 
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 
@@ -18,15 +18,21 @@ def get_kernel_argdefs(kernel):
     return arg_defs
 
 
-def get_all_kernel_argdefs(kernels):
-    argdefs_list = [get_kernel_argdefs(kernel) for kernel in kernels]
-    all_argdefs: Dict[
-        Any, None
-    ] = {}  # use a dict rather than set to maintain insertion order
-    for argdefs in argdefs_list:
-        all_argdefs.update({arg: None for arg in argdefs})
+def _get_all_args(args_list):
+    all_args = max(args_list, key=len)[:]
+    for args in args_list:
+        assert set(args).issubset(set(all_args)), f"{args} v.s. {all_args}"
 
-    return list(all_argdefs.keys())
+    return all_args
+
+
+def get_all_kernel_argdefs(kernels):
+    """
+    The logic here must match with `get_all_call_args`.
+    """
+    argdefs_list = [get_kernel_argdefs(kernel) for kernel in kernels]
+
+    return _get_all_args(argdefs_list)
 
 
 def get_all_call_args(call_args_list):
@@ -50,12 +56,7 @@ def get_all_call_args(call_args_list):
     Instead, we pick the longest call args and assert that otehr call args are
     a subset of it.
     """
-    all_call_args = max(call_args_list, key=len)[:]
-    for call_args in call_args_list:
-        assert set(call_args).issubset(
-            set(all_call_args)
-        ), f"{call_args} v.s. {all_call_args}"
-    return all_call_args
+    return _get_all_args(call_args_list)
 
 
 def get_numel_argdefs(kernel):
