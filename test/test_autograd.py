@@ -33,7 +33,8 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoLapack, slowTest, IS_WINDOWS, IS_MACOS,
     disable_gc, gradcheck, gradgradcheck, parametrize,
-    instantiate_parametrized_tests, skipIfMps, set_warn_always_context)
+    instantiate_parametrized_tests, skipIfMps, set_warn_always_context,
+    skipIfTorchDynamo)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available, _calculate_shape
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
@@ -2132,6 +2133,7 @@ class TestAutograd(TestCase):
         with torch.autograd.grad_mode.no_grad():
             v.grad_fn
 
+    @skipIfTorchDynamo("too slow")
     def test_free_deep_graph(self):
         def scope():
             depth = 150000
@@ -2149,6 +2151,7 @@ class TestAutograd(TestCase):
         # Should not stack overflow
         scope()
 
+    @skipIfTorchDynamo("too slow")
     def test_free_deep_graph_complicated(self):
         def scope():
             depth = 100000
@@ -2179,6 +2182,7 @@ class TestAutograd(TestCase):
         # Should not stack overflow
         scope()
 
+    @skipIfTorchDynamo("too slow")
     def test_free_deep_graph_pyfunction(self):
         class MyOp(Function):
             @staticmethod
@@ -5972,24 +5976,29 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(Exception, "only supported when use_reentrant=False"):
             out = checkpoint(lambda x: x.sin(), x, use_reentrant=True, context_fn=context_fn)
 
-    def test_checkpoint_errors_if_use_reentrant_not_passed_explicitly(self):
+    def test_checkpoint_warns_if_use_reentrant_not_passed_explcitly(self):
         a = torch.randn(1, requires_grad=True)
-        error_str = "please pass in use_reentrant=True or use_reentrant=False explicitly"
 
-        with self.assertRaisesRegex(ValueError, error_str):
+        # Passing explicitly should not warn
+        self.assertNotWarn(lambda: checkpoint(lambda x: x, a, use_reentrant=False))
+
+        # Not passing explicitly warns
+        with self.assertWarnsOnceRegex(UserWarning, ".*the use_reentrant parameter should be passed explicitly.*"):
             checkpoint(lambda x: x, a)
 
-    def test_checkpoint_sequential_errors_if_use_reentrant_not_passed_explicitly(self):
+    def test_checkpoint_sequential_warns_if_use_reentrant_not_passed_explcitly(self):
         a = torch.randn(3, requires_grad=True)
         modules_list = [
             torch.nn.Linear(3, 3),
             torch.nn.Linear(3, 3),
             torch.nn.Linear(3, 3)
         ]
-        error_str = "please pass in use_reentrant=True or use_reentrant=False explicitly"
+
+        # Passing explicitly should not warn
+        self.assertNotWarn(lambda: checkpoint_sequential(modules_list, 3, a, use_reentrant=False))
 
         # Not passing explicitly warns
-        with self.assertRaisesRegex(ValueError, error_str):
+        with self.assertWarnsOnceRegex(UserWarning, ".*the use_reentrant parameter should be passed explicitly.*"):
             checkpoint_sequential(modules_list, 3, a)
 
     def test_checkpoint_detects_non_determinism(self):

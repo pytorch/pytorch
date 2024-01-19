@@ -15,14 +15,15 @@ from torch.testing._internal.common_utils import (
 )
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.triton_utils import requires_cuda
 
 aten = torch.ops.aten
 
 try:
     try:
-        from .test_torchinductor import check_model, check_model_cuda, requires_cuda
+        from .test_torchinductor import check_model, check_model_cuda
     except ImportError:
-        from test_torchinductor import check_model, check_model_cuda, requires_cuda
+        from test_torchinductor import check_model, check_model_cuda
 except (unittest.SkipTest, ImportError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
@@ -568,9 +569,10 @@ class ForeachTests(TestCase):
 
     @requires_cuda()
     @torch._inductor.config.patch("max_pointwise_cat_inputs", 0)
-    def test_fuse_concat_non_input_views(self):
+    def test_fuse_concat_views(self):
         def fn(x, slice_sz):
             x = x + 1  # Make it pointwise to avoid views on inputs.
+            # Using ATen ops to tell inductor what exactly to lower.
             views = torch.ops.aten.split.Tensor(x, slice_sz, dim=0)
             return torch.ops.aten.cat(views)
 
