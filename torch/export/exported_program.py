@@ -107,7 +107,12 @@ class ExportedProgram:
         module_call_graph: List[ModuleCallEntry],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
         verifier: Optional[Type[Any]] = None,  # TODO Change typing hint to Verifier.
-        tensor_constants: Optional[Dict[str, torch.Tensor]] = None,
+        tensor_constants: Optional[
+            Dict[str, torch.Tensor]
+        ] = None,  # TODO: deprecate this
+        constants: Optional[
+            Dict[str, Union[torch.Tensor, torch._C.ScriptObject]]
+        ] = None,
     ):
         from torch._export.exported_program import _create_graph_module_for_export
 
@@ -124,7 +129,8 @@ class ExportedProgram:
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
 
-        self._tensor_constants = tensor_constants or {}
+        self._constants = tensor_constants or constants or {}
+        assert self._constants is not None
 
         from torch._export.verifier import Verifier
 
@@ -230,7 +236,12 @@ class ExportedProgram:
     @property
     @compatibility(is_backward_compatible=False)
     def tensor_constants(self):
-        return self._tensor_constants
+        return self._constants
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def constants(self):
+        return self._constants
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
@@ -250,27 +261,22 @@ class ExportedProgram:
                     f"{received_spec}"
                 )
 
-        ordered_params = tuple(
-            self.state_dict[name] for name in self.graph_signature.parameters
-        )
-        ordered_buffers = tuple(
-            self.state_dict[name] for name in self.graph_signature.buffers
-        )
-        if hasattr(self.graph_signature, "lifted_tensor_constants"):
-            ordered_tensor_constants = tuple(
-                self.tensor_constants[name]
-                for name in self.graph_signature.lifted_tensor_constants
-            )
-        else:
-            ordered_tensor_constants = ()
+        additional_inputs = []
+        for input_ in self.graph_signature.input_specs:
+            if input_.kind == InputKind.USER_INPUT:
+                continue
+            elif input_.kind in (InputKind.PARAMETER, InputKind.BUFFER):
+                additional_inputs.append(self.state_dict[input_.target])
+            elif input_.kind in (InputKind.CONSTANT_TENSOR, InputKind.CUSTOM_OBJ):
+                additional_inputs.append(self.constants[input_.target])
+        additional_inputs = tuple(additional_inputs)
+
         self._check_input_constraints(*args)
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
         # See: torch/_functorch/aot_autograd.py#L1034
         res = torch.fx.Interpreter(self.graph_module).run(
-            *ordered_params,
-            *ordered_buffers,
-            *ordered_tensor_constants,
+            *additional_inputs,
             *args,
             enable_io_processing=False,
         )
@@ -368,9 +374,7 @@ class ExportedProgram:
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
             _AddRuntimeAssertionsForInlineConstraintsPass,
         )
-        from torch._export.passes.lift_constant_tensor_pass import (
-            lift_constant_tensor_pass,
-        )
+        from torch._export.passes.lift_constants_pass import lift_constants_pass
         from torch._export.passes.replace_sym_size_ops_pass import (
             _replace_sym_size_ops_pass,
         )
@@ -459,7 +463,11 @@ class ExportedProgram:
 
         new_range_constraints = _get_updated_range_constraints(gm)
 
-        lift_constant_tensor_pass(gm, new_graph_signature)
+        constants = lift_constants_pass(gm, new_graph_signature)
+        for k, v in constants.items():
+            assert k not in self.constants
+            self.constants[k] = v
+
         _replace_sym_size_ops_pass(gm)
         exported_program = ExportedProgram(
             root=gm,
@@ -470,7 +478,7 @@ class ExportedProgram:
             module_call_graph=copy.deepcopy(self.module_call_graph),
             example_inputs=self.example_inputs,
             verifier=self.verifier,
-            tensor_constants=self.tensor_constants,
+            constants=self.constants,
         )
 
         if len(new_range_constraints) > 0:
@@ -549,7 +557,7 @@ class ExportedProgram:
             module_call_graph=copy.deepcopy(self._module_call_graph),
             example_inputs=self.example_inputs,
             verifier=self.verifier,
-            tensor_constants=self.tensor_constants,
+            constants=self.constants,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)

@@ -14,6 +14,7 @@ __all__ = [
     "OutputSpec",
     "SymIntArgument",
     "TensorArgument",
+    "CustomObjArgument",
 ]
 
 
@@ -47,6 +48,7 @@ class InputKind(Enum):
     PARAMETER = auto()
     BUFFER = auto()
     CONSTANT_TENSOR = auto()
+    CUSTOM_OBJ = auto()
 
 
 @dataclasses.dataclass

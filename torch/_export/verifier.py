@@ -7,8 +7,10 @@ from typing import Any, Dict, final, List, Optional, Tuple, Type
 import torch
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.export.custom_obj import ScriptObjectMeta
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
+    CustomObjArgument,
     ExportGraphSignature,
     InputKind,
     SymIntArgument,
@@ -43,7 +45,7 @@ def _check_val(node: torch.fx.Node) -> None:
             return True
         elif isinstance(val, (SymInt, SymFloat, SymBool)):
             return True
-        elif isinstance(val, torch.ScriptObject):
+        elif isinstance(val, ScriptObjectMeta):
             return True
         elif isinstance(val, Iterable):
             return all(_check_correct_val(x) for x in val)
@@ -315,9 +317,24 @@ def _verify_exported_program_signature(exported_program) -> None:
                 )
 
             tensor_const = input_spec.target
-            if tensor_const not in exported_program.tensor_constants:
+            if tensor_const not in exported_program.constants:
                 raise SpecViolationError(
-                    f"Constant tensor {tensor_const} is not in the tensor constants dictionary."
+                    f"Constant tensor {tensor_const} is not in the constants dictionary."
+                )
+        elif input_spec.kind == InputKind.CUSTOM_OBJ:
+            if not isinstance(input_spec.arg, CustomObjArgument):
+                raise SpecViolationError(
+                    f"Custom object {input_spec.name} is not a custom object argument. Found {input_spec.arg} instead."
+                )
+            if input_spec.target is None:
+                raise SpecViolationError(
+                    f"InputSpec for {input_spec.name} has no target."
+                )
+
+            custom_obj = input_spec.target
+            if custom_obj not in exported_program.constants:
+                raise SpecViolationError(
+                    f"Custom object {custom_obj} is not in the constants dictionary."
                 )
         else:
             raise SpecViolationError(
