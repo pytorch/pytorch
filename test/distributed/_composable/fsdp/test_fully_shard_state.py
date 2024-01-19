@@ -3,7 +3,6 @@
 import copy
 import unittest
 
-import torch
 import torch.nn as nn
 from _test_fully_shard_common import MLP
 
@@ -24,7 +23,7 @@ class TestFullyShardState(FSDPTestMultiThread):
         Tests the ability to get the state object from a fully sharded module.
         """
         num_mlps = 3
-        model = nn.Sequential(*[MLP(8, torch.device("cpu")) for _ in range(num_mlps)])
+        model = nn.Sequential(*[MLP(8) for _ in range(num_mlps)])
         for mlp in model:
             fully_shard(mlp)
         fully_shard(model)
@@ -36,7 +35,7 @@ class TestFullyShardState(FSDPTestMultiThread):
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_fully_shard_reapply(self):
-        model = MLP(8, torch.device("cpu"))
+        model = MLP(8)
         fully_shard(model)
         with self.assertRaisesRegex(
             AssertionError,
@@ -47,7 +46,7 @@ class TestFullyShardState(FSDPTestMultiThread):
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_fully_shard_cls(self):
         # Check that we only swap class for the module passed to `fully_shard`
-        model = MLP(8, torch.device("cpu"))
+        model = MLP(8)
         fully_shard(model)
         self.assertTrue(isinstance(model, MLP))
         self.assertTrue(isinstance(model, FSDP))
@@ -58,7 +57,7 @@ class TestFullyShardState(FSDPTestMultiThread):
             self.assertFalse(isinstance(module, FSDP))
 
         # Check that slicing into a `Sequential` does not preserve FSDP
-        model = nn.Sequential(*[MLP(8, torch.device("cpu")) for _ in range(3)])
+        model = nn.Sequential(*[MLP(8) for _ in range(3)])
         fully_shard(model)
         self.assertTrue(isinstance(model, nn.Sequential))
         self.assertTrue(isinstance(model, FSDP))
@@ -72,18 +71,16 @@ class TestFullyShardState(FSDPTestMultiThread):
         regex = (
             r"fully\_shard does not support containers that do not implement forward"
         )
-        model = nn.ModuleList([MLP(8, torch.device("cpu")) for _ in range(3)])
+        model = nn.ModuleList([MLP(8) for _ in range(3)])
         with self.assertRaisesRegex(ValueError, regex):
             fully_shard(model)
-        model = nn.ModuleDict(
-            {"1": MLP(8, torch.device("cpu")), "2": MLP(8, torch.device("cpu"))}
-        )
+        model = nn.ModuleDict({"1": MLP(8), "2": MLP(8)})
         with self.assertRaisesRegex(ValueError, regex):
             fully_shard(model)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_fully_shard_deepcopy(self):
-        model = MLP(8, torch.device("cpu"))
+        model = MLP(8)
         fully_shard(model)
         with self.assertRaisesRegex(AssertionError, "FSDP does not support deepcopy"):
             copy.deepcopy(model)

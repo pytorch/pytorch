@@ -54,7 +54,7 @@ class TestFullyShardInitMesh(FSDPTestMultiThread):
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_invalid_mesh_ndim(self):
         mesh = init_device_mesh("cuda", (self.world_size, 1, 1))
-        model = MLP(8, torch.device("cuda"))
+        model = MLP(8)
         regex = r"fully\_shard expects a 1D or 2D DeviceMesh but got DeviceMesh\(\[\[\[0\]\], \[\[1\]\]\]\)"
         with self.assertRaisesRegex(ValueError, regex):
             fully_shard(model, mesh=mesh, device="cuda")
@@ -62,7 +62,7 @@ class TestFullyShardInitMesh(FSDPTestMultiThread):
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_mesh_device_mismatch(self):
         mesh = init_device_mesh("cuda", (self.world_size,))
-        model = MLP(8, torch.device("cpu"))
+        model = MLP(8)
         regex = "device and mesh must be of the same type but got cpu for device and cuda for mesh"
         with self.assertRaisesRegex(ValueError, regex):
             fully_shard(model, mesh=mesh, device="cpu")
