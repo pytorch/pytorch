@@ -42,10 +42,10 @@ __all__ = [
     'typename', 'is_tensor', 'is_storage',
     'set_default_tensor_type', 'set_default_device', 'get_default_device',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
-    'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
-    'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
-    'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
-    'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
+    'save', 'load', 'set_printoptions', 'get_printoptions', 'printoptions',
+    'chunk', 'split', 'stack', 'matmul', 'no_grad', 'enable_grad', 'rand',
+    'randn', 'inference_mode', 'DoubleStorage', 'FloatStorage', 'LongStorage',
+    'IntStorage', 'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'TypedStorage', 'UntypedStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
@@ -1447,7 +1447,7 @@ _tensor_classes: Set[Type] = set()
 # If you edit these imports, please update torch/__init__.py.in as well
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
 from .serialization import save, load
-from ._tensor_str import set_printoptions
+from ._tensor_str import set_printoptions, get_printoptions, printoptions
 
 ################################################################################
 # Initialize extension
