@@ -112,9 +112,11 @@ class BuiltinVariable(VariableTracker):
             str.format,
             sum,
             type,
+            operator.abs,
             operator.pos,
             operator.neg,
             operator.not_,
+            operator.truth,
             operator.invert,
             operator.pow,
             operator.mul,
@@ -155,6 +157,7 @@ class BuiltinVariable(VariableTracker):
     @functools.lru_cache(None)
     def _fx_graph_functions():
         fns = {
+            operator.abs,
             operator.pos,
             operator.neg,
             operator.not_,
@@ -1560,9 +1563,11 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):
             from .builder import wrap_fx_proxy_cls
 
-            if op is operator.is_ and isinstance(right, TensorVariable):
+            if op is operator.is_:
                 return ConstantVariable.create(
-                    id(extract_fake_example_value(left.as_proxy().node))
+                    isinstance(left, TensorVariable)
+                    and isinstance(right, TensorVariable)
+                    and id(extract_fake_example_value(left.as_proxy().node))
                     == id(extract_fake_example_value(right.as_proxy().node))
                 )
 
