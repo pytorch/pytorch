@@ -220,7 +220,7 @@ class TestNumPyInterop(TestCase):
                     self.assertEqual(tensor_from_array2[i], array2[i])
 
         # Test unsupported type
-        array = np.array([1, 2, 3, 4], dtype=np.uint16)
+        array = np.array(['foo', 'bar'], dtype=np.dtype(np.str_))
         with self.assertRaises(TypeError):
             tensor_from_array = torch.from_numpy(array)
 
@@ -417,7 +417,7 @@ class TestNumPyInterop(TestCase):
     @onlyCPU
     def test_parse_numpy_int(self, device):
         # Only concrete class can be given where "Type[number[_64Bit]]" is expected
-        self.assertRaisesRegex(RuntimeError, "Overflow",
+        self.assertRaisesRegex(RuntimeError, "(Overflow|an integer is required)",
                                lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)))  # type: ignore[call-overload]
         # https://github.com/pytorch/pytorch/issues/29252
         for nptype in [np.int16, np.int8, np.uint8, np.int32, np.int64]:

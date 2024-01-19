@@ -477,6 +477,26 @@ def forward(self, x_1, output_1):
         self.assertEqual(torch_result, compiled_result)
 
     @requires_cuda()
+    @skipIfRocm
+    def test_triton_kernel_reinplace_inplaceable_pass(self):
+        def call_triton(
+            x: torch.Tensor,
+            y: torch.Tensor,
+        ):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_autotuned[grid](x, y, output, n_elements)
+            add_kernel_autotuned[grid](output, x, output, n_elements)
+            return output
+
+        t1 = torch.rand(5, device="cuda")
+        t2 = torch.rand(5, device="cuda")
+        torch_result = call_triton(t1, t2)
+        compiled_result = torch.compile(call_triton)(t1, t2)
+        self.assertEqual(torch_result, compiled_result)
+
+    @requires_cuda()
     @common_utils.parametrize("grad", [False, True])
     def test_triton_kernel_multi_kernel(self, grad):
         @triton.jit
@@ -818,6 +838,34 @@ def forward(self, x_1, output_1):
                 Y_BLOCK_SIZE=Y_BLOCK_SIZE,
             )
             return out
+
+        inp = torch.randn(64, 256, device="cuda")
+
+        eager_out = f(inp)
+        compiled_out = torch.compile(f)(inp)
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda()
+    def test_triton_kernel_slice_and_view_input(self):
+        def f(inp):
+            # left has strides [256, 1]
+            left = inp[:, :128]
+            left = left.view(64, 4, 32)
+            out = torch.empty_like(left)
+            X_BLOCK_SIZE, Y_BLOCK_SIZE = 32, 16
+            grid = (
+                (left.size(1) * left.size(2)) // X_BLOCK_SIZE,
+                left.size(0) // Y_BLOCK_SIZE,
+            )
+            double_strided_kernel[grid](
+                in_ptr=left,
+                out_ptr=out,
+                in_y_stride=left.stride(0),
+                out_y_stride=out.stride(0),
+                X_BLOCK_SIZE=X_BLOCK_SIZE,
+                Y_BLOCK_SIZE=Y_BLOCK_SIZE,
+            )
+            return out + left
 
         inp = torch.randn(64, 256, device="cuda")
 
