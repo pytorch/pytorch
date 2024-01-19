@@ -10,11 +10,13 @@ from _test_fully_shard_common import MLP
 from torch.distributed._composable import replicate
 
 from torch.distributed._composable.fsdp import fully_shard
+from torch.distributed._composable.fsdp._fsdp_common import ParamModuleInfo
 from torch.distributed._composable.fsdp._fsdp_init import (
     _get_managed_modules,
     _get_managed_states,
     _normalize_device,
 )
+from torch.distributed._composable.fsdp._fsdp_param_group import _get_param_module_infos
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor.parallel import (
@@ -243,6 +245,61 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         self.assertEqual(len(managed_buffers), len(expected_managed_buffers))
         self.assertEqual(set(managed_params), set(expected_managed_params))
         self.assertEqual(set(managed_buffers), set(expected_managed_buffers))
+
+
+class TestFullyShardParamModuleInfos(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_get_param_module_infos_shared_params(self):
+        model = nn.Sequential(*[MLP(8) for _ in range(2)])
+        model[0].in_proj.weight = model[1].in_proj.weight
+        managed_modules = _get_managed_modules(model)
+        params, _ = _get_managed_states(managed_modules)
+        param_module_infos = _get_param_module_infos(params, model)
+        self.assertEqual(len(param_module_infos), len(params))
+        # We expect `params` to already have de-duplicated shared parameters
+        expected_param_module_infos = [
+            ParamModuleInfo(model[0].in_proj, "weight", [model[1].in_proj], ["weight"]),
+            ParamModuleInfo(model[0].in_proj, "bias", [], []),
+            ParamModuleInfo(model[0].out_proj, "weight", [], []),
+            ParamModuleInfo(model[0].out_proj, "bias", [], []),
+            ParamModuleInfo(model[1].in_proj, "bias", [], []),
+            ParamModuleInfo(model[1].out_proj, "weight", [], []),
+            ParamModuleInfo(model[1].out_proj, "bias", [], []),
+        ]
+        self.assertEqual(len(param_module_infos), len(expected_param_module_infos))
+        self.assertEqual(param_module_infos, expected_param_module_infos)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_get_param_module_infos_duplicates(self):
+        mlp = MLP(8)
+        model = nn.Sequential(mlp, mlp)  # shared MLP
+        params = list(model.parameters())
+        param_module_infos = _get_param_module_infos(params, model)
+        self.assertEqual(len(param_module_infos), len(params))
+        expected_param_module_infos = [
+            ParamModuleInfo(mlp.in_proj, "weight", [mlp.in_proj], ["weight"]),
+            ParamModuleInfo(mlp.in_proj, "bias", [mlp.in_proj], ["bias"]),
+            ParamModuleInfo(mlp.out_proj, "weight", [mlp.out_proj], ["weight"]),
+            ParamModuleInfo(mlp.out_proj, "bias", [mlp.out_proj], ["bias"]),
+        ]
+        self.assertEqual(len(param_module_infos), len(expected_param_module_infos))
+        self.assertEqual(param_module_infos, expected_param_module_infos)
+
+        model = nn.Sequential(*[MLP(8) for _ in range(2)])
+        model[0].in_proj = model[1].in_proj  # shared in-projection
+        params = list(model.parameters())
+        param_module_infos = _get_param_module_infos(params, model)
+        self.assertEqual(len(param_module_infos), len(params))
+        expected_param_module_infos = [
+            ParamModuleInfo(model[0].in_proj, "weight", [model[1].in_proj], ["weight"]),
+            ParamModuleInfo(mlp.in_proj, "bias", [], []),
+            ParamModuleInfo(mlp.out_proj, "weight", [], []),
+            ParamModuleInfo(mlp.out_proj, "bias", [], []),
+        ]
 
 
 if __name__ == "__main__":

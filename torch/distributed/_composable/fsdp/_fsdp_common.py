@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import cast, Optional
+from dataclasses import dataclass, field
+from typing import cast, List, Optional
 
 import torch.distributed as dist
 import torch.nn as nn
@@ -51,6 +51,22 @@ class HSDPMeshInfo(FSDPMeshInfo, DDPMeshInfo):
     def __post_init__(self):
         super(FSDPMeshInfo, self).__post_init__()
         super(DDPMeshInfo, self).__post_init__()
+
+
+@dataclass
+class ParamModuleInfo:
+    """
+    For a parameter, this stores the module and the parameter name to be able
+    to do a parameter swap via ``setattr(module, param_name, ...)`` or to get
+    the parameter via ``getattr(module, param_name)``. We additionally save
+    shared modules and shared parameter names to update them accordingly.
+    """
+
+    # Parameter names are unprefixed, e.g. "weight", not "lin.weight"
+    module: nn.Module
+    param_name: str
+    shared_modules: List[nn.Module] = field(default_factory=list)
+    shared_param_names: List[str] = field(default_factory=list)
 
 
 def _is_composable_with_fsdp(module: nn.Module) -> bool:
