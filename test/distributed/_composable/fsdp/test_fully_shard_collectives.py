@@ -151,6 +151,7 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
             group,
         )
         for fsdp_param in fsdp_params:
+            fsdp_param.init_unsharded_param()
             fsdp_param.to_unsharded()
 
         # - Check that the all-gather was correct

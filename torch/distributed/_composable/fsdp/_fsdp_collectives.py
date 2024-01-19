@@ -9,7 +9,7 @@ from ._fsdp_common import (
     print_and_raise_internal,
     to_dtype_if_needed,
 )
-from ._fsdp_param import FSDPParam, ShardedState
+from ._fsdp_param import FSDPParam
 
 
 class AllGatherResult(NamedTuple):
@@ -48,32 +48,7 @@ def foreach_all_gather(
     device: torch.device,
     dtype: torch.dtype,
 ) -> Optional[AllGatherResult]:
-    """
-    Args:
-        use_int8 (bool): If ``False``, then this requires that all parameters
-            have the same dtype, which is used for the all-gather. If ``True``,
-            then this permits different dtypes and converts everything to uint8
-            for the all-gather.
-
-    Returns:
-        Optional[AllGatherResult]: The all-gathered output to be copied out, a
-        CUDA event recording the end of the all-gather collective, and
-        optionally an all-gather work object if this all-gather is run as an
-        async op (for explicit prefetching). If there are no parameters that
-        need to be all-gathered, then returns ``None``.
-    """
-    unsharded_fsdp_params = [
-        fsdp_param
-        for fsdp_param in fsdp_params
-        if fsdp_param.sharded_state == ShardedState.UNSHARDED
-    ]
-    if len(unsharded_fsdp_params) == len(fsdp_params):
-        return None  # already unsharded
-    elif len(unsharded_fsdp_params) != 0:
-        msg = "Expects parameters to be all sharded or all unsharded but got:\n"
-        for fsdp_param in fsdp_params:
-            msg += f"{fsdp_param._param_fqn}: {fsdp_param.sharded_state}\n"
-        print_and_raise_internal(msg)
+    # Assume that all parameters are in some sharded state
     world_size, rank = (group.size(), group.rank())
     # - Copy in
     with torch.cuda.stream(all_gather_copy_in_stream):

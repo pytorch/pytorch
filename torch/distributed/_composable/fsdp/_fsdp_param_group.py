@@ -84,6 +84,8 @@ class FSDPParamGroup:
         self.post_forward_mesh_info = post_forward_mesh_info
         self._device = device
         self._training_state = TrainingState.IDLE
+        # Must be kept in sync with those of the parameters
+        self._sharded_state = ShardedState.SHARDED
 
         # - Mixed precision
         self._orig_dtype, self._reduce_dtype = self._get_mp_dtypes()
@@ -210,6 +212,8 @@ class FSDPParamGroup:
     def _unshard(self, async_op: bool = False):
         if self._all_gather_result is not None:  # already called, pending wait
             return
+        if self._sharded_state == ShardedState.UNSHARDED:
+            return  # already unsharded
         log.info("_unshard for %s", self._module_fqn)
         if self._reshard_after_forward_event is not None:
             # If previously resharded to a different world size, the resharded
@@ -254,7 +258,7 @@ class FSDPParamGroup:
         )
         for fsdp_param in self.fsdp_params:
             fsdp_param.init_unsharded_param()  # no-op after 1st call
-            fsdp_param.to_unsharded()
+        self._to_unsharded()
         all_gather_copy_out_event = torch.cuda.Event()
         all_gather_copy_out_event.record()
         if self._training_state == TrainingState.FORWARD:
@@ -275,13 +279,11 @@ class FSDPParamGroup:
             if not self._reshard_after_forward:
                 return
             if self._use_post_forward_mesh:
-                for fsdp_param in self.fsdp_params:
-                    fsdp_param.to_sharded_post_forward()
+                self._to_sharded_post_forward()
                 self._reshard_after_forward_event = torch.cuda.Event()
                 self._reshard_after_forward_event.record()
                 return
-        for fsdp_param in self.fsdp_params:
-            fsdp_param.to_sharded()
+        self._to_sharded()
 
     def pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
@@ -414,28 +416,12 @@ class FSDPParamGroup:
     def _pre_save_state_dict_hook(
         self, module: nn.Module, *unused_args, **unused_kwargs
     ):
-        if module not in self._module_to_fsdp_param_refs:
-            raise FSDPInternalError(
-                f"Module not found in module to FSDP parameter mapping: {module}"
-            )
-        module_fsdp_params = self._module_to_fsdp_param_refs[module]
-        for fsdp_param_ref in module_fsdp_params:
-            fsdp_param = fsdp_param_ref()
-            assert fsdp_param is not None, "FSDPParam deallocated"
-            fsdp_param.to_sharded()
+        self._to_sharded()
 
     def _pre_load_state_dict_hook(
         self, module: nn.Module, *unused_args, **unused_kwargs
     ):
-        if module not in self._module_to_fsdp_param_refs:
-            raise FSDPInternalError(
-                f"Module not found in module to FSDP parameter mapping: {module}"
-            )
-        module_fsdp_params = self._module_to_fsdp_param_refs[module]
-        for fsdp_param_ref in module_fsdp_params:
-            fsdp_param = fsdp_param_ref()
-            assert fsdp_param is not None, "FSDPParam deallocated"
-            fsdp_param.to_sharded()
+        self._to_sharded()
 
     # Utilities #
     @contextlib.contextmanager
@@ -446,6 +432,21 @@ class FSDPParamGroup:
             yield
         finally:
             self._training_state = old_training_state
+
+    def _to_sharded(self):
+        for fsdp_param in self.fsdp_params:
+            fsdp_param.to_sharded()
+        self._sharded_state = ShardedState.SHARDED
+
+    def _to_sharded_post_forward(self):
+        for fsdp_param in self.fsdp_params:
+            fsdp_param.to_sharded_post_forward()
+        self._sharded_state = ShardedState.SHARDED_POST_FORWARD
+
+    def _to_unsharded(self):
+        for fsdp_param in self.fsdp_params:
+            fsdp_param.to_unsharded()
+        self._sharded_state = ShardedState.UNSHARDED
 
     # Hook Registration #
     def _register_post_backward_hook(
@@ -505,17 +506,6 @@ class FSDPParamGroup:
             self._reshard_after_forward
             and self.mesh_info != self.post_forward_mesh_info
         )
-
-    @property
-    def _sharded_state(self) -> ShardedState:
-        state = self.fsdp_params[0].sharded_state
-        for fsdp_param in self.fsdp_params[1:]:
-            if state != fsdp_param.sharded_state:
-                print_and_raise_internal(
-                    "Parameters in the same group should be in the same "
-                    f"sharded state but got {state} and {fsdp_param.sharded_state}"
-                )
-        return state
 
     @property
     def _all_gather_process_group(self) -> dist.ProcessGroup:
