@@ -19,6 +19,7 @@ import copy
 import json
 import re
 from collections import defaultdict
+from pytest_shard_custom import PytestShardPlugin, pytest_addoptions as shard_addoptions
 
 # a lot of this file is copied from _pytest.junitxml and modified to get rerun info
 
@@ -84,6 +85,7 @@ def pytest_addoption(parser: Parser) -> None:
         "Emit XML for schema: one of legacy|xunit1|xunit2",
         default="xunit2",
     )
+    shard_addoptions(parser)
 
 
 def pytest_configure(config: Config) -> None:
@@ -105,6 +107,8 @@ def pytest_configure(config: Config) -> None:
         config.option.stepcurrent = config.getoption("stepcurrent_skip")
     if config.getoption("stepcurrent"):
         config.pluginmanager.register(StepcurrentPlugin(config), "stepcurrentplugin")
+    if config.getoption("num_shards"):
+        config.pluginmanager.register(PytestShardPlugin(config), "pytestshardplugin")
 
 
 def pytest_unconfigure(config: Config) -> None:
