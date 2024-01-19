@@ -1,12 +1,18 @@
 # Owner(s): ["oncall: distributed"]
 
 import unittest
+from typing import List
 
 import torch
+import torch.nn as nn
 from _test_fully_shard_common import MLP
+from torch.distributed._composable import replicate
 
 from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._composable.fsdp._fsdp_init import _normalize_device
+from torch.distributed._composable.fsdp._fsdp_init import (
+    _get_managed_modules,
+    _normalize_device,
+)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_fsdp import FSDPTestMultiThread
@@ -66,6 +72,48 @@ class TestFullyShardInitMesh(FSDPTestMultiThread):
         regex = "device and mesh must be of the same type but got cpu for device and cuda for mesh"
         with self.assertRaisesRegex(ValueError, regex):
             fully_shard(model, mesh=mesh, device="cpu")
+
+
+class TestFullyShardInitManagedModules(FSDPTestMultiThread):
+    """Tests getting the managed modules for a ``fully_shard`` module."""
+
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_managed_modules_single_fully_shard(self):
+        model = MLP(8, torch.device("cuda"))
+        # Assume calling `fully_shard` on `model`
+        managed_modules = _get_managed_modules(model)
+        expected_managed_modules = list(model.modules())
+        self._check_managed_modules(managed_modules, expected_managed_modules)
+
+    def test_managed_modules_nested_fully_shard(self):
+        model = nn.Sequential(*[MLP(8, torch.device("cuda")) for _ in range(2)])
+        fully_shard(model[0])
+        # Assume calling `fully_shard` on `model`
+        managed_modules = _get_managed_modules(model)
+        expected_managed_modules = list(model[1].modules()) + [model]
+        self._check_managed_modules(managed_modules, expected_managed_modules)
+
+    def test_managed_modules_nested_fully_shard_and_replicate(self):
+        model = nn.Sequential(*[MLP(8, torch.device("cuda")) for _ in range(3)])
+        replicate(model[0])
+        fully_shard(model[2])
+        # Assume calling `fully_shard` on `model`
+        managed_modules = _get_managed_modules(model)
+        expected_managed_modules = list(model[1].modules()) + [model]
+        self._check_managed_modules(managed_modules, expected_managed_modules)
+
+    def _check_managed_modules(
+        self,
+        managed_modules: List[nn.Module],
+        expected_managed_modules: List[nn.Module],
+    ):
+        self.assertEqual(len(managed_modules), len(expected_managed_modules))
+        # Check set comparison since we do not require anything about the order
+        self.assertEqual(set(managed_modules), set(expected_managed_modules))
 
 
 if __name__ == "__main__":
