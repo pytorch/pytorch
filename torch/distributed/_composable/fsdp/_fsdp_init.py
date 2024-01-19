@@ -1,4 +1,4 @@
-from typing import List, Set, Union
+from typing import List, Set, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -58,3 +58,26 @@ def _get_managed_modules(root_module: nn.Module) -> List[nn.Module]:
 
     dfs(root_module)
     return modules
+
+
+def _get_managed_states(
+    modules: List[nn.Module],
+) -> Tuple[List[nn.Parameter], List[torch.Tensor]]:
+    params: List[nn.Parameter] = []
+    buffers: List[torch.Tensor] = []
+    # Track visited parameters/buffers to avoid visiting shared parameters and
+    # buffers multiple times
+    visited_params: Set[nn.Parameter] = set()
+    visited_buffers: Set[torch.Tensor] = set()
+    for module in modules:
+        for param_name, param in module.named_parameters(recurse=False):
+            if param in visited_params:
+                continue
+            params.append(param)
+            visited_params.add(param)
+        for buffer_name, buffer in module.named_buffers(recurse=False):
+            if buffer in visited_buffers:
+                continue
+            buffers.append(buffer)
+            visited_buffers.add(buffer)
+    return params, buffers
