@@ -60,7 +60,7 @@ class TestFullyShardInitMesh(FSDPTestMultiThread):
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_invalid_mesh_ndim(self):
         mesh = init_device_mesh("cuda", (self.world_size, 1, 1))
-        model = MLP(8, torch.device("cuda"))
+        model = MLP(8)
         regex = r"fully\_shard expects a 1D or 2D DeviceMesh but got DeviceMesh\(\[\[\[0\]\], \[\[1\]\]\]\)"
         with self.assertRaisesRegex(ValueError, regex):
             fully_shard(model, mesh=mesh, device="cuda")
@@ -68,7 +68,7 @@ class TestFullyShardInitMesh(FSDPTestMultiThread):
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_mesh_device_mismatch(self):
         mesh = init_device_mesh("cuda", (self.world_size,))
-        model = MLP(8, torch.device("cpu"))
+        model = MLP(8)
         regex = "device and mesh must be of the same type but got cpu for device and cuda for mesh"
         with self.assertRaisesRegex(ValueError, regex):
             fully_shard(model, mesh=mesh, device="cpu")
@@ -83,22 +83,24 @@ class TestFullyShardInitManagedModules(FSDPTestMultiThread):
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_managed_modules_single_fully_shard(self):
-        model = MLP(8, torch.device("cuda"))
+        model = MLP(8)
         # Assume calling `fully_shard` on `model`
         managed_modules = _get_managed_modules(model)
         expected_managed_modules = list(model.modules())
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_managed_modules_nested_fully_shard(self):
-        model = nn.Sequential(*[MLP(8, torch.device("cuda")) for _ in range(2)])
+        model = nn.Sequential(*[MLP(8) for _ in range(2)])
         fully_shard(model[0])
         # Assume calling `fully_shard` on `model`
         managed_modules = _get_managed_modules(model)
         expected_managed_modules = list(model[1].modules()) + [model]
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_managed_modules_nested_fully_shard_and_replicate(self):
-        model = nn.Sequential(*[MLP(8, torch.device("cuda")) for _ in range(3)])
+        model = nn.Sequential(*[MLP(8) for _ in range(3)])
         replicate(model[0])
         fully_shard(model[2])
         # Assume calling `fully_shard` on `model`
