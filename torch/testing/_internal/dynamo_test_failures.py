@@ -1,99 +1,17 @@
-# tests in this list will run without Dynamo strict mode by default.
-FIXME_default_non_strict = {
-    "dynamo/test_logging",
-    "export/test_db",
-    "export/test_experimental",
-    "export/test_export",
-    "export/test_export_nonstrict",
-    "export/test_functionalized_assertions",
-    "export/test_pass_infra",
-    "export/test_passes",
-    "export/test_retraceability",
-    "export/test_serdes",
-    "export/test_serialize",
-    "export/test_unflatten",
-    "export/test_upgrade",
-    "export/test_verifier",
-    "functorch/test_aotdispatch",
-    "functorch/test_ops",
-    "functorch/test_vmap",
-    "inductor/test_aot_inductor",
-    "inductor/test_aot_inductor_utils",
-    "inductor/test_benchmark_fusion",
-    "inductor/test_binary_folding",
-    "inductor/test_codecache",
-    "inductor/test_codegen_triton",
-    "inductor/test_compiled_autograd",
-    "inductor/test_compiled_optimizers",
-    "inductor/test_config",
-    "inductor/test_coordinate_descent_tuner",
-    "inductor/test_cpu_cpp_wrapper",
-    "inductor/test_cpu_repro",
-    "inductor/test_cuda_cpp_wrapper",
-    "inductor/test_cuda_repro",
-    "inductor/test_cudacodecache",
-    "inductor/test_cudagraph_trees",
-    "inductor/test_custom_lowering",
-    "inductor/test_custom_post_grad_passes",
-    "inductor/test_debug_trace",
-    "inductor/test_dependencies",
-    "inductor/test_efficient_conv_bn_eval",
-    "inductor/test_extension_backend",
-    "inductor/test_foreach",
-    "inductor/test_fp8",
-    "inductor/test_fused_attention",
-    "inductor/test_fx_fusion",
-    "inductor/test_group_batch_fusion",
-    "inductor/test_indexing",
-    "inductor/test_inductor_freezing",
-    "inductor/test_inductor_utils",
-    "inductor/test_inplacing_pass",
-    "inductor/test_kernel_benchmark",
-    "inductor/test_layout_optim",
-    "inductor/test_max_autotune",
-    "inductor/test_memory_planning",
-    "inductor/test_minifier",
-    "inductor/test_minifier_isolate",
-    "inductor/test_mkldnn_pattern_matcher",
-    "inductor/test_mmdecomp",
-    "inductor/test_move_constructors_to_cuda",
-    "inductor/test_pattern_matcher",
-    "inductor/test_perf",
-    "inductor/test_profiler",
-    "inductor/test_select_algorithm",
-    "inductor/test_smoke",
-    "inductor/test_snode_runtime",
-    "inductor/test_split_cat_fx_passes",
-    "inductor/test_standalone_compile",
-    "inductor/test_torchinductor",
-    "inductor/test_torchinductor_codegen_dynamic_shapes",
-    "inductor/test_torchinductor_dynamic_shapes",
-    "inductor/test_torchinductor_opinfo",
-    "inductor/test_triton_heuristics",
-    "inductor/test_triton_wrapper",
-    "inductor/test_unbacked_symints",
-    "profiler/test_memory_profiler",
-    "profiler/test_profiler",
-    "profiler/test_profiler_tree",
-    "test_ao_sparsity",
-    "test_autograd",
-    "test_custom_ops",
-    "test_jit",
-    "test_jit_fuser_te",
-    "test_jit_llga_fuser",
-    "test_modules",
-    "test_ops",
-    "test_ops_fwd_gradients",
-    "test_ops_gradients",
-    "test_ops_jit",
-    "test_python_dispatch",
-    "test_quantization",
-    "test_tensorexpr",
-    "test_tensorexpr_pybind",
-    "test_torch",
-    "test_vulkan",
-    "test_xnnpack_integration",
-}
+# NOTE: [dynamo_test_failures.py]
+#
+# We generate xFailIfTorchDynamo* for all tests in `dynamo_expected_failures`
+# We generate skipIfTorchDynamo* for all tests in `dynamo_skips`
+#
+# For an easier-than-manual way of generating and updating these lists,
+# see scripts/compile_tests/update_failures.py
+#
+# If you're adding a new test, and it's failing PYTORCH_TEST_WITH_DYNAMO=1,
+# either add the appropriate decorators to your test or list them in this file.
+#
+# *These are not exactly unittest.expectedFailure and unittest.skip. We'll
+# always execute the test and then suppress the signal, if necessary.
+# If your tests crashes, or is slow, please use @skipIfTorchDynamo instead.
 
 # Tests that run without strict mode in PYTORCH_TEST_WITH_INDUCTOR=1.
 # Please don't add anything to this list.
@@ -106,6 +24,7 @@ FIXME_inductor_non_strict = {
 
 # We generate unittest.expectedFailure for all of the following tests
 # when run under PYTORCH_TEST_WITH_DYNAMO=1.
+# see NOTE [dynamo_test_failures.py] for more details
 #
 # This lists exists so we can more easily add large numbers of failing tests,
 dynamo_expected_failures = {
@@ -113,35 +32,8 @@ dynamo_expected_failures = {
     "TestCppExtensionJIT.test_custom_compound_op_autograd",
     "TestCppExtensionJIT.test_cpp_frontend_module_has_up_to_date_attributes",
     "TestCppExtensionOpenRgistration.test_open_device_registration",
-    "TestAutogradFallback.test_supports_tensor_lists_mode_nothing",
-    "TestAutogradFallback.test_post_autograd_returns_mix_of_requires_grad_tensors_mode_warn",
-    "TestAutogradFallback.test_cpu_return_self_mode_warn",
-    "TestAutogradFallback.test_base_does_not_require_grad_mode_warn",
-    "TestAutogradFallback.test_undefined_grads_mode_nothing",
-    "TestAutogradFallback.test_undefined_grads_mode_warn",
-    "TestAutogradFallback.test_autograd_function_registered_to_cpu_mode_warn",
-    "TestAutogradFallback.test_cpu_return_self_mode_nothing",
-    "TestAutogradFallback.test_composite_registered_to_cpu_mode_nothing",
-    "TestAutogradFallback.test_undefined_inputs_outputs_mode_nothing",
-    "TestAutogradFallback.test_no_autograd_kernel_inplace_mode_nothing",
-    "TestAutogradFallback.test_post_autograd_returns_leaf_mode_nothing",
-    "TestAutogradFallback.test_inplace_on_tensor_that_does_not_require_grad_mode_nothing",
-    "TestAutogradFallback.test_no_grad_mode_warn",
     "TestAutogradFallback.test_inplace_autograd_function_registered_to_cpu_mode_warn",
-    "TestAutogradFallback.test_no_autograd_kernel_mode_warn",
-    "TestAutogradFallback.test_base_does_not_require_grad_mode_nothing",
-    "TestAutogradFallback.test_composite_registered_to_cpu_mode_warn",
-    "TestAutogradFallback.test_post_autograd_returns_mix_of_requires_grad_tensors_mode_nothing",
-    "TestAutogradFallback.test_no_autograd_kernel_inplace_mode_warn",
-    "TestAutogradFallback.test_no_grad_mode_nothing",
-    "TestAutogradFallback.test_no_autograd_kernel_mode_nothing",
-    "TestAutogradFallback.test_supports_tensor_lists_mode_warn",
-    "TestAutogradFallback.test_post_autograd_returns_leaf_mode_warn",
-    "TestAutogradFallback.test_undefined_inputs_outputs_mode_warn",
-    "TestAutogradFallback.test_inplace_on_tensor_that_does_not_require_grad_mode_warn",
     "TestAutogradFallback.test_inplace_autograd_function_registered_to_cpu_mode_nothing",
-    "TestAutogradFallback.test_autograd_function_registered_to_cpu_mode_nothing",
-    "TestFunctionalOptimParity.test_functional_optim_parity_sgd",
     "TestIndexingCPU.test_invalid_index_cpu",
     "NumpyTestsCPU.test_boolean_shape_mismatch_cpu",
     "TestIndexingCPU.test_empty_ndim_index_bool_cpu",
@@ -157,8 +49,6 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_inverse_cpu_complex128",
     "TestLinalgCPU.test_norm_dtype_cpu_complex128",
     "TestLinalgCPU.test_householder_product_cpu_float64",
-    "TestLinalgCPU.test_linalg_lu_family_cpu_float32",
-    "TestLinalgCPU.test_linalg_lu_family_cpu_float64",
     "TestLinalgCPU.test_addr_integral_cpu_int64",
     "TestLinalgCPU.test_norm_vector_cpu_float32",
     "TestLinalgCPU.test_solve_cpu_complex128",
@@ -183,7 +73,6 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_addmm_sizes_cpu_float32",
     "TestLinalgCPU.test_norm_bfloat16_and_half_cpu_float16",
     "TestLinalgCPU.test_householder_product_cpu_complex64",
-    "TestLinalgCPU.test_linalg_lu_family_cpu_complex128",
     "TestLinalgCPU.test_inverse_cpu_float64",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_complex64",
     "TestLinalgCPU.test_pinv_cpu_complex64",
@@ -192,7 +81,6 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_einsum_sublist_format_cpu_complex128",
     "TestLinalgCPU.test_geqrf_cpu_complex64",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_float64",
-    "TestLinalgCPU.test_linalg_lu_family_cpu_complex64",
     "TestLinalgCPU.test_geqrf_cpu_float64",
     "TestLinalgCPU.test_householder_product_cpu_complex128",
     "TestLinalgCPU.test_geqrf_cpu_float32",
@@ -852,10 +740,8 @@ dynamo_expected_failures = {
     "TestIndexing.test_index_no_floats",  # torch_np/numpy_tests/core/test_indexing
     "TestBooleanIndexing.test_boolean_indexing_weirdness",  # torch_np/numpy_tests/core/test_indexing
     "TestBooleanIndexing.test_bool_as_int_argument_errors",  # torch_np/numpy_tests/core/test_indexing
-    "TestBroadcastedAssignments.test_simple_broadcasting_errors",  # torch_np/numpy_tests/core/test_indexing
     "TestFloatNonIntegerArgument.test_non_integer_argument_errors",  # torch_np/numpy_tests/core/test_indexing
     "TestIndexing.test_slicing_no_floats",  # torch_np/numpy_tests/core/test_indexing
-    "TestBroadcastedAssignments.test_prepend_not_one",  # torch_np/numpy_tests/core/test_indexing
     "TestFloatNonIntegerArgument.test_reduce_axis_float_index",  # torch_np/numpy_tests/core/test_indexing
     "TestEinsum.test_different_paths_dtype_e",  # torch_np/numpy_tests/core/test_einsum
     "TestEinsum.test_different_paths_dtype_B",  # torch_np/numpy_tests/core/test_einsum
@@ -1025,7 +911,6 @@ dynamo_expected_failures = {
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_seq_len_267_n_head_1_head_dim_16_causal_True_train_False_cpu_bfloat16",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_seq_len_1030_n_head_1_head_dim_8_causal_False_train_False_cpu_bfloat16",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float64_batch_size_2_seq_len_267_n_head_3_head_dim_16_causal_False_train_False_cpu_float64",
-    "TestTransformersCPU.test_train_with_is_causal_cpu",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float32_batch_size_12_seq_len_1030_n_head_1_head_dim_8_causal_True_train_True_cpu_float32",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float64_batch_size_12_seq_len_267_n_head_3_head_dim_16_causal_False_train_True_cpu_float64",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float64_batch_size_12_seq_len_267_n_head_3_head_dim_8_causal_False_train_True_cpu_float64",
@@ -1928,20 +1813,13 @@ dynamo_expected_failures = {
     "TestTensorBoardEmbedding.test_embedding",  # test_tensorboard
     "TestTensorProtoSummary.test_float_tensor_proto",  # test_tensorboard
     "TestTensorBoardSummary.test_image_without_channel",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_smoke",  # test_tensorboard
     "TestTensorBoardUtils.test_numpy_vid_uint8",  # test_tensorboard
     "TestTensorProtoSummary.test_complex_tensor_proto",  # test_tensorboard
     "TestTensorBoardSummary.test_image_with_one_channel",  # test_tensorboard
     "TestTensorBoardEmbedding.test_embedding_64",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_domain_discrete",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_wrong_parameter",  # test_tensorboard
     "TestTensorBoardSummary.test_video",  # test_tensorboard
     "TestTensorProtoSummary.test_int_tensor_proto",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_number",  # test_tensorboard
-    "TestTensorBoardWriter.test_writer",  # test_tensorboard
     "TestTensorProtoSummary.test_empty_tensor_proto",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_string",  # test_tensorboard
-    "TestTensorBoardSummary.test_hparams_bool",  # test_tensorboard
     "TestTensorBoardSummary.test_uint8_image",  # test_tensorboard
     "TestAsArrayCPU.test_copy_list_cpu_float64",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int64",  # test_tensor_creation_ops
@@ -2031,7 +1909,6 @@ dynamo_expected_failures = {
     "TestScatterGatherCPU.test_scatter_reduce_mean_cpu_int8",  # test_scatter_gather_ops
     "TestScatterGatherCPU.test_scatter__reductions_cpu_complex64",  # test_scatter_gather_ops
     "TestCxxPytree.test_pytree_serialize_spec8",  # test_pytree
-    "TestGenericPytree.test_flatten_unflatten_namedtuple_py",  # test_pytree
     "TestCxxPytree.test_pytree_serialize_spec9",  # test_pytree
     "TestCxxPytree.test_pytree_serialize_spec3",  # test_pytree
     "TestGenericPytree.test_flatten_unflatten_deque_py",  # test_pytree
@@ -2112,7 +1989,6 @@ dynamo_expected_failures = {
     "TestMkldnnCPU.test_tanh_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_conv2d_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_batch_norm_3d_cpu",  # test_mkldnn
-    "TestFunctionSchema.test_serialize_and_deserialize",  # test_function_schema
     "FakeTensorOperatorInvariants.test_like_ops",  # test_fake_tensor
     "FakeTensorConverterTest.test_memoized_conversion_from_meta",  # test_fake_tensor
     "FakeTensorOperatorInvariants.test_non_kwarg_only_device",  # test_fake_tensor
@@ -2820,7 +2696,6 @@ dynamo_expected_failures = {
     "TestNamedTuple.test_max",  # test_overrides
     "TestTorchFunctionMode.test_mode_notimplemented_loop",  # test_overrides
     "TestTorchFunctionMode.test_disable_enable_subclass",  # test_overrides
-    "TestTorchFunctionOverride.test_Tensor___setitem__",  # test_overrides
     "TestTorchFunctionOverride.test_mean_semantics",  # test_overrides
     "TestGradCheckOverride.test_gradcheck",  # test_overrides
     "TestTorchFunctionOverride.test_Tensor___cuda_array_interface_____get__",  # test_overrides
@@ -2831,11 +2706,9 @@ dynamo_expected_failures = {
     "TestGradNewOnesOverride.test_newones",  # test_overrides
     "TestTorchFunctionOverride.test_precedence_semantics",  # test_overrides
     "TestNamedTupleAPI.test_namedtuple_return",  # test_namedtuple_return_api
-    "TestAnalyze.test_trace_dependencies",  # test_package
     "TestVmapOperatorsLegacy.test_contiguous",  # test_legacy_vmap
     "TestVmapAPILegacy.test_accepts_nested_inputs",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nested_out_dims",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_add_cpu",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_inplace_manyview_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_functools_partial",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_unrelated_output_cpu",  # test_legacy_vmap
@@ -2844,21 +2717,16 @@ dynamo_expected_failures = {
     "TestVmapAPILegacy.test_single_input",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_chunk",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_mul_cpu",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_reshape_cpu",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_unrelated_output_multiple_grad_cpu",  # test_legacy_vmap
-    "TestVmapOperatorsLegacy.test_stack",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_select",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_binary_pointwise_ops",  # test_legacy_vmap
     "TestVmapAPILegacy.test_non_tensor_output_raises",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_max_cpu",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_binary_cross_entropy_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_diagonal",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_select_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nonzero_out_dims",  # test_legacy_vmap
     "TestVmapAPILegacy.test_unsupported_op_err_msg",  # test_legacy_vmap
     "TestVmapAPILegacy.test_batched_gradient_basic",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_slice",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_min_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_expand_as",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_unfold",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_sigmoid_cpu",  # test_legacy_vmap
@@ -2868,16 +2736,11 @@ dynamo_expected_failures = {
     "TestVmapOperatorsLegacy.test_new_empty_strided",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_is_floating_point",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_split",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_stack_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_fill_and_zero_inplace",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_is_complex",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_expand_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_as_strided",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_slice_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nested_with_different_map_dim",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_new_zeros",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_trace_cpu",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_permute_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_view_as",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_logsumexp_cpu",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_log1p_cpu",  # test_legacy_vmap
@@ -2891,17 +2754,13 @@ dynamo_expected_failures = {
     "TestVmapBatchedGradientLegacyCPU.test_inplace_on_view_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_new_empty",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_lgamma_cpu",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_threshold_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_multiple_out_dims",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_result_type",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_sum_dim",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_to",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_diagonal_cpu",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_sub_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_backward_unsupported_interaction",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_comparison_ops",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_is_contiguous",  # test_legacy_vmap
-    "TestVmapOperatorsLegacy.test_cat",  # test_legacy_vmap
     "TestVmapAPILegacy.test_multiple_outputs",  # test_legacy_vmap
     "TestVmapAPILegacy.test_inplace_fallback_unary",  # test_legacy_vmap
     "TestVmapAPILegacy.test_out_dim_out_of_bounds_err_msg",  # test_legacy_vmap
@@ -2916,7 +2775,6 @@ dynamo_expected_failures = {
     "TestVmapOperatorsLegacy.test_no_random_op_support",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_unbind",  # test_legacy_vmap
     "TestVmapAPILegacy.test_non_default_in_dims_out_dims",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_median_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_T_numpy",  # test_legacy_vmap
     "TestNamedTensor.test_addmv",  # test_namedtensor
     "TestNamedTensor.test_cummax_cummin",  # test_namedtensor
@@ -2983,201 +2841,884 @@ dynamo_expected_failures = {
     "TestNamedTensor.test_mv",  # test_namedtensor
     "TestNamedTensor.test_using_unseen_interned_string_bumps_refcount_permanently",  # test_namedtensor
     "TestNamedTensor.test_resize",  # test_namedtensor
-    "TestFX.test_graph_edit_with_proxy",  # test_fx
-    "TestFX.test_native_callable",  # test_fx
-    "TestFX.test_interpreter_default_args",  # test_fx
-    "TestFX.test_tuple_no_subscript",  # test_fx
-    "TestFX.test_symbolic_trace_assert",  # test_fx
-    "TestFX.test_layout",  # test_fx
-    "TestFX.test_interpreter_onthefly_swap",  # test_fx
     "TestFX.test_pytree_concrete",  # test_fx
-    "TestFX.test_wrapped_retrace",  # test_fx
-    "TestFX.test_wrong_target_type",  # test_fx
-    "TestFX.test_delete_unused_submodules_leaf",  # test_fx
-    "TestFX.test_trace_fn_constant",  # test_fx
-    "TestFX.test_interpreter_not_enough_args",  # test_fx
-    "TestFX.test_ast_rewriter_wrap_fn_directly",  # test_fx
-    "TestFX.test_module_deepcopy_edit_nodes",  # test_fx
-    "TestFX.test_stack_traces_with_transformer",  # test_fx
-    "TestFX.test_trace_multiple_funcs",  # test_fx
-    "TestFX.test_string_literal_return",  # test_fx
-    "TestFX.test_interpreter",  # test_fx
-    "TestFX.test_graph_module",  # test_fx
-    "TestFX.test_pretty_print_targets",  # test_fx
-    "TestFX.test_tensor_constant",  # test_fx
-    "TestFX.test_erase_node_error",  # test_fx
-    "TestFX.test_node_tagging",  # test_fx
-    "TestFX.test_transformer_preserves_nn_module_stack_for_get_attr",  # test_fx
-    "TestFX.test_trace_return_dataclass_nested",  # test_fx
-    "TestFX.test_find_uses",  # test_fx
-    "TestFX.test_varargs_concrete",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_Mutation_cpu",  # test_fx
-    "TestFX.test_deepcopy_graph_with_tracer_cls",  # test_fx
-    "TestFX.test_submodule_manipulation_API",  # test_fx
-    "TestFX.test_annotations_with_non_torch_reference_and_no_internal_forward_references",  # test_fx
     "TestFX.test_custom_traceback_raised_when_exception_source_is_graphmodule",  # test_fx
-    "TestFX.test_single_default_arg",  # test_fx
-    "TestFX.test_partial_trace",  # test_fx
-    "TestFX.test_prepend_self",  # test_fx
-    "TestFX.test_transformer_noop",  # test_fx
-    "TestFX.test_enum",  # test_fx
     "TestConstFold.test_check_skip_folding_quant_dequant_pattern",  # test_fx
-    "TestFX.test_nonetype_annotation",  # test_fx
-    "TestFX.test_profiler_ranges_side_effect",  # test_fx
-    "TestFX.test_unpack_dict_better_error",  # test_fx
-    "TestFX.test_custom_import",  # test_fx
-    "TestFX.test_custom_proxy_type_literal",  # test_fx
-    "TestFX.test_pretty_print_node",  # test_fx
-    "TestFX.test_interpreter_other_graph",  # test_fx
-    "TestFX.test_trace_function",  # test_fx
-    "TestFX.test_custom_proxy_type",  # test_fx
     "TestFX.test_immutable_list_pytree_ops",  # test_fx
-    "TestFX.test_throw_out_variant",  # test_fx
-    "TestFX.test_no_mutation",  # test_fx
-    "TestFX.test_fx_and_or",  # test_fx
-    "TestFX.test_interpreter_star_args",  # test_fx
-    "TestFX.test_pickle_nonetype_annotation",  # test_fx
-    "TestFX.test_all_input_nodes",  # test_fx
-    "TestFX.test_script_tensor_constant",  # test_fx
-    "TestFX.test_pickle_torch_custom_ops",  # test_fx
-    "TestFX.test_deepcopy_no_recursion",  # test_fx
-    "TestFX.test_torch_custom_ops",  # test_fx
-    "TestFX.test_ast_rewriter_wrap_with_submodule",  # test_fx
-    "TestFX.test_torch_fx_len",  # test_fx
-    "TestFX.test_construct_root_dict",  # test_fx
-    "TestFX.test_fx_shifts",  # test_fx
-    "TestFX.test_inf_nan",  # test_fx
-    "TestFX.test_lineno_map",  # test_fx
-    "TestFX.test_pretty_print",  # test_fx
-    "TestFX.test_trace_dict_proxy_keys",  # test_fx
-    "TestFX.test_ast_rewriter_wrapped_via_decorator_and_transformed",  # test_fx
-    "TestFX.test_wrap_decorated_function",  # test_fx
-    "TestFX.test_tensor_attribute",  # test_fx
-    "TestFX.test_user_friendly_call_provenance_with_module",  # test_fx
-    "TestFX.test_pickle_custom_import",  # test_fx
-    "TestFX.test_informative_co_filename",  # test_fx
-    "TestFX.test_remove_uses",  # test_fx
-    "TestFX.test_deepcopy_with_submods_params",  # test_fx
-    "TestFX.test_custom_codegen_with_transformer",  # test_fx
     "TestFX.test_annotation_with_future",  # test_fx
-    "TestFX.test_copy_it",  # test_fx
-    "TestFX.test_getitem_subproc",  # test_fx
-    "TestFX.test_leaf_module",  # test_fx
-    "TestFX.test_update_kwargs_api",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_TakeList_cpu",  # test_fx
     "TestPassManager.test_pass_manager",  # test_fx
-    "TestFX.test_control_flow_tracing",  # test_fx
     "TestFX.test_pytree",  # test_fx
     "TestFX.test_user_friendly_call_provenance_with_function",  # test_fx
-    "TestFX.test_wrap_with_submodule",  # test_fx
-    "TestFX.test_example_shape_prop",  # test_fx
-    "TestFX.test_stack_traces",  # test_fx
-    "TestFX.test_tracing_graphmodules_as_leaf_submodules",  # test_fx
-    "TestFX.test_symbolic_trace_sequential",  # test_fx
-    "TestFX.test_script_method_trace",  # test_fx
-    "TestFX.test_return_type_exists",  # test_fx
-    "TestFX.test_transformer_multi_outputs",  # test_fx
-    "TestFX.test_unpack",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_MutationMetadata_cpu",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_MutationTorchTensorCall_cpu",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_MutationInput_cpu",  # test_fx
-    "TestFX.test_metadata_on_ph",  # test_fx
-    "TestFX.test_shape_prop_aggregate",  # test_fx
-    "TestFX.test_custom_codegen",  # test_fx
-    "TestFX.test_namedtuple_return_trace",  # test_fx
-    "TestFX.test_interpreter_partial_eval",  # test_fx
-    "TestFX.test_reserved_getattr",  # test_fx
-    "TestFX.test_deepcopy_graphmodule_with_transform",  # test_fx
-    "TestFX.test_multi_insert_point",  # test_fx
-    "TestFX.test_pretty_print_graph",  # test_fx
-    "TestFX.test_graph_module_replicate_for_dp",  # test_fx
     "TestFX.test_fn_type_annotation_empty",  # test_fx
     "TestFX.test_immutable_dict_pytree_ops",  # test_fx
-    "TestFX.test_reassign_args_kwargs_uses",  # test_fx
-    "TestFX.test_fn_type_annotations",  # test_fx
-    "TestFX.test_custom_proxy_input_dependent_control_flow",  # test_fx
-    "TestFX.test_interpreter_run_node_override",  # test_fx
-    "TestFX.test_ctx_mgr",  # test_fx
-    "TestFX.test_wrap",  # test_fx
-    "TestFX.test_deepcopy_recursion_depth",  # test_fx
-    "TestFX.test_wrapped_method",  # test_fx
-    "TestFX.test_wrong_topo",  # test_fx
-    "TestFX.test_autowrap_functions",  # test_fx
-    "TestFX.test_fx_create_arg",  # test_fx
-    "TestFX.test_regular_and_default_args",  # test_fx
-    "TestFX.test_inf_nan_kwds",  # test_fx
-    "TestFX.test_wrapped_via_decorator_and_transformed",  # test_fx
-    "TestFX.test_ast_rewriter_reassigns_submodules",  # test_fx
-    "TestFX.test_ast_rewriter_rewrites_assert",  # test_fx
-    "TestFX.test_annotations_with_forward_references",  # test_fx
-    "TestFX.test_ast_rewriter_rewrites_assert_with_message",  # test_fx
-    "TestFX.test_matmul_tracing",  # test_fx
-    "TestFX.test_torch_op_overloads",  # test_fx
-    "TestFX.test_args_kwargs_no_self",  # test_fx
-    "TestFX.test_custom_traceback_not_raised_when_exception_source_is_submodule",  # test_fx
-    "TestFX.test_imul_code_print",  # test_fx
     "TestCommonPass.test_correctness_factory_CSEPass_MutationFactory_cpu",  # test_fx
-    "TestFX.test_inline_graph",  # test_fx
-    "TestFX.test_trace_return_dataclass",  # test_fx
-    "TestFX.test_get_torch_func_signature",  # test_fx
     "TestCommonPass.test_correctness_factory_CSEPass_FactoryFunctionCall_cpu",  # test_fx
-    "TestFX.test_direct_param_use",  # test_fx
-    "TestFX.test_multiple_default_args",  # test_fx
-    "TestFX.test_tensor_attribute_coalseced",  # test_fx
-    "TestFX.test_insertion_point",  # test_fx
-    "TestFX.test_namedtuple_return_qualname",  # test_fx
-    "TestFX.test_annotations_with_non_torch_reference_and_internal_forward_references",  # test_fx
-    "TestFX.test_concrete_arg_none_assert",  # test_fx
-    "TestFX.test_torch_fx_getattr",  # test_fx
-    "TestFX.test_named_tuple_inlined",  # test_fx
-    "TestFX.test_wrap_fn_directly",  # test_fx
-    "TestFX.test_graph_fns",  # test_fx
-    "TestFX.test_args_kwargs",  # test_fx
-    "TestFX.test_return_tuple",  # test_fx
-    "TestFX.test_trace_return_namedtuple",  # test_fx
-    "TestFX.test_ast_rewriter_wrapped_via_decorator",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_ReturnList_cpu",  # test_fx
-    "TestFX.test_replace_input",  # test_fx
-    "TestFX.test_sqrt",  # test_fx
-    "TestFX.test_remove_uses_with_custom_filter",  # test_fx
-    "TestFX.test_empty_graph_codegen",  # test_fx
-    "TestFX.test_deepcopy_tracer",  # test_fx
-    "TestFX.test_insert_arg",  # test_fx
-    "TestFX.test_interpreter_with_codegen",  # test_fx
-    "TestFX.test_torchbind_class_attribute_in_fx",  # test_fx
-    "TestFX.test_pickle_graphmodule",  # test_fx
-    "TestFX.test_graph_module_init_buffer_param_copied_mod_init",  # test_fx
-    "TestFX.test_update_args_api",  # test_fx
-    "TestFX.test_nn_module_stack",  # test_fx
-    "TestFX.test_graph_unique_names",  # test_fx
-    "TestFX.test_trace_dict_int_keys",  # test_fx
-    "TestFX.test_custom_proxy_dynamic_value",  # test_fx
-    "TestFX.test_typename_print",  # test_fx
-    "TestFX.test_move_before",  # test_fx
     "TestFXAPIBackwardCompatibility.test_public_api_surface",  # test_fx
-    "TestFX.test_copy_no_remap",  # test_fx
-    "TestFX.test_shape_prop_layout",  # test_fx
-    "TestFX.test_shape_prop_layout_3d",  # test_fx
-    "TestFX.test_update_args_kwargs_yells_at_you",  # test_fx
-    "TestFX.test_transformer_op_swap",  # test_fx
-    "TestFX.test_unpack_list_better_error",  # test_fx
-    "TestFX.test_graph_module_init_buffer_param_copied_dict_init",  # test_fx
-    "TestFX.test_disallow_override",  # test_fx
-    "TestFX.test_fx_stateless",  # test_fx
-    "TestFX.test_sequential",  # test_fx
-    "TestFX.test_dict",  # test_fx
-    "TestFX.test_snake_case",  # test_fx
-    "TestFX.test_deepcopy_graphmodule",  # test_fx
-    "TestFX.test_annotations_with_no_forward_references",  # test_fx
-    "TestFX.test_wrapped_via_decorator",  # test_fx
-    "TestFX.test_graph_unique_names_manual",  # test_fx
-    "TestFX.test_ast_rewriter_wrap",  # test_fx
-    "TestFX.test_torchbind_class_attribute_in_fx_tensor_arg",  # test_fx
-    "TestFX.test_ellipsis",  # test_fx
     "TestContentStoreCPU.test_repeated_hash_cpu",  # test_content_store
     "TestLazyTensor.test_tensor_ctr",  # lazy/test_ts_opinfo
+    "TestAnalyze.test_trace_dependencies",  # test_package
+    "TestProfilerTree.test_profiler_experimental_tree_with_memory",  # profiler/test_profiler_tree
+    "TestProfilerTree.test_profiler_experimental_tree_with_memory_and_stack",  # profiler/test_profiler_tree
+    "TestProfilerTree.test_profiler_experimental_tree_with_record_function",  # profiler/test_profiler_tree
+    "TestProfilerTree.test_profiler_experimental_tree_with_stack_and_torch_dispatch",  # profiler/test_profiler_tree
+    "TestProfilerTree.test_profiler_experimental_tree_with_stack_and_torch_function",  # profiler/test_profiler_tree
+    "TestTorchTidyProfiler.test_allocation_ids_with_other_ops",  # profiler/test_profiler
+    "TestExperimentalUtils.test_profiler_synchronized_dataloader_pattern",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_impl_reuse",  # profiler/test_profiler
+    "TestExperimentalUtils.test_profiler_pattern_matcher_json_report",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_tensorimpl_invalidation_full",  # profiler/test_profiler
+    "TestProfiler.test_profiler_tracing",  # profiler/test_profiler
+    "TestProfiler.test_is_profiler_enabled",  # profiler/test_profiler
+    "TestExperimentalUtils.test_utils_compute_idle_time",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_optimizer_parameters_sgd",  # profiler/test_profiler
+    "TestExperimentalUtils.test_profiler_name_pattern",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_extra_fields",  # profiler/test_profiler
+    "TestProfiler.test_flops",  # profiler/test_profiler
+    "TestProfiler.test_profiler_correlation_id",  # profiler/test_profiler
+    "TestProfiler.test_source_multithreaded_open_in_scope_work_in_main_thread_True",  # profiler/test_profiler
+    "TestProfiler.test_source_multithreaded_close_in_scope_work_in_main_thread_True",  # profiler/test_profiler
+    "TestProfiler.test_source",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_allocation_ids",  # profiler/test_profiler
+    "TestRecordFunction.test_record_function",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_optimizer_parameters_adam",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_tensor_properties",  # profiler/test_profiler
+    "TestProfiler.test_record_function_fast",  # profiler/test_profiler
+    "TestProfiler.test_profiler_fwd_bwd_link",  # profiler/test_profiler
+    "TestProfiler.test_concrete_inputs_profiling",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_tensorimpl_invalidation_scalar_args",  # profiler/test_profiler
+    "TestProfiler.test_guarded_record_function_fast",  # profiler/test_profiler
+    "TestExperimentalUtils.test_profiler_optimizer_single_tensor_pattern",  # profiler/test_profiler
+    "TestExperimentalUtils.test_utils_compute_self_time",  # profiler/test_profiler
+    "TestProfiler.test_high_level_trace",  # profiler/test_profiler
+    "TestRecordFunction.test_datapipe_with_record_function_fork",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_allocations",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_module_and_optimizer_ids",  # profiler/test_profiler
+    "TestExperimentalUtils.test_utils_compute_queue_depth_when_no_cuda_events",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_allocation_id_uniqueness",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_sparse_tensors",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_optimizer",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_tensorimpl_invalidation_keep_alive",  # profiler/test_profiler
+    "TestExperimentalUtils.test_utils_compute_queue_depth",  # profiler/test_profiler
+    "TestExperimentalUtils.test_profiler_pattern_match_helper",  # profiler/test_profiler
+    "TestProfiler.test_export_stacks",  # profiler/test_profiler
+    "TestProfiler.test_source_multithreaded_basic_work_in_main_thread_True",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_mkldnn_tensors",  # profiler/test_profiler
+    "TestRecordFunction.test_datapipe_with_record_function",  # profiler/test_profiler
+    "TestProfiler.test_memory_profiler",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_tensor_lists",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_pointers_and_ids",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_nnmodule_params",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_tensorimpl_invalidation_set",  # profiler/test_profiler
+    "TestTorchTidyProfiler.test_scalar_ins",  # profiler/test_profiler
+    "TestProfiler.test_profiler_op_event_args",  # profiler/test_profiler
+    "TestProfiler.test_source_multithreaded_complex_work_in_main_thread_True",  # profiler/test_profiler
+    "TestProfiler.test_source_multithreaded_multiple_preexisting_work_in_main_thread_True",  # profiler/test_profiler
+    "TestAOTAutograd.test_input_mutation_aliases_and_output_alias",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_aliases_bases_out_of_order",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_inference_mode",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_is_output",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_set__input_mutation",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_multiple_mixed",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_some_outputs_dont_require_grad_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_data_and_metadata_mutation_aliases_other_input",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_output_view_metadata_mutate_multiple",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_data_and_metadata_mutation",  # functorch/test_aotdispatch
+    "TestPythonKeyCPU.test_make_fx_vjp_cpu",  # functorch/test_aotdispatch
+    "TestPartitioning.test_min_cut_partitioner_output_tensor_shape_tensor",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_subclass_metadata_mutation_req_grad_False",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_output_view_simple",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_multi_output_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_returned_multiple_times",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_metadata_mutation_aliases",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_input_multi_output_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_subclass_metadata_mutation_req_grad_True",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_aliases_other_input2",  # functorch/test_aotdispatch
+    "TestAOTDispatch.test_aot_dispatch_input_mutation_and_output_alias",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_aliased_with_mutation_output_alias",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_invalid_dupe_left_bias",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_multiple_inputs_get_correct_one",  # functorch/test_aotdispatch
+    "TestAOTDispatch.test_aot_dispatch_input_mutation",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_new_inp_requires_grad_now",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_view_detach",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_false_aliasing",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_default_partitioner_saves_symints_not_tensors_for_bw",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_invalid_dupe",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_and_returned_different_grad",  # functorch/test_aotdispatch
+    "TestPartitioning.test_min_cut_partitioner_recomputable_ops",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_all_alias_types",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_set__and_data_mutation_good",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_set__and_data_mutation_bad",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_set__nop",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_dupe_arg_torture",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_noncontiguous",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_output_view_mutate_multiple",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_and_returned",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_some_outputs_dont_require_grad_non_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_some_output_requires_grad_input_doesnt",  # functorch/test_aotdispatch
+    "TestAOTDispatch.test_aot_dispatch_output_alias",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_and_output_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_invalid_dupe_fake",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_multiple",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_alias_everything",  # functorch/test_aotdispatch
+    "TestPythonKeyCPU.test_make_fx_jacrev_cpu",  # functorch/test_aotdispatch
+    "TestPartitioning.test_default_partitioner_output_tensor_shape_tensor",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_aliases_other_input",  # functorch/test_aotdispatch
+    "TestPartitioning.test_contiguous",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_outputs_are_aliased",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_aliases_and_none_require_gradients",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_aliases_intermediate_and_returned_flipped",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_view_and_inplace_view",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_metadata",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_dict",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_output_op_depending_on_symint",  # functorch/test_aotdispatch
+    "TestAOTAutograd.test_input_mutation_output_view_multiple",  # functorch/test_aotdispatch
+    "TestUnflatten.test_unflatten_container_type",  # export/test_unflatten
+    "TestDeserialize.test_tensor_tensor_list",  # export/test_serialize
+    "SerDesExportTestExport.test_constrain_size_with_constrain_value_serdes",  # export/test_serdes
+    "SerDesExportTestDynamismExpression.test_export_inline_constraints_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_nn_module_stack_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_basic_non_strict_real_tensor_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_external_call_non_strict_real_tensor_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_constrain_size_with_various_cases_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_constrain_size_in_eager_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_non_strict_dynamic_shapes_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_basic_non_strict_fake_tensor_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_non_strict_dynamic_shapes_suggested_fixes_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_cond_with_module_stack_export_with_serdes",  # export/test_serdes
+    "SerDesExportTestExport.test_nn_module_stack_shared_submodule_serdes",  # export/test_serdes
+    "RetraceExportTestExport.test_constrain_size_in_eager_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_cond_with_module_stack_export_with_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_non_strict_dynamic_shapes_suggested_fixes_retraceability",  # export/test_retraceability  # noqa: B950
+    "RetraceExportTestExport.test_constrain_size_with_constrain_value_retraceability",  # export/test_retraceability
+    "RetraceExportTestDynamismExpression.test_export_inline_constraints_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_nn_module_stack_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_nn_module_stack_shared_submodule_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_constrain_size_with_various_cases_retraceability",  # export/test_retraceability
+    "RetraceExportTestExport.test_non_strict_dynamic_shapes_retraceability",  # export/test_retraceability
+    "TestPasses.test_views_op_having_view_copy",  # export/test_passes
+    "TestPasses.test_functionalize_inline_contraints",  # export/test_passes
+    "NonStrictExportTestExport.test_non_strict_dynamic_shapes_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_basic_non_strict_fake_tensor_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_nn_module_stack_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_param_util_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_cond_with_module_stack_export_with_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_non_strict_dynamic_shapes_suggested_fixes_non_strict",  # export/test_export_nonstrict  # noqa: B950
+    "NonStrictExportTestExport.test_raise_user_error_when_guard_on_data_dependent_operation_non_strict",  # export/test_export_nonstrict  # noqa: B950
+    "NonStrictExportTestExport.test__scaled_dot_product_flash_attention_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_to_module_with_mutated_buffer_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_basic_non_strict_real_tensor_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_external_call_non_strict_real_tensor_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_export_decomps_dynamic_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_to_module_with_mutated_buffer_multiple_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_export_with_wrong_inputs_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_fqn_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_sym_sqrt_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_nn_module_stack_shared_submodule_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_buffer_util_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_export_decomps_simple_non_strict",  # export/test_export_nonstrict
+    "NonStrictExportTestExport.test_to_module_with_mutated_buffer_multiple_update_sub_later_non_strict",  # export/test_export_nonstrict  # noqa: B950
+    "TestExport.test_non_strict_dynamic_shapes",  # export/test_export
+    "TestExport.test_cond_with_module_stack_export_with",  # export/test_export
+    "TestExport.test_constrain_size_in_eager",  # export/test_export
+    "TestExport.test_nn_module_stack",  # export/test_export
+    "TestExport.test_basic_non_strict_fake_tensor",  # export/test_export
+    "TestExport.test_constrain_size_with_various_cases",  # export/test_export
+    "TestExport.test_external_call_non_strict_real_tensor",  # export/test_export
+    "TestDynamismExpression.test_export_inline_constraints",  # export/test_export
+    "TestExport.test_basic_non_strict_real_tensor",  # export/test_export
+    "TestExport.test_constrain_size_with_constrain_value",  # export/test_export
+    "TestExport.test_nn_module_stack_shared_submodule",  # export/test_export
+    "TestExport.test_non_strict_dynamic_shapes_suggested_fixes",  # export/test_export
+    "TestExperiment.test_with_buffer_as_submodule",  # export/test_experimental
+    "ExampleTests.test_exportdb_supported_case_constrain_as_size_example",  # export/test_db
+    "ExampleTests.test_exportdb_supported_case_assume_constant_result",  # export/test_db
+    "TestOpCPU.test_addmm_cpu_bfloat16",  # test_jit_llga_fuser
+    "TestOpCPU.test_cat_cpu_float32",  # test_jit_llga_fuser
+    "TestOpCPU.test_addmm_cpu_float32",  # test_jit_llga_fuser
+    "TestOpCPU.test_add_scalar_cpu_bfloat16",  # test_jit_llga_fuser
+    "TestOpCPU.test_add_scalar_cpu_float32",  # test_jit_llga_fuser
+    "TestOpCPU.test_cat_cpu_bfloat16",  # test_jit_llga_fuser
+    "TestOpCPU.test_identity_binary_cpu_bfloat16",  # test_jit_llga_fuser
+    "TestOpCPU.test_identity_binary_cpu_float32",  # test_jit_llga_fuser
+    "TestTorch.test_type",  # test_torch
+    "TestTorch.test_cuda_not_built",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint4x2",  # test_torch
+    "TestTorch.test_map",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_fmod_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_float16",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_lerp_cpu",  # test_torch
+    "TestTorch.test_parsing_int64",  # test_torch
+    "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_bfloat16",  # test_torch
+    "TestTorch.test_parsing_intlist",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_eq_cpu",  # test_torch
+    "TestTorch.test_contains",  # test_torch
+    "TestTorch.test_new",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_map2_cpu",  # test_torch
+    "TestTorch.test_newaxis_numpy_comparison",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_ne_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_gt_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_bfloat16",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_div_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint8",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_lt_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_memory_format_operators_cpu",  # test_torch
+    "TestTorch.test_pin_memory",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_masked_fill_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool2d_cpu_float64",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_sub_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_le_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_qint32",  # test_torch
+    "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float16",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_qint8",  # test_torch
+    "TestTorchDeviceTypeCPU.test_untyped_storage_meta_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_remainder_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool1d_cpu_float32",  # test_torch
+    "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_float64",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_add_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_addcmul_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint2x4",  # test_torch
+    "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float64",  # test_torch
+    "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_float32",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool2d_cpu_float32",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool3d_cpu_float32",  # test_torch
+    "TestTorchDeviceTypeCPU.test_where_scalar_handcrafted_values_cpu",  # test_torch
+    "TestTorch.test_upsample_nearest2d_meta",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_map_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool1d_cpu_float64",  # test_torch
+    "TestTorch.test_upsample_nearest1d_meta",  # test_torch
+    "TestTorchDeviceTypeCPU.test_normal_kstest_cpu_float32",  # test_torch
+    "TestTorchDeviceTypeCPU.test_normal_kstest_cpu_float64",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_pow_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_copy_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool3d_cpu_float64",  # test_torch
+    "TestTorchDeviceTypeCPU.test_normal_kstest_cpu_float16",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_masked_scatter_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_ge_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_atan2_cpu",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_mul_cpu",  # test_torch
+    "TestTorch.test_tensoriterator_output_setup",  # test_torch
+    "TestTorchDeviceTypeCPU.test_broadcast_fn_addcdiv_cpu",  # test_torch
+    "TestTorch.test_parsing_double",  # test_torch
+    "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float32",  # test_torch
+    "TestTorchDeviceTypeCPU.test_deterministic_empty_cpu_uint64",  # test_torch
+    "TestAutograd.test_checkpoint_detects_non_determinism",  # test_autograd
+    "TestAutograd.test_gradcheck_backward_mul_by_grad_output",  # test_autograd
+    "TestAutogradForwardModeBatchedGrad.test_out_of_place_basic",  # test_autograd
+    "TestAutogradLogging.test_logging",  # test_autograd
+    "TestAutograd.test_custom_function_cycle",  # test_autograd
+    "TestAutogradForwardMode.test_detach_view_tracking",  # test_autograd
+    "TestAutograd.test_return_duplicate_inplace",  # test_autograd
+    "TestNestedCheckpoint.test_nested_checkpoint_set_early_stop_no_recompution_needed",  # test_autograd
+    "TestAutograd.test_backward_with_inputs",  # test_autograd
+    "TestAutograd.test_setitem",  # test_autograd
+    "TestAutogradDeviceTypeCPU.test_inplace_on_view_python_cpu",  # test_autograd
+    "TestAutogradForwardMode.test_make_dual_inference_tensor_in_inference_mode",  # test_autograd
+    "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_normal_mode_inplace_op",  # test_autograd
+    "TestAutograd.test_custom_function_save_for_forward",  # test_autograd
+    "TestAutograd.test_sparse_mm_backward",  # test_autograd
+    "TestAutograd.test_checkpointing_without_reentrant_with_context_fn",  # test_autograd
+    "TestAutograd.test_custom_function_saved_tensors",  # test_autograd
+    "TestAutograd.test_custom_function_forward_mode_wrong_formula",  # test_autograd
+    "TestAutogradInferenceMode.test_inference_mode_decorator",  # test_autograd
+    "TestAutogradForwardMode.test_forward_level_cleanup",  # test_autograd
+    "TestAutograd.test_gradcheck_check_forward_or_backward_only",  # test_autograd
+    "TestAutogradDeviceTypeCPU.test_inplace_on_view_modify_base_cpu",  # test_autograd
+    "TestAutograd.test_full_backward_hook_double_backward",  # test_autograd
+    "TestAutograd.test_gradcheck_forward_ad_batched_grad",  # test_autograd
+    "TestAutograd.test_custom_function_non_tensor_inputs_outputs",  # test_autograd
+    "TestNestedCheckpoint.test_nested_checkpoint_non_tensor_inputs_and_outputs_early_stop_True",  # test_autograd
+    "TestAutograd.test_autograd_views_codegen",  # test_autograd
+    "TestAutograd.test_profiler_aggregation_table",  # test_autograd
+    "TestAutograd.test_profiler_propagation",  # test_autograd
+    "TestAutograd.test_profiler_seq_nr",  # test_autograd
+    "TestNestedCheckpoint.test_nested_checkpoint_kwargs_early_stop_False",  # test_autograd
+    "TestAutograd.test_checkpointing_non_reentrant_autocast_cpu",  # test_autograd
+    "TestAutograd.test_named_tensor_for_complex_views",  # test_autograd
+    "TestAutogradInferenceMode.test_inference_mode_existing_autograd_session",  # test_autograd
+    "TestAutograd.test_set_grad_generator_functions_recursive",  # test_autograd
+    "TestAutograd.test_increment_version",  # test_autograd
+    "TestAutograd.test_record_function_callbacks",  # test_autograd
+    "TestAutograd.test_save_on_cpu_and_checkpoint",  # test_autograd
+    "TestAutogradForwardMode.test_make_dual_torch_dispatch",  # test_autograd
+    "TestAutogradDeviceTypeCPU.test_sparse_ctor_getter_backward_cpu_complex128",  # test_autograd
+    "TestNestedCheckpoint.test_nested_checkpoint_non_tensor_inputs_and_outputs_early_stop_False",  # test_autograd
+    "TestAutograd.test_gradcheck_nondeterministic",  # test_autograd
+    "TestAutograd.test_custom_function_forward_mode_forward_is_no_op",  # test_autograd
+    "TestNestedCheckpoint.test_nested_checkpoint_set_early_stop",  # test_autograd
+    "TestAutograd.test_version_counter",  # test_autograd
+    "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_normal_mode_view_op",  # test_autograd
+    "TestAutograd.test_set_grad_generator_functions",  # test_autograd
+    "TestAutograd.test_record_function",  # test_autograd
+    "TestAutograd.test_custom_function_forward_mode_view_checks",  # test_autograd
+    "TestNestedCheckpoint.test_nested_checkpoint_early_stop_True",  # test_autograd
+    "TestNestedCheckpoint.test_nested_checkpoint_two_children_early_stop_True",  # test_autograd
+    "TestAutograd.test_gradcheck_check_no_differentiable_outputs",  # test_autograd
+    "TestNestedCheckpoint.test_nested_checkpoint_two_children_early_stop_False",  # test_autograd
+    "TestAutograd.test_custom_autograd_repeated_grad_grad",  # test_autograd
+    "TestAutograd.test_setitem_mask",  # test_autograd
+    "TestAutogradDeviceTypeCPU.test_sparse_ctor_getter_backward_cpu_float64",  # test_autograd
+    "TestAutograd.test_anomaly_mode_no_check_nan",  # test_autograd
+    "TestAutograd.test_return_duplicate",  # test_autograd
+    "TestAutogradForwardMode.test_create_new_zeros_with_same_meta",  # test_autograd
+    "TestAutogradInferenceMode.test_inference_mode_tensor_creation",  # test_autograd
+    "TestAutograd.test_set_grad_coroutines",  # test_autograd
+    "TestAutograd.test_no_grad_copy_sparse",  # test_autograd
+    "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_inf_mode_view_op",  # test_autograd
+    "TestAutograd.test_set_grad_coroutines_exit",  # test_autograd
+    "TestNestedCheckpoint.test_nested_checkpoint_reentrant_backwards_early_stop_True",  # test_autograd
+    "TestAutograd.test_saved_tensor_hooks_custom_function_intermediates",  # test_autograd
+    "TestNestedCheckpoint.test_nested_checkpoint_reentrant_backwards_early_stop_False",  # test_autograd
+    "TestAutograd.test_custom_autograd_no_early_free",  # test_autograd
+    "TestAutograd.test_checkpointing_without_reentrant_custom_function_works",  # test_autograd
+    "TestNestedCheckpoint.test_nested_checkpoint_kwargs_early_stop_True",  # test_autograd
+    "TestAutograd.test_gradcheck_forward_ad",  # test_autograd
+    "TestAutograd.test_access_saved_tensor_twice_without_recomputation_works",  # test_autograd
+    "TestMultithreadAutograd.test_fork_join_in_middle",  # test_autograd
+    "TestAutograd.test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_False",  # test_autograd
+    "TestAutograd.test_accumulate_grad_tensor_reference",  # test_autograd
+    "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_inf_mode_functional_op",  # test_autograd
+    "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_normal_mode_functional_op",  # test_autograd
+    "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_inf_mode_inplace_op",  # test_autograd
+    "TestMultithreadAutograd.test_set_multithreading_enabled_as_context_manager_and_function",  # test_autograd
+    "TestAutogradDeviceTypeCPU.test_scatter_index_reduce_prod_gradgrad_error_cpu",  # test_autograd
+    "TestAutograd.test_current_graph_task_execution_order",  # test_autograd
+    "TestAutograd.test_nested_anomaly_detect_nan",  # test_autograd
+    "TestAutograd.test_nested_anomaly_printstack_cleanup",  # test_autograd
+    "TestAutograd.test_post_accumulate_grad_hook_gets_cleaned_up",  # test_autograd
+    "TestAutogradInferenceMode.test_inference_mode_context_manager",  # test_autograd
+    "TestAutograd.test_hook_none",  # test_autograd
+    "TestAutograd.test_set_data_tensorimpl_type",  # test_autograd
+    "TestAutograd.test_autograd_simple_views_python",  # test_autograd
+    "TestNestedCheckpoint.test_nested_checkpoint_early_stop_False",  # test_autograd
+    "TestNestedCheckpoint.test_nested_checkpoint_same_graph_early_stop_False",  # test_autograd
+    "TestAutograd.test_profiler_shapes",  # test_autograd
+    "TestAutograd.test_profiler",  # test_autograd
+    "TestNestedCheckpoint.test_nested_checkpoint_same_graph_early_stop_True",  # test_autograd
+    "TestAutograd.test_custom_function_forward_mode_inplace_checks",  # test_autograd
+    "TestAutograd.test_record_function_legacy",  # test_autograd
+    "TestBaseStructuredSparsifier.test_constructor",  # test_ao_sparsity
+    "TestBaseStructuredSparsifier.test_prepare_linear",  # test_ao_sparsity
+    "TestFxComposability.test_q_prep_fx_s_prep_ref_conv",  # test_ao_sparsity
+    "TestFxComposability.test_s_prep_before_q_prep_fx",  # test_ao_sparsity
+    "TestBaseStructuredSparsifier.test_step_linear",  # test_ao_sparsity
+    "TestComposability.test_convert_without_squash_mask",  # test_ao_sparsity
+    "TestComposability.test_s_prep_before_qat_prep",  # test_ao_sparsity
+    "TestComposability.test_qat_prep_before_s_prep",  # test_ao_sparsity
+    "TestFxComposability.test_q_prep_fx_before_s_prep",  # test_ao_sparsity
+    "TestFakeSparsity.test_jit_trace",  # test_ao_sparsity
+    "TestFakeSparsity.test_masking_logic",  # test_ao_sparsity
+    "TestComposability.test_fusion_before_s_prep",  # test_ao_sparsity
+    "TestFxComposability.test_s_prep_before_qat_prep_fx",  # test_ao_sparsity
+    "TestFxComposability.test_s_prep_q_prep_fx_ref",  # test_ao_sparsity
+    "TestComposability.test_s_prep_before_q_prep",  # test_ao_sparsity
+    "TestBaseSparsifier.test_state_dict",  # test_ao_sparsity
+    "TestComposability.test_q_prep_before_s_prep",  # test_ao_sparsity
+    "TestComposability.test_s_prep_before_fusion",  # test_ao_sparsity
+    "TestBaseStructuredSparsifier.test_prepare_conv2d",  # test_ao_sparsity
+    "TestQuantizeFx.test_conv_transpose_relu_not_reference",  # test_quantization
+    "TestPT2ERepresentation.test_qdq",  # test_quantization
+    "TestQuantizeFx.test_custom_module_class",  # test_quantization
+    "TestQuantizedConv.test_qconv2d_sum_relu_float_output_pt2e",  # test_quantization
+    "TestStaticQuantizedModule.test_batch_norm3d",  # test_quantization
+    "TestQuantizeFxOps.test_conv_transpose_1d",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_relu_fusion",  # test_quantization
+    "TestQuantizeFxOps.test_fixed_qparams_ops_qint8",  # test_quantization
+    "TestStaticQuantizedModule.test_channel_shuffle",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_resize",  # test_quantization
+    "TestQuantizeFx.test_state_dict",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_extract_weights_conv_fun_qat",  # test_quantization
+    "TestQuantizeFx.test__convert_to_reference_decomposed_fx_dynamic_quant",  # test_quantization
+    "TestQuantizedOps.test_qtanh",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_fusion",  # test_quantization
+    "TestQuantizePT2E.test_fold_quantize",  # test_quantization
+    "TestQuantizeFx.test_static_lstm_with_custom_fixed_qparams",  # test_quantization
+    "TestEqualizeFx.test_input_weight_equalization_graphs",  # test_quantization
+    "TestComparatorOps.test_compare_tensor_scalar",  # test_quantization
+    "TestQuantizedFunctionalOps.test_grid_sample",  # test_quantization
+    "TestQuantizeFxOps.test_chunk",  # test_quantization
+    "TestXNNPACKQuantizer.test_gru",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn2d.test_prepare_qat_conv_bn_fusion_getitem_placeholder",  # test_quantization
+    "TestDynamicQuantizedModule.test_dynamic_conv3d",  # test_quantization
+    "TestQuantizeFx.test_quantized_model_type",  # test_quantization
+    "TestQuantizedOps.test_equal",  # test_quantization
+    "TestQuantizedOps.test_qelu",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_relu_fusion_no_conv_bias",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_equal",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_index_put_cpu",  # test_quantization
+    "TestQuantizedConv.test_qconv3d_relu",  # test_quantization
+    "TestQuantizedConv.test_qconv3d",  # test_quantization
+    "TestXNNPACKQuantizer.test_propagate_annotation",  # test_quantization
+    "TestQuantizedTensor.test_choose_qparams_optimized",  # test_quantization
+    "TestXNNPACKQuantizer.test_linear_gru",  # test_quantization
+    "TestDynamicQuantizedModule.test_cell_api",  # test_quantization
+    "TestQuantizedOps.test_interpolate",  # test_quantization
+    "TestQuantizeFx.test_conv_transpose_reference",  # test_quantization
+    "TestPT2ERepresentation.test_conv2d",  # test_quantization
+    "TestQuantizeFxOps.test_embedding",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_float_assignment",  # test_quantization
+    "TestFXNumericSuiteNShadows.test_qconfig_multi_mapping_from_list",  # test_quantization
+    "TestXNNPACKQuantizer.test_conv_linear",  # test_quantization
+    "TestQuantizedOps.test_qadd_broadcast",  # test_quantization
+    "TestFXNumericSuiteNShadows.test_qconfig_multi_mapping_ordering",  # test_quantization
+    "TestFXNumericSuiteNShadows.test_linear_relu_mod",  # test_quantization
+    "TestQuantizedOps.test_sigmoid_non_observed",  # test_quantization
+    "TestStaticQuantizedModule.test_sigmoid",  # test_quantization
+    "TestQuantizedOps.test_mean",  # test_quantization
+    "TestQuantizeFx.test_shape_followed_by_quantized_op",  # test_quantization
+    "TestQuantizedTensor.test_decomposed_quantize_per_tensor_bfloat16_input",  # test_quantization
+    "TestQuantizeFxOps.test_clamp",  # test_quantization
+    "TestQuantizeFxOps.test_conv_module",  # test_quantization
+    "TestQuantizedOps.test_qmul_relu_different_qparams",  # test_quantization
+    "TestQuantizeFx.test_attention",  # test_quantization
+    "TestQuantizeFxOps.test_conv_transpose_2d",  # test_quantization
+    "TestStaticQuantizedModule.test_relu",  # test_quantization
+    "TestQuantizedOps.test_linear_bias_unpack",  # test_quantization
+    "TestPT2ERepresentation.test_dynamic_linear",  # test_quantization
+    "TestQuantizeFxModels.test_resnet_base",  # test_quantization
+    "TestQuantizeFxOps.test_qbatch_norm",  # test_quantization
+    "TestQNNPackOps.test_qnnpack_sigmoid",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_extract_weights_linear_fun_qat",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn1d.test_qat_update_shared_qspec",  # test_quantization
+    "TestQuantizeFxModels.test_qat_embedding_linear",  # test_quantization
+    "TestQuantizePT2E.test_fold_all_ops_before_quantize",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_int8_shadows_fp32_coverage",  # test_quantization
+    "TestQuantizePT2E.test_fold_quantize_per_channel",  # test_quantization
+    "TestQuantizationDocs.test_quantization_doc_qat",  # test_quantization
+    "TestQuantizedOps.test_custom_module_lstm",  # test_quantization
+    "TestStaticQuantizedModule.test_pool_api",  # test_quantization
+    "TestQuantizeFx.test_quant_output_always_observed",  # test_quantization
+    "TestQuantizeEagerOps.test_functional_module",  # test_quantization
+    "TestFakeQuantizeOps.test_learnable_backward_per_channel_cuda",  # test_quantization
+    "TestFXNumericSuiteNShadows.test_partial_qconfig_mapping",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_no_bias",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_layer_names",  # test_quantization
+    "TestQuantizedConv.test_qconv1d_unpack",  # test_quantization
+    "TestQuantizeFx.test_custom_module_class_input_has_duplicate_nodes",  # test_quantization
+    "TestXNNPACKQuantizer.test_linear_relu",  # test_quantization
+    "TestSerialization.test_linear_relu_package_quantization_transforms",  # test_quantization
+    "TestDynamicQuantizedModule.test_gru_api",  # test_quantization
+    "TestQuantizeFx.test_qconfig_for_call_method",  # test_quantization
+    "TestXNNPACKQuantizer.test_conv1d_with_conv2d",  # test_quantization
+    "TestQuantizedOps.test_qsoftmax",  # test_quantization
+    "TestQuantizedEmbeddingOps.test_embedding_bag_2bit",  # test_quantization
+    "TestObserver.test_per_tensor_observers",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_per_channel_load_save",  # test_quantization
+    "TestQuantizedOps.test_max_pool2d_nhwc",  # test_quantization
+    "TestFXGraphMatcher.test_simple_fun",  # test_quantization
+    "TestEqualizeFx.test_selective_equalization",  # test_quantization
+    "TestQuantizeFx.test__convert_to_reference_decomposed_fx",  # test_quantization
+    "TestQuantizeFx.test_remove_qconfig",  # test_quantization
+    "TestBackendConfig.test_backend_op_config_set_input_type_to_index",  # test_quantization
+    "TestQuantizedLinear.test_qlinear_relu",  # test_quantization
+    "TestQuantizePT2E.test_constant_prop_preserve_metadata",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_permute",  # test_quantization
+    "TestQuantizedTensor.test_quantize_per_channel_sub_byte",  # test_quantization
+    "TestStaticQuantizedModule.test_conv3d_relu_api",  # test_quantization
+    "TestPT2ERepresentation.test_add_relu",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_fusion_no_conv_bias",  # test_quantization
+    "TestQuantizeFxOps.test_layer_norm",  # test_quantization
+    "TestQuantizeFxOps.test_add_relu",  # test_quantization
+    "TestQuantizedOps.test_qthreshold",  # test_quantization
+    "TestXNNPACKQuantizer.test_dynamic_linear_with_conv",  # test_quantization
+    "TestQuantizeFx.test_custom_module_class_input_has_multiple_users",  # test_quantization
+    "TestXNNPACKQuantizer.test_add_mul_scalar",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_load_save",  # test_quantization
+    "TestFXNumericSuiteNShadows.test_add_loggers_functions",  # test_quantization
+    "TestFXNumericSuiteNShadows.test_linear_mod",  # test_quantization
+    "TestXNNPACKQuantizer.test_add_and_inplace_add",  # test_quantization
+    "TestQuantizeFxOps.test_elu",  # test_quantization
+    "TestQuantizeFx.test_conv_lowering",  # test_quantization
+    "TestQuantizedFunctionalOps.test_conv1d_api",  # test_quantization
+    "TestQuantizeFx.test_lowering_functional_linear_with_kwargs",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_bn_fusion_literal_args",  # test_quantization
+    "TestQuantizedTensor.test_per_tensor_qtensor_to_memory_format",  # test_quantization
+    "TestQuantizedOps.test_cat_nhwc",  # test_quantization
+    "TestStaticQuantizedModule.test_conv2d_relu_api",  # test_quantization
+    "TestQuantizeFx.test_prepare_custom_config_set_standalone_module_class",  # test_quantization
+    "TestQuantizeFxOps.test_mul",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_quant_dequant",  # test_quantization
+    "TestQuantizeFx.test_qconfig_module_name_regex",  # test_quantization
+    "TestQuantizeFx.test_qconfig_module_type",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn2d.test_qat_inplace_add_relu",  # test_quantization
+    "TestStaticQuantizedModule.test_embedding_api",  # test_quantization
+    "TestQuantizePT2E.test_speed",  # test_quantization
+    "TestStaticQuantizedModule.test_dropout",  # test_quantization
+    "TestQNNPackOps.test_qnnpack_sigmoid_sweep",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_match_activations_fun_qat",  # test_quantization
+    "TestQuantizedOps.test_qclamp",  # test_quantization
+    "TestQuantizedOps.test_avg_pool2d",  # test_quantization
+    "TestQuantizedOps.test_add_scalar_relu",  # test_quantization
+    "TestQuantizedTensor.test_decomposed_dequantize_per_tensor",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_int8_shadows_int8_mod",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_dtypes",  # test_quantization
+    "TestQuantizedOps.test_quantized_equal",  # test_quantization
+    "TestQuantizeFx.test_fold_quant_dequant",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn1d.test_prepare_qat_conv_bn_fusion_getitem_placeholder",  # test_quantization
+    "TestFakeQuantizeOps.test_fake_quant_per_channel_qparam_range",  # test_quantization
+    "TestQuantizedTensor.test_fp16_saturate_op",  # test_quantization
+    "TestQuantizedFunctionalOps.test_conv2d_api",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_bn_fusion",  # test_quantization
+    "TestQuantizedOps.test_avg_pool2d_nhwc",  # test_quantization
+    "TestQuantizeFxOps.test_quantized_conv_relu",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn2d.test_qat_update_shared_qspec",  # test_quantization
+    "TestQuantizeFx.test_fp32_sum",  # test_quantization
+    "TestQuantizedTensor.test_per_channel_qtensor_to_memory_format",  # test_quantization
+    "TestQuantizeFx.test_dict_output",  # test_quantization
+    "TestQuantizedConv.test_qconv2d_pt2e",  # test_quantization
+    "TestQuantizedLinear.test_qlinear_unpack",  # test_quantization
+    "TestQuantizeFx.test_lowering_functional_conv_with_kwargs",  # test_quantization
+    "TestQuantizePT2E.test_reentrant",  # test_quantization
+    "TestFXNumericSuiteNShadows.test_add_loggers_conv_bn_relu_fusion_quant",  # test_quantization
+    "TestQuantizedLinear.test_qlinear_qnnpack_free_memory_and_unpack",  # test_quantization
+    "TestDynamicQuantizedOps.test_qrnncell",  # test_quantization
+    "TestFXNumericSuiteNShadows.test_functions",  # test_quantization
+    "TestQuantizedOps.test_qmul_broadcast",  # test_quantization
+    "TestQuantizeFx.test_dequantize",  # test_quantization
+    "TestDynamicQuantizedModule.test_dynamic_convtranspose3d",  # test_quantization
+    "TestQuantizeFx.test_static_lstm_consume_tuple",  # test_quantization
+    "TestXNNPACKQuantizer.test_conv_linear_no_permute",  # test_quantization
+    "TestReferenceQuantizedModule.test_rnn_cell",  # test_quantization
+    "TestBackendConfig.test_backend_op_config_add_dtype_config",  # test_quantization
+    "TestStaticQuantizedModule.test_conv2d_add",  # test_quantization
+    "TestQuantizedConv.test_qconv2d_relu_pt2e",  # test_quantization
+    "TestPT2ERepresentation.test_add",  # test_quantization
+    "TestQuantizedEmbeddingOps.test_embedding_bag_4bit",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_channel_float_assignment",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_match_activations_fun_ptq",  # test_quantization
+    "TestXNNPACKQuantizer.test_mul_float32_max",  # test_quantization
+    "TestFXNumericSuiteNShadows.test_add_loggers_linear_mod_quant_quant",  # test_quantization
+    "TestQuantizeFx.test_standalone_module_float_interface",  # test_quantization
+    "TestFXNumericSuiteNShadows.test_custom_functions_and_tracer",  # test_quantization
+    "TestQuantizeFxOps.test_multiple_qconfigs_for_single_value",  # test_quantization
+    "TestQuantizedOps.test_leaky_relu_observed_output",  # test_quantization
+    "TestFakeQuantizeOps.test_learnable_forward_per_tensor_cuda",  # test_quantization
+    "TestQuantizedTensor.test_repeat",  # test_quantization
+    "TestStaticQuantizedModule.test_linear_leaky_relu",  # test_quantization
+    "TestBitsCPU.test_subclass_cpu",  # test_quantization
+    "TestFakeQuantizeOps.test_learnable_backward_per_channel_cpu",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_add_shadow_loggers_fun_ptq",  # test_quantization
+    "TestQuantizeFx.test_static_lstm",  # test_quantization
+    "TestQuantizeFx.test_qconfig_qat_module_type",  # test_quantization
+    "TestQuantizedOps.test_mul_scalar_relu",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_per_channel_permute",  # test_quantization
+    "TestStaticQuantizedModule.test_batch_norm2d",  # test_quantization
+    "TestDynamicQuantizedModule.test_dynamic_conv2d",  # test_quantization
+    "TestGenerateNumericDebugHandle.test_quantize_pt2e_preserve_handle",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_sub_byte_not_aligned_cols",  # test_quantization
+    "TestQuantizeFx.test_conv_linear_reference",  # test_quantization
+    "TestQuantizePT2E.test_composable_quantizer_linear_conv",  # test_quantization
+    "TestBackendConfig.test_backend_op_config_from_dict",  # test_quantization
+    "TestFakeQuantizeOps.test_learnable_backward_per_tensor_cuda",  # test_quantization
+    "TestXNNPACKQuantizer.test_linear_with_dynamic_shape",  # test_quantization
+    "TestQuantizedOps.test_empty_batch",  # test_quantization
+    "TestQuantizeFx.test_symmetric_qnnpack_qconfig_mapping",  # test_quantization
+    "TestQuantizedEmbeddingOps.test_embedding_bag_2d_indices",  # test_quantization
+    "TestQuantizeFx.test_symmetric_qnnpack_qat_qconfig_mapping",  # test_quantization
+    "TestQuantizePT2E.test_save_load",  # test_quantization
+    "TestPT2ERepresentation.test_qdq_per_channel",  # test_quantization
+    "TestQuantizeFxOps.test_prelu",  # test_quantization
+    "TestDynamicQuantizedOps.test_dynamic_conv1d",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_match_activations_fqn",  # test_quantization
+    "TestQuantizeFx.test_assert_on_size_after_quant_layer",  # test_quantization
+    "TestQuantizedConv.test_qconv1d_pt2e",  # test_quantization
+    "TestQuantizeFx.test_conv_linear_not_reference",  # test_quantization
+    "TestFakeQuantizeOps.test_forward_per_channel",  # test_quantization
+    "TestQuantizeFx.test_qconfig_none",  # test_quantization
+    "TestQuantizeFx.test__convert_to_reference_decomposed_fx_per_channel_quant",  # test_quantization
+    "TestPadding.test_reflection_pad2d",  # test_quantization
+    "TestStaticQuantizedModule.test_quant_dequant_api",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_add_shadow_loggers_fun_qat",  # test_quantization
+    "TestDynamicQuantizedOps.test_dynamic_conv2d",  # test_quantization
+    "TestQuantizedOps.test_qsoftmax_qnnpack",  # test_quantization
+    "TestStaticQuantizedModule.test_prelu",  # test_quantization
+    "TestQuantizedEmbeddingOps.test_embedding_bag_byte",  # test_quantization
+    "TestQuantizedConv.test_qconv3d_pt2e",  # test_quantization
+    "TestQuantizedOps.test_qcelu",  # test_quantization
+    "TestReferenceQuantizedModule.test_sparse",  # test_quantization
+    "TestQuantizedOps.test_max_pool3d",  # test_quantization
+    "TestPadding.test_reflection_pad1d",  # test_quantization
+    "TestQuantizedConv.test_qconv2d_sum_relu_pt2e",  # test_quantization
+    "TestDynamicQuantizedOps.test_qlstmGRU",  # test_quantization
+    "TestFakeQuantizeOps.test_fixed_qparams_fq_module",  # test_quantization
+    "TestQuantizeFxOps.test_qmatmul",  # test_quantization
+    "TestQuantizeFx.test_conv_transpose_not_reference",  # test_quantization
+    "TestUtils.test_get_fqn_to_example_inputs_default_kwargs",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_extract_weights_linear_fun_ptq",  # test_quantization
+    "TestQuantizeFxOps.test_cat",  # test_quantization
+    "TestQuantizeFx.test_sequential",  # test_quantization
+    "TestFakeQuantizeOps.test_learnable_backward_per_tensor_cpu",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_quantize_per_channel",  # test_quantization
+    "TestDynamicQuantizedModule.test_linear_api",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_unsqueeze",  # test_quantization
+    "TestQuantizedFunctionalOps.test_relu_api",  # test_quantization
+    "TestDynamicQuantizedModule.test_dynamic_convtranspose1d",  # test_quantization
+    "TestQuantizeFxOps.test_add",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_fusion_literal_args",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_fill_per_channel",  # test_quantization
+    "TestQuantizeFx.test_dynamic_with_fusion",  # test_quantization
+    "TestQuantizeFx.test_convert_qconfig_mapping",  # test_quantization
+    "TestQuantizeFx.test_save_observer_state_dict",  # test_quantization
+    "TestDynamicQuantizedOps.test_dynamic_convtranspose1d",  # test_quantization
+    "TestQuantizePT2E.test_derived_qspec",  # test_quantization
+    "TestDynamicQuantizedModule.test_dynamic_convtranspose2d",  # test_quantization
+    "TestFuseFx.test_fuse_conv_bn_add_relu_lowering",  # test_quantization
+    "TestQuantizedConv.test_qconv2d_sum_pt2e",  # test_quantization
+    "TestDynamicQuantizedOps.test_dynamic_convtranspose2d",  # test_quantization
+    "TestPT2ERepresentation.test_maxpool2d",  # test_quantization
+    "TestQuantizeFx.test_lowering_functional_conv_transpose_with_kwargs",  # test_quantization
+    "TestQuantizedOps.test_avg_pool3d_nhwc",  # test_quantization
+    "TestQuantizeFx.test_qparams_buffers",  # test_quantization
+    "TestStaticQuantizedModule.test_instance_norm",  # test_quantization
+    "TestQuantizeFxOps.test_functional_conv",  # test_quantization
+    "TestXNNPACKQuantizer.test_qat_dynamic_linear",  # test_quantization
+    "TestQuantizedLinear.test_qlinear",  # test_quantization
+    "TestQuantizeFx.test_no_obs_between_unmatched_node_and_copy_node",  # test_quantization
+    "TestStaticQuantizedModule.test_conv1d_relu_api",  # test_quantization
+    "TestXNNPACKQuantizer.test_linear",  # test_quantization
+    "TestQuantizeFxOps.test_norm_weight_bias",  # test_quantization
+    "TestQuantizeFxOps.test_reshape_fp16",  # test_quantization
+    "TestQuantizeFx.test_packed_weight_fused_op",  # test_quantization
+    "TestStaticQuantizedModule.test_embedding_bag_api",  # test_quantization
+    "TestQuantizedOps.test_advanced_indexing",  # test_quantization
+    "TestQuantizeFx.test_conv_bn_relu",  # test_quantization
+    "TestQuantizeFx.test_qconfig_for_call_func",  # test_quantization
+    "TestQuantizedConv.test_qconv3d_unpack",  # test_quantization
+    "TestFakeQuantizeOps.test_fq_module_per_tensor",  # test_quantization
+    "TestDynamicQuantizedOps.test_qlinear",  # test_quantization
+    "TestStaticQuantizedModule.test_layer_norm",  # test_quantization
+    "TestQuantizedOps.test_leaky_relu",  # test_quantization
+    "TestFakeQuantize.test_fq_module_per_channel",  # test_quantization
+    "TestQuantizeFxOps.test_getitem",  # test_quantization
+    "TestQuantizeFx.test_mixed_dtypes",  # test_quantization
+    "TestQuantizeFx.test_linear_tanh_lowering",  # test_quantization
+    "TestStaticQuantizedModule.test_conv3d_api",  # test_quantization
+    "TestStaticQuantizedModule.test_linear_tanh",  # test_quantization
+    "TestQuantizedOps.test_sigmoid",  # test_quantization
+    "TestQuantizedConv.test_qconv2d_unpack",  # test_quantization
+    "TestQuantizedOps.test_qgelu",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_view",  # test_quantization
+    "TestUtils.test_get_fqn_to_example_inputs_complex_args",  # test_quantization
+    "TestQuantizeFxOps.test_embedding_bag",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn1d.test_qat_inplace_add_relu",  # test_quantization
+    "TestQuantizePT2E.test_embedding_conv_linear_quantization",  # test_quantization
+    "TestFakeQuantizeOps.test_learnable_forward_per_channel_cuda",  # test_quantization
+    "TestPT2ERepresentation.test_static_linear",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_bn_fusion_no_conv_bias",  # test_quantization
+    "TestQuantizedOps.test_qadd_relu_different_qparams",  # test_quantization
+    "TestQuantizeFxOps.test_qbatch_norm_relu",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_shadow_activations_fqn",  # test_quantization
+    "TestDynamicQuantizedOps.test_dynamic_conv3d",  # test_quantization
+    "TestFXNumericSuiteNShadows.test_add_loggers_linear_mod_quant_fp32",  # test_quantization
+    "TestFXNumericSuiteNShadows.test_qconfig_multi_mapping_end_to_end",  # test_quantization
+    "TestQuantizedConv.test_qconv2d",  # test_quantization
+    "TestFXNumericSuiteNShadows.test_logger_enabled_and_save_activations_flags",  # test_quantization
+    "TestXNNPACKQuantizer.test_add_mul_long",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_bn_relu_fusion",  # test_quantization
+    "TestDynamicQuantizedModule.test_lstm_api",  # test_quantization
+    "TestComparatorOps.test_compare_tensor_tensor",  # test_quantization
+    "TestQuantizeFxModels.test_qat_functional_linear",  # test_quantization
+    "TestQuantizeFxOps.test_functional_linear",  # test_quantization
+    "TestQuantizedTensor.test_per_channel_qtensor_creation_cpu",  # test_quantization
+    "TestQuantizedOps.test_max_pool2d_cudnn",  # test_quantization
+    "TestQNNPackOps.test_qnnpack_mul",  # test_quantization
+    "TestUtils.test_get_fqn_to_example_inputs_simple",  # test_quantization
+    "TestQuantizeEagerQATNumerics.test_conv_bn_folded_vs_unfolded",  # test_quantization
+    "TestQNNPackOps.test_qnnpack_maxpool2d",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_extract_weights_conv_fun_ptq",  # test_quantization
+    "TestQuantizeFx.test_qconfig_module_name_object_type_order",  # test_quantization
+    "TestDynamicQuantizedModule.test_dynamic_conv1d",  # test_quantization
+    "TestEqualizeFx.test_input_weight_equalization_convert",  # test_quantization
+    "TestFXNumericSuiteNShadows.test_add_loggers_linear_mod_fp32_quant",  # test_quantization
+    "TestQNNPackOps.test_qnnpack_add",  # test_quantization
+    "TestStaticQuantizedModule.test_conv2d_api",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_bias_derived_qspec",  # test_quantization
+    "TestQuantizedOps.test_std",  # test_quantization
+    "TestBitsCPU.test_cat_cpu",  # test_quantization
+    "TestFakeQuantizeOps.test_forward_per_tensor",  # test_quantization
+    "TestQNNPackOps.test_qnnpack_tanh",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_loggers_preserve_qat_numerics",  # test_quantization
+    "TestDynamicQuantizedOps.test_qlinear_legacy",  # test_quantization
+    "TestQuantizedOps.test_cat",  # test_quantization
+    "TestXNNPACKQuantizer.test_conv1d",  # test_quantization
+    "TestQuantizedOps.test_qadd_relu_same_qparams",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_shadow_loggers_preserve_qat_numerics",  # test_quantization
+    "TestXNNPACKQuantizer.test_dynamic_linear",  # test_quantization
+    "TestXNNPACKQuantizer.test_dynamic_linear_int4_weight",  # test_quantization
+    "TestFakeQuantizeOps.test_learnable_forward_per_channel_cpu",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_int8_shadows_fp32_simple",  # test_quantization
+    "TestXNNPACKQuantizer.test_conv2d",  # test_quantization
+    "TestQuantizeFx.test_linear_leaky_relu_lowering",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_bn_bias_derived_qspec",  # test_quantization
+    "TestFakeQuantizeOps.test_backward_per_tensor",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_int_repr",  # test_quantization
+    "TestQuantizedEmbeddingOps.test_embedding_2d_indices",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_sub_byte_aligned_cols",  # test_quantization
+    "TestQuantizeFxOps.test_leaky_relu",  # test_quantization
+    "TestFXGraphMatcher.test_simple_fusion",  # test_quantization
+    "TestXNNPACKQuantizer.test_mul_and_inplace_mul",  # test_quantization
+    "TestQuantizedOps.test_max_pool2d",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn2d.test_qat_preserve_source_fn_stack",  # test_quantization
+    "TestQuantizeFx.test_qparams_fqn",  # test_quantization
+    "TestFakeQuantizeOps.test_backward_per_channel",  # test_quantization
+    "TestQuantizeFx.test_conv_transpose_relu_reference",  # test_quantization
+    "TestQuantizedConv.test_qconv2d_hardtanh_pt2e",  # test_quantization
+    "TestQuantizedTensor.test_decomposed_quantize_per_tensor",  # test_quantization
+    "TestQNNPackOps.test_qnnpack_add_broadcast",  # test_quantization
+    "TestQuantizeFxOps.test_linear_module",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_no_bias",  # test_quantization
+    "TestFakeQuantizeOps.test_learnable_forward_per_tensor_cpu",  # test_quantization
+    "TestStaticQuantizedModule.test_hard_swish",  # test_quantization
+    "TestQuantizeFxModels.test_qat_embeddingbag_linear",  # test_quantization
+    "TestStaticQuantizedModule.test_conv2d_add_relu",  # test_quantization
+    "TestQuantizedOps.test_interpolate3d",  # test_quantization
+    "TestDynamicQuantizedOps.test_dynamic_convtranspose3d",  # test_quantization
+    "TestQNNPackOps.test_qnnpack_relu",  # test_quantization
+    "TestFXNumericSuiteCoreAPIs.test_int8_shadows_int8_fun",  # test_quantization
+    "TestStaticQuantizedModule.test_conv1d_api",  # test_quantization
+    "TestQuantizationDocs.test_quantization_doc_fx",  # test_quantization
+    "TestQuantizedOps.test_channel_shuffle",  # test_quantization
+    "TestQuantizedOps.test_hardtanh",  # test_quantization
+    "TestQuantizeFx.test_qconfig_function",  # test_quantization
+    "TestQuantizeFx.test_ref_conv_module",  # test_quantization
+    "TestBackendConfig.test_backend_op_config_set_num_tensor_args_to_observation_type",  # test_quantization
+    "TestQuantizedOps.test_max_pool1d",  # test_quantization
+    "TestStaticQuantizedModule.test_linear",  # test_quantization
+    "TestQuantizeFxOps.test_mul_relu",  # test_quantization
+    "TestQuantizePT2E.test_groupwise_per_channel_quant",  # test_quantization
+    "TestQuantizeFxOps.test_hardswish",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_cpu",  # test_quantization
+    "TestQuantizedConv.test_qconv_transpose1d",  # test_quantization
+    "TestEqualizeFx.test_input_weight_equalization_results",  # test_quantization
+    "TestQuantizedFunctionalOps.test_conv3d_api",  # test_quantization
+    "TestQuantizeFx.test_linear_bn",  # test_quantization
+    "TestStaticQuantizedModule.test_elu",  # test_quantization
+    "TestQuantizeFx.test_standalone_module_quantized_interface",  # test_quantization
+    "TestQuantizedOps.test_qprelu",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn1d.test_qat_preserve_source_fn_stack",  # test_quantization
+    "TestQuantizedOps.test_qmatmul",  # test_quantization
+    "TestPadding.test_constant_padNd",  # test_quantization
+    "TestQuantizedConv.test_qconv2d_relu",  # test_quantization
+    "TestQuantizedConv.test_qconv2d_add",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_reshape",  # test_quantization
+    "TestQuantizeFx.test_ref_linear_module",  # test_quantization
+    "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_bn_relu_fusion_no_conv_bias",  # test_quantization
+    "TestReferenceQuantizedModule.test_rnn",  # test_quantization
+    "TestQuantizedConv.test_qconv1d",  # test_quantization
+    "TestQuantizedTensor.test_choose_qparams",  # test_quantization
+    "TestQuantizedConv.test_qconv1d_relu",  # test_quantization
+    "TestFXNumericSuiteNShadows.test_conv_bn_relu_mod",  # test_quantization
+    "TestQuantizedConv.test_qconv2d_add_relu",  # test_quantization
+    "TestStaticQuantizedModule.test_group_norm",  # test_quantization
+    "TestStaticQuantizedModule.test_leaky_relu",  # test_quantization
+    "TestQuantizedTensor.test_torch_qtensor_deepcopy",  # test_quantization
+    "TestXNNPACKQuantizer.test_obs_sharing_ops",  # test_quantization
+    "TestStaticQuantizedModule.test_linear_relu",  # test_quantization
+    "TestQuantizedOps.test_avg_pool3d",  # test_quantization
+    "TestQuantizedTensor.test_quantize_per_channel_float_qparams",  # test_quantization
+    "TestQuantizedOps.test_qmul_relu_same_qparams",  # test_quantization
+    "TestQuantizeFxOps.test_instance_norm",  # test_quantization
+    "TestQuantizedTensor.test_qtensor_legacy_new_failure",  # test_quantization
+    "TestXNNPACKQuantizerModels.test_resnet18",  # test_quantization.py
+    "TestFXGraphMatcherModels.test_mobilenet_v2_qat",  # test_quantization.py
+    "TestQuantizePT2EQATModels.test_qat_resnet18",  # test_quantization.py
+    "TestQuantizePT2EQATModels.test_qat_mobilenet_v2",  # test_quantization.py
+    "TestObserver.test_per_channel_observers",  # test_quantization.py
+    "TestCustomOp.test_impl_cpu",  # test_custom_ops
+    "TestCustomOp.test_backward_tensorlist_input_requires_list_grads_none_or_Tensor",  # test_custom_ops
+    "TestCustomOp.test_define_with_tags_single",  # test_custom_ops
+    "TestCustomOp.test_autogen_aten_ops_are_pt2_compliant",  # test_custom_ops
+    "TestCustomOp.test_backward_output_differentiability_tensorlist",  # test_custom_ops
+    "TestCustomOp.test_backward_output_differentiability_type",  # test_custom_ops
+    "TestCustomOp.test_impl_meta",  # test_custom_ops
+    "TestCustomOp.test_impl_invalid_devices",  # test_custom_ops
+    "TestCustomOp.test_new_data_dependent_symint",  # test_custom_ops
+    "TestCustomOpTestingCPU.test_missing_abstract_impl_cpu",  # test_custom_ops
+    "TestCustomOp.test_define_with_tags_list",  # test_custom_ops
+    "TestCustomOp.test_backward_tensorlist_input_requires_list_grads",  # test_custom_ops
+    "TestCustomOp.test_not_implemented_error",  # test_custom_ops
+    "TestCustomOp.test_impl_device_cpu",  # test_custom_ops
+    "TestCustomOp.test_backward_returns_dict",  # test_custom_ops
+    "TestCustomOp.test_autograd_notimplemented",  # test_custom_ops
+    "TestCustomOp.test_backward_grads_are_tensor_or_none",  # test_custom_ops
+    "TestCustomOp.test_backward_dict_requires_keys_for_input_optional_tensors",  # test_custom_ops
+    "TestCustomOp.test_backward_output_differentiability_non_tensor",  # test_custom_ops
+    "TestCustomOp.test_lifetime",  # test_custom_ops
+    "TestCustomOp.test_impl_device_function",  # test_custom_ops
+    "TestCustomOp.test_builtin_torchscript_ops",  # test_custom_ops
+    "TestCustomOpTestingCPU.test_missing_functionalization_cpu",  # test_custom_ops
+    "TestCustomOpTestingCPU.test_incorrect_schema_view_cpu",  # test_custom_ops
+    "TestCustomOp.test_define_with_tags_tuple",  # test_custom_ops
+    "TestCustomOp.test_builtin_aten_ops_are_pt2_compliant",  # test_custom_ops
+    "TestCustomOp.test_save_for_backward_inputs_are_namedtuple",  # test_custom_ops
+    "TestCustomOp.test_autograd_notimplemented_gradmode",  # test_custom_ops
+    "TestGenerateOpcheckTests.test_opcheck_bad_op",  # test_custom_ops
+    "TestCustomOp.test_backward_dict_invalid_keys",  # test_custom_ops
+    "TestCustomOp.test_backward_tensorlist_input_requires_list_grads_with_same_numel",  # test_custom_ops
+    "TestCustomOp.test_duplicate_impl",  # test_custom_ops
+    "TestCustomOpTestingCPU.test_incorrect_abstract_impl_cpu",  # test_custom_ops
+    "TestCustomOp.test_backward_output_differentiability_numel",  # test_custom_ops
+    "TestCustomOp.test_backward_dict_requires_keys_for_input_tensors",  # test_custom_ops
+    "TestCustomOp.test_legacy_define",  # test_custom_ops
+    "TestCustomOpTestingCPU.test_opcheck_fails_basic_cpu",  # test_custom_ops
+    "TestCustomOp.test_backward_dict_grad_for_nontensor",  # test_custom_ops
+    "TestCustomOp.test_backward_partially_registered",  # test_custom_ops
+    "TestCustomOp.test_basic_make_fx",  # test_custom_ops
+    "TestPythonRegistration.test_alias_analysis",  # test_python_dispatch
+    "TestPythonDispatch.test_torch_dispatch_mode_subclass_priority",  # test_python_dispatch
+    "TestPythonDispatch.test_strides_slow_path",  # test_python_dispatch
+    "TestPythonDispatch.test_invalid_ret",  # test_python_dispatch
+    "TestPythonDispatch.test_dim_slowpath",  # test_python_dispatch
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_conv2d_cpu",  # test_python_dispatch
+    "TestPythonDispatch.test_fancy_strides",  # test_python_dispatch
+    "TestPythonDispatch.test_layout_slow_path",  # test_python_dispatch
+    "TestPythonDispatch.test_dispatch_super_dont_autograd",  # test_python_dispatch
+    "TestPythonDispatch.test_sizes_slow_path",  # test_python_dispatch
+    "TestPythonRegistration.test_finalizer",  # test_python_dispatch
+    "TestPythonDispatch.test_dispatch_super_call_list_arg",  # test_python_dispatch
+    "TestPythonDispatch.test_is_contiguous_slow_path",  # test_python_dispatch
+    "TestPythonRegistration.test_override_cpu_sum",  # test_python_dispatch
+    "TestPythonDispatch.test_mode_with_make_subclass",  # test_python_dispatch
+    "TestPythonDispatch.test_multiple_ops_subclass",  # test_python_dispatch
+    "TestPythonDispatch.test_subclass_autograd_device_check",  # test_python_dispatch
+    "TestPythonDispatch.test_data_ptr_respects_numel_slow_path",  # test_python_dispatch
+    "TestPythonDispatch.test_make_subclass_with_modes",  # test_python_dispatch
+    "TestPythonRegistration.test_override_aten_ops_with_multiple_libraries",  # test_python_dispatch
+    "TestPythonDispatch.test_dispatch_super_call",  # test_python_dispatch
+    "TestPythonDispatch.test_subclass_priority",  # test_python_dispatch
+    "TestPythonDispatch.test_exception_handling",  # test_python_dispatch
+    "TestPythonDispatch.test_list_ret",  # test_python_dispatch
+    "LoggingTests.test_trace_source_nested",  # dynamo/test_logging
+    "LoggingTests.test_guards_recompiles",  # dynamo/test_logging
+    "LoggingTests.test_inductor_info",  # dynamo/test_logging
+    "LoggingTests.test_output_code",  # dynamo/test_logging
+    "LoggingTests.test_graph_code",  # dynamo/test_logging
+    "LoggingTests.test_graph_sizes",  # dynamo/test_logging
+    "LoggingTests.test_recompiles",  # dynamo/test_logging
+    "LoggingTests.test_inductor_error",  # dynamo/test_logging
+    "LoggingTests.test_graph",  # dynamo/test_logging
+    "LoggingTests.test_custom_format_exc",  # dynamo/test_logging
+    "LoggingTests.test_custom_format",  # dynamo/test_logging
+    "LoggingTests.test_trace_source_cond",  # dynamo/test_logging
+    "LoggingTests.test_multiline_format",  # dynamo/test_logging
+    "LoggingTests.test_aot_joint_graph",  # dynamo/test_logging
+    "LoggingTests.test_inductor_debug",  # dynamo/test_logging
+    "LoggingTests.test_bytecode",  # dynamo/test_logging
+    "LoggingTests.test_graph_sizes_dynamic",  # dynamo/test_logging
+    "LoggingTests.test_dynamo_error",  # dynamo/test_logging
+    "LoggingTests.test_dynamo_debug",  # dynamo/test_logging
+    "LoggingTests.test_aot_graphs",  # dynamo/test_logging
+    "LoggingTests.test_dynamo_info",  # dynamo/test_logging
+    "LoggingTests.test_graph_breaks",  # dynamo/test_logging
+    "LoggingTests.test_aot",  # dynamo/test_logging
 }
 
+# see NOTE [dynamo_test_failures.py] for more details
 dynamo_skips = {
     "TestMatmulOperator.test_matmul_raises",
     "TestMatmulOperator.test_exceptions",
@@ -3199,6 +3740,7 @@ dynamo_skips = {
     "TestMethods.test_choose",
     "TestMethods.test_conjugate_out",
     "TestMethods.test_compress",
+    "TestCustomOpTestingCPU.test_incorrect_schema_mutation_cpu",  # test_custom_ops
     "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmax_np_method0",
     "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmin_np_method1",
     "TestIsreal.test_fail",  # known py311 fail
@@ -7583,8 +8125,21 @@ dynamo_skips = {
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int16",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_int8",  # known py38 fail
     "TestForeachCPU.test_add_scalar_with_empty_list_and_empty_tensor_cpu_uint8",  # known py38 fail
-    "TestRepackage.test_repackage_import_indirectly_via_parent_module",  # known py311 fail
-    "TestPackageScript.test_load_shared_tensors_repackaged",  # known py311 fail
+    "TestProfiler.test_source_multithreaded_basic_work_in_main_thread_False",
+    "TestProfiler.test_source_multithreaded_complex_work_in_main_thread_False",
+    "TestProfiler.test_source_multithreaded_open_in_scope_work_in_main_thread_False",
+    "TestProfiler.test_source_multithreaded_multiple_preexisting_work_in_main_thread_False",
+    "TestProfiler.test_source_multithreaded_close_in_scope_work_in_main_thread_False",
+    "TestProfiler.test_profiler_disable_fwd_bwd_link",
+    "TestProfiler.test_profiler_metadata",
+    "TestSerializeCustomClass.test_custom_class",
+    "TestTensorExprPyBind.test_kernel_with_transpose",
+    "TestTensorExprPyBind.test_kernel_with_custom_lowering",
+    "TestTensorExprPyBind.test_kernel_with_expand",
+    "TestTensorExprPyBind.test_kernel_with_permute",
+    "TestTensorExprPyBind.test_kernel_with_scalar_inputs",
+    "TestTensorExprPyBind.test_kernel_with_t",
+    "TestTensorExprPyBind.test_kernel_with_tensor_inputs",
     "TestFX.test_assert",  # known py38 fail
     "TestFX.test_annotations_empty_tuple",  # known py38 fail
     "TestDataLoaderPersistentWorkers.test_early_exit",  # known py38 fail
@@ -7592,6 +8147,87 @@ dynamo_skips = {
     "TestDataLoaderPersistentWorkers.test_fd_limit_exceeded",  # known py38 fail
     "TestLazyDynamicOps.test_nonzero_dynamic",  # known py311 fail
     "TestLazyTensor.test_view_mark_step_preserved",  # known py311 fail
+    "TestRepackage.test_repackage_import_indirectly_via_parent_module",  # known py311 fail
+    "TestPackageScript.test_load_shared_tensors_repackaged",  # known py311 fail
+    "TestFXExperimental.test_optimize_for_inference_cpu_torchvision",
+    "TestXNNPACKOps.test_linear_1d_input",  # flaky
+    "TestXNNPACKOps.test_conv2d",  # flaky
+    "TestXNNPACKOps.test_conv2d_transpose",  # flaky
+    "TestProfilerTree.test_profiler_experimental_tree",  # known py311 fail
+    "TestExperiment.test_mark_strict_with_container_type",  # known py311 fail
+    "TestExprHandlePyBind.test_unary_ops",  # known py38 fail
+    "TestTorch.test_bmm_multithreaded",
+    "TestTorch.test_terminate_handler_on_crash",  # known py38 fail
+    "TestTorch.test_storage_casts",  # known py311 fail
+    "TestAutograd.test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_True",  # known py311 fail
+    "TestQuantizeFxOps.test_fixed_qparams_ops",  # known py38 fail
+    "TestQuantizeFxOps.test_int8_input_no_unnecessary_fq",  # known py38 fail
+    "TestQuantizeFxOps.test_general_value_ops",  # known py38 fail
+    "TestQuantizeFxOps.test_fixed_qparams_ops_wrong_qconfig",  # known py38 fail
+    "TestQuantizeFxOps.test_narrow",  # known py38 fail
+    "TestQuantizeFxOps.test_float_functional",  # known py38 fail
+    "TestQuantizeFxOps.test_copy_node_fp32_input",  # known py38 fail
+    "TestQuantizeFxOps.test_ave_pool_with_custom_cfg",  # known py38 fail
+    "TestQuantizeFxOps.test_pixel_unshuffle",  # known py38 fail
+    "TestQuantizeFxOps.test_quantized_add_qat",  # known py38 fail
+    "TestQuantizeFxOps.test_ref_pattern_multi_use",  # known py38 fail
+    "TestQuantizeFxOps.test_pixel_unshuffle_module",  # known py38 fail
+    "TestQuantizeFxOps.test_pixel_shuffle",  # known py38 fail
+    "TestQuantizeFxOps.test_boolean_tensor",  # known py38 fail
+    "TestQuantizeFxOps.test_bmm_int_reference",  # known py38 fail
+    "TestQuantizeFxOps.test_rnn_cell",  # known py38 fail
+    "TestQuantizeFxOps.test_pixel_shuffle_module",  # known py38 fail
+    "TestQuantizeFxOps.test_fixed_qparams_ops_fp16",  # known py38 fail
+    "TestQuantizeFxOps.test_quantized_mul_qat",  # known py38 fail
+    "TestQuantizeFxOps.test_general_shape_ops",  # known py38 fail
+    "TestQuantizeFxOps.test_add_relu_multiple_uses_of_relu",  # known py38 fail
+    "TestQuantizeFxOps.test_rnn",  # known py38 fail
+    "TestQuantizeFxOps.test_linear_dynamic_fp16",  # known py38 fail
+    "TestQuantizeFxOps.test_linear_static_fp16",  # known py38 fail
+    "TestAutogradFallback.test_no_grad_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_no_autograd_kernel_inplace_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_no_autograd_kernel_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_undefined_grads_mode_nothing",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_post_autograd_returns_mix_of_requires_grad_tensors_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_no_autograd_kernel_inplace_mode_nothing",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_undefined_inputs_outputs_mode_nothing",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_inplace_on_tensor_that_does_not_require_grad_mode_nothing",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_post_autograd_returns_mix_of_requires_grad_tensors_mode_nothing",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_supports_tensor_lists_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_post_autograd_returns_leaf_mode_nothing",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_inplace_on_tensor_that_does_not_require_grad_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_no_grad_mode_nothing",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_post_autograd_returns_leaf_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_undefined_grads_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_no_autograd_kernel_mode_nothing",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_undefined_inputs_outputs_mode_warn",  # test_autograd_fallback.py
+    "TestAutogradFallback.test_supports_tensor_lists_mode_nothing",  # test_autograd_fallback.py
+    "TestReductionsCPU.test_logcumsumexp_complex_cpu_complex128",  # test_reductions.py
+    "TestReductionsCPU.test_logcumsumexp_complex_cpu_complex64",  # test_reductions.py
+    "TestCustomOp.test_impl_on_existing_op_with_cpu_registration_key_CompositeExplicitAutograd",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyViewCopyCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyCatCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestPythonDispatcher.test_lstsq",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_split_cpu_float32",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_split_list_args_cpu_float32",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyNonzeroCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_mul_cpu_float32",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyMulCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpySortCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_out_op_cpu",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyTakeCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyCubeCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_cat_cpu_float32",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_native_batch_norm_cpu_float32",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyNMSCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpySplitCopyWithIntCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_view_cpu_float32",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpySplitCopyCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "LoggingTests.test_logs_out",  # known py38 fail
+    "LoggingTests.test_distributed_rank_logging",  # known py38 fail
+    "LoggingTests.test_trace_call",  # known py311 fail
+    "LoggingTests.test_trace_call_graph_break",  # known py311 fail
+    "LoggingTests.test_trace_call_inline_call",  # known py311 fail
 }
 
 
