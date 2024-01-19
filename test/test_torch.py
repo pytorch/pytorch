@@ -5658,16 +5658,6 @@ else:
         actual = t_non_contig.masked_scatter_(mask_contig, source)
         self.assertEqual(actual, expected)
 
-    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo doesn't init AccumulateGrad nodes on forward")
-    def test_tensor_use_count(self, device):
-        t = torch.empty(2, 3, device=device)
-        self.assertEqual(torch._C._tensor_use_count(t), 1)
-
-        m = torch.nn.Linear(2, 3, device=device)
-        self.assertEqual(torch._C._tensor_use_count(m.weight), 1)
-        inp = torch.randn(2, 2, device=device)
-        out = m(inp)
-        self.assertEqual(torch._C._tensor_use_count(m.weight), 2)
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
