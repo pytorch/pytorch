@@ -830,7 +830,7 @@ def wait_for_process(p, timeout=None):
         else:
             p.kill()
             raise
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as timeout_exception:
         # send SIGINT to give pytest a chance to make xml
         p.send_signal(signal.SIGINT)
         exit_status = None
@@ -844,7 +844,9 @@ def wait_for_process(p, timeout=None):
             return exit_status
         else:
             p.kill()
-        raise
+        # Provide more info about the timeout (specifically that it timed out
+        # after the keyboard interrupt as well)
+        raise RuntimeError(f"Subprocess failed to exit smoothly after timeout {timeout} expired") from timeout_exception
     except:  # noqa: B001,E722, copied from python core library
         p.kill()
         raise
