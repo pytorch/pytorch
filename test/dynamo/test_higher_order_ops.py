@@ -25,7 +25,10 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._higher_order_ops.wrap import wrap
-from torch.testing._internal.common_utils import xfailIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    TEST_WITH_TORCHDYNAMO,
+    xfailIfTorchDynamo,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
@@ -2431,14 +2434,23 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         # because of a previous call to _vmap_increment_nesting that wasn't undone
         # i.e. test_vmap_free_tensor fails when PYTORCH_TEST_WITH_DYNAMO=1
         # and the call to increment nesting is not undone
-        ci = torch._C._functorch.peek_interpreter_stack()
-        if ci and ci.key() == torch._C._functorch.TransformType.Vmap:
+        if not TEST_WITH_TORCHDYNAMO:
+            return
+
+        warn = False
+        while ci := torch._C._functorch.peek_interpreter_stack():
+            if ci.key() == torch._C._functorch.TransformType.Vmap:
+                warn = True
+                torch._C._functorch._vmap_decrement_nesting()
+            else:
+                break
+
+        if warn:
             msg = (
                 "Interpreter stack is not empty. Test should have called "
                 "'torch._C._functorch._vmap_decrement_nesting()'"
             )
             warnings.warn(msg)
-            torch._C._functorch._vmap_decrement_nesting()
 
     def _compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
         backend = EagerAndRecordGraphs()
