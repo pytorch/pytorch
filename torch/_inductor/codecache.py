@@ -798,11 +798,14 @@ class CompiledFxGraph:
 
     _boxed_call: Optional[bool] = None
 
+    disabled_cudagraphs_reason: Optional[str] = None
+
     def __init__(
         self,
         compiled_artifact: Optional[Callable[..., Any]],
         graph: GraphLowering,
         output_strides: List[Optional[Tuple[int, ...]]],
+        disabled_cudagraphs_reason: Optional[str],
     ):
         self.compiled_artifact = compiled_artifact
         self.cache_key = graph.cache_key
@@ -815,6 +818,7 @@ class CompiledFxGraph:
         self.constants = graph.constants
         self.output_strides = output_strides
         self.guards_expr = None
+        self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
 
     def __call__(self, inputs: List[Any]) -> Any:
         return self.get_current_callable()(inputs)
@@ -1819,11 +1823,11 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         "shared": True,
     }
     entry_function = "kernel"
-    call_entry_function = "kernel(%s);Py_RETURN_NONE"
+    call_entry_function = "kernel(%s);Py_RETURN_NONE;"
     extra_parse_arg = ""
     suffix_template = textwrap.dedent(
         """
-        // Python bindings to call ENTRY_FUNCTION():
+        // Python bindings to call %s():
         #define PY_SSIZE_T_CLEAN
         #include <Python.h>
         #include <sstream>
@@ -1846,13 +1850,13 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
         %s
 
-        static PyObject* ENTRY_FUNCTION_py(PyObject* self, PyObject* args) {
+        static PyObject* %s_py(PyObject* self, PyObject* args) {
             try {
                 if(!PyTuple_CheckExact(args))
                     [[unlikely]] throw std::runtime_error("tuple args required");
                 if(PyTuple_GET_SIZE(args) != %s)
                     [[unlikely]] throw std::runtime_error("requires %s args");
-                CALL_ENTRY_FUNCTION;
+                %s
             } catch(std::exception const& e) {
                 PyErr_SetString(PyExc_RuntimeError, e.what());
                 return nullptr;
@@ -1863,13 +1867,13 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         }
 
         static PyMethodDef py_methods[] = {
-            {"ENTRY_FUNCTION", ENTRY_FUNCTION_py, METH_VARARGS, ""},
+            {"%s", %s_py, METH_VARARGS, ""},
             {NULL, NULL, 0, NULL}};
 
         static struct PyModuleDef py_module =
-            {PyModuleDef_HEAD_INIT, "ENTRY_FUNCTION", NULL, -1, py_methods};
+            {PyModuleDef_HEAD_INIT, "%s", NULL, -1, py_methods};
 
-        PyMODINIT_FUNC PyInit_ENTRY_FUNCTION(void) {
+        PyMODINIT_FUNC PyInit_%s(void) {
             const char* str_addr = std::getenv("_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR");
             if(!str_addr) {
                 PyErr_SetString(PyExc_RuntimeError, "_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR must be set");
@@ -1912,13 +1916,17 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             f"parse_arg<{argtype.replace('const ', '')}>(args, {n})"
             for n, argtype in enumerate(argtypes)
         )
-        suffix = cls.suffix_template.replace(
-            "CALL_ENTRY_FUNCTION", cls.call_entry_function
-        ).replace("ENTRY_FUNCTION", cls.entry_function) % (
+        suffix = cls.suffix_template % (
+            cls.entry_function,
             cls.extra_parse_arg,
+            cls.entry_function,
             len(argtypes),
             len(argtypes),
-            parseargs,
+            cls.call_entry_function % parseargs,
+            cls.entry_function,
+            cls.entry_function,
+            cls.entry_function,
+            cls.entry_function,
         )
         result = cls.load(source_code + suffix, cuda)
         assert isinstance(result, ModuleType)
@@ -1933,7 +1941,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         "shared": True,
     }
     entry_function = "inductor_entry_cpp"
-    call_entry_function = "return THPVariable_WrapList(inductor_entry_cpp(%s))"
+    call_entry_function = "return THPVariable_WrapList(inductor_entry_cpp(%s));"
     extra_parse_arg = textwrap.dedent(
         """
         #include <torch/csrc/autograd/python_variable.h>
