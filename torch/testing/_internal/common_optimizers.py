@@ -1379,6 +1379,11 @@ optim_db: List[OptimizerInfo] = [
         supports_sparse_on=("cpu", "cuda"),
         skips=(
             DecorateInfo(
+                unittest.skip("SGD currently doesn't have capturable"),
+                "TestOptimRenewed",
+                "test_cpu_load_state_dict_impl_capturable",
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
                 ),
