@@ -333,6 +333,13 @@ def compile_fx_inner(
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
+    # check cudagraph disabling reasons from inductor lowering
+    if cudagraphs and compiled_graph.disabled_cudagraphs_reason:
+        perf_hint_log.warning(
+            "skipping cudagraphs due to %s", compiled_graph.disabled_cudagraphs_reason
+        )
+        BoxedBool.disable(cudagraphs)
+
     # Return the output strides to the caller via TracingContext
     context = torch._guards.TracingContext.try_get()
     if context is not None and context.output_strides is not None:
@@ -377,9 +384,8 @@ def compile_fx_inner(
 
                 if stack_trace:
                     msg = f"skipping cudagraphs due to mutaton on input. Found from : \n {stack_trace}"
-                    V.graph.disable_cudagraphs_reason = msg
+                    compiled_graph.disabled_cudagraphs_reason = msg
 
-                V.graph.disable_cudagraphs = True
         else:
             has_mutation = len(compiled_graph.mutated_inputs) != 0
 
@@ -454,8 +460,8 @@ def compile_fx_inner(
             if "cuda" in compiled_graph.device_types:
                 # prefer better disable_cudagraphs_reason bc stack trace
                 # TODO: migrate all disable reasons to stack trace
-                if V.graph.disable_cudagraphs_reason:
-                    perf_hint_log.warning(V.graph.disable_cudagraphs_reason)
+                if compiled_graph.disabled_cudagraphs_reason:
+                    perf_hint_log.warning(compiled_graph.disabled_cudagraphs_reason)
                 else:
                     perf_hint_log.warning(
                         "skipping cudagraphs due to %s", cudagraph_fail_reasons
@@ -588,13 +594,9 @@ def fx_codegen_and_compile(
             if V.aot_compilation is True:
                 return compiled_fn
 
-            if cudagraphs and graph.disable_cudagraphs:
-                perf_hint_log.warning(
-                    "skipping cudagraphs due to %s", V.graph.disable_cudagraphs_reason
-                )
-                BoxedBool.disable(cudagraphs)
-
-            compiled_graph = CompiledFxGraph(compiled_fn, graph, output_strides)
+            compiled_graph = CompiledFxGraph(
+                compiled_fn, graph, output_strides, V.graph.disable_cudagraphs_reason
+            )
 
     return compiled_graph
 
