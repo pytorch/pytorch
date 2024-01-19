@@ -94,6 +94,19 @@ if TYPE_CHECKING:
 threadlocal = local()
 
 T = TypeVar("T")
+StoreMode = Optional[Literal["atomic_add"]]
+ReductionType = Literal[
+    "argmax",
+    "argmin",
+    "welford_reduce",
+    "welford_combine",
+    "any",
+    "max",
+    "min",
+    "prod",
+    "sum",
+    "xor_sum",
+]
 
 
 class NullHandler:
@@ -239,14 +252,21 @@ class OpsHandler(Protocol[T]):
 
     Note that this often describes a class of static methods, for stateless
     ops handlers.
+
+    Handlers are often defined using ``__getattr__`` metaprogramming, which means
+    that you cannot declare that a type implements a protocol by inheriting from
+    it (as the type stubs count as attribute declarations and impede the getattr
+    magic method from being called).  Instead, define a function that casts an
+    argument of your type to the protocol, which is sufficient to induce mypy to
+    test that the protocol is implemented correctly.  Search for ``_typecheck_``
+    in this file to see some examples.
     """
 
     def constant(self, value: Union[bool, float, int], dtype: torch.dtype) -> T:
         """Produces a scalar constant of type dtype."""
         ...
 
-    # TODO: not sure about sympy.Expr here
-    def load_seed(self, name: str, offset: sympy.Expr):
+    def load_seed(self, name: str, offset: T):
         """Computes inductor_prims.lookup_seed."""
         ...
 
@@ -258,8 +278,7 @@ class OpsHandler(Protocol[T]):
         """Computes inductor_prims.random with mode="randn".  offset has dtype int32."""
         ...
 
-    # TODO: not sure about sympy.Expr here
-    def randint64(self, seed: T, offset: T, low: sympy.Expr, high: sympy.Expr) -> T:
+    def randint64(self, seed: T, offset: T, low: T, high: T) -> T:
         """Computes inductor_prims.randint.  offset has dtype int32."""
         ...
 
@@ -306,16 +325,14 @@ class OpsHandler(Protocol[T]):
         """
         ...
 
-    def bucketize(
-        self,
-        values: T,
-        offsets_name: str,
-        offsets_size: sympy.Expr,
-        indexing_dtype: torch.dtype,
-        right: bool,
-    ) -> T:
-        # See [Note: Inductor bucketize op]
-        ...
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # These operations are only available in a "kernel" context.  Check
+    # torch._inductor.codegen.common.CSEProxy for their typical implementation
+    # in op handler (routing to their respective implementations in the kernel
+    # handler)
+    #
+    # Importantly, inside a kernel, indexing and mask variables are available
+    # in scope, which are typically used by sympy.Expr indexing.
 
     def indirect_indexing(
         self, x: T, size: sympy.Expr, check: bool = True
@@ -327,6 +344,25 @@ class OpsHandler(Protocol[T]):
         """
         ...
 
+    def load(self, name: str, index: sympy.Expr) -> T:
+        """
+        Load from the memory location 'name', offset by some indexing expression 'index'.
+        """
+        ...
+
+    def store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: T,
+        mode: StoreMode = None,
+    ) -> T:
+        """
+        Store 'value' to the memory location 'name' offset by 'expr'.  If
+        specified, 'mode' can require the store to be an atomic addition.
+        """
+        ...
+
     # TODO: Better explain how the "collective" semantics of these ops;
     # remember that the input value is a scalar, you can't reduce on it in the
     # traditional sense!
@@ -334,18 +370,7 @@ class OpsHandler(Protocol[T]):
         self,
         dtype: torch.dtype,
         src_dtype: torch.dtype,
-        reduction_type: Literal[
-            "argmax",
-            "argmin",
-            "welford_reduce",
-            "welford_combine",
-            "any",
-            "max",
-            "min",
-            "prod",
-            "sum",
-            "xor_sum",
-        ],
+        reduction_type: ReductionType,
         value: T,
     ) -> Union[T, Tuple[T, ...]]:
         """
@@ -360,7 +385,10 @@ class OpsHandler(Protocol[T]):
         """
         ...
 
-    def store_reduction(self, name: str, index: sympy.Expr, value: T):
+    # TODO: in practice, this seems to actually return None, but not returning
+    # a T makes common __getattr__ idioms not type correctly.  Figure out if
+    # this should be returning something.
+    def store_reduction(self, name: str, index: sympy.Expr, value: T) -> T:
         """
         Store the fully accumulated result of 'reduction' to the memory
         location 'name' offset by 'expr'.
@@ -376,25 +404,18 @@ class OpsHandler(Protocol[T]):
         # TODO: Improve the description with some pseudocode
         ...
 
-    def load(self, name: str, index: sympy.Expr) -> T:
-        """
-        Load from the memory location 'name', offset by some indexing expression 'index'.
-        """
-        ...
-
-    def store(
+    def bucketize(
         self,
-        name: str,
-        index: sympy.Expr,
-        value: T,
-        mode: Optional[Literal["atomic_add"]] = None,
-    ):
-        """
-        Store 'value' to the memory location 'name' offset by 'expr'.  If
-        specified, 'mode' can require the store to be an atomic addition.
-        """
+        values: T,
+        offsets_name: str,
+        offsets_size: sympy.Expr,
+        indexing_dtype: torch.dtype,
+        right: bool,
+    ) -> T:
+        # See [Note: Inductor bucketize op]
         ...
 
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # The following ops have semantics that correspond exactly to the torch
     # operation with the same corresponding name.
 
@@ -617,6 +638,7 @@ class OpsHandler(Protocol[T]):
     def xor(self, x0: T, x1: T) -> T:
         ...
 
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # In CUDA, optimized implementations of other mathematical operations are
     # offered separately via libdevice for double precision computation (in
     # Triton, these go to tl.math rather than tl).  We lower to these
@@ -696,8 +718,12 @@ class KernelFormatterHandler:
         return inner
 
     def reduction(
-        self, dtype, src_dtype, reduction_type, value
-    ) -> Union[tuple[str, ...], str]:
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: str,
+    ) -> Union[str, tuple[str, ...]]:
         line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
         num_values = reduction_num_outputs(reduction_type)
         varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
