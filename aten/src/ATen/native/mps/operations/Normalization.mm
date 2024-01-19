@@ -406,17 +406,18 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_mps(const Tensor& self,
   return std::make_tuple(output, save_mean, save_var);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> _new_batch_norm_with_update_mps(const Tensor& input,
-                                                                           const c10::optional<Tensor>& weight_opt,
-                                                                           const c10::optional<Tensor>& bias_opt,
-                                                                           const c10::optional<Tensor>& running_mean_opt,
-                                                                           const c10::optional<Tensor>& running_var_opt,
-                                                                           double momentum,
-                                                                           double eps,
-                                                                           bool cudnn_enabled) {
+std::tuple<Tensor, Tensor, Tensor, Tensor> _new_batch_norm_with_update_mps(
+    const Tensor& input,
+    const c10::optional<Tensor>& weight_opt,
+    const c10::optional<Tensor>& bias_opt,
+    const c10::optional<Tensor>& running_mean_opt,
+    const c10::optional<Tensor>& running_var_opt,
+    double momentum,
+    double eps,
+    bool cudnn_enabled) {
   Tensor output, save_mean, save_var;
-  std::tie(output, save_mean, save_var) = batch_norm_mps(
-      input, weight_opt, bias_opt, running_mean_opt, running_var_opt, /*train*/true, momentum, eps);
+  std::tie(output, save_mean, save_var) =
+      batch_norm_mps(input, weight_opt, bias_opt, running_mean_opt, running_var_opt, /*train*/true, momentum, eps);
   Tensor reserve = at::empty({0}, input.options().dtype(kByte));
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
 }
@@ -495,10 +496,18 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mps(const Tensor& gr
                                                                 const c10::optional<Tensor>& save_var_opt,
                                                                 bool update,
                                                                 double eps,
-                                                                std::array<bool,3> grad_input_mask,
+                                                                std::array<bool, 3> grad_input_mask,
                                                                 const Tensor& reserve) {
-  return batch_norm_backward_mps(
-      grad_output, input, weight, running_mean_opt, running_var_opt, save_mean_opt, save_var_opt, update, eps, grad_input_mask);
+  return batch_norm_backward_mps(grad_output,
+                                 input,
+                                 weight,
+                                 running_mean_opt,
+                                 running_var_opt,
+                                 save_mean_opt,
+                                 save_var_opt,
+                                 update,
+                                 eps,
+                                 grad_input_mask);
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_out,

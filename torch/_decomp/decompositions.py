@@ -301,8 +301,8 @@ def _prelu_kernel_backward(
 def rrelu_with_noise(
     self: Tensor,
     noise: Tensor,
-    lower: float,
-    upper: float,
+    lower: float = 0.125,
+    upper: float = 0.3333333333333333,
     training: bool = False,
     generator: Optional[torch.Generator] = None,
 ) -> Tensor:
@@ -2284,6 +2284,33 @@ def _index_add(
         return out.squeeze(0) if zero_dim else out.contiguous()
 
 
+@register_decomposition(aten.pad_sequence.default)
+@aten.pad_sequence.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+def pad_sequence(sequences, batch_first=False, padding_value=0.0):
+    torch._check(len(sequences) > 0, lambda: "received an empty list of sequences")
+    sequences_size = len(sequences)
+    max_size = sequences[0].size()
+    trailing_dims = max_size[1:]
+    max_len = max(x.size(0) for x in sequences)
+    if batch_first:
+        out_dims = (sequences_size, max_len)
+    else:
+        out_dims = (max_len, sequences_size)
+    out_dims = out_dims + trailing_dims
+    out = sequences[0].new_full(out_dims, padding_value)
+    dim_paddings = (0, 0) * len(trailing_dims)
+    for i in range(sequences_size):
+        currseq = sequences[i]
+        row = aten.constant_pad_nd(
+            currseq, dim_paddings + (0, max_len - currseq.size(0)), padding_value
+        )
+        if batch_first:
+            out = aten.select_scatter(out, row, dim=0, index=i)
+        else:
+            out = aten.select_scatter(out, row, dim=1, index=i)
+    return out
+
+
 @register_decomposition(aten.index_copy_)
 def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return _index_copy(x, dim, index, tensor, inplace=True)
@@ -2306,6 +2333,7 @@ def _index_copy(
     # Treat scalars as elements of \R^1
     zero_dim = x.ndim == 0
     x1 = x.unsqueeze(0) if zero_dim else x
+    index = index.unsqueeze(0) if index.ndim == 0 else index
     idx = (None,) * dim + (index,)
     index_put = aten.index_put_ if inplace else aten.index_put
     out = index_put(x1, idx, tensor)
@@ -3258,6 +3286,18 @@ def upsample_bilinear2d_aa_vec(input, output_size, align_corners, scale_factors)
     )
 
 
+@register_decomposition(aten._upsample_bicubic2d_aa.vec)
+@aten._upsample_bicubic2d_aa.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten._upsample_bicubic2d_aa.vec.py_impl(DispatchKey.Autograd)
+def upsample_bicubic2d_aa_vec(input, output_size, align_corners, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_h = get_scale_value(scale_factors, 0)
+    scale_w = get_scale_value(scale_factors, 1)
+    return torch.ops.aten._upsample_bicubic2d_aa(
+        input, osize, align_corners, scale_h, scale_w
+    )
+
+
 @register_decomposition(aten.upsample_bilinear2d.vec)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.Autograd)
@@ -3781,18 +3821,11 @@ def mv(self, vec):
 def binary_cross_entropy_with_logits(
     self, target, weight=None, pos_weight=None, reduction=Reduction.MEAN.value
 ):
-    max_val = (-self).clamp_min(0)
     if pos_weight is not None:
         log_weight = (pos_weight - 1) * target + 1
-        loss = (1 - target) * self + log_weight * (
-            ((-max_val).exp() + (-self - max_val).exp()).log() + max_val
-        )
+        loss = (1 - target) * self - (log_weight * F.logsigmoid(self))
     else:
-        loss = (
-            (1 - target) * self
-            + max_val
-            + ((-max_val).exp() + (-self - max_val).exp()).log()
-        )
+        loss = (1 - target) * self - F.logsigmoid(self)
 
     if weight is not None:
         loss = loss * weight
@@ -4249,25 +4282,25 @@ def multilabel_margin_loss_forward(
 # it calls _scaled_dot_product_attention_math and
 # _scaled_dot_product_attention_math only has a CompositeImplicitAutograd
 # kernel. As a result it's decomposed into ops with finer granularity.
-# However recent PRs (#103826 #105131) added new logic in
+# However recent PRs (#103826 #105131 #115913) added new logic in
 # scaled_dot_product_attention and now it calls
-# _scaled_dot_product_flash_attention which contains a CPU kernel. This results
-# in _scaled_dot_product_flash_attention showing up in torch.export().
+# _scaled_dot_product_flash_attention_for_cpu in export path. This results
+# in _scaled_dot_product_flash_attention_for_cpu showing up in export result.
 # This decomposition ensures scaled_dot_product_attention is still decomposed
 # the same way as before, i.e., going through
 # _scaled_dot_product_attention_math. Notice that this decomp rule should be
 # excluded by inductor.
-@register_decomposition(aten._scaled_dot_product_flash_attention.default)
-def scaled_dot_product_flash_attention(
+@register_decomposition(aten._scaled_dot_product_flash_attention_for_cpu.default)
+def scaled_dot_product_flash_attention_for_cpu(
     query: Tensor,
     key: Tensor,
     value: Tensor,
     dropout_p: float = 0.0,
     is_causal: bool = False,
-    return_debug_mask: bool = False,
     *,
+    attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
-) -> Tuple[Tensor, Tensor, Tensor, Tensor, int, int, Tensor, Tensor, Tensor]:
+) -> Tuple[Tensor, Tensor]:
     dtype = query.dtype
     batchSize, num_head, qSize, headSize = (
         query.shape[0],
@@ -4291,26 +4324,16 @@ def scaled_dot_product_flash_attention(
         query.shape[3] == value.shape[3] and key.shape[3] == value.shape[3],
         lambda: "q, k, v should have the same head size",
     )
-    torch._check(
-        return_debug_mask is False, lambda: "return_debug_mask is not supported."
-    )
 
-    logsumexp = torch.empty([batchSize, qSize, num_head, headSize], dtype=torch.float)
-    cum_seq_q, cum_seq_k = torch.empty([], dtype=torch.long), torch.empty(
-        [], dtype=torch.long
-    )
-    max_q, max_k = 0, 0
-    philox_seed, philox_offset = torch.empty([], dtype=torch.long), torch.empty(
-        [], dtype=torch.long
-    )
-    debug_attn_mask = torch.empty(
-        [],
-        dtype=query.dtype,
-        device=query.device,
-        requires_grad=query.requires_grad,
-    )
-    output, _ = aten._scaled_dot_product_attention_math.default(
-        query, key, value, None, dropout_p, is_causal, None, scale=scale
+    output, attn = aten._scaled_dot_product_attention_math.default(
+        query,
+        key,
+        value,
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        dropout_mask=None,
+        scale=scale,
     )
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via
@@ -4346,17 +4369,7 @@ def scaled_dot_product_flash_attention(
     # pre-dispatch op-output and its decomposed representation must
     # return tensor with same view and dims
     output = output.transpose(1, 2).contiguous(memory_format=torch.contiguous_format)
-    return (
-        output.transpose(1, 2),
-        logsumexp,
-        cum_seq_q,
-        cum_seq_k,
-        max_q,
-        max_k,
-        philox_seed,
-        philox_offset,
-        debug_attn_mask,
-    )
+    return (output.transpose(1, 2), attn)
 
 
 def register_inplace(aten_op, outplace_op):
@@ -4391,6 +4404,11 @@ def floor_divide(self, other):
     return torch.div(self, other, rounding_mode="floor")
 
 
+@register_decomposition(aten.sym_numel)
+def sym_numel(t):
+    return functools.reduce(operator.mul, t.shape, 1)
+
+
 @register_decomposition([aten.sum.default, aten.sum.out])
 def sum_default(
     self: Tensor,
@@ -4418,6 +4436,13 @@ def _weight_norm_interface(x, y, dim):
     keep_dim = tuple(i for i in range(len(x.shape)) if i != dim)
     norm = x.norm(2, keep_dim, keepdim=True)
     return x * (y / norm), norm
+
+
+@register_decomposition(aten.take)
+@out_wrapper()
+def take(self, index):
+    flattened = self.reshape(-1)
+    return flattened[index]
 
 
 register_inplace(aten.addbmm_, aten.addbmm)

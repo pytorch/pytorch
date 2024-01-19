@@ -3,9 +3,12 @@
 #include <c10/util/C++17.h>
 #include <c10/util/TypeTraits.h>
 #include <algorithm>
+#include <cstddef>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 
-namespace c10 {
-namespace guts {
+namespace c10::guts {
 
 template <class... T>
 struct false_t : std::false_type {};
@@ -198,7 +201,7 @@ struct all {
 };
 template <template <class> class Condition, class... Types>
 struct all<Condition, typelist<Types...>>
-    : guts::conjunction<Condition<Types>...> {
+    : std::conjunction<Condition<Types>...> {
   static_assert(
       is_type_condition<Condition>::value,
       "In typelist::all<Condition, TypeList>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
@@ -220,7 +223,7 @@ struct true_for_any_type final {
 };
 template <template <class> class Condition, class... Types>
 struct true_for_any_type<Condition, typelist<Types...>> final
-    : guts::disjunction<Condition<Types>...> {
+    : std::disjunction<Condition<Types>...> {
   static_assert(
       is_type_condition<Condition>::value,
       "In typelist::true_for_any_type<Condition, TypeList>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
@@ -512,5 +515,4 @@ decltype(auto) map_types_to_values(Func&& func) {
 }
 
 } // namespace typelist
-} // namespace guts
-} // namespace c10
+} // namespace c10::guts

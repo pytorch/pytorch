@@ -54,10 +54,9 @@ static PyObject* THPVariable_pynew(
       throw python_error();
   }
 
-  if (is_volatile && requires_grad) {
-    throw ValueError(
-        "Variable can't be volatile and require_grad at the same time!");
-  }
+  TORCH_CHECK_VALUE(
+      !is_volatile || !requires_grad,
+      "Variable can't be volatile and require_grad at the same time!");
   if (grad_fn && !THPFunction_Check(grad_fn)) {
     throw TypeError(
         "_grad_fn has to be a Function object or None, but got %s",

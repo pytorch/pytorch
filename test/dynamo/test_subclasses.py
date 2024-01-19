@@ -36,6 +36,14 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 compile_full_eager = torch.compile(backend="eager", fullgraph=True)
 
 
+class BaseTorchFunction(torch.Tensor):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        return super().__torch_function__(func, types, args, kwargs)
+
+
 class MockSubclass(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -144,6 +152,7 @@ GLOBAL_TEST_SUBCLASSES = {
     MockSubclass,
     DummyNDim,
     SigmoidToExpSubclass,
+    BaseTorchFunction,
 }
 
 
@@ -175,6 +184,40 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls._exit_stack.close()
+
+    def test_no_call_to_new(self):
+        class BadNewTorchFunction(torch.Tensor):
+            def __new__(cls, *args, **kwargs):
+                raise RuntimeError("Oops!")
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_function__(func, types, args, kwargs)
+
+        with torch._dynamo.config.patch(
+            "traceable_tensor_subclasses", {BadNewTorchFunction}
+        ):
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                return torch.add(x, 1)
+
+            input = torch.ones(2, 2).as_subclass(BadNewTorchFunction)
+
+            res = fn(input)
+            self.assertIsInstance(res, BadNewTorchFunction)
+
+    def test_base_torch_function_tracing(self):
+        def fn(x):
+            return torch.add(x, 1)
+
+        input = torch.ones(2, 2).as_subclass(BaseTorchFunction)
+        out = fn(input)
+        out_opt = compile_full_eager(fn)(input)
+        self.assertIsInstance(out, BaseTorchFunction)
+        self.assertEqual(out, out_opt)
 
     def test_torch_function_state_graph_break(self):
         @torch.compile(backend="eager")
@@ -230,6 +273,16 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             return MockSubclass(torch.add(x, 1.0))
+
+        input = torch.ones(2, 2)
+
+        res = fn(input)
+        self.assertIsInstance(res, MockSubclass)
+
+    def test_return_as_subclass(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return torch.add(x, 1.0).as_subclass(MockSubclass)
 
         input = torch.ones(2, 2)
 
@@ -436,6 +489,19 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         def fn(w):
             return torch.add(w, 1.0)
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(wrapped)
+        res_act = fn_opt(wrapped)
+        self.assertEqual(res_exp, res_act)
+
+    def test_torch_function_wrapper_class_with_kwargs(self):
+        x = torch.ones(2, 2)
+        wrapped = WrapperSubclass(x)
+
+        def fn(w):
+            return torch.add(w, 1.0, alpha=2.0)
 
         fn_opt = compile_full_eager(fn)
 

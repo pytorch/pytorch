@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from . import allowed_functions
+from . import trace_rules, variables
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
 
@@ -91,9 +91,9 @@ def allow_in_graph(fn):
     if isinstance(fn, (list, tuple)):
         return [allow_in_graph(x) for x in fn]
     assert callable(fn), "allow_in_graph expects a callable"
-    allowed_functions._allowed_function_ids.add(id(fn))
-    allowed_functions._disallowed_function_ids.remove(id(fn))
-    allowed_functions._allowed_user_defined_function_ids.add(id(fn))
+    if trace_rules.lookup(fn) != variables.TorchInGraphFunctionVariable:
+        trace_rules._disallowed_callable_ids.remove(id(fn))
+        trace_rules._allowed_callable_ids.add(id(fn))
     return fn
 
 
@@ -102,14 +102,17 @@ def _disallow_in_graph_helper(throw_if_not_allowed):
         if isinstance(fn, (list, tuple)):
             return [disallow_in_graph(x) for x in fn]
         assert callable(fn), "disallow_in_graph expects a callable"
-        if throw_if_not_allowed and not allowed_functions.is_allowed(fn):
+        if (
+            throw_if_not_allowed
+            and trace_rules.lookup(fn) != variables.TorchInGraphFunctionVariable
+            and fn not in trace_rules._allowed_callable_ids
+        ):
             raise IncorrectUsage(
                 "disallow_in_graph is expected to be used on an already allowed callable (like torch.* ops). "
                 "Allowed callables means callables that TorchDynamo puts as-is in the extracted graph."
             )
-        allowed_functions._allowed_function_ids.remove(id(fn))
-        allowed_functions._disallowed_function_ids.add(id(fn))
-        allowed_functions._allowed_user_defined_function_ids.remove(id(fn))
+        trace_rules._allowed_callable_ids.remove(id(fn))
+        trace_rules._disallowed_callable_ids.add(id(fn))
         return fn
 
     return inner
@@ -310,4 +313,4 @@ def _allow_in_graph_einops():
             allow_in_graph(einops.unpack)  # available since einops 0.6.0
 
 
-allowed_functions.add_module_init_func("einops", _allow_in_graph_einops)
+trace_rules.add_module_init_func("einops", _allow_in_graph_einops)

@@ -11,12 +11,13 @@ import subprocess
 import sys
 import textwrap
 from typing import (
-    cast, Any, Callable, DefaultDict, Dict, Generator, List, NamedTuple,
+    cast, Any, Callable, DefaultDict, Dict, Iterator, List, NamedTuple,
     Optional, Tuple, Union, TYPE_CHECKING)
 
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
 from torch.utils.benchmark.utils._stubs import CallgrindModuleType
+import operator
 
 
 __all__ = ["FunctionCount", "FunctionCounts", "CallgrindStats", "CopyIfCallgrind"]
@@ -54,7 +55,7 @@ class FunctionCounts:
     # the print settings. This is simply to allow hermetic unit tests.
     _linewidth: Optional[int] = None
 
-    def __iter__(self) -> Generator[FunctionCount, None, None]:
+    def __iter__(self) -> Iterator[FunctionCount]:
         yield from self._data
 
     def __len__(self) -> int:
@@ -100,7 +101,7 @@ class FunctionCounts:
         self,
         other: "FunctionCounts",
     ) -> "FunctionCounts":
-        return self._merge(other, lambda c: -c)
+        return self._merge(other, operator.neg)
 
     def __mul__(self, other: Union[int, float]) -> "FunctionCounts":
         return self._from_dict({

@@ -309,6 +309,7 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
   auto input_t = (input_tensor.sizes().size() == 0) ? input_tensor.view({1}) : input_tensor;
   auto in_dtype = opt_dtype.value_or(input_tensor.scalar_type());
   auto mps_input_dtype = getMPSDataType(in_dtype);
+  TORCH_CHECK(!input_tensor.is_complex(), "norm ops are not supported for complex yet");
 
   IntArrayRef input_shape = cdist ? input_broadcasted_shape.value() : input_t.sizes();
 
