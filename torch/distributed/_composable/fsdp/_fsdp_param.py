@@ -18,7 +18,7 @@ from ._fsdp_common import (
 
 """
 [Note: FSDP Tensors]
-FSDP works with the following tensors:
+FSDP considers the following tensors:
 - Original parameter: parameter passed to :class:`FSDPParam`, i.e. the one
   on the module when applying FSDP
 - Sharded parameter: sharding the original parameter on dim-0 as a DTensor
