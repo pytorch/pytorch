@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import itertools
 import unittest
 from typing import List
 
@@ -14,7 +15,13 @@ from torch.distributed._composable.fsdp._fsdp_init import (
     _get_managed_states,
     _normalize_device,
 )
+from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_fsdp import FSDPTestMultiThread
 from torch.testing._internal.common_utils import run_tests
@@ -49,6 +56,79 @@ class TestFullyShardInitDevice(FSDPTestMultiThread):
             with torch.cuda.device(1):
                 for device in ("cuda", torch.device("cuda")):
                     self.assertEqual(_normalize_device(device), torch.device("cuda", 1))
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_move_states_to_device_tensor(self):
+        model = MLP(8, torch.device("cpu"), with_buffer=True)
+        for tensor in itertools.chain(model.parameters(), model.buffers()):
+            self.assertEqual(tensor.device, torch.device("cpu"))
+        fully_shard(model, device="cuda")
+        cuda_device = torch.device("cuda", torch.cuda.current_device())
+        for tensor in itertools.chain(model.parameters(), model.buffers()):
+            self.assertEqual(tensor.device, cuda_device)
+
+
+class TestFullyShardInitDeviceDTensor(FSDPTestMultiThread):
+    """Tests the ``device`` argument with DTensors."""
+
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_move_states_to_device_dtensor_valid(self):
+        assert self.world_size >= 4, f"{self.world_size}"
+        dp_size = 2
+        global_mesh = init_device_mesh(
+            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+        )
+        dp_mesh = global_mesh["dp"]
+        tp_mesh = global_mesh["tp"]
+        model = MLP(8, torch.device("cpu"), with_buffer=True)
+        parallelize_module(
+            model,
+            tp_mesh,
+            {"in_proj": ColwiseParallel(), "out_proj": RowwiseParallel()},
+        )
+        cuda_device = torch.device("cuda", torch.cuda.current_device())
+        for tensor in itertools.chain(model.parameters(), model.buffers()):
+            if isinstance(tensor, DTensor):
+                # DTensor constructor moves to the mesh's device
+                self.assertEqual(tensor.device, cuda_device)
+                self.assertEqual(tensor._local_tensor.device, cuda_device)
+            else:
+                self.assertEqual(tensor.device, torch.device("cpu"))
+        fully_shard(model, mesh=dp_mesh)
+        for tensor in itertools.chain(model.parameters(), model.buffers()):
+            self.assertEqual(tensor.device, cuda_device)
+            if isinstance(tensor, DTensor):
+                self.assertEqual(tensor._local_tensor.device, cuda_device)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_move_states_to_device_dtensor_invalid(self):
+        assert self.world_size >= 4, f"{self.world_size}"
+        dp_size = 2
+        global_cuda_mesh = init_device_mesh(
+            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+        )
+        global_cpu_mesh = init_device_mesh(
+            "cpu", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+        )
+        dp_mesh = global_cuda_mesh["dp"]
+        tp_mesh = global_cpu_mesh["tp"]  # mismatched meshes!
+        model = MLP(8, torch.device("cpu"), with_buffer=True)
+        parallelize_module(
+            model,
+            tp_mesh,
+            {"in_proj": ColwiseParallel(), "out_proj": RowwiseParallel()},
+        )
+        for tensor in itertools.chain(model.parameters(), model.buffers()):
+            self.assertEqual(tensor.device, torch.device("cpu"))
+            if isinstance(tensor, DTensor):
+                self.assertEqual(tensor._local_tensor.device, torch.device("cpu"))
+        regex = r"Requires DTensor to have mesh of the same type as the FSDP mesh but got cpu for DTensor and cuda for FSDP"
+        with self.assertRaisesRegex(ValueError, regex):
+            fully_shard(model, mesh=dp_mesh)
 
 
 class TestFullyShardInitMesh(FSDPTestMultiThread):

@@ -12,6 +12,7 @@ from ._fsdp_init import (
     _get_managed_modules,
     _get_managed_states,
     _init_default_fully_shard_mesh,
+    _move_states_to_device,
     _normalize_device,
 )
 from ._fsdp_state import FSDPState
@@ -49,6 +50,7 @@ def fully_shard(
 
     managed_modules = _get_managed_modules(module)
     params, buffers = _get_managed_states(managed_modules)
+    _move_states_to_device(params, buffers, device, mesh_info)
 
     # Place FSDP leftmost for highest priority in the method resolution order
     cls = module.__class__
