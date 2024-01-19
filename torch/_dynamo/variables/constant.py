@@ -98,6 +98,7 @@ class ConstantVariable(VariableTracker):
         if type(obj) in (
             int,
             float,
+            complex,
             bool,
             type(None),
             str,
