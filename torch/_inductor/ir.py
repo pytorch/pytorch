@@ -3481,23 +3481,20 @@ class ConcatKernel(NopKernel):
         )
         kernel = StorageBox(concat_kernel)
         buffer_names = []
-        for i in range(len(inputs)):
-            input_buffer = cls.realize_into(
-                inputs[i],
+        for i, input in enumerate(inputs):
+            input_buffer, copy_required = cls.realize_into(
+                input,
                 SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
             )
             concat_kernel.inputs.append(input_buffer)
 
-            if isinstance(inputs[i].data, BaseView):
-                input_unwrapped = inputs[i].data.unwrap_view()
-            else:
-                input_unwrapped = inputs[i].data
-
             if (
-                input_unwrapped.is_input_buffer()
-                and inputs[i].get_device().type == "cuda"
+                copy_required
+                and len(inputs) >= 10
+                and input.get_device().type == "cuda"
                 and not is_dynamic(input_buffer)
             ):
+                # Take all copy kernels and fuse them into a single ForEach kernel
                 buffer_names.append(input_buffer.get_name())
 
         if len(buffer_names) > 1:
@@ -3537,7 +3534,7 @@ class ConcatKernel(NopKernel):
             assert hasattr(src.data, "layout")
             if cls.can_realize_into_without_copy(src):
                 src.data.layout = AliasedLayout(dst)
-                return src.data
+                return src.data, False
         # introduce a copy
         pw = Pointwise.create(
             device=src.get_device(),
@@ -3548,7 +3545,8 @@ class ConcatKernel(NopKernel):
                 for a, b in zip(src.get_size(), dst.get_size())
             ],
         )
-        return cls.realize_into(pw, dst)
+        computed_buffer, _ = cls.realize_into(pw, dst)
+        return computed_buffer, True
 
     def should_allocate(self):
         return True
