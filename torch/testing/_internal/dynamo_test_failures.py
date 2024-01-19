@@ -2002,7 +2002,6 @@ dynamo_expected_failures = {
     "TestShapeOpsCPU.test_flip_cpu_bfloat16",  # test_shape_ops
     "TestShapeOpsCPU.test_clamp_cpu_float32",  # test_shape_ops
     "TestSubclassSerialization.test_tensor_subclass_deepcopy",  # test_serialization
-    "TestOldSerialization.test_save_different_dtype_unallocated",  # test_serialization
     "TestSubclassSerialization.test_tensor_subclass_getstate_overwrite",  # test_serialization
     "TestSerialization.test_save_different_dtype_unallocated",  # test_serialization
     "TestSubclassSerialization.test_tensor_subclass_wrapper_serialization",  # test_serialization
@@ -2171,7 +2170,6 @@ dynamo_expected_failures = {
     "TestModuleHookNN.test_hook_parameter_registration",  # nn/test_module_hooks
     "TestModuleHooks.test_full_backward_pre_hooks_named_tuple_False",  # nn/test_module_hooks
     "TestModuleHookNN.test_hook_cpp",  # nn/test_module_hooks
-    "TestStateDictHooks.test_load_state_dict_pre_hook",  # nn/test_module_hooks
     "TestModuleHookNN.test_hook_invalid_outputs",  # nn/test_module_hooks
     "TestModuleHookNN.test_backward_hooks_interaction",  # nn/test_module_hooks
     "TestModuleHookNN.test_hooks",  # nn/test_module_hooks
@@ -2198,7 +2196,6 @@ dynamo_expected_failures = {
     "TestLazyModules.test_lazy_batchnorm3d",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv2d_pickle",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv1d_pickle",  # nn/test_lazy_modules
-    "TestLazyModules.test_lazy_module_jit_buffer",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv1d",  # nn/test_lazy_modules
     "TestLazyModules.test_linear",  # nn/test_lazy_modules
     "TestLazyModules.test_materialize_dtype",  # nn/test_lazy_modules
