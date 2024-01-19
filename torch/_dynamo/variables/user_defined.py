@@ -297,8 +297,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     cm_obj=self.value(*unwrapped_args),
                 )
 
+            try:
+                fn = variables.UserFunctionVariable(
+                    self.value.__init__, source=self.source
+                )
+            except AssertionError:
+                unimplemented("Failed to get __init__ function of %s" % self.value)
             return tx.inline_user_function_return(
-                variables.UserFunctionVariable(self.value.__init__, source=self.source),
+                fn,
                 (self, *args),
                 {},
             )
