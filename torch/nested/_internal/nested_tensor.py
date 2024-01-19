@@ -11,11 +11,13 @@ _tensor_id_counter = 0
 _tensor_symint_registry = WeakTensorKeyDictionary()
 
 
-def get_tensor_symint(tensor, *, coeff=1):
+def get_tensor_symint(tensor, *, coeff=1, sum_vec=None):
     global _tensor_id_counter
     tensor_symint = _tensor_symint_registry.get(tensor)
     if tensor_symint is None:
-        tensor_symint = torch._C._get_singleton_int(_tensor_id_counter, coeff)
+        tensor_symint = torch._C._get_singleton_int(
+            _tensor_id_counter, coeff, tensor, sum_vec
+        )
         _tensor_id_counter += 1
         _tensor_symint_registry[tensor] = tensor_symint
     return tensor_symint
@@ -89,7 +91,7 @@ class NestedTensor(torch.Tensor):
         # Query cache for the symint associated with offsets or lengths
         # (create a new one if needed).
         ragged_source = offsets if lengths is None else lengths
-        ragged_size = get_tensor_symint(ragged_source, coeff=1)
+        ragged_size = get_tensor_symint(ragged_source, coeff=1, sum_vec=values.shape[0])
         self._ragged_idx = kwargs.get("_ragged_idx", 1)
         B = offsets.shape[0] - 1
         Ds = values.shape[: self._ragged_idx - 1] + values.shape[self._ragged_idx :]
@@ -198,6 +200,16 @@ class NestedTensor(torch.Tensor):
             # Associate offsets or lengths (possibly fake, possibly functionalized)
             # with the ragged_size.
             ragged_size = outer_size[ragged_idx]
+            # Ordinarily, we create singleton ints by passing a 1D tensor to
+            # get_tensor_symint. When we create singleton ints this way, we are
+            # able to set the singleton int's metadata, e.g. the 'vec' field
+            # during construction.
+            #
+            # In the case of torch compile, a symbolic version of the
+            # singleton int is created in a different way, and it does not yet
+            # have the metadata set. We set the metadata here.
+            ragged_size.node._singleton_vec = offsets
+            ragged_size.node._singleton_sum_vec = values.shape[0]
             _tensor_symint_registry[ragged_source] = ragged_size
 
         return NestedTensor(
@@ -235,6 +247,14 @@ class NestedTensor(torch.Tensor):
             pass
         with torch._C.DisableTorchFunctionSubclass():
             return func(*args, **kwargs)
+
+
+# Let dispatcher associate singleton ints with NestedTensor class. This is
+# so that if the dispatcher sees singleton ints in the arguments, it will know
+# to dispatch to NestedTensor's __torch_dispatch__. This is important in the
+# case where there are no NestedTensor arguments to that function, e.g.
+# factory functions like zeros, and views like expand.
+torch._C._set_nested_tensor_cls(NestedTensor)
 
 
 # Not actually a view!

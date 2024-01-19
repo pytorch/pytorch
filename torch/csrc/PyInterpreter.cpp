@@ -322,6 +322,15 @@ void ConcretePyInterpreterVTable::dispatch(
             append_overloaded_tensor(&overloaded_args, py::cast(tensor).ptr());
           }
         }
+        if (nv.isSymInt()) {
+          const auto& x = nv.toSymInt();
+          if (x.is_heap_allocated() && x.toSymNode()->is_singleton()) {
+            const auto& nt_cls = at::impl::get_nested_tensor_cls();
+            TORCH_INTERNAL_ASSERT(nt_cls);
+            append_overloaded_type(
+                &overloaded_args, nt_cls->ptr(getPyInterpreter()));
+          }
+        }
       }
     }
   }

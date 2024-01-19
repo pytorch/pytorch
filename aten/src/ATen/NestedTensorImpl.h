@@ -169,6 +169,8 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   //       we can compute it from `nested_sizes_`
   mutable c10::optional<std::vector<int64_t>> opt_sizes_;
 
+  mutable c10::optional<std::vector<c10::SymInt>> sym_sizes_;
+
   template <typename VariableVersion>
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
       VariableVersion&& version_counter,

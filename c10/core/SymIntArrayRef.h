@@ -36,7 +36,7 @@ inline at::IntArrayRef asIntArrayRefSlow(
     int64_t line) {
   for (const c10::SymInt& sci : ar) {
     TORCH_CHECK(
-        !sci.is_heap_allocated(),
+        !sci.is_symbolic(),
         file,
         ":",
         line,

@@ -12,6 +12,7 @@
 #include <ATen/ATen.h>
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/TracerMode.h>
+#include <c10/core/SafePyObject.h>
 #include <c10/util/irange.h>
 
 #include <sstream>
@@ -541,8 +542,7 @@ auto handle_torch_function(
     const char* func_name_override) -> PyObject* {
   py::object torch_api_function = PyObject_FastGetAttrString(
       torch_api,
-      (char*)(func_name_override ? func_name_override
-                                 : r.get_func_name().c_str()));
+      (char*)(func_name_override ? func_name_override : r.get_func_name().c_str()));
   TORCH_INTERNAL_ASSERT(
       torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::tuple args_ = combine_self_args(self, args);

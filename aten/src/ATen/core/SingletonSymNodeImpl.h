@@ -6,6 +6,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
+#include <ATen/core/TensorBody.h>
 #include <cstdint>
 #include <string>
 
@@ -34,12 +35,40 @@ namespace c10 {
 // During tracing the strides of the outputs need to be a function of the size
 // and strides of the inputs so it is important that SingletonSymNode itself is
 // able to express this.
+//
+// NOTE [ SingletonVariant ]
+//
+// Currently, if SingletonSymNodeType::CPP is passed, that means that the
+// singleton is only meant to be used to ferry nested_tensor_size metadata
+// from forward to use in backward. In this case we set `val`, `coeff` etc
+// to bogus values and make sure to error if they are accessed.
+enum class SingletonVariant { PYTHON, CPP };
+
+constexpr c10::DispatchKeySet py_singleton_ks({c10::DispatchKey::Python, c10::DispatchKey::PythonTLSSnapshot});
+constexpr c10::DispatchKeySet cpp_singleton_ks({c10::DispatchKey::NestedTensor});
+
 class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
  public:
   // CAUTION: you should probably not be constructing these directly; please
-  // the higher-level API in python instead (TODO: actually introduce that).
-  explicit SingletonSymNodeImpl(int64_t val, int64_t coeff)
-      : val_(val), coeff_(coeff) {}
+  // the higher-level API in python instead.
+  explicit SingletonSymNodeImpl(
+      int64_t val,
+      int64_t coeff,
+      at::Tensor vec,
+      int64_t sum_vec,
+      SingletonVariant type)
+      : val_(val), coeff_(coeff), vec_(std::move(vec)), sum_vec_(sum_vec), type_(type) {
+    // See NOTE [ SingletonVariant ]
+    if (type == SingletonVariant::PYTHON) {
+      key_set_ = py_singleton_ks;
+    } else if (type == SingletonVariant::CPP) {
+      TORCH_INTERNAL_ASSERT(val == -1 && coeff == -1 && sum_vec == -1);
+      // NB: Since we possibly don't have python instead of relying on torch
+      //     dispatch, we dispatch to the NestedTensor kernel directly.
+      // NB: we can potentially add the AutogradNestedTensor key
+      key_set_ = cpp_singleton_ks;
+    }
+  }
 
   bool bool_() override {
     return false;
@@ -55,6 +84,10 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
 
   bool is_bool() override {
     return false;
+  }
+
+  bool is_singleton() override {
+    return true;
   }
 
   bool has_hint() override {
@@ -84,6 +117,9 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
   std::string str() override {
     if (coeff_ == 1) {
       return "j" + std::to_string(val_);
+    }
+    if (type_ == SingletonVariant::CPP) {
+      return "jx";
     }
     return std::to_string(coeff_) + "*j" + std::to_string(val_);
   }
@@ -131,15 +167,33 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
   c10::SymNode mul(const c10::SymNode& other) override;
 
   c10::optional<int64_t> singleton_int() override {
+    TORCH_CHECK(
+        type_ == SingletonVariant::PYTHON,
+        "shape returned from strided layout NestedTensor does not support this "
+        "operation");
     return val_;
   }
 
   c10::optional<int64_t> singleton_coeff() override {
+    TORCH_INTERNAL_ASSERT(type_ == SingletonVariant::PYTHON);
     return coeff_;
+  }
+
+  c10::TensorImpl* singleton_vec() override {
+    return vec_.unsafeGetTensorImpl();
+  }
+
+  int64_t singleton_sum_vec() override {
+    TORCH_INTERNAL_ASSERT(type_ == SingletonVariant::PYTHON);
+    return sum_vec_;
   }
 
   bool is_symbolic() override {
     return false;
+  }
+
+  c10::DispatchKeySet key_set() override {
+    return key_set_;
   }
 
 #define DEFINE_BINARY_NOT_SUPPORTED(name)                           \
@@ -177,6 +231,15 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
  private:
   int64_t val_;
   int64_t coeff_;
+  at::Tensor vec_;
+  int64_t sum_vec_;
+  SingletonVariant type_;
+  c10::DispatchKeySet key_set_;
 };
+
+// If we would like to have singleton_vec() as a virtual method, it must return
+// a TensorImpl* instead of a normal Tensor. We then rely on this helper to
+// wrap that back into a Tensor.
+TORCH_API at::Tensor get_singleton_vec(const c10::SymNode& node);
 
 } // namespace c10

@@ -222,19 +222,7 @@ def is_concrete_bool(a: Union[bool, SymBool]):
     return False
 
 def is_singleton(s):
-    # check for SingletonSymNode
-    if not isinstance(s, torch.SymInt):
-        return False
-    if s.node.singleton_int() is not None:
-        return True
-
-    # check for symbolic variable wrapping a SingletonSymNode (fake-ifying causes this)
-    return (
-        s.node.is_symbolic()
-        and s.node.hint is not None
-        and isinstance(s.node.hint, torch.SymInt)
-        and s.node.hint.node.singleton_int() is not None
-    )
+    return isinstance(s, torch.SymInt) and s.node.is_singleton()
 
 def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
     if isinstance(val, SymTypes):

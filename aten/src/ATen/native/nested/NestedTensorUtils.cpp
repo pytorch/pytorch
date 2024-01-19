@@ -1,5 +1,7 @@
-#include <ATen/NestedTensorImpl.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
+
+#include <ATen/core/SingletonSymNodeImpl.h>
+#include <ATen/NestedTensorImpl.h>
 #include <c10/util/Optional.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -165,6 +167,36 @@ std::vector<Tensor> split_with_sizes_nested(
     splits[split_idx] = create_nested_view_tensor(self, new_sizes, new_strides, new_offsets);
   }
   return splits;
+}
+
+Tensor get_nested_sizes_from_sym_sizes(SymIntArrayRef size) {
+  c10::SymNode node = nullptr;
+  int64_t singleton_idx = -1;
+  for (const auto i : c10::irange(size.size())) {
+    if (size[i].is_heap_allocated() && size[i].toSymNode()->is_singleton()) {
+      node = size[i].toSymNode();
+      singleton_idx = static_cast<int64_t>(i);
+      // TODO: Handle multiple singletons
+      break;
+    }
+  }
+  TORCH_INTERNAL_ASSERT(node != nullptr);
+  auto vec = c10::get_singleton_vec(node);
+
+  auto nt_sizes = at::empty({vec.size(0), static_cast<int64_t>(size.size() - 1)},
+                            TensorOptions().dtype(at::kLong));
+  for (const auto i : c10::irange(size.size())) {
+    if (i == 0) {
+      continue;
+    }
+    int64_t idx = static_cast<int64_t>(i);
+    if (idx == singleton_idx) {
+      nt_sizes.select(1, idx - 1).copy_(vec);
+    } else {
+      nt_sizes.select(1, idx - 1).fill_(size[i]);
+    }
+  }
+  return nt_sizes;
 }
 
 } // namespace native

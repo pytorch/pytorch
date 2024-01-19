@@ -11,7 +11,7 @@ namespace c10 {
 #define DEFINE_BINARY_OP(OP, ROP)                                        \
   template <typename T>                                                  \
   c10::SymNode ConstantSymNodeImpl<T>::OP(const c10::SymNode& other) {   \
-    TORCH_INTERNAL_ASSERT(other->singleton_int().has_value());           \
+    TORCH_INTERNAL_ASSERT(other->is_singleton());                        \
     return other->ROP(                                                   \
         c10::intrusive_ptr<ConstantSymNodeImpl<T>>::reclaim_copy(this)); \
   }
