@@ -8,8 +8,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 using optional_variable_list = std::vector<c10::optional<Variable>>;
 using _jvp_fn_t = std::function<variable_list(variable_list, variable_list)>;
@@ -97,7 +96,7 @@ struct TORCH_API Function {
   // the parameter X.
   template <typename X = T, typename... Args>
   static auto apply(Args&&... args)
-      -> std::enable_if_t<std::is_same<X, T>::value, forward_t<X, Args...>>;
+      -> std::enable_if_t<std::is_same_v<X, T>, forward_t<X, Args...>>;
 };
 
 /// Context to save information during `forward` that can be accessed in
@@ -228,8 +227,8 @@ inline void extract_vars(
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, variable_list>::value, T>::type
-to_output_type(std::vector<c10::optional<Variable>>& output_list) {
+std::enable_if_t<std::is_same_v<T, variable_list>, T> to_output_type(
+    std::vector<c10::optional<Variable>>& output_list) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list result;
   std::transform(
@@ -241,8 +240,8 @@ to_output_type(std::vector<c10::optional<Variable>>& output_list) {
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, Variable>::value, T>::type
-to_output_type(std::vector<c10::optional<Variable>>& output_list) {
+std::enable_if_t<std::is_same_v<T, Variable>, T> to_output_type(
+    std::vector<c10::optional<Variable>>& output_list) {
   return *output_list[0];
 }
 
@@ -264,7 +263,7 @@ inline std::vector<c10::optional<Variable>> to_optional(variable_list& output) {
 template <class T>
 template <typename X, typename... Args>
 auto Function<T>::apply(Args&&... args)
-    -> std::enable_if_t<std::is_same<X, T>::value, forward_t<X, Args...>> {
+    -> std::enable_if_t<std::is_same_v<X, T>, forward_t<X, Args...>> {
   const auto& functorch_tls = at::functorch::functorchTLSAccessor();
   if (functorch_tls) {
     // Function support for functorch is handled in Python.
@@ -434,5 +433,4 @@ void CppNode<T>::set_ctx_grad_fn(const std::shared_ptr<Node>& node) {
   ctx_.grad_fn_ = node;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
