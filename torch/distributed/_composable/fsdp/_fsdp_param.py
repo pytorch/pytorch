@@ -74,8 +74,7 @@ class FSDPParam:
     def _init_sharded_param(self, param: nn.Parameter, device: torch.device):
         if param.device != device:
             raise AssertionError(
-                "Expects parameter to already be moved to device "
-                f"{device} but got {param.device}"
+                f"Expects the parameter to already be moved to device {device} but got {param.device}"
             )
         # TODO: Replace the sharded DTensor parameter construction logic with
         # `distribute_tensor` after https://github.com/pytorch/pytorch/issues/116101
