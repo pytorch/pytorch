@@ -287,6 +287,11 @@ class TracerBase:
             kwargs = {field.name: self.create_arg(getattr(a, field.name)) for field in fields(a)}
             return self.create_node("call_function", a.__class__, (), kwargs)
 
+        from torch.fx.experimental.symbolic_shapes import is_singleton, is_symbolic
+
+        if is_singleton(a) and not is_symbolic(a):
+            return a
+
         elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
             return a
         raise NotImplementedError(f"argument of type: {type(a)}")

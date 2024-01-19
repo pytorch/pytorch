@@ -982,6 +982,32 @@ def embedding_default(func, *args, **kwargs):
     )
 
 
+@register_jagged_func(
+    torch.ops.aten.empty_strided.default,
+    "size: any, stride: any, dtype: any?, layout: any?, device: any?, pin_memory: any?",
+)
+def empty_strided(func, *args, **kwargs):
+    # Ignores strides
+    from torch.fx.experimental.symbolic_shapes import is_singleton
+
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    _unused_B, singleton, *Ds = new_kwargs.pop("size")
+    _unused_B_stride, *strides = new_kwargs.pop("stride")
+
+    print(singleton, type(singleton))
+    if not is_singleton(singleton):
+        raise ValueError(
+            f"{func.__name__}() only supports shapes of form (B, *, D1, D2...) "
+            "where only the second-left-most dimension is ragged. "
+        )
+    offsets = singleton.node.singleton_vec()
+    sum_offsets = singleton.node.singleton_sum_vec()
+
+    return NestedTensor(func([sum_offsets, *Ds], strides, **new_kwargs), offsets)
+
+
 def jagged_factory(func, *args, **kwargs):
     from torch.fx.experimental.symbolic_shapes import is_singleton
 

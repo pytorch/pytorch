@@ -896,7 +896,7 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
 
 
 def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
-    if isinstance(val, (int, float, bool)):
+    if not isinstance(val, (SymInt, SymFloat, SymBool)):
         return False
     return val.node.is_symbolic()
 
