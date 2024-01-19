@@ -14,7 +14,7 @@ from torch.fx.experimental.proxy_tensor import (
     decompose,
     disable_autocast_cache,
     disable_proxy_modes_tracing,
-    fetch_tensor_proxy,
+    fetch_object_proxy,
     ProxyTorchDispatchMode,
     PythonKeyTracer,
     track_tensor_tree,
@@ -211,7 +211,7 @@ class AutogradCompilerInstance:
         if isinstance(t, tuple):
             return tuple(self.to_proxy(x) for x in t)
         assert isinstance(t, (torch.Tensor, torch.SymInt))
-        return fetch_tensor_proxy(self.fx_tracer)(t).proxy
+        return fetch_object_proxy(self.fx_tracer)(t).proxy
 
     def bind_tensors_to_proxies(self, tensors, proxies):
         if isinstance(proxies, torch.fx.Proxy):
