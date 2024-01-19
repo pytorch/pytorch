@@ -4065,8 +4065,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for i in range(0, 10):
             opt_fn(x, counter)
         self.assertEqual(counter[0], 12)
-        # 3 becuase of automatic dynamic
-        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.frame_count, torch._dynamo.utils.ifdynstaticdefault(3, 2))
 
 
 if __name__ == "__main__":

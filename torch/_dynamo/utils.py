@@ -2463,7 +2463,6 @@ def safe_hasattr_and_no_user_defined_getattr(obj, name):
     Note:One thing to keep in mind is that checking for SAFETY takes precedence over checking hasattr.
     This means that for cases where we are unsafe, we will return False, even if the attribute is there.
     """
-    assert isinstance(obj, torch._dynamo.variables.VariableTracker)
     if object_has_getattribute(obj) or get_custom_getattr(obj):
         return False
     return hasattr(obj, name)
