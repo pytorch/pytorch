@@ -7,7 +7,12 @@ import torch.nn.functional as F
 
 
 class MLP(nn.Module):
-    def __init__(self, dim: int, device: torch.device, dim_multiplier: int = 4):
+    def __init__(
+        self,
+        dim: int,
+        device: torch.device = torch.device("cpu"),
+        dim_multiplier: int = 4,
+    ):
         super().__init__()
         self.in_proj = nn.Linear(dim, dim_multiplier * dim, device=device)
         self.out_proj = nn.Linear(dim_multiplier * dim, dim, device=device)
