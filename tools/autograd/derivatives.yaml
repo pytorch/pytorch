@@ -829,7 +829,7 @@
 - name: _unsafe_masked_index(Tensor self, Tensor mask, Tensor?[] indices, Scalar fill) -> Tensor
   self: at::_unsafe_masked_index_put(grad.new_zeros_symint(self.sym_sizes(), self.options()), mask, indices, grad, true)
   mask: non_differentiable
-  result: auto_linear
+  result: _unsafe_masked_index(self_t, mask, indices, 0)
 
 - name: _unsafe_masked_index_put(Tensor self, Tensor mask, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
   self: "accumulate ? grad.masked_fill(~mask, 0) : at::_unsafe_masked_index_put(grad, mask, indices, zeros_like(values), false)"
