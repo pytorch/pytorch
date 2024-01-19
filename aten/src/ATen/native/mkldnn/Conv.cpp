@@ -329,7 +329,15 @@ Tensor mkldnn_convolution(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
-  bool use_channels_last = mkldnn_conv_use_channels_last(input_t, weight_t);
+  bool use_channels_last;
+  // Enables Channel last layout for 2D Convolution with Float datatype.
+  // Boosts performance by calling forward convolution with channel last (NHWC).
+  if (input_t.scalar_type() == at::kFloat &&  input_t.ndimension()==4 && (!(input_t.is_mkldnn() || weight_t.is_mkldnn()))) {
+      use_channels_last =true;
+  }
+  else {
+      use_channels_last = mkldnn_conv_use_channels_last(input_t, weight_t);
+  }
   return _mkldnn_convolution(
       input_t,
       weight_t,
