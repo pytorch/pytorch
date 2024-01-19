@@ -1,5 +1,3 @@
-from contextlib import nullcontext
-
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
@@ -15,7 +13,6 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import (
     FunctionalTensor,
-    FunctionalTensorMode,
     unset_functional_temporarily,
 )
 from torch.fx.experimental.proxy_tensor import (
@@ -95,7 +92,8 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
                         return maybe_unfunc_t.clone()
                 return t
 
-            example_xs = [_from_fun(xs) for xs in _unstack_pytree(mapped_xs)[0]]
+            unwrapped_mapped_xs = pytree.tree_map(_from_fun, mapped_xs)
+            example_xs = _unstack_pytree(unwrapped_mapped_xs)[0]
 
             example_pos_args = [
                 _from_fun(arg) if isinstance(arg, torch.Tensor) else arg
@@ -274,13 +272,7 @@ def _unstack_pytree(xs):
             f"Leaves of xs must have same leading dimension size {[xs.shape for xs in flat_xs]}"
         )
 
-    ctx = (
-        FunctionalTensorMode
-        if any(isinstance(x, FunctionalTensor) for x in flat_xs)
-        else nullcontext
-    )
-    with ctx():
-        a = zip(*flat_xs)
+    a = zip(*flat_xs)
 
     pytrees = []
     for tuple in a:
