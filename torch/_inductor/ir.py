@@ -53,6 +53,7 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
 from .dependencies import (
+    extract_free_unbacked_symbols,
     extract_input_node_reduction_ranges,
     extract_read_writes,
     var_builder,
@@ -342,7 +343,10 @@ class Loops(IRNode):
     ranges: List[Expr]
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
-        return set().union(*(free_unbacked_symbols(e) for e in self.ranges))
+        index = self._index(self.ranges)
+        return set().union(
+            *(free_unbacked_symbols(e) for e in self.ranges)
+        ) | extract_free_unbacked_symbols(self.inner_fn, index)
 
     def __str__(self, names=("ranges",)):
         return self.str_helper(

@@ -1312,6 +1312,7 @@ class Kernel(CodeGen):
             x: self.args.size(x)
             for x in sorted_symbols
             if x.name.startswith("s")
+            or x.name.startswith("u")
             or x.name.startswith("ps")
             or (x.name.startswith("i") and not x.name.startswith("idx"))
         }

@@ -259,7 +259,10 @@ class OpsHandler(Protocol[T]):
     magic method from being called).  Instead, define a function that casts an
     argument of your type to the protocol, which is sufficient to induce mypy to
     test that the protocol is implemented correctly.  Search for ``_typecheck_``
-    in this file to see some examples.
+    in this file to see some examples.  If you see an obscure error where a
+    class doesn't implement a Protocol, but mypy doesn't say why, check to see
+    that ``__getattr__`` is typed correctly (typically, it is not possible to
+    type ``__getattr__`` without typing it as ``Callable[..., Any]``)
     """
 
     def constant(self, value: Union[bool, float, int], dtype: torch.dtype) -> T:

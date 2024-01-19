@@ -12,6 +12,7 @@ import torch._custom_ops as custom_ops
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch.testing._internal.common_device_type import (
+    expectedFailureCPU,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -296,6 +297,20 @@ class TestInductorDynamic(TestCase):
             return x.item()
 
         f(torch.tensor([3.0], device=device))
+
+    @expectedFailureCPU
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_index_select(self, device):
+        # Tests if unbacked symbols captured by inner_fn are properly tracked
+        def f(x):
+            y = x.item()
+            return torch.index_select(
+                torch.ones(y, device=device), 0, torch.tensor([0, 2, 1], device=device)
+            )
+
+        cf = torch.compile(fullgraph=True)(f)
+        arg = torch.tensor(5, device=device)
+        self.assertEqual(f(arg), cf(arg))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_matmul(self, device):

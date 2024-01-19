@@ -12,8 +12,15 @@ import torch
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
 from .codegen.common import index_prevent_reordering
-from .utils import get_dtype_size, sympy_str, sympy_subs, sympy_symbol, VarRanges
-from .virtualized import V
+from .utils import (
+    get_dtype_size,
+    reduction_num_outputs,
+    sympy_str,
+    sympy_subs,
+    sympy_symbol,
+    VarRanges,
+)
+from .virtualized import OpsHandler, ReductionType, V
 
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
@@ -442,3 +449,43 @@ def extract_input_node_reduction_ranges(
 
 def canonicalization_prefix():
     return "c"
+
+
+# ops handler which computes all the free unbacked symbols for an IR
+class FreeUnbackedSymbolsOpsHandler:
+    symbols: Set[sympy.Symbol]
+
+    def __init__(self):
+        self.symbols = set()
+
+    def __getattr__(self, name: str) -> Callable[..., Any]:
+        def inner(*args, **kwargs):
+            for a in itertools.chain(args, kwargs.values()):
+                if isinstance(a, (sympy.Expr, sympy.logic.boolalg.Boolean)):
+                    self.symbols |= free_unbacked_symbols(a)
+
+        return inner
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: str,
+    ) -> Union[None, tuple[None, ...]]:
+        num_values = reduction_num_outputs(reduction_type)
+        return (None,) * num_values if num_values > 1 else None
+
+
+def _typecheck_FreeUnbackedSymbolsOpsHandler(
+    h: FreeUnbackedSymbolsOpsHandler,
+) -> OpsHandler[None]:
+    return h
+
+
+def extract_free_unbacked_symbols(fn: Callable[..., Any], index, rindex=None):
+    args = [index, rindex] if rindex is not None else [index]
+    handler = FreeUnbackedSymbolsOpsHandler()
+    with V.set_ops_handler(handler):
+        fn(*args)
+    return handler.symbols
