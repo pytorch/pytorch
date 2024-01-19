@@ -5,6 +5,7 @@ from typing import Collection, Dict, List, Mapping, Optional, Set, Tuple, Union
 
 __all__ = [
     "ConstantArgument",
+    "CustomObjArgument",
     "ExportBackwardSignature",
     "ExportGraphSignature",
     "InputKind",
@@ -28,13 +29,13 @@ class SymIntArgument:
 
 
 @dataclasses.dataclass
-class ConstantArgument:
-    value: Union[int, float, bool, None]
+class CustomObjArgument:
+    name: str
 
 
 @dataclasses.dataclass
-class CustomObjArgument:
-    name: str
+class ConstantArgument:
+    value: Union[int, float, bool, None]
 
 
 ArgumentSpec = Union[
