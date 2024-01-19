@@ -4421,6 +4421,12 @@ def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
         bias = create_tensor([out_feat])
         yield SampleInput(input_tensor, weight, bias)
 
+    # 5D tensor, used to crash on MPS, see https://github.com/pytorch/pytorch/issues/114942
+    input_tensor = create_tensor(2, 1, 2, 1, 2)
+    weight = create_tensor(4, 2)
+    yield SampleInput(input_tensor, weight)
+    yield SampleInput(input_tensor, weight, create_tensor(4))
+
 def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4, 5], [8, 8, 8]]
     batch_options: List[List[int]] = [
