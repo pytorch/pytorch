@@ -3,7 +3,7 @@ from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
                         _default_to_fused_or_foreach, _get_scalar_dtype, _differentiable_doc, _maximize_doc, _foreach_doc,
-                        _capturable_doc)
+                        _view_as_real, _capturable_doc)
 from typing import List, Optional
 
 __all__ = ["Adamax", "adamax"]
@@ -62,9 +62,11 @@ class Adamax(Optimizer):
                 s["step"] = torch.tensor(float(s["step"]))
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_infs, state_steps):
+        has_complex = False
         for p in group["params"]:
             if p.grad is None:
                 continue
+            has_complex |= torch.is_complex(p)
             params_with_grad.append(p)
             if p.grad.is_sparse:
                 raise RuntimeError("Adamax does not support sparse gradients")
@@ -86,6 +88,8 @@ class Adamax(Optimizer):
             exp_avgs.append(state["exp_avg"])
             exp_infs.append(state["exp_inf"])
             state_steps.append(state["step"])
+
+        return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -116,7 +120,7 @@ class Adamax(Optimizer):
             differentiable = group["differentiable"]
             capturable = group["capturable"]
 
-            self._init_group(group, params_with_grad, grads, exp_avgs, exp_infs, state_steps)
+            has_complex = self._init_group(group, params_with_grad, grads, exp_avgs, exp_infs, state_steps)
 
             adamax(
                 params_with_grad,
@@ -133,6 +137,7 @@ class Adamax(Optimizer):
                 maximize=maximize,
                 differentiable=differentiable,
                 capturable=capturable,
+                has_complex=has_complex,
             )
 
         return loss
@@ -196,6 +201,7 @@ def adamax(
     maximize: bool = False,
     differentiable: bool = False,
     capturable: bool = False,
+    has_complex: bool = False,
     *,
     eps: float,
     beta1: float,
@@ -237,6 +243,7 @@ def adamax(
         weight_decay=weight_decay,
         maximize=maximize,
         differentiable=differentiable,
+        has_complex=has_complex,
         capturable=capturable,
     )
 
@@ -256,6 +263,7 @@ def _single_tensor_adamax(
     maximize: bool,
     differentiable: bool,
     capturable: bool,
+    has_complex: bool,
 ):
 
     for i, param in enumerate(params):
@@ -312,6 +320,7 @@ def _multi_tensor_adamax(
     maximize: bool,
     differentiable: bool,
     capturable: bool,
+    has_complex: bool,
 ):
 
     assert not differentiable, "_foreach ops don't support autograd"
@@ -324,10 +333,8 @@ def _multi_tensor_adamax(
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
 
-        grouped_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_params]
-        grouped_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_grads]
-        grouped_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_exp_avgs]
-        grouped_exp_infs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grouped_exp_infs]
+        if has_complex:
+            _view_as_real(grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs)
 
         # Update steps
         torch._foreach_add_(grouped_state_steps, 1)
