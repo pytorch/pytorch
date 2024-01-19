@@ -854,8 +854,11 @@ void gemm_and_bias(
     epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
 #endif
   }
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
+
+  if (bias != nullptr) {
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
+  }
 
   CuBlasLtMatrixLayout Adesc(abcType, m, k, mat1_ld, transpose_mat1);
   CuBlasLtMatrixLayout Bdesc(abcType, k, n, mat2_ld, transpose_mat2);
