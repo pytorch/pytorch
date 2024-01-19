@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     subtest,
 )
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -1180,6 +1181,38 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         x_view.requires_grad_(True)
         x_view_view = x_view.unsqueeze(-1)
         yield x_view_view
+
+    def test_zeros(self):
+        dtypes = (torch.float, torch.double, torch.half)
+        devices = ("cpu", "cuda")
+        for dtype, device in itertools.product(dtypes, devices):
+            if device == "cuda" and not TEST_CUDA:
+                continue
+
+            kwargs = {
+                "device": device,
+                "dtype": dtype,
+            }
+            # Need more extensive testing with various settings dtype/device etc.
+            x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
+
+            def fn1(nt):
+                out = torch.zeros(nt.shape, **kwargs)
+                return out
+
+            def fn2(nt):
+                out = torch.zeros(nt.shape[:2] + (2, 3), **kwargs)
+                return out
+
+            def do_check(fn):
+                compile_fn = torch.compile(
+                    fn, fullgraph=True, backend="aot_eager", dynamic=True
+                )
+                out = compile_fn(x)
+                self.assertEqual(out, fn(x))
+
+            do_check(fn1)
+            do_check(fn2)
 
     def test_inputs_to_compiled_fn_are_views(self):
         for nt_view in self._get_views():

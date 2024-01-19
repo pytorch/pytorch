@@ -1569,12 +1569,12 @@ class FakeTensorMode(TorchDispatchMode):
                     out = out.clone()
                 return converter(self, out, make_constant=True)
 
-        # See [subclass inputs] below
+        # See Note [User dispatchable args] below
         # NB: If you're seeing a mysterious infinite loop involving fake
         # tensor, it might be related to this line.  Though I'm not sure
         # how you'll know to read this comment, as this line won't show up
         # in the stack trace.
-        unrecognized_types = self.check_for_subclass(flat_args)
+        unrecognized_types = self.check_user_dispatchable_args(flat_args)
         if unrecognized_types:
             not_implemented_log.debug(
                 "FakeTensorMode unrecognized subclass(es): %s", unrecognized_types
@@ -1770,7 +1770,8 @@ class FakeTensorMode(TorchDispatchMode):
             or func.name() == "fbgemm::gmm"
         )
 
-    # [subclass inputs]
+    # Note [User dispatchable args]
+    #
     # Suppose we enable fake tensor mode.  This means that fake tensor
     # mode will run first.  But what if we do an operation that
     # involves a tensor subclass that will desugar into normal tensor
@@ -1780,14 +1781,17 @@ class FakeTensorMode(TorchDispatchMode):
     # fake tensor is not supported.  What we actually wanted to happen
     # was to give the subclass a chance to figure out what it wants to
     # before erroring out. Returning NotImplemented here allows this.
-    def check_for_subclass(self, flat_args):
+    def check_user_dispatchable_args(self, flat_args):
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import is_singleton
+
         def check(x):
             return (
                 isinstance(x, torch.Tensor)
                 and not isinstance(x, FakeTensor)
                 and type(x) is not torch.Tensor
                 and type(x) is not torch.nn.Parameter
-            )
+            ) or is_singleton(x)
 
         return [type(x) for x in flat_args if check(x)]
 

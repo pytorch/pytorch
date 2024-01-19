@@ -35,7 +35,17 @@ namespace c10 {
 // During tracing the strides of the outputs need to be a function of the size
 // and strides of the inputs so it is important that SingletonSymNode itself is
 // able to express this.
-enum class SingletonType { PYTHON, CPP };
+//
+// NOTE [ SingletonVariant ]
+//
+// Currently, if SingletonSymNodeType::CPP is passed, that means that the
+// singleton is only meant to be used to ferry nested_tensor_size metadata
+// from forward to use in backward. In this case we set `val`, `coeff` etc
+// to bogus values and make sure to error if they are accessed.
+enum class SingletonVariant { PYTHON, CPP };
+
+constexpr c10::DispatchKeySet py_singleton_ks({c10::DispatchKey::Python, c10::DispatchKey::PythonTLSSnapshot});
+constexpr c10::DispatchKeySet cpp_singleton_ks({c10::DispatchKey::NestedTensor});
 
 class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
  public:
@@ -46,23 +56,17 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
       int64_t coeff,
       at::Tensor vec,
       int64_t sum_vec,
-      SingletonType type)
+      SingletonVariant type)
       : val_(val), coeff_(coeff), vec_(std::move(vec)), sum_vec_(sum_vec), type_(type) {
-    if (type == SingletonType::PYTHON) {
-      key_set_ =
-          c10::DispatchKeySet({c10::DispatchKey::Python, c10::DispatchKey::PythonTLSSnapshot});
-    } else if (type == SingletonType::CPP) {
-      // NB: Currently, if SingletonType::CPP is passed, that means that the
-      //     singleton is only meant to be used to ferry nested_tensor_size
-      //     metadata from forward to use in backward. In this case val and
-      //     should be set to some dummy values, and we should make sure to
-      //     error if such an instance is used for anything that relies on val
-      //     and coeff being valid.
-      TORCH_INTERNAL_ASSERT(val == 0 && coeff == 1 && sum_vec == -1);
+    // See NOTE [ SingletonVariant ]
+    if (type == SingletonVariant::PYTHON) {
+      key_set_ = py_singleton_ks;
+    } else if (type == SingletonVariant::CPP) {
+      TORCH_INTERNAL_ASSERT(val == -1 && coeff == -1 && sum_vec == -1);
       // NB: Since we possibly don't have python instead of relying on torch
       //     dispatch, we dispatch to the NestedTensor kernel directly.
       // NB: we can potentially add the AutogradNestedTensor key
-      key_set_ = c10::DispatchKeySet({c10::DispatchKey::NestedTensor});
+      key_set_ = cpp_singleton_ks;
     }
   }
 
@@ -114,6 +118,9 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
     if (coeff_ == 1) {
       return "j" + std::to_string(val_);
     }
+    if (type_ == SingletonVariant::CPP) {
+      return "jx";
+    }
     return std::to_string(coeff_) + "*j" + std::to_string(val_);
   }
 
@@ -160,12 +167,15 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
   c10::SymNode mul(const c10::SymNode& other) override;
 
   c10::optional<int64_t> singleton_int() override {
-    TORCH_INTERNAL_ASSERT(type_ == SingletonType::PYTHON);
+    TORCH_CHECK(
+        type_ == SingletonVariant::PYTHON,
+        "shape returned from strided layout NestedTensor does not support this "
+        "operation");
     return val_;
   }
 
   c10::optional<int64_t> singleton_coeff() override {
-    TORCH_INTERNAL_ASSERT(type_ == SingletonType::PYTHON);
+    TORCH_INTERNAL_ASSERT(type_ == SingletonVariant::PYTHON);
     return coeff_;
   }
 
@@ -174,7 +184,7 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
   }
 
   int64_t singleton_sum_vec() override {
-    TORCH_INTERNAL_ASSERT(type_ == SingletonType::PYTHON);
+    TORCH_INTERNAL_ASSERT(type_ == SingletonVariant::PYTHON);
     return sum_vec_;
   }
 
@@ -223,7 +233,7 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
   int64_t coeff_;
   at::Tensor vec_;
   int64_t sum_vec_;
-  SingletonType type_;
+  SingletonVariant type_;
   c10::DispatchKeySet key_set_;
 };
 

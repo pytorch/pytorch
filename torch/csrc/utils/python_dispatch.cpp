@@ -821,7 +821,7 @@ void initDispatchBindings(PyObject* module) {
       [](int64_t data, int64_t coeff, const at::Tensor& vec, int64_t sum_vec) {
         return c10::SymInt(
             c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
-                data, coeff, vec, sum_vec, c10::SingletonType::PYTHON)));
+                data, coeff, vec, sum_vec, c10::SingletonVariant::PYTHON)));
       });
 
   m.def("_set_nested_tensor_cls", [](py::object cls) {
