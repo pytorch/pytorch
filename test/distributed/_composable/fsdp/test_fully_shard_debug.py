@@ -23,8 +23,8 @@ class TestFullyShardDebug(FSDPTestMultiThread):
         lazy initialization.
 
         FSDP(model(
-            MLP(FSDP(in_proj), FSDP(out_proj)),
-            MLP(in_proj, out_proj),
+            0: MLP(FSDP(in_proj), FSDP(out_proj)),
+            1: MLP(in_proj, out_proj),
         ))
         """
         model = nn.Sequential(MLP(8), MLP(8))
