@@ -1,21 +1,30 @@
-from typing import Any
+from typing import Any, Union
 
+import torch
 import torch.nn as nn
 
 from torch.distributed._composable import contract
 from torch.distributed._composable_state import _insert_module_state
 
+from ._fsdp_init import _normalize_device
+from ._fsdp_state import FSDPState
 
-@contract()
+
+@contract(state_cls=FSDPState)
 def fully_shard(
     module: nn.Module,
+    *,
+    device: Union[torch.device, int, str] = "cuda",
 ):
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
             f"fully_shard does not support containers that do not implement forward: {module}"
         )
+    device = _normalize_device(device)
     state = fully_shard.state(module)
     _insert_module_state(module, state)
+    state._module = module
+    state._device = device
     # Place FSDP leftmost for highest priority in the method resolution order
     cls = module.__class__
     dct = {"__deepcopy__": unimplemented_deepcopy}
