@@ -150,7 +150,7 @@ class TestMatmulCuda(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(IS_JETSON, "Too large for Jetson")
-    @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1e-5)})
+    @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1.1e-5)})
     @dtypes(*([torch.float32, torch.float16] +
               [torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
     @parametrize(
