@@ -36,6 +36,7 @@ from ..utils import (
     namedtuple_fields,
     object_has_getattribute,
     proxy_args_kwargs,
+    safe_hasattr_and_no_user_defined_getattr,
     tensortype_to_dtype,
 )
 from .base import MutableLocal, VariableTracker
@@ -285,12 +286,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif (
             issubclass(type(self.value), type)
-            and hasattr(
-                self.value, "__enter__"
-            )  # TODO(voz): These can invoke user code!
-            and hasattr(
-                self.value, "__exit__"
-            )  # TODO(voz): These can invoke user code!
+            and safe_hasattr_and_no_user_defined_getattr(self.value, "__enter__")
+            and safe_hasattr_and_no_user_defined_getattr(self.value, "__exit__")
             and check_constant_args(args, kwargs)
             and self.value.__init__ == object.__init__
             and len(kwargs) == 0  # TODO(ybliang): support kwargs
@@ -300,7 +297,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 unwrapped_args,
                 cm_obj=self.value(*unwrapped_args),
             )
-
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             field_defaults = self.value._field_defaults
