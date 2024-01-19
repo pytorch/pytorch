@@ -2773,8 +2773,6 @@ class CPUReproTests(TestCase):
             o2 = torch.logical_xor(out=out2, input=input, other=other)
             return o1, o2
 
-        o1 = torch.rand([3, 3, 2, 8, 9, 2], dtype=torch.float16)
-        o2 = torch.rand([3, 3, 2, 8, 9, 2], dtype=torch.float16)
         x = torch.rand([3, 3, 2, 8, 9, 2], dtype=torch.float)
         y = torch.rand([3, 3, 2, 8, 9, 2], dtype=torch.float)
         for dtype in _lowp_fp_dtypes:
