@@ -408,8 +408,9 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
 
         all_states = [ref() for ref in root_state._all_state_refs]
         self.assertEqual(len(all_states), 3)
-        self.assertEqual(all_states, [root_state, model0_in_proj_state, model0_out_proj_state])
-
+        self.assertEqual(
+            all_states, [root_state, model0_in_proj_state, model0_out_proj_state]
+        )
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_fully_shard_module_and_param_fqns(self):
