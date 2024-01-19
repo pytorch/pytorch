@@ -386,7 +386,7 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_fully_shard_is_root(self):
         """
-        Tests that ``is_root`` is set correctly after lazy initialization.
+        Tests that ``_is_root`` is set correctly after lazy initialization.
 
         FSDP(model(
             0: MLP(FSDP(in_proj), FSDP(out_proj)),
