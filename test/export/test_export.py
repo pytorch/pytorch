@@ -1,4 +1,4 @@
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["module: export"]
 # flake8: noqa
 import copy
 import dataclasses

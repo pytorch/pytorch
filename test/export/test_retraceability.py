@@ -1,4 +1,4 @@
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["module: export"]
 
 try:
     from . import test_export, testing
