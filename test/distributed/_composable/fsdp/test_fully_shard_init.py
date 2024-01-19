@@ -69,7 +69,7 @@ class TestFullyShardInitDevice(FSDPTestMultiThread):
 
 
 class TestFullyShardInitDeviceDTensor(FSDPTestMultiThread):
-    """Tests the ``device`` argument with DTensors."""
+    """Tests the ``device`` argument with DTensor parameters."""
 
     @property
     def world_size(self) -> int:
