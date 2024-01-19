@@ -50,8 +50,6 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_inverse_cpu_complex128",
     "TestLinalgCPU.test_norm_dtype_cpu_complex128",
     "TestLinalgCPU.test_householder_product_cpu_float64",
-    "TestLinalgCPU.test_linalg_lu_family_cpu_float32",
-    "TestLinalgCPU.test_linalg_lu_family_cpu_float64",
     "TestLinalgCPU.test_addr_integral_cpu_int64",
     "TestLinalgCPU.test_norm_vector_cpu_float32",
     "TestLinalgCPU.test_solve_cpu_complex128",
@@ -76,7 +74,6 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_addmm_sizes_cpu_float32",
     "TestLinalgCPU.test_norm_bfloat16_and_half_cpu_float16",
     "TestLinalgCPU.test_householder_product_cpu_complex64",
-    "TestLinalgCPU.test_linalg_lu_family_cpu_complex128",
     "TestLinalgCPU.test_inverse_cpu_float64",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_complex64",
     "TestLinalgCPU.test_pinv_cpu_complex64",
@@ -85,7 +82,6 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_einsum_sublist_format_cpu_complex128",
     "TestLinalgCPU.test_geqrf_cpu_complex64",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_float64",
-    "TestLinalgCPU.test_linalg_lu_family_cpu_complex64",
     "TestLinalgCPU.test_geqrf_cpu_float64",
     "TestLinalgCPU.test_householder_product_cpu_complex128",
     "TestLinalgCPU.test_geqrf_cpu_float32",
@@ -745,10 +741,8 @@ dynamo_expected_failures = {
     "TestIndexing.test_index_no_floats",  # torch_np/numpy_tests/core/test_indexing
     "TestBooleanIndexing.test_boolean_indexing_weirdness",  # torch_np/numpy_tests/core/test_indexing
     "TestBooleanIndexing.test_bool_as_int_argument_errors",  # torch_np/numpy_tests/core/test_indexing
-    "TestBroadcastedAssignments.test_simple_broadcasting_errors",  # torch_np/numpy_tests/core/test_indexing
     "TestFloatNonIntegerArgument.test_non_integer_argument_errors",  # torch_np/numpy_tests/core/test_indexing
     "TestIndexing.test_slicing_no_floats",  # torch_np/numpy_tests/core/test_indexing
-    "TestBroadcastedAssignments.test_prepend_not_one",  # torch_np/numpy_tests/core/test_indexing
     "TestFloatNonIntegerArgument.test_reduce_axis_float_index",  # torch_np/numpy_tests/core/test_indexing
     "TestEinsum.test_different_paths_dtype_e",  # torch_np/numpy_tests/core/test_einsum
     "TestEinsum.test_different_paths_dtype_B",  # torch_np/numpy_tests/core/test_einsum
@@ -1997,7 +1991,6 @@ dynamo_expected_failures = {
     "TestMkldnnCPU.test_tanh_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_conv2d_cpu",  # test_mkldnn
     "TestMkldnnCPU.test_batch_norm_3d_cpu",  # test_mkldnn
-    "TestFunctionSchema.test_serialize_and_deserialize",  # test_function_schema
     "FakeTensorOperatorInvariants.test_like_ops",  # test_fake_tensor
     "FakeTensorConverterTest.test_memoized_conversion_from_meta",  # test_fake_tensor
     "FakeTensorOperatorInvariants.test_non_kwarg_only_device",  # test_fake_tensor
@@ -2718,7 +2711,6 @@ dynamo_expected_failures = {
     "TestVmapOperatorsLegacy.test_contiguous",  # test_legacy_vmap
     "TestVmapAPILegacy.test_accepts_nested_inputs",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nested_out_dims",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_add_cpu",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_inplace_manyview_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_functools_partial",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_unrelated_output_cpu",  # test_legacy_vmap
@@ -2727,21 +2719,16 @@ dynamo_expected_failures = {
     "TestVmapAPILegacy.test_single_input",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_chunk",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_mul_cpu",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_reshape_cpu",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_unrelated_output_multiple_grad_cpu",  # test_legacy_vmap
-    "TestVmapOperatorsLegacy.test_stack",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_select",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_binary_pointwise_ops",  # test_legacy_vmap
     "TestVmapAPILegacy.test_non_tensor_output_raises",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_max_cpu",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_binary_cross_entropy_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_diagonal",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_select_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nonzero_out_dims",  # test_legacy_vmap
     "TestVmapAPILegacy.test_unsupported_op_err_msg",  # test_legacy_vmap
     "TestVmapAPILegacy.test_batched_gradient_basic",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_slice",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_min_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_expand_as",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_unfold",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_sigmoid_cpu",  # test_legacy_vmap
@@ -2751,16 +2738,11 @@ dynamo_expected_failures = {
     "TestVmapOperatorsLegacy.test_new_empty_strided",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_is_floating_point",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_split",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_stack_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_fill_and_zero_inplace",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_is_complex",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_expand_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_as_strided",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_slice_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nested_with_different_map_dim",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_new_zeros",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_trace_cpu",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_permute_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_view_as",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_logsumexp_cpu",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_log1p_cpu",  # test_legacy_vmap
@@ -2774,17 +2756,13 @@ dynamo_expected_failures = {
     "TestVmapBatchedGradientLegacyCPU.test_inplace_on_view_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_new_empty",  # test_legacy_vmap
     "TestVmapBatchedGradientLegacyCPU.test_lgamma_cpu",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_threshold_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_multiple_out_dims",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_result_type",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_sum_dim",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_to",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_diagonal_cpu",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_sub_cpu",  # test_legacy_vmap
     "TestVmapAPILegacy.test_backward_unsupported_interaction",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_comparison_ops",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_is_contiguous",  # test_legacy_vmap
-    "TestVmapOperatorsLegacy.test_cat",  # test_legacy_vmap
     "TestVmapAPILegacy.test_multiple_outputs",  # test_legacy_vmap
     "TestVmapAPILegacy.test_inplace_fallback_unary",  # test_legacy_vmap
     "TestVmapAPILegacy.test_out_dim_out_of_bounds_err_msg",  # test_legacy_vmap
@@ -2799,7 +2777,6 @@ dynamo_expected_failures = {
     "TestVmapOperatorsLegacy.test_no_random_op_support",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_unbind",  # test_legacy_vmap
     "TestVmapAPILegacy.test_non_default_in_dims_out_dims",  # test_legacy_vmap
-    "TestVmapBatchedGradientLegacyCPU.test_median_cpu",  # test_legacy_vmap
     "TestVmapOperatorsLegacy.test_T_numpy",  # test_legacy_vmap
     "TestNamedTensor.test_addmv",  # test_namedtensor
     "TestNamedTensor.test_cummax_cummin",  # test_namedtensor
@@ -3742,9 +3719,6 @@ dynamo_expected_failures = {
     "LoggingTests.test_dynamo_info",  # dynamo/test_logging
     "LoggingTests.test_graph_breaks",  # dynamo/test_logging
     "LoggingTests.test_aot",  # dynamo/test_logging
-    "TestFrozenOptimizations.test_collapse_adjacent_conversions",  # test_jit.py
-    "TestFrozenOptimizations.test_conv_bn_folding",  # test_jit.py
-    "TestFrozenOptimizations.test_conv_add_folding",  # test_jit.py
 }
 
 # see NOTE [dynamo_test_failures.py] for more details
@@ -8629,6 +8603,7 @@ dynamo_skips = {
     "TestNnapiBackend.test_compile_spec_santiy",  # test_jit.py
     "TestNnapiBackend.test_unsqueeze",  # test_jit.py
     "TestNnapiBackend.test_pointwise_unary",  # test_jit.py
+    "TestFrozenOptimizations.test_conv_bn_folding",  # test_jit.py
 }
 
 
