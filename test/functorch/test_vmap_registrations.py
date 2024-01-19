@@ -291,7 +291,6 @@ class TestFunctorchDispatcher(TestCase):
         "FuncTorchBatchedDecomposition", xfail_functorch_batched_decomposition
     )
     def test_register_functorch_batched_decomposition(self, registration):
-        print(get_registrations_for_dispatch_key)
         assert registration in CompositeImplicitAutogradRegistrations, (
             f"The registrations in BatchedDecompositions.cpp must be for CompositeImplicitAutograd "
             f"operations. If your operation {registration} is not CompositeImplicitAutograd, "
