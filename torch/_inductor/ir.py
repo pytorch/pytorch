@@ -340,6 +340,9 @@ class Loops(IRNode):
     inner_fn: Callable[..., Any]
     ranges: List[Expr]
 
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return set().union(*(free_unbacked_symbols(e) for e in self.ranges))
+
     def __str__(self, names=("ranges",)):
         return self.str_helper(
             [
@@ -578,6 +581,11 @@ class Reduction(Loops):
 
     def __repr__(self):
         return self.__str__()
+
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return super().get_unbacked_symbol_uses() | set().union(
+            *(free_unbacked_symbols(e) for e in self.reduction_ranges)
+        )
 
     def get_reduction_size(self):
         return self.reduction_ranges
@@ -1548,6 +1556,16 @@ class Scan(Loops):
     init: Any
 
     # HACK we mimick reduction
+
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        # TODO: Can combine_fn/reindex close over unbacked symbols? If so, we
+        # need to explicitly represent the closure so we can pull out unbacked
+        # symbols here
+        return (
+            super().get_unbacked_symbol_uses()
+            | set().union(*(free_unbacked_symbols(e) for e in self.scan_ranges))
+            | set().union(*(free_unbacked_symbols(e) for e in self.size))
+        )
 
     def __post_init__(self):
         assert len(self.ranges) + len(self.scan_ranges) == len(self.size)
@@ -3051,6 +3069,7 @@ class ComputedBuffer(Buffer):
             free_unbacked_symbols(self.get_size())
             | free_unbacked_symbols(self.get_stride())
             | free_unbacked_symbols(self.get_offset())
+            | self.data.get_unbacked_symbol_uses()
         )
 
     def make_loader(self):
@@ -4309,13 +4328,8 @@ class IndexPutFallback(ExternKernel):
             else:
                 indices.append(V.graph.wrapper_code.none_str)
 
-        indices_str = f"{V.graph.wrapper_code.open_bracket}{', '.join(indices)}{V.graph.wrapper_code.closed_bracket}"
-        args = [x, indices_str, values, *self.codegen_const_args()]
-        wrapper.writeline(
-            wrapper.wrap_kernel_call(
-                self.get_kernel_name(),
-                args,
-            )
+        wrapper.generate_index_put_fallback(
+            self.get_kernel_name(), x, indices, values, *self.codegen_const_args()
         )
 
     def should_allocate(self):
@@ -4338,8 +4352,8 @@ class IndexPutFallback(ExternKernel):
             (accumulate,),
         )
         self.name = V.graph.register_buffer(self)
-        self.cpp_kernel_name = "at::index_put_"
         self.python_kernel_name = "aten.index_put_"
+        self.cpp_kernel_name = "at::index_put_out"
         mark_node_as_mutating(self, x)
 
 

@@ -667,10 +667,10 @@ class KernelArgs:
         )
 
     def wrap_ptr_arg(self, buf, dtype):
-        return f"c_void_p({buf}.data_ptr())"
+        return buf
 
     def wrap_size_arg(self, size):
-        return f"c_long({size})"
+        return str(size)
 
     def cpp_argdefs(self):
         from .cpp import DTYPE_TO_CPP, INDEX_TYPE
@@ -1011,6 +1011,7 @@ class Kernel(CodeGen):
         self.inplace_update_buffers = dict()
         # Set minimum number of elements processed per thread.
         self.min_elem_per_thread = 1
+        self.kernel_name = None
 
     @contextlib.contextmanager
     def set_current_node(self, node):
@@ -1273,6 +1274,7 @@ class Kernel(CodeGen):
             x: self.args.size(x)
             for x in sorted_symbols
             if x.name.startswith("s")
+            or x.name.startswith("u")
             or x.name.startswith("ps")
             or (x.name.startswith("i") and not x.name.startswith("idx"))
         }
