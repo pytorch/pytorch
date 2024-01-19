@@ -10,7 +10,7 @@ from torch.testing._internal.common_fsdp import FSDPTestMultiThread
 from torch.testing._internal.common_utils import run_tests
 
 
-class TestFullyShardInitDevice(FSDPTestMultiThread):
+class TestFullyShardDeviceArg(FSDPTestMultiThread):
     """Tests the ``device`` argument."""
 
     @property
