@@ -1481,6 +1481,29 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         resB = graph(torch.tensor([2]))
         self.assertTrue(torch._dynamo.utils.same(resA, resB))
 
+    def test_export_with_builtin_op_on_assume_constant(self):
+        @torch._dynamo.assume_constant_result
+        def get_y(y) -> torch.Tensor:
+            return y
+
+        class Bob(torch.nn.Module):
+            def __init__(self, p, val) -> None:
+                super().__init__()
+                self.p = p
+                self.y = torch.nn.Parameter(torch.tensor(val))
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # This only looks dynamic but it's actually a constant value
+                if get_y(self.y) < self.p:
+                    return torch.cat([x, x])
+                else:
+                    return x
+
+        model = Bob(0.5, 0.3)
+        inp = torch.ones(3, 4)
+        graph, guards = torch._dynamo.export(model)(inp)
+        self.assertEqual(model(inp), graph(inp))
+
     def test_export_decomp(self):
         def f(x):
             return x.t() + x.t()
@@ -2260,10 +2283,13 @@ def forward(self, x):
             torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
 
     def test_primitive_constant_output(self):
-        def foo(x):
-            # return a constant of primitive type
-            y = 5
-            return y * x, y
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                # return a constant of primitive type
+                y = 5
+                return y * x, y
+
+        foo = Foo()
 
         with self.assertRaisesRegex(
             AssertionError,
@@ -2271,8 +2297,11 @@ def forward(self, x):
         ):
             torch.export.export(foo, (torch.tensor(3),))
 
-        def bar(x, y):
-            return y * x, y
+        class Bar(torch.nn.Module):
+            def forward(self, x, y):
+                return y * x, y
+
+        bar = Bar()
 
         # new behavior
         with self.assertRaisesRegex(
@@ -2281,8 +2310,11 @@ def forward(self, x):
         ):
             torch.export.export(bar, (torch.tensor(3), 5))
 
-        def qux(x, y):
-            return y * x, y - 1
+        class Qux(torch.nn.Module):
+            def forward(self, x, y):
+                return y * x, y - 1
+
+        qux = Qux()
 
         with self.assertRaisesRegex(
             AssertionError,
@@ -2338,11 +2370,14 @@ def forward(self, x):
         self.assertEqual(dynamo_result, m(inp))
 
     def test_constraint_violation_error_messages(self):
-        def foo(x):
-            if x.shape[0] == x.shape[1] * 2:
-                return x + 1
-            else:
-                return x + 2
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                if x.shape[0] == x.shape[1] * 2:
+                    return x + 1
+                else:
+                    return x + 2
+
+        foo = Foo()
 
         t = torch.zeros([8, 4])
         dim0 = torch.export.Dim("dim0", min=3, max=10)
@@ -2356,11 +2391,14 @@ def forward(self, x):
         ):
             torch.export.export(foo, (t,), dynamic_shapes=dynamic_shapes)
 
-        def bar(x):
-            if x.shape[0] == 5:
-                return x + 1
-            else:
-                return x + 2
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                if x.shape[0] == 5:
+                    return x + 1
+                else:
+                    return x + 2
+
+        bar = Bar()
 
         t = torch.zeros([5])
         dim0 = torch.export.Dim("dim0", min=3, max=8)
@@ -2371,11 +2409,14 @@ def forward(self, x):
         ):
             torch.export.export(bar, (t,), dynamic_shapes=dynamic_shapes)
 
-        def qux(x):
-            if x.shape[0] > 5 and x.shape[0] < 10:
-                return x + 1
-            else:
-                return x + 2
+        class Qux(torch.nn.Module):
+            def forward(self, x):
+                if x.shape[0] > 5 and x.shape[0] < 10:
+                    return x + 1
+                else:
+                    return x + 2
+
+        qux = Qux()
 
         t = torch.zeros([7])
         dim0 = torch.export.Dim("dim0", min=3, max=8)
@@ -2389,8 +2430,11 @@ def forward(self, x):
     def test_untracked_inputs_in_constraints(self):
         from copy import copy
 
-        def foo(x, y):
-            return y + 1
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return y + 1
+
+        foo = Foo()
 
         x = torch.randn(2)
         y = torch.randn(5, 4)
@@ -2499,11 +2543,14 @@ def forward(self, x):
         torch._dynamo.export(my_dyn_fn, constraints=constraints)(x, y, z)
 
     def test_remove_redundant_dynamic_dim_in_error_message(self):
-        def foo(x, y):
-            if x.shape[0] == y["k"].shape[0]:
-                return x + 1
-            else:
-                return x - 1
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                if x.shape[0] == y["k"].shape[0]:
+                    return x + 1
+                else:
+                    return x - 1
+
+        foo = Foo()
 
         a = torch.randn(3)
         b = torch.randn(3)
@@ -2516,8 +2563,11 @@ def forward(self, x):
             )
 
     def test_enforce_equalities(self):
-        def bar(x, y):
-            return torch.matmul(x, y)
+        class Bar(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.matmul(x, y)
+
+        bar = Bar()
 
         batch, size = torch.export.dims("batch", "size")
         dynamic_shapes = {"x": (batch, size, size), "y": (batch, size, size)}
@@ -2695,19 +2745,25 @@ def forward(self, x):
             )(x)
 
     def test_trivial_constraint(self):
-        def foo(x):
-            # non-trivial divisibility condition
-            if (2 * x.shape[0] + 3) % (x.shape[0] - 3) == 0:
-                return x + 1
-            else:
-                return x - 1
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                # non-trivial divisibility condition
+                if (2 * x.shape[0] + 3) % (x.shape[0] - 3) == 0:
+                    return x + 1
+                else:
+                    return x - 1
 
-        def bar(x):
-            # trivially true
-            if (2 * x.shape[0] + 2) % (x.shape[0] + 1) == 0:
-                return x + 1
-            else:
-                return x - 1
+        foo = Foo()
+
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                # trivially true
+                if (2 * x.shape[0] + 2) % (x.shape[0] + 1) == 0:
+                    return x + 1
+                else:
+                    return x - 1
+
+        bar = Bar()
 
         x = torch.randn(12)
         dim0 = torch.export.Dim("dim0", max=100)

@@ -14,8 +14,11 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 @unittest.skipIf(not is_dynamo_supported(), "dynamo isn't supported")
 class TestVerifier(TestCase):
     def test_verifier_basic(self) -> None:
-        def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            return x + y
+        class Foo(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                return x + y
+
+        f = Foo()
 
         ep = export(f, (torch.randn(100), torch.randn(100)))
 
@@ -38,8 +41,11 @@ class TestVerifier(TestCase):
             verifier._check_graph_module(gm)
 
     def test_verifier_no_functional(self) -> None:
-        def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            return x + y
+        class Foo(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                return x + y
+
+        f = Foo()
 
         ep = export(f, (torch.randn(100), torch.randn(100)))
         for node in ep.graph.nodes:
@@ -51,16 +57,19 @@ class TestVerifier(TestCase):
             verifier.check(ep)
 
     def test_verifier_higher_order(self) -> None:
-        def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            def true_fn(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-                return x + y
+        class Foo(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                def true_fn(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                    return x + y
 
-            def false_fn(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-                return x - y
+                def false_fn(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                    return x - y
 
-            return control_flow.cond(
-                x.shape[0] > 2, true_fn, false_fn, [x, y]
-            )
+                return control_flow.cond(
+                    x.shape[0] > 2, true_fn, false_fn, [x, y]
+                )
+
+        f = Foo()
 
         ep = export(f, (torch.randn(3, 3), torch.randn(3, 3)))
 
@@ -68,16 +77,19 @@ class TestVerifier(TestCase):
         verifier.check(ep)
 
     def test_verifier_nested_invalid_module(self) -> None:
-        def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            def true_fn(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-                return x + y
+        class Foo(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                def true_fn(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                    return x + y
 
-            def false_fn(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-                return x - y
+                def false_fn(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                    return x - y
 
-            return control_flow.cond(
-                x.shape[0] > 2, true_fn, false_fn, [x, y]
-            )
+                return control_flow.cond(
+                    x.shape[0] > 2, true_fn, false_fn, [x, y]
+                )
+
+        f = Foo()
 
         ep = export(f, (torch.randn(3, 3), torch.randn(3, 3)))
         for node in ep.graph_module.true_graph_0.graph.nodes:
