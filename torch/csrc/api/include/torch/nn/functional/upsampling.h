@@ -185,7 +185,8 @@ inline Tensor interpolate(
     return detail::adaptive_avg_pool3d(
         input, _interp_output_size(3, std::move(closed_over_args)));
   } else if (input.dim() == 3 && std::get_if<enumtype::kLinear>(&mode)) {
-    TORCH_CHECK(align_corners != c10::nullopt, "align_corners should be specified.");
+    TORCH_CHECK(
+        align_corners != c10::nullopt, "align_corners should be specified.");
     return torch::upsample_linear1d(
         input,
         _interp_output_size(1, std::move(closed_over_args)),
@@ -198,7 +199,8 @@ inline Tensor interpolate(
   } else if (input.dim() == 4 && std::get_if<enumtype::kLinear>(&mode)) {
     TORCH_CHECK(false, "Got 4D input, but linear mode needs 3D input");
   } else if (input.dim() == 4 && std::get_if<enumtype::kBilinear>(&mode)) {
-    TORCH_CHECK(align_corners != c10::nullopt, "align_corners should be specified.");
+    TORCH_CHECK(
+        align_corners != c10::nullopt, "align_corners should be specified.");
     if (antialias) {
       return torch::_upsample_bilinear2d_aa(
           input,
@@ -220,7 +222,8 @@ inline Tensor interpolate(
   } else if (input.dim() == 5 && std::get_if<enumtype::kBilinear>(&mode)) {
     TORCH_CHECK(false, "Got 5D input, but bilinear mode needs 4D input");
   } else if (input.dim() == 5 && std::get_if<enumtype::kTrilinear>(&mode)) {
-    TORCH_CHECK(align_corners != c10::nullopt, "align_corners should be specified.");
+    TORCH_CHECK(
+        align_corners != c10::nullopt, "align_corners should be specified.");
     return torch::upsample_trilinear3d(
         input,
         _interp_output_size(3, std::move(closed_over_args)),
@@ -229,7 +232,8 @@ inline Tensor interpolate(
         scale_factor_list.at(1),
         scale_factor_list.at(2));
   } else if (input.dim() == 4 && std::get_if<enumtype::kBicubic>(&mode)) {
-    TORCH_CHECK(align_corners != c10::nullopt, "align_corners should be specified.");
+    TORCH_CHECK(
+        align_corners != c10::nullopt, "align_corners should be specified.");
     if (antialias) {
       return torch::_upsample_bicubic2d_aa(
           input,
