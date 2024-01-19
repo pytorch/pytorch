@@ -1,12 +1,14 @@
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
 
 from torch.distributed._composable import contract
 from torch.distributed._composable_state import _insert_module_state
+from torch.distributed._tensor import DeviceMesh
 
-from ._fsdp_init import _normalize_device
+from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
+from ._fsdp_init import _init_default_fully_shard_mesh, _normalize_device
 from ._fsdp_state import FSDPState
 
 
@@ -14,6 +16,7 @@ from ._fsdp_state import FSDPState
 def fully_shard(
     module: nn.Module,
     *,
+    mesh: Optional[DeviceMesh] = None,
     device: Union[torch.device, int, str] = "cuda",
 ):
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
@@ -21,10 +24,24 @@ def fully_shard(
             f"fully_shard does not support containers that do not implement forward: {module}"
         )
     device = _normalize_device(device)
+    mesh = mesh or _init_default_fully_shard_mesh(device.type)
+    if mesh.ndim not in (1, 2):
+        raise ValueError(f"fully_shard expects a 1D or 2D DeviceMesh but got {mesh}")
+    elif mesh.ndim == 1:
+        mesh_info = FSDPMeshInfo(mesh, shard_mesh_dim=0)
+    elif mesh.ndim == 2:
+        mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
+    if device.type != mesh.device_type:
+        raise ValueError(
+            f"device and mesh must be of the same type but got {device.type} "
+            f"for device and {mesh.device_type} for mesh"
+        )
+
     state = fully_shard.state(module)
     _insert_module_state(module, state)
     state._module = module
     state._device = device
+
     # Place FSDP leftmost for highest priority in the method resolution order
     cls = module.__class__
     dct = {"__deepcopy__": unimplemented_deepcopy}
