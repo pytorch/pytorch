@@ -10,13 +10,7 @@ static sycl::async_handler asyncHandler = [](sycl::exception_list el) {
     try {
       std::rethrow_exception(e);
     } catch (sycl::exception& e) {
-      TORCH_WARN(
-          "SYCL Exception: ",
-          e.what(),
-          "file = ",
-          __FILE__,
-          "line = ",
-          __LINE__);
+      TORCH_WARN("SYCL Exception: ", e.what());
       throw;
     }
   }
