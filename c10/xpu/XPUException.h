@@ -5,8 +5,8 @@
 
 namespace c10::xpu {
 
-static sycl::async_handler asyncHandler = [](sycl::exception_list eL) {
-  for (auto& e : eL) {
+static sycl::async_handler asyncHandler = [](sycl::exception_list el) {
+  for (auto& e : el) {
     try {
       std::rethrow_exception(e);
     } catch (sycl::exception& e) {
