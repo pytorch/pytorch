@@ -459,7 +459,7 @@ def compile_fx_inner(
 
             if "cuda" in compiled_graph.device_types:
                 # prefer better disable_cudagraphs_reason bc stack trace
-                # TODO: migrate all disable reasons to stack trace
+                # TODO: migrate all disable reasons to stack trace, refactor
                 if compiled_graph.disabled_cudagraphs_reason:
                     perf_hint_log.warning(compiled_graph.disabled_cudagraphs_reason)
                 else:
