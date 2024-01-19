@@ -1126,7 +1126,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
   // Abort communicators after all threads have exited to avoid having the
   // threads dying due to aborted communicator and raising a SIGABRT
-  std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
+  std::string abortReason = c10::str("Process Group destroyed: ", logPrefix());
   abort(abortReason);
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL abort finished.";
 
