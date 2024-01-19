@@ -140,8 +140,8 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Configure AWS credentials(PyTorch account) for main
-        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' }}
+      - name: Configure AWS credentials(PyTorch account) for nightly
+        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' }}
         uses: aws-actions/configure-aws-credentials@v3
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_nightly_build_wheels

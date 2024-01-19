@@ -4175,46 +4175,6 @@ class TestAOTModuleSimplified(AOTTestCase):
         res = compiled_f(*inputs)
         res[0].sum().backward()
 
-    def test_aot_module_simplified_preserves_stack_trace_from_mutation(self):
-        class MockModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                x_view = x[0]
-                x_view.mul_(2)
-                return (x + x, )
-
-        tracer = torch.fx.Tracer()
-        tracer.record_stack_traces = True
-        graph = tracer.trace(MockModule())
-        mod = torch.fx.GraphModule(tracer.root, graph)
-
-        for node in mod.graph.nodes:
-            if node.op == 'output':
-                continue
-            self.assertTrue(node.stack_trace is not None)
-            assert 'test_aotdispatch.py' in node.stack_trace
-
-        def assert_compiler(gm: torch.fx.GraphModule, _):
-            assert torch.ops.aten.copy_.default in [x.target for x in gm.graph.nodes]
-            for node in gm.graph.nodes:
-                if node.target == torch.ops.aten.copy_.default:
-                    assert 'stack_trace' in node.meta
-                    assert 'x_view.mul_(2)' in node.meta['stack_trace']
-            return gm.forward  # return a python callable
-
-        x = torch.randn(128, 20)
-        inputs = [x]
-
-        aot_module_simplified(
-            mod,
-            inputs,
-            fw_compiler=assert_compiler,
-            bw_compiler=assert_compiler,
-            keep_inference_input_mutations=True,
-        )
-
     def test_aot_module_simplified_fake_tensor_gm_raises(self):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
         real_x = torch.randn(4, requires_grad=True)

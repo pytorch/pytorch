@@ -2562,16 +2562,6 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       .def(
           "result",
           [](::c10d::Work& work) -> std::vector<at::Tensor> {
-            // Deprecation reason:
-            // Work.result() returns a vector of tensors. This signature is
-            // problematic as some collectives may just return one tensor (e.g
-            // all-reduce), while some others may return multiple tensors (e.g.
-            // all-gather).
-            // Deprecating work.result() would also allow us to remove the
-            // `outputs_` field in the Work class, avoiding an "artificial"
-            // reference to the tensors, which could potentially hold up the
-            // tensors' memory.
-            TORCH_WARN_ONCE(fmt::format(kDeprecationWarning, "Work::result"));
             return work.result();
           })
       .def(

@@ -51,6 +51,7 @@ import torch._dynamo
 import torch._dynamo.utils
 import torch._export
 import torch.distributed
+import torch.fx._pytree as fx_pytree
 import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
@@ -1125,7 +1126,13 @@ class AOTInductorModelCache:
             _register_dataclass_output_as_pytree(example_outputs)
 
             so_path = torch._export.aot_compile(model, example_args, example_kwargs)
-            cls.cache[key] = torch._export.aot_load(so_path, device)
+
+            runner = (
+                torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
+                if device == "cpu"
+                else torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1)
+            )
+            cls.cache[key] = runner
 
         return cls.cache[key]
 
@@ -1145,11 +1152,19 @@ def export(model, example_inputs):
 
 
 def export_aot_inductor(model, example_inputs, device):
-    optimized = AOTInductorModelCache.load(model, example_inputs, device)
+    runner = AOTInductorModelCache.load(model, example_inputs, device)
+    call_spec = runner.get_call_spec()
+    in_spec = pytree.treespec_loads(call_spec[0])
+    out_spec = pytree.treespec_loads(call_spec[1])
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        return optimized(example_args, example_kwargs)
+
+        flat_inputs = fx_pytree.tree_flatten_spec(
+            (example_args, example_kwargs), in_spec
+        )
+        flat_outputs = runner.run(flat_inputs)
+        return pytree.tree_unflatten(flat_outputs, out_spec)
 
     return opt_aot_inductor
 

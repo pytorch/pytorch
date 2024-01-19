@@ -147,7 +147,7 @@ if RUN_CUDA:
     class BaseTest(NamedTuple):
         name: str
         device: str = "cuda"
-        tests: TorchTestCase = test_torchinductor.GPUTests()
+        tests: TorchTestCase = test_torchinductor.CudaTests()
 
     # Maintain two separate test lists for cuda and cpp for now
     for item in [

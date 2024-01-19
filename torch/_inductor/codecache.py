@@ -23,7 +23,6 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
-import textwrap
 import threading
 import warnings
 import weakref
@@ -65,7 +64,6 @@ from torch.hub import _Faketqdm, tqdm
 
 _HERE = os.path.abspath(__file__)
 _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
-_LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
 
 if config.is_fbcode():
     from triton.fb import build_paths
@@ -1125,13 +1123,7 @@ def get_compile_only(compile_only: bool = True) -> str:
 
 
 def get_shared(shared: bool = True) -> str:
-    if not shared:
-        return ""
-    if platform.system() == "Darwin" and "clang" in cpp_compiler():
-        # This causes undefined symbols to behave the same as linux
-        return "-shared -fPIC -undefined dynamic_lookup"
-    else:
-        return "-shared -fPIC"
+    return "-shared -fPIC" if shared else ""
 
 
 def get_warning_all_flag(warning_all: bool = True) -> str:
@@ -1426,17 +1418,14 @@ def cpp_compile_command(
         if aot_mode and not use_absolute_path:
             inp_name = input
             out_name = output
-            linker_script = _LINKER_SCRIPT
         else:
             # We need to copy any absolute-path torch includes
             inp_name = [os.path.basename(i) for i in input]
             out_name = os.path.basename(output)
-            linker_script = os.path.basename(_LINKER_SCRIPT)
         assert is_clang()
         # Use clang runtime instead of libgcc
         clang_flags += " --rtlib=compiler-rt"
         clang_flags += " -fuse-ld=lld"
-        clang_flags += f" -Wl,--script={linker_script}"
         linker_paths = "-B" + build_paths.glibc_lib()
         linker_paths += " -L" + build_paths.glibc_lib()
     else:
@@ -1713,11 +1702,12 @@ def compile_file(
             # When we build remotely, we need to make sure to carefully copy any files
             # that are required during the compilation process into our build directly.
             # This is where all of the ATen/c10/Torch includes come from.
-            torch_includes_path = os.path.join(_TORCH_PATH, "include")
+            torch_includes_path = os.path.join(
+                torch.utils.cpp_extension._TORCH_PATH, "include"
+            )
             with tempfile.TemporaryDirectory() as tmp_dir:
                 # Copy everything to tmp compilation folder
                 shutil.copy(header_path, os.path.join(tmp_dir, header_name))
-                shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
                 for p, f in zip(input_paths, input_files):
                     shutil.copy(p, os.path.join(tmp_dir, f))
                 dest_include_path = os.path.join(tmp_dir, "include")
@@ -1751,24 +1741,19 @@ _libgomp: Optional[CDLL] = None
 
 
 class CppCodeCache:
-    cache: Dict[str, Union[CDLL, ModuleType]] = {}
+    cache: Dict[str, CDLL] = dict()
     clear = staticmethod(cache.clear)
-    cpp_compile_command_flags: Dict[str, Any] = {}
 
     @staticmethod
-    def _load_library_inner(path: str, key: str) -> Union[CDLL, ModuleType]:
-        return cdll.LoadLibrary(path)
-
-    @classmethod
-    def _load_library(cls, path: str, key: str) -> Union[CDLL, ModuleType]:
+    def _load_library(path: str) -> CDLL:
         try:
-            return cls._load_library_inner(path, key)
-        except (ImportError, OSError) as e:
+            return cdll.LoadLibrary(path)
+        except OSError as e:
             if "gomp" in str(e) and os.path.exists("/usr/lib64/libgomp.so.1"):
                 # hacky workaround for fbcode/buck
                 global _libgomp
                 _libgomp = cdll.LoadLibrary("/usr/lib64/libgomp.so.1")
-                return cls._load_library_inner(path, key)
+                return cdll.LoadLibrary(path)
             if "failed to map segment from shared object" in str(e):
                 raise OSError(
                     f"{e}.  The most common reason this may occur is if the {tempfile.gettempdir()} folder "
@@ -1779,13 +1764,9 @@ class CppCodeCache:
             raise
 
     @classmethod
-    def load(cls, source_code: str) -> Union[CDLL, ModuleType]:
+    def load(cls, source_code: str) -> CDLL:
         picked_vec_isa = pick_vec_isa()
-        cpp_command = repr(
-            cpp_compile_command(
-                "i", "o", vec_isa=picked_vec_isa, **cls.cpp_compile_command_flags
-            )
-        )
+        cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
         key, input_path = write(source_code, "cpp", extra=cpp_command)
         if key not in cls.cache:
             from filelock import FileLock
@@ -1797,118 +1778,14 @@ class CppCodeCache:
                 if not os.path.exists(output_path):
                     cmd = shlex.split(
                         cpp_compile_command(
-                            input=input_path,
-                            output=output_path,
-                            vec_isa=picked_vec_isa,
-                            **cls.cpp_compile_command_flags,
+                            input=input_path, output=output_path, vec_isa=picked_vec_isa
                         )
                     )
                     compile_file(input_path, output_path, cmd)
-                cls.cache[key] = cls._load_library(output_path, key)
-                cls.cache[key].key = key  # type: ignore[union-attr]
+                cls.cache[key] = cls._load_library(output_path)
+                cls.cache[key].key = key  # type: ignore[attr-defined]
 
         return cls.cache[key]
-
-
-class CppPythonBindingsCodeCache(CppCodeCache):
-    cache: Dict[str, Union[CDLL, ModuleType]] = {}
-    clear = staticmethod(cache.clear)
-    cpp_compile_command_flags = {
-        "include_pytorch": True,
-        "shared": True,
-    }
-    suffix_template = textwrap.dedent(
-        """
-        // Python bindings to call kernel():
-        #define PY_SSIZE_T_CLEAN
-        #include <Python.h>
-        #include <sstream>
-        #include <cstdlib>
-
-        // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow.
-        // We manually link it below to workaround issues with fbcode build.
-        static void* (*_torchinductor_pyobject_tensor_data_ptr)(PyObject* obj);
-
-        template <typename T> static inline T parse_arg(PyObject* args, size_t n) {
-            static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
-            return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
-        }
-        template <> inline long parse_arg<long>(PyObject* args, size_t n) {
-            auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
-            if(result == -1 && PyErr_Occurred())
-                [[unlikely]] throw std::runtime_error("expected int arg");
-            return result;
-        }
-
-        static PyObject* kernel_py(PyObject* self, PyObject* args) {
-            try {
-                if(!PyTuple_CheckExact(args))
-                    [[unlikely]] throw std::runtime_error("tuple args required");
-                if(PyTuple_GET_SIZE(args) != %s)
-                    [[unlikely]] throw std::runtime_error("requires %s args");
-                kernel(%s);
-                Py_RETURN_NONE;
-            } catch(std::exception const& e) {
-                PyErr_SetString(PyExc_RuntimeError, e.what());
-                return nullptr;
-            } catch(...) {
-                PyErr_SetString(PyExc_RuntimeError, "unhandled error");
-                return nullptr;
-            }
-        }
-
-        static PyMethodDef py_methods[] = {
-            {"kernel", kernel_py, METH_VARARGS, ""},
-            {NULL, NULL, 0, NULL}};
-
-        static struct PyModuleDef py_module =
-            {PyModuleDef_HEAD_INIT, "kernel", NULL, -1, py_methods};
-
-        PyMODINIT_FUNC PyInit_kernel(void) {
-            const char* str_addr = std::getenv("_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR");
-            if(!str_addr) {
-                PyErr_SetString(PyExc_RuntimeError, "_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR must be set");
-                return nullptr;
-            }
-            std::istringstream iss(str_addr);
-            uintptr_t addr = 0;
-            iss >> addr;
-            _torchinductor_pyobject_tensor_data_ptr =
-                reinterpret_cast<decltype(_torchinductor_pyobject_tensor_data_ptr)>(addr);
-            return PyModule_Create(&py_module);
-        }
-        """
-    )
-
-    @classmethod
-    def _load_library_inner(cls, path: str, key: str) -> ModuleType:
-        os.environ["_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR"] = str(
-            torch._C._dynamo.guards._torchinductor_pyobject_tensor_data_ptr  # type: ignore[attr-defined]
-        )
-        return importlib.machinery.ExtensionFileLoader(
-            f"{key}.kernel", path
-        ).load_module()  # type: ignore[call-arg]
-
-    @classmethod
-    def load_pybinding(cls, argtypes: List[str], source_code: str) -> Any:
-        """
-        Wrap a C++ function in fast Python bindings.
-
-        Args:
-            argtypes: The types of args to kernel(), e.g. ["float*", "long"]
-            source_code: C++ source code containing a kernel() function
-
-        Returns:
-            A python version of kernel()
-        """
-        parseargs = ", ".join(
-            f"parse_arg<{argtype.replace('const ', '')}>(args, {n})"
-            for n, argtype in enumerate(argtypes)
-        )
-        suffix = cls.suffix_template % (len(argtypes), len(argtypes), parseargs)
-        result = cls.load(source_code + suffix)
-        assert isinstance(result, ModuleType)
-        return result.kernel
 
 
 class PyCodeCache:
@@ -2410,17 +2287,6 @@ def _async_compile_initializer(orig_ppid) -> None:
 
 _watchdog_thread: Optional[Thread] = None
 
-# Used to keep track of all process pools invoked so far.
-_pool_set: Set[ProcessPoolExecutor] = set()
-
-
-def shutdown_compile_workers() -> None:
-    """Shut down all outstanding compile-worker pools."""
-    global _pool_set
-    for pool in _pool_set:
-        pool.shutdown()
-    _pool_set = set()
-
 
 class AsyncCompile:
     def __init__(self) -> None:
@@ -2447,10 +2313,6 @@ class AsyncCompile:
             mp_context=ctx,
             initializer=partial(_async_compile_initializer, orig_ppid),
         )
-
-        global _pool_set
-        _pool_set.add(pool)
-
         # when this pool is created in a subprocess object, the normal exit handler
         # doesn't run, and we need to register our own handler.
         # exitpriority has to be high, because another one of the finalizers will
@@ -2521,13 +2383,6 @@ class AsyncCompile:
             return CppCodeCache.load(source_code).kernel
 
         return self.submit(task)
-
-    def cpp_pybinding(self, argtypes: List[str], source_code: str) -> ModuleType:
-        return self.submit(
-            functools.partial(
-                CppPythonBindingsCodeCache.load_pybinding, argtypes, source_code
-            )
-        )
 
     def cuda(self, source_code, dst_file_ext):
         def task():

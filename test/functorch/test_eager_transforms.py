@@ -419,6 +419,7 @@ class TestGradTransform(TestCase):
         expected = -y * x.sin()
         self.assertEqual(result, expected)
 
+    @xfailIfTorchDynamo
     def test_grad_of_vjp_of_grad_composition(self, device):
         x = torch.randn([], device=device)
         y = torch.randn([], device=device)

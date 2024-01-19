@@ -375,7 +375,7 @@ std::future<bool> launchAsyncGilCheck() {
 // heuristic is the correct assignment of ranks to GPUs that Python
 // layers use, but in practice it tends to be.  Fortunately we don't
 // rely on this for correctness of any tensor operations, just for
-// ancillary uses like barriers.
+// ancillary uses like health checks and barriers.
 at::Device ProcessGroupNCCL::guessDeviceForRank() const {
   TORCH_CHECK_WITH(ValueError, rank_ >= 0, "Invalid rank ", rank_);
   if (getBoundDeviceId()) {
@@ -702,6 +702,38 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   ncclCommDevIdxMapMutex.unlock();
 }
 
+ProcessGroupNCCL::CoalescedWorkNCCL::CoalescedWorkNCCL(
+    std::vector<ProcessGroupNCCL::WorkNCCL> works,
+    int rank,
+    OpType opType)
+    : Work(rank, opType, nullptr), works_(std::move(works)) {}
+
+ProcessGroupNCCL::CoalescedWorkNCCL::~CoalescedWorkNCCL() = default;
+
+c10::intrusive_ptr<ProcessGroupNCCL::CoalescedWorkNCCL> ProcessGroupNCCL::
+    initCoalescedWork(
+        const std::vector<c10::intrusive_ptr<Work>>& works,
+        int rank,
+        OpType opType) {
+  std::vector<ProcessGroupNCCL::WorkNCCL> ncclWorks;
+  ncclWorks.reserve(works.size());
+  for (auto& work : works) {
+    ncclWorks.push_back(*static_cast<ProcessGroupNCCL::WorkNCCL*>(work.get()));
+  }
+  return c10::make_intrusive<ProcessGroupNCCL::CoalescedWorkNCCL>(
+      ncclWorks, rank, opType);
+}
+
+// Same as calling synchronize().
+bool ProcessGroupNCCL::CoalescedWorkNCCL::wait(
+    std::chrono::milliseconds timeout) {
+  for (auto& w : works_) {
+    w.wait(timeout);
+  }
+  // Always return true, because abort API is not implemented.
+  return true;
+}
+
 static std::atomic<size_t> process_group_id = 0;
 
 ProcessGroupNCCL::ProcessGroupNCCL(
@@ -784,6 +816,15 @@ ProcessGroupNCCL::ProcessGroupNCCL(
           << "Enabling TORCH_NCCL_ASYNC_ERROR_HANDLING.";
       asyncErrorHandling_ = SkipCleanUp;
     }
+  }
+
+  if (getCvarBool(TORCH_ENABLE_NCCL_HEALTH_CHECK, false)) {
+    // Perform health check by initializing dummy communicators and destroying
+    // them. This will help indicate any NCCL-related issues prior to the first
+    // collective.
+    // Run it in a separate thread and wait on CV to handle timeouts, since
+    // majority of getNCCLComm failures are hangs.
+    runHealthCheck();
   }
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -913,6 +954,65 @@ c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
   return intra_node_comm::IntraNodeComm::rendezvous(
       store_, std::to_string(uid_), rank_, size_);
+}
+
+void ProcessGroupNCCL::runHealthCheck() {
+  // Run health check in a separate thread and wait on CV to handle timeouts,
+  // since majority of getNCCLComm failures are hangs.
+
+  struct HealthCheckData {
+    std::mutex healthCheckMutex;
+    std::condition_variable healthCheckCv;
+    bool healthCheckSuccess = false;
+    std::exception_ptr healthCheckException;
+  };
+
+  HealthCheckData healthCheckData;
+  auto t = std::thread([&healthCheckData, this]() {
+    try {
+      std::vector<at::Device> rankDevice = {guessDeviceForRank()};
+
+      const auto key = getKeyFromDevices(rankDevice);
+      // OpType does not matter, only need to set to not go through send/recv
+      // path.
+      getNCCLComm(key, rankDevice, OpType::ALLREDUCE);
+      // Now destroy the communicators and remove them from cache so we don't
+      // use destroyed communicators.
+      destroyNCCLComms(key);
+      // Notify main thread the health check is complete.
+      {
+        std::lock_guard<std::mutex> lk(healthCheckData.healthCheckMutex);
+        healthCheckData.healthCheckSuccess = true;
+      }
+      healthCheckData.healthCheckCv.notify_one();
+    } catch (const std::exception& e) {
+      // Populate exception ptr.
+      healthCheckData.healthCheckException = std::current_exception();
+      // Unblock waiting main thread which will report exception.
+      healthCheckData.healthCheckCv.notify_one();
+    } // Unknown exceptions will just cause the program to terminate.
+  });
+  // We don't need to join the thread, just need to verify health check via the
+  // CV. Hence we detach the thread here.
+  t.detach(); // NOLINT
+  LOG(INFO) << logPrefix() << "will wait up to " << options_->timeout.count()
+            << " msec for NCCL health check to complete.";
+  std::unique_lock<std::mutex> lock(healthCheckData.healthCheckMutex);
+  healthCheckData.healthCheckCv.wait_for(
+      lock, options_->timeout, [&healthCheckData]() {
+        return healthCheckData.healthCheckSuccess;
+      });
+
+  if (healthCheckData.healthCheckException) {
+    std::rethrow_exception(healthCheckData.healthCheckException);
+  }
+  // If there is no exception, the likely culprit is a timeout/hang which is how
+  // most communicator init issues manifest themselves.
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      healthCheckData.healthCheckSuccess,
+      "ProcessGroupNCCL: Health check failure: Failed to initialize NCCL communicator on rank ",
+      rank_);
 }
 
 void ProcessGroupNCCL::setSequenceNumberForGroup() {
@@ -2293,22 +2393,24 @@ void ProcessGroupNCCL::startCoalescing() {
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
-  if (coalescedComms_.size() == 0) {
-    // There is no actual work being coalesced, return here
+  if (!nccl_use_nonblocking() ||
+      coalescedComms_.size() == 0) { // There is no actual work being coalesced
     groupEnd();
+  } else {
+    // `coalescedComms_` should have same set of comms across collectives
+    auto comms = coalescedComms_[0];
+    groupEndNonblocking(comms);
+  }
+
+  coalescing_state_ = 0;
+
+  if (coalescedDevices_.size() == 0) {
+    // There is no actual work being coalesced
     return nullptr;
   }
 
-  // `coalescedComms_` should have same set of comms across collectives
-  auto comms = coalescedComms_[0];
   // `coalescedDevices_` should have same set of devices across collectives
   auto devices = coalescedDevices_[0];
-
-  if (nccl_use_nonblocking()) {
-    groupEndNonblocking(comms);
-  } else {
-    groupEnd();
-  }
 
   // Create Work object
   auto work = initWork(devices, rank_, OpType::COALESCED, "nccl:coalesced");
@@ -2321,7 +2423,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   for (const auto i : c10::irange(devices.size())) {
     auto& devEvent = (*work->ncclEndEvents_)[i];
     devEvent.record(ncclStreams[i]);
-    work->ncclComms_[i] = comms[i];
   }
 
   // Set appropriate work parameters.
@@ -2337,20 +2438,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
 
-  // Notify graphs before we check the capture status preemptively
-  at::cuda::CUDAGraph::inc_pending_event_queries();
-
   if ((coalescing_state_ & CoalColl) &&
       capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
     // TODO: it seems we never enqueue work for single send/recv or batch P2P,
     // see the `pointToPoint` function. This should be fixed. Otherwise, we risk
     // not being able to abort hanged P2P ops.
-  } else {
-    at::cuda::CUDAGraph::dec_pending_event_queries();
   }
-
-  coalescing_state_ = 0;
 
   return work;
 }

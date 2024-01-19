@@ -189,7 +189,7 @@ def split_module(
                 use_partition = partitions[used]
                 use_partition.inputs.setdefault(def_node.name)
                 if (def_val := def_node.meta.get("example_value")) is not None:
-                    for s in sorted(free_symbols(def_val), key=str):
+                    for s in sorted(free_symbols(def_val)):
                         use_partition.inputs.setdefault(symbol_to_node[s].name)
                 if defined is not None:
                     use_partition.dependencies.setdefault(defined)
