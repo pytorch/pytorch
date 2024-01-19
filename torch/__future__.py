@@ -1,5 +1,5 @@
 """
-_overwrite_module_params_on_conversion controls whether to assign new tensors to the parameters
+This global flag controls whether to assign new tensors to the parameters
 instead of changing the existing parameters in-place when converting an `nn.Module`
 using the following methods:
 1. `module.cuda()` / `.cpu()` (for moving `module` between devices)
