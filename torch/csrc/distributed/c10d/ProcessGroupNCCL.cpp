@@ -387,7 +387,7 @@ at::Device ProcessGroupNCCL::guessDeviceForRank() const {
   }
 }
 
-const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 1000;
+const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 100;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
 
