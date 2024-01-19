@@ -91,12 +91,12 @@ class MultiKernelTest(TestCase):
 
     @config.patch("warn_mix_layout", True)
     def test_softmax_warn_mixed_layout(self):
-        self.test_softmax(True)
+        self.test_softmax()
 
     @config.patch("cpp_wrapper", True)
     def test_softmax_cpp_wrapper(self):
         """
-        Multi-kernel does not work when cpp_wrapper is enabled. So we disable
+        Multi-kernel does not work when cpp_wrapper is enabled right now. So we disable
         multi-kernel in that case.
         """
 
