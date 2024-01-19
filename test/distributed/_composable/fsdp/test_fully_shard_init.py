@@ -119,7 +119,7 @@ class TestFullyShardInitManagedModules(FSDPTestMultiThread):
         self.assertEqual(set(managed_modules), set(expected_managed_modules))
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    def test_managed_states_shared_params(self):
+    def test_managed_states_shared_params_and_buffers(self):
         model = nn.Sequential(*[MLP(8, with_buffer=True) for _ in range(3)])
         model[0].in_proj.weight = model[1].in_proj.weight
         model[2].in_proj.weight = model[1].in_proj.weight
