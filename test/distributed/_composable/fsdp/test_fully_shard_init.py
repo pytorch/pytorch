@@ -13,7 +13,7 @@ from torch.testing._internal.common_fsdp import FSDPTestMultiThread
 from torch.testing._internal.common_utils import run_tests
 
 
-class TestFullyShardInitDevice(FSDPTestMultiThread):
+class TestFullyShardDeviceArg(FSDPTestMultiThread):
     """Tests the ``device`` argument."""
 
     @property
@@ -44,7 +44,7 @@ class TestFullyShardInitDevice(FSDPTestMultiThread):
                     self.assertEqual(_normalize_device(device), torch.device("cuda", 1))
 
 
-class TestFullyShardInitMesh(FSDPTestMultiThread):
+class TestFullyShardMeshArg(FSDPTestMultiThread):
     """Tests the ``mesh`` argument."""
 
     @property
