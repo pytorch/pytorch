@@ -613,7 +613,6 @@ class _BaseDataLoaderIter:
         # a Generator -> base_seed mapping, and that is really difficult to do (a simple dict would fail because Generators
         # can't be pickled, and other solutions get very complex very fast).
         self._base_seed = _utils.worker._generate_seed(generator=loader.generator)
-        print("In dataloader.py from the PR!!")
         for g in _utils.worker._non_default_cpu_generators():
             # We just consume the RNG here. This is to ensure different RNGs for consecutive epochs.
             # The base seed for those generators will be generated with _worker_loop().

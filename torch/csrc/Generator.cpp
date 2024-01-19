@@ -235,7 +235,6 @@ static int THPGenerator_traverse(
     THPGenerator* self,
     visitproc visit,
     void* arg) {
-        printf("In THPGenerator_traverse from the PR!\n");
   return 0;
 }
 
