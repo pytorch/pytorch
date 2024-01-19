@@ -129,7 +129,8 @@ PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  PyObject *_inputs = nullptr, *_output = nullptr, *_streams = nullptr, *_comms = nullptr;
+  PyObject *_inputs = nullptr, *_output = nullptr, *_streams = nullptr,
+           *_comms = nullptr;
   int root = 0, op = 0;
 
   if (!PyArg_ParseTuple(
@@ -161,7 +162,8 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr, *_comms = nullptr;
+  PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr,
+           *_comms = nullptr;
   int op = 0;
 
   if (!PyArg_ParseTuple(
@@ -224,7 +226,8 @@ PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr, *_comms = nullptr;
+  PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr,
+           *_comms = nullptr;
 
   if (!PyArg_ParseTuple(
           args, "OOOO", &_inputs, &_outputs, &_streams, &_comms)) {
@@ -255,7 +258,8 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr, *_comms = nullptr;
+  PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr,
+           *_comms = nullptr;
   int op = 0;
 
   if (!PyArg_ParseTuple(
