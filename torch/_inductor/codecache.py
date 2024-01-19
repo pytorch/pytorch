@@ -799,11 +799,14 @@ class CompiledFxGraph:
 
     _boxed_call: Optional[bool] = None
 
+    disabled_cudagraphs_reason: Optional[str] = None
+
     def __init__(
         self,
         compiled_artifact: Optional[Callable[..., Any]],
         graph: GraphLowering,
         output_strides: List[Optional[Tuple[int, ...]]],
+        disabled_cudagraphs_reason: Optional[str],
     ):
         self.compiled_artifact = compiled_artifact
         self.cache_key = graph.cache_key
@@ -816,6 +819,7 @@ class CompiledFxGraph:
         self.constants = graph.constants
         self.output_strides = output_strides
         self.guards_expr = None
+        self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
 
     def __call__(self, inputs: List[Any]) -> Any:
         return self.get_current_callable()(inputs)

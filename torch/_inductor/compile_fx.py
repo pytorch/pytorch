@@ -329,6 +329,12 @@ def compile_fx_inner(
     if aot_mode:
         return compiled_graph
 
+    if cudagraphs and compiled_graph.disabled_cudagraphs_reason:
+        perf_hint_log.warning(
+            "skipping cudagraphs due to %s", compiled_graph.disabled_cudagraphs_reason
+        )
+        BoxedBool.disable(cudagraphs)
+
     if cudagraphs:
         # output args are tuple of first argument
         output = list(gm.graph.nodes)[-1]
@@ -553,13 +559,9 @@ def fx_codegen_and_compile(
             if V.aot_compilation is True:
                 return compiled_fn
 
-            if cudagraphs and graph.disable_cudagraphs:
-                perf_hint_log.warning(
-                    "skipping cudagraphs due to %s", V.graph.disable_cudagraphs_reason
-                )
-                BoxedBool.disable(cudagraphs)
-
-            compiled_graph = CompiledFxGraph(compiled_fn, graph, output_strides)
+            compiled_graph = CompiledFxGraph(
+                compiled_fn, graph, output_strides, V.graph.disable_cudagraphs_reason
+            )
 
     return compiled_graph
 
