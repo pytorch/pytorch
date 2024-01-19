@@ -364,6 +364,12 @@ inline at::vec::Vectorized<float> mask_convert_to_float(at::vec::Vectorized<floa
   return at::vec::Vectorized<float>::blendv(zeros, ones, src);
 }
 
+template <typename scalar_t>
+inline at::vec::Vectorized<scalar_t> mask_convert_to_lp(at::vec::Vectorized<float> src) {
+  auto fp_vec = mask_convert_to_float(src);
+  return cvt_fp32_to_lowp_fp<scalar_t>(fp_vec);
+}
+
 template <typename SRC>
 inline at::vec::Vectorized<float> vec_convert_to_mask(at::vec::Vectorized<SRC> src) {
   assert(
