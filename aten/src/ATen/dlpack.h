@@ -94,7 +94,10 @@ typedef enum {
 /*!
  * \brief A Device for Tensor and operator.
  */
-typedef struct {
+// NB: This is the only difference from
+// https://github.com/dmlc/dlpack/blob/v0.7/include/dlpack/dlpack.h Required to
+// allow forward declaration of DLDevice.
+typedef struct DLDevice_ {
   /*! \brief The device type used in the device. */
   DLDeviceType device_type;
   /*!

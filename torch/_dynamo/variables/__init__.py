@@ -51,7 +51,6 @@ from .misc import (
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
-    MethodWrapperVariable,
     NewCellVariable,
     NewGlobalVariable,
     NumpyVariable,

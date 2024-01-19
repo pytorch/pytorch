@@ -2283,7 +2283,6 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         # stats should be empty, but comparisons should be there
         _check_logger_count(msq, 0, 1)
 
-    @skipIfTorchDynamo("too slow")
     @skip_if_no_torchvision
     @withQNNPACKBackend
     def test_mobilenet_v2(self):
@@ -2891,7 +2890,6 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
                 results_len=3,
                 should_log_inputs=should_log_inputs)
 
-    @skipIfTorchDynamo("too slow")
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
     def test_resnet18(self):
@@ -2903,7 +2901,6 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             qconfig_dict=qconfig_dict,
             should_log_inputs=False)
 
-    @skipIfTorchDynamo("too slow")
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
     def test_mobilenet_v2(self):

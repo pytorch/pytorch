@@ -8,16 +8,12 @@ from functorch.experimental.control_flow import map
     example_inputs=(torch.ones(3, 2), torch.ones(2)),
     tags={"torch.dynamic-shape", "torch.map"},
 )
-class DynamicShapeMap(torch.nn.Module):
+def dynamic_shape_map(xs, y):
     """
     functorch map() maps a function over the first tensor dimension.
     """
 
-    def __init__(self):
-        super().__init__()
+    def body(x, y):
+        return x + y
 
-    def forward(self, xs, y):
-        def body(x, y):
-            return x + y
-
-        return map(body, xs, y)
+    return map(body, xs, y)

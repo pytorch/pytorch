@@ -43,26 +43,22 @@ class AOTIRunnerUtil:
             return (
                 torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
                 if device == "cpu"
-                else torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
+                else torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1)
             )
 
     @classmethod
     def load(cls, device, so_path):
-        # TODO: unify fbcode and oss behavior to only use torch._export.aot_load
-        if IS_FBCODE:
-            runner = AOTIRunnerUtil.load_runner(device, so_path)
+        runner = AOTIRunnerUtil.load_runner(device, so_path)
 
-            def optimized(*args):
-                call_spec = runner.get_call_spec()
-                in_spec = pytree.treespec_loads(call_spec[0])
-                out_spec = pytree.treespec_loads(call_spec[1])
-                flat_inputs = fx_pytree.tree_flatten_spec((*args, {}), in_spec)
-                flat_outputs = runner.run(flat_inputs)
-                return pytree.tree_unflatten(flat_outputs, out_spec)
+        def optimized(*args):
+            call_spec = runner.get_call_spec()
+            in_spec = pytree.treespec_loads(call_spec[0])
+            out_spec = pytree.treespec_loads(call_spec[1])
+            flat_inputs = fx_pytree.tree_flatten_spec((*args, {}), in_spec)
+            flat_outputs = runner.run(flat_inputs)
+            return pytree.tree_unflatten(flat_outputs, out_spec)
 
-            return optimized
-        else:
-            return torch._export.aot_load(so_path, device)
+        return optimized
 
     @classmethod
     def run(

@@ -25,12 +25,6 @@ void initAOTIRunnerBindings(PyObject* module) {
 #ifdef USE_CUDA
   py::class_<AOTIModelContainerRunnerCuda>(m, "AOTIModelContainerRunnerCuda")
       .def(py::init<const std::string&, int>())
-      .def(py::init<const std::string&, int, const std::string&>())
-      .def(py::init<
-           const std::string&,
-           int,
-           const std::string&,
-           const std::string&>())
       .def("run", &AOTIModelContainerRunnerCuda::run)
       .def("get_call_spec", &AOTIModelContainerRunnerCuda::get_call_spec)
       .def(

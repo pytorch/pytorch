@@ -1,8 +1,6 @@
 # Owner(s): ["module: autograd"]
 
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON, IS_WINDOWS
-from torch._utils_internal import get_file_path_2
-
 import pkgutil
 import torch
 import importlib
@@ -12,47 +10,6 @@ import json
 import os
 import unittest
 from importlib import import_module
-from itertools import chain
-from pathlib import Path
-
-def _find_all_importables(pkg):
-    """Find all importables in the project.
-
-    Return them in order.
-    """
-    return sorted(
-        set(
-            chain.from_iterable(
-                _discover_path_importables(Path(p), pkg.__name__)
-                for p in pkg.__path__
-            ),
-        ),
-    )
-
-
-def _discover_path_importables(pkg_pth, pkg_name):
-    """Yield all importables under a given path and package.
-
-    This is like pkgutil.walk_packages, but does *not* skip over namespace
-    packages. Taken from https://stackoverflow.com/questions/41203765/init-py-required-for-pkgutil-walk-packages-in-python3
-    """
-    for dir_path, _d, file_names in os.walk(pkg_pth):
-        pkg_dir_path = Path(dir_path)
-
-        if pkg_dir_path.parts[-1] == '__pycache__':
-            continue
-
-        if all(Path(_).suffix != '.py' for _ in file_names):
-            continue
-
-        rel_pt = pkg_dir_path.relative_to(pkg_pth)
-        pkg_pref = '.'.join((pkg_name, ) + rel_pt.parts)
-        yield from (
-            pkg_path
-            for _, pkg_path, _ in pkgutil.walk_packages(
-                (str(pkg_dir_path), ), prefix=f'{pkg_pref}.',
-            )
-        )
 
 
 class TestPublicBindings(TestCase):
@@ -274,10 +231,9 @@ class TestPublicBindings(TestCase):
                 return False
         return True
 
-
     def test_modules_can_be_imported(self):
         failures = []
-        for _, modname, _ in _discover_path_importables(str(torch.__path__), "torch"):
+        for _, modname, _ in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
             try:
                 # TODO: fix "torch/utils/model_dump/__main__.py"
                 # which calls sys.exit() when we try to import it
@@ -353,19 +309,6 @@ class TestPublicBindings(TestCase):
             "torch.distributed.algorithms._optimizer_overlap",
             "torch.distributed.rpc._testing.faulty_agent_backend_registry",
             "torch.distributed.rpc._utils",
-            "torch.ao.pruning._experimental.data_sparsifier.benchmarks.dlrm_utils",
-            "torch.ao.pruning._experimental.data_sparsifier.benchmarks.evaluate_disk_savings",
-            "torch.ao.pruning._experimental.data_sparsifier.benchmarks.evaluate_forward_time",
-            "torch.ao.pruning._experimental.data_sparsifier.benchmarks.evaluate_model_metrics",
-            "torch.ao.pruning._experimental.data_sparsifier.lightning.tests.test_callbacks",
-            "torch.csrc.jit.tensorexpr.scripts.bisect",
-            "torch.csrc.lazy.test_mnist",
-            "torch.distributed._shard.checkpoint._fsspec_filesystem",
-            "torch.distributed._tensor.examples.visualize_sharding_example",
-            "torch.distributed.checkpoint._fsspec_filesystem",
-            "torch.distributed.examples.memory_tracker_example",
-            "torch.testing._internal.distributed.rpc.fb.thrift_rpc_agent_test_fixture",
-            "torch.utils._cxx_pytree",
         }
 
         # No new entries should be added to this list.
@@ -402,7 +345,6 @@ class TestPublicBindings(TestCase):
             "torch.distributed.run",
             "torch.distributed.tensor.parallel",
             "torch.distributed.utils",
-            "torch.utils.tensorboard",
         }
 
         errors = []
@@ -432,7 +374,7 @@ class TestPublicBindings(TestCase):
           `__module__` that start with the current submodule.
         '''
         failure_list = []
-        with open(get_file_path_2(os.path.dirname(__file__), 'allowlist_for_publicAPI.json')) as json_file:
+        with open(os.path.join(os.path.dirname(__file__), 'allowlist_for_publicAPI.json')) as json_file:
             # no new entries should be added to this allow_dict.
             # New APIs must follow the public API guidelines.
             allow_dict = json.load(json_file)
@@ -530,7 +472,7 @@ class TestPublicBindings(TestCase):
                     if not elem.startswith('_'):
                         check_one_element(elem, modname, mod, is_public=True, is_all=False)
 
-        for _, modname, _ in _discover_path_importables(str(torch.__path__), "torch"):
+        for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
             test_module(modname)
 
         test_module('torch')
