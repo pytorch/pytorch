@@ -4,6 +4,7 @@ from typing import cast, Optional
 import torch.distributed as dist
 from torch.distributed._tensor import DeviceMesh
 
+
 @dataclass
 class DataParallelMeshInfo:
     mesh: DeviceMesh
