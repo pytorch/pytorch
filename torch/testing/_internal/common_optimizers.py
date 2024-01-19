@@ -765,9 +765,9 @@ def optim_error_inputs_func_sparseadam(device, dtype):
         # SparseAdam raises a warning and not an error for the first entry. We
         # update it here:
         error_inputs[0].error_type = FutureWarning
-        error_inputs[0].error_regex = (
-            "Passing in a raw Tensor as ``params`` to SparseAdam"
-        )
+        error_inputs[
+            0
+        ].error_regex = "Passing in a raw Tensor as ``params`` to SparseAdam"
 
         error_inputs += [
             ErrorOptimizerInput(
