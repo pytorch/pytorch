@@ -119,7 +119,6 @@ xfail_not_implemented = {
     "aten::lu_solve",
     "aten::margin_ranking_loss",
     "aten::masked_select_backward",
-    # "aten::matrix_exp",
     "aten::matrix_exp_backward",
     "aten::max.names_dim",
     "aten::max.names_dim_max",
