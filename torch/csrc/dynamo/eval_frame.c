@@ -4,6 +4,7 @@
 #include <torch/csrc/utils/python_compat.h>
 #include <opcode.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 // Problem in CPython includes when mixing core and non-core build
 // The fix was not backported to 3.12 so this is needed here
@@ -294,6 +295,8 @@ of the cache is as follows:
     -> check_fn
     -> optimized_code
     -> next
+    -> prev
+    -> extra_state
   -> FrameState
 
 CacheEntry is a linked list, with each node containing the check_fn for guards
@@ -305,6 +308,27 @@ is used to detect dynamism in automatic dynamic shapes.
 These two are encapsulated into a ExtraState.
 */
 
+typedef struct cache_entry CacheEntry;
+
+// ExtraState encasulates CacheEntry and FrameState. ExtraState is the highest
+// level of abstraction of what is stored on the extra code object. Previously,
+// we saved different parts on different extra indexes.  We prefer this way
+// because of cleaner abstraction and faster SetExtra access.
+
+// TODO(anijain2305) - Consider making this a PyObject. Benefits are
+//   1) Modular dealloc - destroy_extra_state just becomes Py_DECREF(extra)
+//   2) We can directly send the extra object to convert_frame callback. One
+//   data structure - easier to understand code.
+// There might be some perf impact of going through a PyObject on the critical
+// path, but it should not be too bad.
+typedef struct extra_state {
+  // Cache entry for the code object
+  CacheEntry* cache_entry;
+  // Frame state to detect dynamic shape dims
+  FrameState* frame_state;
+} ExtraState;
+
+
 // Linked list of cache entries, where each cache entry stores
 // the check_fn and the torch.compile optimized python bytecode.
 typedef struct cache_entry {
@@ -315,6 +339,12 @@ typedef struct cache_entry {
   PyCodeObject* code;
   // on a cache miss, linked list of next thing to try
   struct cache_entry* next;
+  // backward link for doubly linked list
+  struct cache_entry* prev;
+  // ExtraState reference to handle the case where we delete the first CacheEntry
+  ExtraState* extra_state;
+  // to support weak references
+  PyObject *weakreflist;
 } CacheEntry;
 
 static void cache_entry_dealloc(CacheEntry* e);
@@ -337,6 +367,44 @@ static struct PyGetSetDef CacheEntry_properties[] = {
     {NULL}};
 
 
+static PyObject* CacheEntry_invalidate(CacheEntry* self, PyObject* args) {
+  DEBUG_CHECK(self->extra_state != SKIP_CODE)
+  DEBUG_NULL_CHECK(self->extra_state);
+
+  // handle case where CacheEntry is the first entry in self->extra_state
+  if (self->extra_state->cache_entry == self) {
+    DEBUG_CHECK((PyObject*)self->prev == Py_None);
+    // will be decremented later on, so increment now
+    Py_INCREF(self->next);
+    self->extra_state->cache_entry = self->next;
+  }
+
+  // delete this CacheEntry from the linked list
+  if ((PyObject*)self->next != Py_None) {
+    self->next->prev = self->prev;
+  }
+  if ((PyObject*)self->prev != Py_None) {
+    // steal reference
+    self->prev->next = self->next;
+    self->prev = (CacheEntry*)Py_None;
+  } else {
+    Py_DECREF(self->next);
+  }
+  Py_INCREF(Py_None);
+  self->next = (CacheEntry*)Py_None;
+
+  // Delete self
+  Py_DECREF(self);
+
+  return Py_None;
+}
+
+static PyMethodDef CacheEntry_methods[] = {
+    {"invalidate", (PyCFunction) CacheEntry_invalidate, METH_NOARGS,
+     "Invalidates this CacheEntry and removes it from the internal linked list."},
+    {NULL}};
+
+
 static PyObject* cache_entry_new(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   CacheEntry *self = (CacheEntry*) type->tp_alloc(type, 0);
   if (self != NULL) {
@@ -347,6 +415,9 @@ static PyObject* cache_entry_new(PyTypeObject* type, PyObject* args, PyObject* k
     self->code = (PyCodeObject*)Py_None;
     Py_INCREF(Py_None);
     self->next = (CacheEntry*)Py_None;
+    // borrowed
+    self->prev = (CacheEntry*)Py_None;
+    self->extra_state = NULL;
   }
   return (PyObject*)self;
 }
@@ -398,36 +469,22 @@ static PyTypeObject CacheEntryType = {
   .tp_init = (initproc)cache_entry_init,
   .tp_dealloc = (destructor)cache_entry_dealloc,
   .tp_getset = CacheEntry_properties,
+  .tp_methods = CacheEntry_methods,
+  .tp_weaklistoffset = offsetof(CacheEntry, weakreflist),
 };
-
-// ExtraState encasulates CacheEntry and FrameState. ExtraState is the highest
-// level of abstraction of what is stored on the extra code object. Previously,
-// we saved different parts on different extra indexes.  We prefer this way
-// because of cleaner abstraction and faster SetExtra access.
-
-// TODO(anijain2305) - Consider making this a PyObject. Benefits are
-//   1) Modular dealloc - destroy_extra_state just becomes Py_DECREF(extra)
-//   2) We can directly send the extra object to convert_frame callback. One
-//   data structure - easier to understand code.
-// There might be some perf impact of going through a PyObject on the critical
-// path, but it should not be too bad.
-typedef struct {
-  // Cache entry for the code object
-  CacheEntry* cache_entry;
-  // Frame state to detect dynamic shape dims
-  FrameState* frame_state;
-} ExtraState;
 
 
 /* CacheEntry helper functions begins */
 
 static CacheEntry* create_cache_entry(
     CacheEntry* next,
-    PyObject* guarded_code) {
+    PyObject* guarded_code,
+    ExtraState* extra_state) {
   // Ownership contract
   // args
   //   - next: steals
   //   - guarded_code: Borrowed
+  //   - extra_state: Borrowed (not a PyObject)
   //  return
   //   - CacheEntry*: new reference.
   PyObject* check_fn = PyObject_GetAttrString(guarded_code, "check_fn"); // new reference
@@ -436,12 +493,24 @@ static CacheEntry* create_cache_entry(
   // equivalent to CacheEntry(check_fn, code, next) in Python
   PyObject* args = Py_BuildValue("OOO", check_fn, code, next);
   CacheEntry* e = (CacheEntry*)PyObject_CallObject((PyObject*)&CacheEntryType, args); // new reference
-  // CacheEntry e is the now the owner of old cachey entry next. This happens
+
+  // create backward link
+  if ((PyObject*)next != Py_None) {
+    // check if next is a CacheEntry
+    DEBUG_CHECK(PyObject_IsInstance((PyObject*)next, (PyObject*)&CacheEntryType));
+    // borrowed
+    next->prev = e;
+  }
+
+  // CacheEntry e is the now the owner of old cachy entry next. This happens
   // when we incref the next pointer in cache_entry_init.
   Py_DECREF(next);
   Py_DECREF(check_fn);
   Py_DECREF(code);
   Py_DECREF(args);
+
+  e->extra_state = extra_state;
+
   return e;
 }
 
@@ -451,6 +520,8 @@ static void cache_entry_dealloc(CacheEntry* e) {
   // This will recursively call cache_entry_dealloc for the next items in the
   // linked list.
   Py_XDECREF(e->next);
+  if (e->weakreflist != NULL)
+        PyObject_ClearWeakRefs((PyObject*)e);
   Py_TYPE(e)->tp_free((PyObject*)e);
 }
 
@@ -516,6 +587,12 @@ inline static void destroy_extra_state(void* obj) {
 
   ExtraState* extra = (ExtraState*)obj;
   if (extra != NULL && extra != SKIP_CODE) {
+    // Clean up CacheEntry pointers to extra
+    CacheEntry* cache_entry = extra->cache_entry;
+    while (cache_entry != (CacheEntry*) Py_None) {
+      cache_entry->extra_state = NULL;
+      cache_entry = cache_entry->next;
+    }
     // Cpython gc will call cache_entry_dealloc on its own when the ref count
     // goes to 0.
     Py_XDECREF(extra->cache_entry);
@@ -646,7 +723,7 @@ static PyObject* call_guard_fail_hook(
 
 // Return value: borrowed reference
 // Is either Py_None or a PyCodeObject
-static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEntry* prev, size_t index) {
+static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, size_t index) {
   if (e == (CacheEntry*)Py_None) {
     // NB: intentionally not using Py_RETURN_NONE, to return borrowed ref
     return Py_None;
@@ -673,17 +750,21 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     // Keep the head as the most recently used cache entry.
     // If the hit cache entry is not the head of the linked list,
     // move it to the head
-    if (prev != NULL) {
+    if (e->prev != (CacheEntry*)Py_None) {
         ExtraState* extra = get_extra_state(frame->f_code);
         // Override the extra state to reflect the updated cache line.
         CacheEntry* old_cache_entry = extra->cache_entry;
-        prev->next = e->next;
+        e->prev->next = e->next;
+        if (e->next != (CacheEntry*)Py_None) {
+          e->next->prev = e->prev;
+        }
         e->next = old_cache_entry;
+        e->prev = (CacheEntry*)Py_None;
         extra->cache_entry = e;
     }
     return (PyObject*)e->code;
   }
-  return lookup(e->next, frame, e, index + 1);
+  return lookup(e->next, frame, index + 1);
 }
 
 inline static PyObject* eval_custom_code_impl(
@@ -958,7 +1039,7 @@ static PyObject* _custom_eval_frame(
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
     _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
-    PyObject* maybe_cached_code = lookup(cache_entry, frame, NULL, 0);
+    PyObject* maybe_cached_code = lookup(cache_entry, frame, 0);
     _pytorch_record_function_exit(rf);
 
     if (maybe_cached_code == NULL) {
@@ -983,7 +1064,7 @@ static PyObject* _custom_eval_frame(
   eval_frame_callback_set(Py_None);
 
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
-  PyObject* maybe_cached_code = lookup(cache_entry, frame, NULL, 0);
+  PyObject* maybe_cached_code = lookup(cache_entry, frame, 0);
   _pytorch_record_function_exit(rf);
   if (maybe_cached_code == NULL) {
     // Python error
@@ -1017,7 +1098,25 @@ static PyObject* _custom_eval_frame(
     // extract_cache_entry returns a borrowed reference. Modifying a borrowed
     // reference seems wrong. Therefore, we directly access the
     // extra->cache_entry. extra wont be NULL here.
-    extra->cache_entry = create_cache_entry(extra->cache_entry, result);
+    extra->cache_entry = create_cache_entry(extra->cache_entry, result, extra);
+
+    PyObject* check_fn = PyObject_GetAttrString(result, "check_fn");
+    DEBUG_NULL_CHECK(check_fn);
+
+    #ifdef TORCHDYNAMO_DEBUG
+    PyObject* check_fn_cache_entry = PyObject_GetAttrString(check_fn, "cache_entry");
+    DEBUG_CHECK(check_fn_cache_entry == Py_None);
+    Py_XDECREF(check_fn_cache_entry);
+    #endif
+
+    // Use a weakref to avoid circular references
+    PyObject* cache_entry_ref = PyWeakref_NewRef((PyObject*)extra->cache_entry, NULL);
+    DEBUG_NULL_CHECK(cache_entry_ref);
+    int ret = PyObject_SetAttrString(check_fn, "cache_entry", cache_entry_ref);
+    DEBUG_CHECK(ret == 0);
+    Py_DECREF(check_fn);
+    Py_DECREF(cache_entry_ref);
+
     Py_DECREF(result);
     // Update the existing cache_entry on the extra object. This extra object is
     // sitting on the extra scratch space, we are just changing the cache_entry

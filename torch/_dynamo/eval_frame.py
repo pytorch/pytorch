@@ -14,6 +14,7 @@ import threading
 import traceback
 import types
 import warnings
+import weakref
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -346,7 +347,9 @@ class _TorchDynamoContext:
             # Assume that the underlying node metadata of `fn`,
             # a GraphModule instance, accurately represents
             # all instances of type(fn).
-            code_context.get_context(fn.forward.__code__)["orig_graphmodule"] = fn
+            code_context.get_context(fn.forward.__code__)[
+                "orig_graphmodule"
+            ] = weakref.ref(fn)
 
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):

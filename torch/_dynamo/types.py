@@ -1,6 +1,7 @@
 import dataclasses
 import sys
 import types
+import weakref
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Protocol, Union
 
 from typing_extensions import TypeAlias
@@ -37,6 +38,7 @@ class GuardFn(Protocol):
     verbose_code_parts: List[str]
     global_scope: Dict[str, object]
     guard_fail_fn: Optional[Callable[[GuardFail], None]]
+    cache_entry: Optional[weakref.ref[CacheEntry]]
 
     # maps locals of user function to bool
     def __call__(self, f_locals: Dict[str, object]) -> bool:

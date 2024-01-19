@@ -55,7 +55,7 @@ from torch.utils.weak import TensorWeakRef
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
 from .source import DefaultsSource, LocalSource, TypeSource
-from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
+from .types import CacheEntry, GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     common_constant_types,
     dict_keys_getitem,
@@ -923,6 +923,10 @@ def must_add_nn_module_guards(guard):
     )
 
 
+class DeletedGuardFn:
+    pass
+
+
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -1182,13 +1186,20 @@ class CheckFunctionManager:
             "G": builder.scope["G"],
         }
         guard_fn.guard_fail_fn = guard_fail_fn
+        guard_fn.cache_entry = None
         return guard_fn
 
     def invalidate(self):
         # A weakref is no longer valid, self.check_fn should return false
-        # TODO(janimesh) - Free up cache entry after the cache entry formation
-        # is in python, and the underlying data structure is a doubly linked
-        # list.
+        if (
+            self.valid
+            and self.check_fn is not DeletedGuardFn
+            and (cache_entry := self.check_fn.cache_entry()) is not None
+        ):
+            assert isinstance(cache_entry, CacheEntry)
+            cache_entry.invalidate()
+            # to make sure we don't try using check_fn again
+            self.check_fn = DeletedGuardFn
         self.valid = False
 
     def id_ref(self, obj):
