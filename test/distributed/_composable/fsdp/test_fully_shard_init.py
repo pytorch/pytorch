@@ -314,6 +314,18 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
         orig_params = [param.detach().clone() for param in model.parameters()]
         fully_shard(model)
         sharded_params = list(model.parameters())
+        self._check_1d_sharded_parameters(orig_params, sharded_params)
+
+        model = nn.Sequential(*[MLP(3, dim_multiplier=3) for _ in range(3)])
+        model[0].in_proj = model[1].in_proj
+        orig_params = [param.detach().clone() for param in model.parameters()]
+        fully_shard(model)
+        sharded_params = list(model.parameters())
+        self._check_1d_sharded_parameters(orig_params, sharded_params)
+
+    def _check_1d_sharded_parameters(
+        self, orig_params: List[nn.Parameter], sharded_params: List[nn.Parameter]
+    ):
         self.assertEqual(len(orig_params), len(sharded_params))
         global_mesh = init_device_mesh("cuda", (self.world_size,))
         for orig_param, sharded_param in zip(orig_params, sharded_params):
