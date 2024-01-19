@@ -6,11 +6,9 @@ from typing import Any, Callable, Dict, List, Tuple
 import torch
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_functional
 from torch._inductor import inductor_prims
-from torch._inductor.fx_utils import get_node_storage
+from torch._inductor.fx_utils import get_node_storage, is_node_realized
 from torch._inductor.lowering import (
-    fallbacks,
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
-    needs_realized_inputs,
 )
 from torch._inductor.virtualized import V
 from torch.fx.immutable_collections import immutable_dict
@@ -176,19 +174,12 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     if scatter_always_uses_mutation(node):
         return True
 
-    # Check if input is always a buffer, and output is always realized by users.
-    def is_buffer(node):
-        return node.op == "placeholder" or node.target in fallbacks
-
-    def realizes_inputs(node):
-        return node.op == "output" or node.target in needs_realized_inputs
-
-    if is_buffer(inp) and any(realizes_inputs(user) for user in node.users):
+    if is_node_realized(inp) and is_node_realized(node):
         return True
 
     # If the output is copied back into the input, this forces both to be
     # realized as the output is a user of the input
-    if any(
+    if inp.op == "placeholder" and any(
         user.target is aten.copy_.default and user.args[0] is inp for user in node.users
     ):
         return True
@@ -263,17 +254,19 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
             kwargs=node.kwargs,
         )
 
-        if can_fuse := src.target is _generalized_scatter:
+        def can_fuse():
+            if src.target is not _generalized_scatter:
+                return False
             src_inp, src_src, src_scatter_view_op = src.args
 
             inp_base = node_to_view_base.get(inp, inp)
             src_base = node_to_view_base.get(src_inp, src_inp)
-            can_fuse = inp_base is src_base and node_to_view_op[src_inp] == [
+            return inp_base is src_base and node_to_view_op[src_inp] == [
                 *node_to_view_op[inp],
                 scatter_view_op,
             ]
 
-        if not can_fuse:
+        if not can_fuse():
             with graph.inserting_before(node):
                 new_node = graph_call_function(
                     graph,
@@ -286,6 +279,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
             graph.erase_node(node)
             return
 
+        src_inp, src_src, src_scatter_view_op = src.args
         with graph.inserting_before(src):
             new_node = graph_call_function(
                 graph,
