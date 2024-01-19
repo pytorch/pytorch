@@ -14,6 +14,8 @@ from torch.testing._internal.common_utils import run_tests
 
 
 class TestFullyShardInitDevice(FSDPTestMultiThread):
+    """Tests the ``device`` argument."""
+
     @property
     def world_size(self) -> int:
         return 1
@@ -43,6 +45,8 @@ class TestFullyShardInitDevice(FSDPTestMultiThread):
 
 
 class TestFullyShardInitMesh(FSDPTestMultiThread):
+    """Tests the ``mesh`` argument."""
+
     @property
     def world_size(self) -> int:
         return 2
