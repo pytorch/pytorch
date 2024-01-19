@@ -8,7 +8,7 @@ import torch
 
 from torch.distributed._tensor import DeviceMesh, distribute_module, distribute_tensor
 from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.ops.utils import is_tensor_partial
+from torch.distributed._tensor.ops.utils import is_tensor_partial, normalize_dim
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -73,18 +73,14 @@ class DistMathOpsTest(DTensorTestBase):
                 x, dim=softmax_dim, dtype=torch.float32
             )
             dist_x = distribute_tensor(x, device_mesh, [Shard(shard_dim)])
+            dist_y = torch.nn.functional.softmax(
+                dist_x, dim=softmax_dim, dtype=torch.float32
+            )
+            shard_dim = normalize_dim(shard_dim, dist_x.ndim)
             if dims[shard_dim] == dims[softmax_dim]:
-                with self.assertRaisesRegex(
-                    Exception, "Cannot run .* on sharding dimension!$"
-                ):
-                    dist_y = torch.nn.functional.softmax(
-                        dist_x, dim=softmax_dim, dtype=torch.float32
-                    )
+                self.assertTrue(dist_y.placements[0].is_replicate())
+                self.assertEqual(dist_y.to_local(), local_y)
             else:
-                dist_y = torch.nn.functional.softmax(
-                    dist_x, dim=softmax_dim, dtype=torch.float32
-                )
-                shard_dim = shard_dim + dist_y.ndim if shard_dim < 0 else shard_dim
                 self.assertTrue(dist_y.placements[0].is_shard(dim=shard_dim))
                 self.assertEqual(dist_y.full_tensor(), local_y)
 
@@ -112,22 +108,23 @@ class DistMathOpsTest(DTensorTestBase):
 
             dist_x = distribute_tensor(x, device_mesh, [Shard(shard_dim)])
             self.assertTrue(dist_x.requires_grad)
+            dist_softmax = dist_x.softmax(dim=softmax_dim)
+            shard_dim = normalize_dim(shard_dim, dist_x.ndim)
             if dims[softmax_dim] == dims[shard_dim]:
-                with self.assertRaisesRegex(
-                    Exception, "Cannot run .* on sharding dimension!$"
-                ):
-                    dist_softmax = dist_x.softmax(dim=softmax_dim)
+                self.assertTrue(dist_softmax.placements[0].is_replicate())
             else:
-                dist_softmax = dist_x.softmax(dim=softmax_dim)
-                shard_dim = shard_dim + dist_x.ndim if shard_dim < 0 else shard_dim
                 self.assertTrue(dist_softmax.placements[0].is_shard(dim=shard_dim))
-                dist_y = dist_softmax.sum()
+            dist_y = dist_softmax.sum()
+            if dims[softmax_dim] == dims[shard_dim]:
+                self.assertTrue(dist_y.placements[0].is_replicate())
+            else:
+                self.assertTrue(dist_y.placements[0].is_partial())
                 dist_y = dist_y.redistribute(device_mesh, [Replicate()])
-                self.assertEqual(dist_y.to_local(), local_y)
-                self.assertIsNone(dist_x.grad)
-                dist_y.backward()
-                self.assertIsNotNone(dist_x.grad)
-                self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+            self.assertEqual(dist_y.to_local(), local_y)
+            self.assertIsNone(dist_x.grad)
+            dist_y.backward()
+            self.assertIsNotNone(dist_x.grad)
+            self.assertEqual(dist_x.grad.full_tensor(), x.grad)
 
     @with_comms
     def test_full_shard_math_ops(self):
