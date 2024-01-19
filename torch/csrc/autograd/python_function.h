@@ -13,6 +13,7 @@
 #include <c10/util/Optional.h>
 
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -27,7 +28,17 @@ namespace torch::autograd {
 struct PyNode : public Node {
   PyNode(THPObjectPtr obj) : obj(obj.release()) {}
 
+  PyObject* to_py_args(
+      const variable_list& inputs,
+      at::OptionalDeviceGuard* device_guard);
+  variable_list to_variable_list(
+      const PyObject* r,
+      const std::vector<bool>& is_variable_input);
+
   variable_list apply(variable_list&& inputs) override;
+  variable_list compiled_apply(
+      variable_list&& inputs,
+      std::optional<PyObject*> compiler);
 
   void release_variables() override;
   std::string name() const override;
@@ -38,8 +49,13 @@ struct PyNode : public Node {
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
 
+  bool compiled_autograd_should_lift() const;
+
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
+
+  // The AutogradCompilerCall::hooks idx corresponding to this node's backward
+  std::optional<int> _backward_idx;
 
   ~PyNode() override {
     // Can't use THPObjectPtr as a field in this class; destructor won't take

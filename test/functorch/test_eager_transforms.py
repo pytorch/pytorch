@@ -419,7 +419,6 @@ class TestGradTransform(TestCase):
         expected = -y * x.sin()
         self.assertEqual(result, expected)
 
-    @xfailIfTorchDynamo
     def test_grad_of_vjp_of_grad_composition(self, device):
         x = torch.randn([], device=device)
         y = torch.randn([], device=device)
@@ -3152,7 +3151,7 @@ class TestComposability(TestCase):
             torch.vmap(torch.sin)
 
     # Some of these pass, some of these don't
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     @parametrize('transform', [
         'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
@@ -3398,7 +3397,7 @@ class TestComposability(TestCase):
             transform(MySin.apply)(x)
 
     # Some of these pass, some of these don't
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     @parametrize('transform', [
         'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
