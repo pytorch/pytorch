@@ -1255,7 +1255,7 @@ def parse_args():
         "--pipe-logs",
         action="store_true",
         help="Print logs to output file while running tests.  True if in CI and env var is not set",
-        default=IS_CI and not strtobool(os.environ.get("NO_PIPE_LOGS", "False")),
+        default=IS_CI and not strtobool(os.environ.get("VERBOSE_TEST_LOGS", "False")),
     )
     parser.add_argument(
         "--set-timeout",

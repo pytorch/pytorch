@@ -638,14 +638,14 @@ class TestConfigFilter(TestCase):
     def test_perform_misc_tasks(self, mocked_subprocess: Any) -> None:
         def _gen_expected_string(
             keep_going: bool = False,
-            ci_no_pipe_logs: bool = False,
+            ci_verbose_test_logs: bool = False,
             ci_no_test_timeout: bool = False,
             is_unstable: bool = False,
             reenabled_issues: str = "",
         ) -> str:
             return (
                 f"keep-going={keep_going}\n"
-                f"ci-no-pipe-logs={ci_no_pipe_logs}\n"
+                f"ci-verbose-test-logs={ci_verbose_test_logs}\n"
                 f"ci-no-test-timeout={ci_no_test_timeout}\n"
                 f"is-unstable={is_unstable}\n"
                 f"reenabled-issues={reenabled_issues}\n"
@@ -681,7 +681,7 @@ class TestConfigFilter(TestCase):
                 "job_name": "A job name",
                 "pr_body": "[ci-no-test-timeout]",
                 "expected": _gen_expected_string(
-                    ci_no_pipe_logs=True, ci_no_test_timeout=True
+                    ci_verbose_test_logs=True, ci_no_test_timeout=True
                 ),
                 "description": "No pipe logs label and no test timeout in PR body",
             },

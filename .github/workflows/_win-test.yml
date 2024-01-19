@@ -140,7 +140,7 @@ jobs:
           INSTALL_WINDOWS_SDK: 1
           PYTHON_VERSION: 3.8
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
-          NO_PIPE_LOGS: ${{ steps.keep-going.outputs.ci-no-pipe-logs }}
+          VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
           NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
