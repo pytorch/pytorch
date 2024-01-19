@@ -484,6 +484,19 @@ class BuiltinVariable(VariableTracker):
             for i in itertools.chain(args, kwargs.values())
         )
 
+    def python_and_tensor_constant_only(self, *args, **kwargs):
+        tensor_args = []
+        non_tensor_args = []
+        for i in itertools.chain(args, kwargs.values()):
+            if isinstance(i, variables.TensorVariable):
+                tensor_args.append(i)
+            else:
+                non_tensor_args.append(i)
+        return all(
+            is_constant_source(t.source) if t.source is not None else False
+            for t in tensor_args
+        ) and self.constant_args(*non_tensor_args)
+
     def unspec_python_args(self, *args, **kwargs):
         return check_unspec_python_args(args, kwargs)
 
@@ -529,6 +542,17 @@ class BuiltinVariable(VariableTracker):
         ):
             try:
                 fn = self.fn
+
+                # Constant fold for constant tensor and python constants
+                if tensor_args and self.python_and_tensor_constant_only(
+                    *args, **kwargs
+                ):
+                    from ..bytecode_transformation import unique_id
+                    from .functions import invoke_and_store_as_constant
+
+                    return invoke_and_store_as_constant(
+                        tx, fn, unique_id(fn.__name__), args, kwargs
+                    )
 
                 if self.fn in IN_PLACE_DESUGARING_MAP and isinstance(
                     args[0], variables.ConstantVariable

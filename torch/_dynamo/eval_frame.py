@@ -938,6 +938,17 @@ def rewrite_signature(
 ):
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
 
+    constant_types = [
+        int,
+        str,
+        bool,
+        float,
+        torch.memory_format,
+        torch.device,
+        torch.dtype,
+        torch.layout,
+    ]
+
     def check_user_input_output(flat_values, error_type):
         supported_types = [
             torch.Tensor,
@@ -947,7 +958,7 @@ def rewrite_signature(
             torch._C.ScriptObject,
         ]
         if error_type == UserErrorType.INVALID_INPUT:
-            supported_types.extend([int, str, bool, float])
+            supported_types.extend(constant_types)
 
         def is_supported_type(val):
             return isinstance(val, tuple(supported_types))
@@ -1485,7 +1496,6 @@ class TorchPatcher:
         disabled_multi_tensor_opt_modules = {
             adamax,
             radam,  # data-dependent control flow
-            sgd,  # for now, until we can speed up compilation (this affects the benchmarks)
         }
 
         for opt_mod in optimizer_modules:
