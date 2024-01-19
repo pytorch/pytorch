@@ -338,7 +338,7 @@ class TestOptimRenewed(TestCase):
         optim_cls = optim_info.optim_cls
         if optim_cls.__name__ == "SGD" and impl == "capturable":
             # Capturable SGD does not exist
-            return unittest.skip("SGD does not currently support capturable")
+            self.skipTest("SGD does not currently support capturable")
 
         cpu_optim_inputs = optim_info.optim_inputs_func(device="cpu")
         for optim_input in cpu_optim_inputs:
