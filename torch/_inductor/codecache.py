@@ -2516,6 +2516,18 @@ class AsyncCompile:
         else:
             return _load_kernel(kernel_name, source_code)
 
+    def multi_kernel(self, *args, **kwargs) -> ModuleType:
+        """
+        Async compile the python shim for multi-kernel.
+        """
+
+        def task():
+            from torch._inductor.codegen.multi_kernel import MultiKernelCall
+
+            return MultiKernelCall(*args, **kwargs)
+
+        return self.submit(task)
+
     def cpp(self, source_code: str) -> ModuleType:
         def task():
             return CppCodeCache.load(source_code).kernel

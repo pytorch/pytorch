@@ -1,7 +1,7 @@
 # NOTE: This is a placeholder for iterating on export serialization schema design.
 #       Anything is subject to change and no guarantee is provided at this point.
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
 
@@ -92,6 +92,11 @@ class TensorMeta:
     strides: List[SymInt]
     storage_offset: int
     layout: Layout
+
+
+@dataclass
+class ScriptObjectMeta:
+    constant_name: Optional[str]
 
 
 # In most cases we will use the "as_name" field to store arguments which are
@@ -199,6 +204,7 @@ class Graph:
     # tensor, rather than following export schema and returning a singleton
     # list.
     is_single_tensor_return: bool = False
+    script_object_metas: Dict[str, ScriptObjectMeta] = field(default_factory=dict)
 
 
 @dataclass
@@ -225,12 +231,19 @@ class InputToTensorConstantSpec:
     tensor_constant_name: str
 
 
+@dataclass
+class InputToCustomObjSpec:
+    arg: CustomObjArgument
+    custom_obj_name: str
+
+
 @dataclass(repr=False)
 class InputSpec(_Union):
     user_input: UserInputSpec
     parameter: InputToParameterSpec
     buffer: InputToBufferSpec
     tensor_constant: InputToTensorConstantSpec
+    custom_obj: InputToCustomObjSpec
 
 
 @dataclass

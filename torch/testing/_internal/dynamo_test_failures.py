@@ -1,9 +1,17 @@
-# tests in this list will run without Dynamo strict mode by default.
-FIXME_default_non_strict = {
-    "dynamo/test_logging",
-    "test_custom_ops",
-    "test_python_dispatch",
-}
+# NOTE: [dynamo_test_failures.py]
+#
+# We generate xFailIfTorchDynamo* for all tests in `dynamo_expected_failures`
+# We generate skipIfTorchDynamo* for all tests in `dynamo_skips`
+#
+# For an easier-than-manual way of generating and updating these lists,
+# see scripts/compile_tests/update_failures.py
+#
+# If you're adding a new test, and it's failing PYTORCH_TEST_WITH_DYNAMO=1,
+# either add the appropriate decorators to your test or list them in this file.
+#
+# *These are not exactly unittest.expectedFailure and unittest.skip. We'll
+# always execute the test and then suppress the signal, if necessary.
+# If your tests crashes, or is slow, please use @skipIfTorchDynamo instead.
 
 # Tests that run without strict mode in PYTORCH_TEST_WITH_INDUCTOR=1.
 # Please don't add anything to this list.
@@ -16,6 +24,7 @@ FIXME_inductor_non_strict = {
 
 # We generate unittest.expectedFailure for all of the following tests
 # when run under PYTORCH_TEST_WITH_DYNAMO=1.
+# see NOTE [dynamo_test_failures.py] for more details
 #
 # This lists exists so we can more easily add large numbers of failing tests,
 dynamo_expected_failures = {
@@ -3620,8 +3629,96 @@ dynamo_expected_failures = {
     "TestQuantizePT2EQATModels.test_qat_resnet18",  # test_quantization.py
     "TestQuantizePT2EQATModels.test_qat_mobilenet_v2",  # test_quantization.py
     "TestObserver.test_per_channel_observers",  # test_quantization.py
+    "TestCustomOp.test_impl_cpu",  # test_custom_ops
+    "TestCustomOp.test_backward_tensorlist_input_requires_list_grads_none_or_Tensor",  # test_custom_ops
+    "TestCustomOp.test_define_with_tags_single",  # test_custom_ops
+    "TestCustomOp.test_autogen_aten_ops_are_pt2_compliant",  # test_custom_ops
+    "TestCustomOp.test_backward_output_differentiability_tensorlist",  # test_custom_ops
+    "TestCustomOp.test_backward_output_differentiability_type",  # test_custom_ops
+    "TestCustomOp.test_impl_meta",  # test_custom_ops
+    "TestCustomOp.test_impl_invalid_devices",  # test_custom_ops
+    "TestCustomOp.test_new_data_dependent_symint",  # test_custom_ops
+    "TestCustomOpTestingCPU.test_missing_abstract_impl_cpu",  # test_custom_ops
+    "TestCustomOp.test_define_with_tags_list",  # test_custom_ops
+    "TestCustomOp.test_backward_tensorlist_input_requires_list_grads",  # test_custom_ops
+    "TestCustomOp.test_not_implemented_error",  # test_custom_ops
+    "TestCustomOp.test_impl_device_cpu",  # test_custom_ops
+    "TestCustomOp.test_backward_returns_dict",  # test_custom_ops
+    "TestCustomOp.test_autograd_notimplemented",  # test_custom_ops
+    "TestCustomOp.test_backward_grads_are_tensor_or_none",  # test_custom_ops
+    "TestCustomOp.test_backward_dict_requires_keys_for_input_optional_tensors",  # test_custom_ops
+    "TestCustomOp.test_backward_output_differentiability_non_tensor",  # test_custom_ops
+    "TestCustomOp.test_lifetime",  # test_custom_ops
+    "TestCustomOp.test_impl_device_function",  # test_custom_ops
+    "TestCustomOp.test_builtin_torchscript_ops",  # test_custom_ops
+    "TestCustomOpTestingCPU.test_missing_functionalization_cpu",  # test_custom_ops
+    "TestCustomOpTestingCPU.test_incorrect_schema_view_cpu",  # test_custom_ops
+    "TestCustomOp.test_define_with_tags_tuple",  # test_custom_ops
+    "TestCustomOp.test_builtin_aten_ops_are_pt2_compliant",  # test_custom_ops
+    "TestCustomOp.test_save_for_backward_inputs_are_namedtuple",  # test_custom_ops
+    "TestCustomOp.test_autograd_notimplemented_gradmode",  # test_custom_ops
+    "TestGenerateOpcheckTests.test_opcheck_bad_op",  # test_custom_ops
+    "TestCustomOp.test_backward_dict_invalid_keys",  # test_custom_ops
+    "TestCustomOp.test_backward_tensorlist_input_requires_list_grads_with_same_numel",  # test_custom_ops
+    "TestCustomOp.test_duplicate_impl",  # test_custom_ops
+    "TestCustomOpTestingCPU.test_incorrect_abstract_impl_cpu",  # test_custom_ops
+    "TestCustomOp.test_backward_output_differentiability_numel",  # test_custom_ops
+    "TestCustomOp.test_backward_dict_requires_keys_for_input_tensors",  # test_custom_ops
+    "TestCustomOp.test_legacy_define",  # test_custom_ops
+    "TestCustomOpTestingCPU.test_opcheck_fails_basic_cpu",  # test_custom_ops
+    "TestCustomOp.test_backward_dict_grad_for_nontensor",  # test_custom_ops
+    "TestCustomOp.test_backward_partially_registered",  # test_custom_ops
+    "TestCustomOp.test_basic_make_fx",  # test_custom_ops
+    "TestPythonRegistration.test_alias_analysis",  # test_python_dispatch
+    "TestPythonDispatch.test_torch_dispatch_mode_subclass_priority",  # test_python_dispatch
+    "TestPythonDispatch.test_strides_slow_path",  # test_python_dispatch
+    "TestPythonDispatch.test_invalid_ret",  # test_python_dispatch
+    "TestPythonDispatch.test_dim_slowpath",  # test_python_dispatch
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_conv2d_cpu",  # test_python_dispatch
+    "TestPythonDispatch.test_fancy_strides",  # test_python_dispatch
+    "TestPythonDispatch.test_layout_slow_path",  # test_python_dispatch
+    "TestPythonDispatch.test_dispatch_super_dont_autograd",  # test_python_dispatch
+    "TestPythonDispatch.test_sizes_slow_path",  # test_python_dispatch
+    "TestPythonRegistration.test_finalizer",  # test_python_dispatch
+    "TestPythonDispatch.test_dispatch_super_call_list_arg",  # test_python_dispatch
+    "TestPythonDispatch.test_is_contiguous_slow_path",  # test_python_dispatch
+    "TestPythonRegistration.test_override_cpu_sum",  # test_python_dispatch
+    "TestPythonDispatch.test_mode_with_make_subclass",  # test_python_dispatch
+    "TestPythonDispatch.test_multiple_ops_subclass",  # test_python_dispatch
+    "TestPythonDispatch.test_subclass_autograd_device_check",  # test_python_dispatch
+    "TestPythonDispatch.test_data_ptr_respects_numel_slow_path",  # test_python_dispatch
+    "TestPythonDispatch.test_make_subclass_with_modes",  # test_python_dispatch
+    "TestPythonRegistration.test_override_aten_ops_with_multiple_libraries",  # test_python_dispatch
+    "TestPythonDispatch.test_dispatch_super_call",  # test_python_dispatch
+    "TestPythonDispatch.test_subclass_priority",  # test_python_dispatch
+    "TestPythonDispatch.test_exception_handling",  # test_python_dispatch
+    "TestPythonDispatch.test_list_ret",  # test_python_dispatch
+    "LoggingTests.test_trace_source_nested",  # dynamo/test_logging
+    "LoggingTests.test_guards_recompiles",  # dynamo/test_logging
+    "LoggingTests.test_inductor_info",  # dynamo/test_logging
+    "LoggingTests.test_output_code",  # dynamo/test_logging
+    "LoggingTests.test_graph_code",  # dynamo/test_logging
+    "LoggingTests.test_graph_sizes",  # dynamo/test_logging
+    "LoggingTests.test_recompiles",  # dynamo/test_logging
+    "LoggingTests.test_inductor_error",  # dynamo/test_logging
+    "LoggingTests.test_graph",  # dynamo/test_logging
+    "LoggingTests.test_custom_format_exc",  # dynamo/test_logging
+    "LoggingTests.test_custom_format",  # dynamo/test_logging
+    "LoggingTests.test_trace_source_cond",  # dynamo/test_logging
+    "LoggingTests.test_multiline_format",  # dynamo/test_logging
+    "LoggingTests.test_aot_joint_graph",  # dynamo/test_logging
+    "LoggingTests.test_inductor_debug",  # dynamo/test_logging
+    "LoggingTests.test_bytecode",  # dynamo/test_logging
+    "LoggingTests.test_graph_sizes_dynamic",  # dynamo/test_logging
+    "LoggingTests.test_dynamo_error",  # dynamo/test_logging
+    "LoggingTests.test_dynamo_debug",  # dynamo/test_logging
+    "LoggingTests.test_aot_graphs",  # dynamo/test_logging
+    "LoggingTests.test_dynamo_info",  # dynamo/test_logging
+    "LoggingTests.test_graph_breaks",  # dynamo/test_logging
+    "LoggingTests.test_aot",  # dynamo/test_logging
 }
 
+# see NOTE [dynamo_test_failures.py] for more details
 dynamo_skips = {
     "TestMatmulOperator.test_matmul_raises",
     "TestMatmulOperator.test_exceptions",
@@ -3643,6 +3740,7 @@ dynamo_skips = {
     "TestMethods.test_choose",
     "TestMethods.test_conjugate_out",
     "TestMethods.test_compress",
+    "TestCustomOpTestingCPU.test_incorrect_schema_mutation_cpu",  # test_custom_ops
     "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmax_np_method0",
     "TestArgmaxArgminCommon.test_np_vs_ndarray_arr_method_argmin_np_method1",
     "TestIsreal.test_fail",  # known py311 fail
@@ -8106,6 +8204,30 @@ dynamo_skips = {
     "TestAutogradFallback.test_supports_tensor_lists_mode_nothing",  # test_autograd_fallback.py
     "TestReductionsCPU.test_logcumsumexp_complex_cpu_complex128",  # test_reductions.py
     "TestReductionsCPU.test_logcumsumexp_complex_cpu_complex64",  # test_reductions.py
+    "TestCustomOp.test_impl_on_existing_op_with_cpu_registration_key_CompositeExplicitAutograd",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyViewCopyCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyCatCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestPythonDispatcher.test_lstsq",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_split_cpu_float32",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_split_list_args_cpu_float32",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyNonzeroCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_mul_cpu_float32",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyMulCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpySortCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_out_op_cpu",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyTakeCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyCubeCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_cat_cpu_float32",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_native_batch_norm_cpu_float32",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpyNMSCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpySplitCopyWithIntCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_view_cpu_float32",  # known py38 fail
+    "TestWrapperSubclassAliasingCPU.test_wrapper_subclass_aliasing_custom_NumpySplitCopyCustomOp_cpu_float32",  # known py38 fail  # noqa: B950
+    "LoggingTests.test_logs_out",  # known py38 fail
+    "LoggingTests.test_distributed_rank_logging",  # known py38 fail
+    "LoggingTests.test_trace_call",  # known py311 fail
+    "LoggingTests.test_trace_call_graph_break",  # known py311 fail
+    "LoggingTests.test_trace_call_inline_call",  # known py311 fail
 }
 
 
