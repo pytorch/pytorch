@@ -4,11 +4,10 @@ import unittest
 
 import torch
 
+from torch.distributed._composable.fsdp._fsdp_init import _normalize_device
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_fsdp import FSDPTestMultiThread
 from torch.testing._internal.common_utils import run_tests
-
-from torch.distributed._composable.fsdp._fsdp_init import _normalize_device
 
 
 class TestFullyShardInitDevice(FSDPTestMultiThread):
@@ -26,7 +25,13 @@ class TestFullyShardInitDevice(FSDPTestMultiThread):
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_normalize_device_cuda(self):
-        for device in ("cuda", 0, "cuda:0", torch.device("cuda"), torch.device("cuda", 0)):
+        for device in (
+            "cuda",
+            0,
+            "cuda:0",
+            torch.device("cuda"),
+            torch.device("cuda", 0),
+        ):
             self.assertEqual(_normalize_device(device), torch.device("cuda", 0))
         if torch.cuda.device_count() > 1:
             with torch.cuda.device(1):
