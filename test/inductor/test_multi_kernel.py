@@ -104,6 +104,7 @@ class MultiKernelTest(TestCase):
         # cpp_wrapper disabled. Clear the cache so we go ahead to re-compile
         # the kernel with cpp_wrapper enabled.
         from torch._inductor import codecache
+
         codecache.PyCodeCache.clear()
         self.test_softmax(False)
 
