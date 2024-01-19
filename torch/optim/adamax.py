@@ -59,7 +59,7 @@ class Adamax(Optimizer):
         )
         if not step_is_tensor:
             for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]))
+                s["step"] = torch.tensor(float(s["step"]), dtype=_get_scalar_dtype())
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_infs, state_steps):
         has_complex = False
@@ -337,11 +337,17 @@ def _multi_tensor_adamax(
             _view_as_real(grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs)
 
         # Update steps
-        torch._foreach_add_(grouped_state_steps, 1)
+        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
+        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
+        # wrapped it once now. The alpha is required to assure we go to the right overload.
+        if grouped_state_steps[0].is_cpu:
+            torch._foreach_add_(grouped_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
+        else:
+            torch._foreach_add_(grouped_state_steps, 1)
 
         if weight_decay != 0:
             if maximize:
-                # Re-use the intermediate memory (device_grads) already allocated for maximize
+                # Re-use the intermediate memory (grouped_grads) already allocated for maximize
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
             else:
                 grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
