@@ -75,8 +75,10 @@ no_default = object()
 
 py_sym_types = (SymInt, SymFloat, SymBool)
 def is_sym_node(node):
+    from torch.fx.experimental.symbolic_shapes import is_symbolic
+
     assert hasattr(node, 'meta'), "All nodes traced with proxy_tensor should have meta"
-    return "val" in node.meta and isinstance(node.meta['val'], py_sym_types)
+    return "val" in node.meta and is_symbolic(node.meta['val'])
 
 def set_proxy_slot(obj, tracer, proxy):
     if isinstance(obj, torch.Tensor):
@@ -118,9 +120,11 @@ def snapshot_fake(val):
     return val.detach()
 
 def extract_val(val):
+    from torch.fx.experimental.symbolic_shapes import is_symbolic
+
     if is_fake(val):
         return snapshot_fake(val)
-    elif isinstance(val, py_sym_types):
+    elif is_symbolic(val):
         return val
     elif isinstance(val, (list, tuple)):
         return val.__class__([extract_val(x) for x in val])
@@ -164,8 +168,11 @@ def thunkify(f, *args, **kwargs):
 
 def track_tensor(tensor, proxy, *, constant, tracer):
     def try_set_proxy_slot(outer_s, proxy_callable, *args):
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import is_symbolic
+
         assert callable(proxy_callable)
-        if isinstance(outer_s, SymInt):
+        if isinstance(outer_s, SymInt) and is_symbolic(outer_s):
             inner_s = outer_s.node
             set_proxy_slot(inner_s, tracer, thunkify(proxy_callable, outer_s, *args))
 
@@ -185,11 +192,13 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
 def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
+    from torch.fx.experimental.symbolic_shapes import is_symbolic
+
     def wrap_with_proxy(e, proxy, constant):
         if isinstance(e, torch.Tensor):
             track_tensor(e, proxy, tracer=tracer, constant=constant)
             set_meta(proxy, e)
-        elif isinstance(e, py_sym_types):
+        elif is_symbolic(e):
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
             set_proxy_slot(e.node, tracer, lambda: proxy)
@@ -277,20 +286,26 @@ def fetch_tensor_proxy(tracer):
 HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, FakeTensor)
 
 def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
+    print(f"proxy_call {func} {args} {kwargs}")
     unrecognized_types = []
 
-    def can_handle_tensor(x):
-        r = type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
-        if proxy_mode._allow_fake_constant:
-            r = r or type(x) in (torch._subclasses.FakeTensor,)
+    def can_handle_arg(x):
+        from torch.fx.experimental.symbolic_shapes import is_singleton
+        r = True
+        if isinstance(x, torch.Tensor):
+            r = type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer) and not "NestedTensor" in str(type(x))
+            if proxy_mode._allow_fake_constant:
+                r = r or type(x) in (torch._subclasses.FakeTensor,)
+        r = r and not is_singleton(x)
         if not r:
             unrecognized_types.append(type(x))
         return r
 
     # If there are any tensor subclasses, we need to handle those tensor subclasses first
     # TODO: we could use types to test this
-    if not pytree.tree_all_only(torch.Tensor, can_handle_tensor, (args, kwargs)):
+    if not pytree.tree_all(can_handle_arg, (args, kwargs)):
         not_implemented_log.debug("ProxyTensorMode tensors without proxy had unrecognized subclasses: %s", unrecognized_types)
+        print("ProxyTensorMode unrecognized subclasses: ", unrecognized_types)
         return NotImplemented
 
     r = maybe_handle_decomp(proxy_mode, func, args, kwargs)
@@ -337,8 +352,10 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
                 "It may be possible to trace this with dynamic shapes; try setting tracing_mode='symbolic' "
                 "in your make_fx call."
             )
+    from torch.fx.experimental.symbolic_shapes import is_symbolic
+
     proxy_args, proxy_kwargs = pytree.tree_map_only(
-        (SymInt, SymFloat, SymBool),
+        is_symbolic,
         fetch_sym_proxy(proxy_mode.tracer),
         pytree.tree_map_only(_ProxyTensor, lambda e: e.proxy, (f_args, f_kwargs))
     )
@@ -465,6 +482,8 @@ class PythonKeyTracer(Tracer):
         return attr_val
 
     def create_arg(self, a: Any):
+        from torch.fx.experimental.symbolic_shapes import is_symbolic
+
         if isinstance(a, torch.nn.Parameter):
             for n, p in self.root.named_parameters():
                 if a is p:
@@ -481,15 +500,17 @@ class PythonKeyTracer(Tracer):
                 setattr(self.root, qualname, a)
 
             return self.create_node('get_attr', qualname, (), {})
-        elif isinstance(a, (SymInt, SymFloat, SymBool)):
+        elif is_symbolic(a):
             assert a.node.constant is not None
             return a.node.constant
         return super().create_arg(a)
 
     def unwrap_proxy(self, e):
+        from torch.fx.experimental.symbolic_shapes import is_symbolic
+
         if isinstance(e, torch.Tensor):
             return get_proxy_slot(e, self, e, lambda e: e.proxy)
-        elif isinstance(e, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        elif is_symbolic(e):
             return get_proxy_slot(e.node, self, e, lambda e: e())
         else:
             return e
@@ -516,6 +537,8 @@ def _pop_proxy_mode_temporarily():
 
 
 def wrap_key(f, tensors, tracer, pre_dispatch: bool):
+    from torch.fx.experimental.symbolic_shapes import is_symbolic
+
     flat_tensors, tensors_spec = pytree.tree_flatten(tensors)
 
     @functools.wraps(f)
@@ -533,7 +556,7 @@ def wrap_key(f, tensors, tracer, pre_dispatch: bool):
             out
         )
         out = pytree.tree_map_only(
-            (SymInt, SymFloat, SymBool),
+            is_symbolic,
             lambda t: get_proxy_slot(t.node, tracer)(),
             out
         )
@@ -662,8 +685,10 @@ class ProxySymDispatchMode(SymDispatchMode):
             self.enable_tracing = old
 
     def _compute_proxy(self, func, args, out: Union[SymInt, SymFloat, SymBool]):
+        from torch.fx.experimental.symbolic_shapes import is_symbolic
+
         n_args = tuple(
-            get_proxy_slot(a.node, self.tracer)().node if isinstance(a, py_sym_types) else a
+            get_proxy_slot(a.node, self.tracer)().node if is_symbolic(a) else a
             for a in args
         )
 
@@ -675,6 +700,8 @@ class ProxySymDispatchMode(SymDispatchMode):
         return p_out
 
     def __sym_dispatch__(self, func, types, args, kwargs):
+        from torch.fx.experimental.symbolic_shapes import is_symbolic
+
         if not self.enable_tracing:
             return func(*args, **kwargs)
 
@@ -696,7 +723,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         # determined that the result is constant (no matter if the inputs
         # were symbolic) and it is no longer necessary to trace the
         # computation.  This could occur if func triggered some guards.
-        if isinstance(out, py_sym_types):
+        if is_symbolic(out):
             # Delays tracing out the proxies on this op until we actually need it
             p_out_thunk = thunkify(self._compute_proxy, func=func, args=args, out=out)
             set_proxy_slot(out.node, self.tracer, p_out_thunk)
