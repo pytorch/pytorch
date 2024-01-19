@@ -15,6 +15,7 @@ from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.utils import (
     as_list,
     generate_redistribute_costs,
+    normalize_dim,
     normalize_dims,
     normalize_to_torch_size,
     register_op_strategy,
@@ -228,8 +229,7 @@ def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     input_strategy, softmax_dim, _ = op_schema.args_schema
     input_strategy = cast(OpStrategy, input_strategy)
     softmax_dim = cast(int, softmax_dim)
-    if softmax_dim < 0:
-        softmax_dim += input_strategy.output_ndim
+    softmax_dim = normalize_dim(softmax_dim, input_strategy.output_ndim)
 
     output_strategy = OpStrategy([])
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
@@ -239,7 +239,9 @@ def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
         # make sure input is replicated along the softmax dim
         input_target_spec = DTensorSpec(
             mesh=mesh,
-            placements=_replicate_dim_at(input_src_spec.placements, softmax_dim),
+            placements=replicate_reduction_dims(
+                input_src_spec.placements, [softmax_dim]
+            ),
             tensor_meta=input_src_spec.tensor_meta,
         )
         redistribute_costs.append(
@@ -537,18 +539,6 @@ def _replicate_dims_start_at(
     new_placements: List[Placement] = []
     for p in placements:
         if p.is_partial() or (isinstance(p, Shard) and p.dim >= start_dim):
-            new_placements.append(Replicate())  # make it replicate
-        else:
-            new_placements.append(p)  # keep the placement
-    return tuple(new_placements)
-
-
-def _replicate_dim_at(
-    placements: Sequence[Placement], dim: int = 0
-) -> Tuple[Placement, ...]:
-    new_placements: List[Placement] = []
-    for p in placements:
-        if p.is_partial() or (isinstance(p, Shard) and p.dim == dim):
             new_placements.append(Replicate())  # make it replicate
         else:
             new_placements.append(p)  # keep the placement
