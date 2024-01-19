@@ -122,11 +122,11 @@ MegatronBertForQuestionAnswering,pass,4
 
 
 
-MobileBertForMaskedLM,pass,4
+MobileBertForMaskedLM,pass,3
 
 
 
-MobileBertForQuestionAnswering,pass,4
+MobileBertForQuestionAnswering,pass,3
 
 
 
@@ -146,7 +146,7 @@ PegasusForCausalLM,pass,12
 
 
 
-PegasusForConditionalGeneration,pass,24
+PegasusForConditionalGeneration,pass,23
 
 
 

@@ -429,15 +429,6 @@ static id<MTLComputePipelineState> getCPLState(id<MTLDevice> device,
   return rc;
 }
 
-static void dispatch1DJob(id<MTLComputeCommandEncoder> commandEncoder,
-                          id<MTLComputePipelineState> cplState,
-                          uint32_t length) {
-  uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
-  auto size = MTLSizeMake(length, 1, 1);
-  auto threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, length), 1, 1);
-  [commandEncoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
-}
-
 } // namespace mps
 
 TORCH_IMPL_FUNC(lgamma_out_mps)(const Tensor& self, const Tensor& output_) {
@@ -467,16 +458,14 @@ TORCH_IMPL_FUNC(lgamma_out_mps)(const Tensor& self, const Tensor& output_) {
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      id<MTLBuffer> outBuf = getMTLBufferStorage(output);
-      id<MTLBuffer> selfBuf = getMTLBufferStorage(self);
 
       getMPSProfiler().beginProfileKernel(cplState, "lgamma_out", {self});
 
       [computeEncoder setComputePipelineState:cplState];
-      [computeEncoder setBuffer:selfBuf offset:self.storage_offset() * self.element_size() atIndex:0];
-      [computeEncoder setBuffer:outBuf offset:output.storage_offset() * output.element_size() atIndex:1];
+      mtl_setBuffer(computeEncoder, self, 0);
+      mtl_setBuffer(computeEncoder, output, 1);
 
-      mps::dispatch1DJob(computeEncoder, cplState, static_cast<uint32_t>(length));
+      mtl_dispatch1DJob(computeEncoder, cplState, length);
 
       getMPSProfiler().endProfileKernel(cplState);
     });
@@ -513,16 +502,13 @@ TORCH_IMPL_FUNC(digamma_out_mps)(const Tensor& self, const Tensor& output_) {
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      id<MTLBuffer> outBuf = getMTLBufferStorage(output);
-      id<MTLBuffer> selfBuf = getMTLBufferStorage(self);
 
       getMPSProfiler().beginProfileKernel(cplState, "digamma_out", {self});
 
       [computeEncoder setComputePipelineState:cplState];
-      [computeEncoder setBuffer:selfBuf offset:self.storage_offset() * self.element_size() atIndex:0];
-      [computeEncoder setBuffer:outBuf offset:output.storage_offset() * output.element_size() atIndex:1];
-
-      mps::dispatch1DJob(computeEncoder, cplState, static_cast<uint32_t>(length));
+      mtl_setBuffer(computeEncoder, self, 0);
+      mtl_setBuffer(computeEncoder, output, 1);
+      mtl_dispatch1DJob(computeEncoder, cplState, length);
 
       getMPSProfiler().endProfileKernel(cplState);
     });
@@ -571,20 +557,18 @@ TORCH_IMPL_FUNC(polygamma_out_mps)(const int64_t order, const Tensor& self, cons
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      id<MTLBuffer> outBuf = getMTLBufferStorage(output);
-      id<MTLBuffer> selfBuf = getMTLBufferStorage(self);
 
       getMPSProfiler().beginProfileKernel(cplState, func_name, {self});
 
       [computeEncoder setComputePipelineState:cplState];
-      [computeEncoder setBuffer:selfBuf offset:self.storage_offset() * self.element_size() atIndex:0];
-      [computeEncoder setBuffer:outBuf offset:output.storage_offset() * output.element_size() atIndex:1];
+      mtl_setBuffer(computeEncoder, self, 0);
+      mtl_setBuffer(computeEncoder, output, 1);
 
       if (func_name == "polygamma") {
         [computeEncoder setBytes:&order length:sizeof(order) atIndex:2];
       }
 
-      mps::dispatch1DJob(computeEncoder, cplState, static_cast<uint32_t>(length));
+      mtl_dispatch1DJob(computeEncoder, cplState, length);
 
       getMPSProfiler().endProfileKernel(cplState);
     });

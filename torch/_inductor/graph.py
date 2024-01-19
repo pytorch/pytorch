@@ -1,3 +1,4 @@
+import itertools
 import logging
 import operator
 import os
@@ -23,6 +24,8 @@ from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
 from .codegen.common import (
+    DeviceOpOverrides,
+    get_device_op_overrides,
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
     register_backend_for_device,
@@ -82,10 +85,9 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
         torch.bool,
         torch.bfloat16,
         torch.complex64,
-        # torch.float16, # TODO: implement this
+        torch.float16,
     }
     if cuda:
-        supported_dtype.add(torch.float16)
         supported_dtype.add(torch.float8_e4m3fn)
         supported_dtype.add(torch.float8_e5m2)
 
@@ -220,6 +222,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_buffers: Set[str] = set()
         self.never_reuse_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
+        self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: WrapperCodeGen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
         self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
@@ -255,6 +258,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.disable_cudagraphs = False
         self.disable_cudagraphs_reason = ""
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
+        self.dynamo_flat_name_to_original_fqn = self.module.meta.get(
+            "dynamo_flat_name_to_original_fqn", {}
+        )
         self.init_backend_registration()
 
     @staticmethod
@@ -275,10 +281,6 @@ class GraphLowering(torch.fx.Interpreter):
         nconv = len(conv_nodes)
 
         if nconv == 0:
-            return False
-
-        # NHWC perf issue on ROCm5.7 first noted here https://github.com/pytorch/pytorch/pull/110319
-        if torch.version.hip and torch.cuda.is_available():
             return False
 
         # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
@@ -1006,6 +1008,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         only_cpu = len(device_types) == 0
         device_type = "cpu" if only_cpu else device_types.pop()
+
+        self.device_ops = get_device_op_overrides(device_type)
         wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
         assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls()
@@ -1034,9 +1038,23 @@ class GraphLowering(torch.fx.Interpreter):
                     ), "Unknown type when creating real inputs" + str(type(x))
                     return x
 
+            if tracing_context := torch._guards.TracingContext.try_get():
+                if tracing_context.output_strides:
+                    tracing_context.output_strides.clear()
+
+                params_flat = [
+                    param
+                    for param in tracing_context.params_flat  # type: ignore[union-attr]
+                    if param is not None
+                ]
+                real_inputs = [
+                    materialize(x) for x in itertools.chain(params_flat, V.real_inputs)
+                ]
+            else:
+                real_inputs = [materialize(x) for x in V.real_inputs]
+
             with torch.utils._python_dispatch._disable_current_modes():
                 assert self.example_inputs is not None
-                real_inputs = [materialize(x) for x in self.example_inputs]
                 compiled(real_inputs)
             del real_inputs
 
@@ -1107,7 +1125,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def compile_to_fn(self):
         if self.aot_mode:
-            from .codecache import AotCodeCache
+            from .codecache import AotCodeCompiler
 
             assert self.cpp_wrapper, "AOT mode only supports C++ wrapper"
             code, linemap = self.codegen_with_cpp_wrapper()
@@ -1128,7 +1146,7 @@ class GraphLowering(torch.fx.Interpreter):
                 )
 
             # Directly return the file path with the compiled code
-            return AotCodeCache.compile(
+            return AotCodeCompiler.compile(
                 self, code, serialized_extern_kernel_nodes, cuda=self.cuda
             )
         else:

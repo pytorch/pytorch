@@ -23,6 +23,7 @@ from torch._prims_common import (
     dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    get_computation_dtype,
     is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
@@ -146,7 +147,7 @@ def decode_dtype(dtype: int):
 def is_integer_type(x):
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
-    elif isinstance(x, sympy.Symbol):
+    elif isinstance(x, sympy.Expr):
         return x.is_integer is True  # type: ignore[attr-defined]
     else:
         return isinstance(x, int)
@@ -353,13 +354,13 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
 
     if not any(isinstance(x, (sympy.Expr, int, float)) for x in inputs):
         return inputs
-    if all(isinstance(x, (int, float, sympy.Symbol)) for x in inputs):
+    if all(isinstance(x, (int, float, sympy.Expr)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
             *inputs, type_promotion_kind=type_promotion_kind
         )
 
         def const_func(x):
-            if isinstance(x, sympy.Symbol):
+            if isinstance(x, sympy.Expr):
                 return ir.IndexingConstant(x, dtype, decode_device(None))
             else:
                 return ir.Constant(x, dtype, decode_device(None))
@@ -882,10 +883,6 @@ def slice_(x, dim=0, start=0, end=2**63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
-    if V.graph.sizevars.evaluate_expr(sympy.Lt(start + dim_size, 0)):
-        start = 0
-    if V.graph.sizevars.evaluate_expr(sympy.Lt(end + dim_size, 0)):
-        end = 0
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
 
@@ -1091,7 +1088,12 @@ def cat(inputs, dim=0):
 
         return False
 
-    if len(inputs) <= config.max_pointwise_cat_inputs:
+    # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
+    #             We will revisit this later after enabling vectorization on index_expr.
+    if (
+        len(inputs) <= config.max_pointwise_cat_inputs
+        and inputs[0].get_device().type != "cpu"
+    ):
         pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
         all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
         any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
@@ -1522,6 +1524,17 @@ def register_onednn_fusion_ops():
             unary_scalars,
             unary_algorithmm,
         ):
+            if (
+                binary_attr == "sum"
+                and output_dtype in [torch.float32, torch.bfloat16]
+                and accum.get_dtype() in [torch.float32, torch.bfloat16]
+                and accum.get_dtype() != output_dtype
+            ):
+                # For int8-mixed-bf16 quantization and inplace add,
+                # there is case when accum dtype is float32 but output dtype is bfloat16.
+                # Since the accum will be inplaced changed with post op sum,
+                # we will do accum dtype convertion here.
+                accum = to_dtype(accum, output_dtype)
             return TensorBox.create(
                 ir.QConvPointWiseBinaryPT2E.create(
                     x,
@@ -2118,6 +2131,16 @@ make_fallback(
     sdpa_constraint,
     warn=False,
 )
+make_fallback(
+    aten._scaled_dot_product_flash_attention_for_cpu.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_flash_attention_for_cpu_backward.default,
+    sdpa_constraint,
+    warn=False,
+)
 make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
 make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
@@ -2222,7 +2245,6 @@ make_fallback(aten.special_scaled_modified_bessel_k0)
 make_fallback(aten.special_scaled_modified_bessel_k1)
 make_fallback(aten.special_spherical_bessel_j0, warn=False)
 make_fallback(aten.special_zeta, warn=False)
-make_fallback(aten.take)
 make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten._adaptive_avg_pool3d_backward)
@@ -2296,6 +2318,26 @@ def clone(x, *, memory_format=None):
     )
 
 
+def clone_preserve_reinterpret_view(x):
+    reinterpret_view_layouts = []
+    if isinstance(x, TensorBox) and isinstance(x.data, ir.ReinterpretView):
+        x = x.data  # unwrap TensorBox
+        while isinstance(x, ir.ReinterpretView):
+            reinterpret_view_layouts.append(x.get_layout())
+            x = x.data
+        x = TensorBox(x)
+
+    x = clone(x)
+
+    if reinterpret_view_layouts:
+        x = x.data  # unwrap TensorBox
+        for layout in reinterpret_view_layouts[::-1]:
+            x = ir.ReinterpretView(x, layout)
+        x = TensorBox(x)
+
+    return x
+
+
 if hasattr(aten, "lift_fresh_copy"):
     register_lowering(aten.lift_fresh_copy)(clone)
 
@@ -2357,14 +2399,8 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
-    if start is not None and V.graph.sizevars.evaluate_expr(sympy.Lt(start, 0)):
-        start = start + dim_size
-    if end is not None and V.graph.sizevars.evaluate_expr(sympy.Lt(end, 0)):
-        end = end + dim_size
-    if start is None:
-        start = 0
-    if end is None or V.graph.sizevars.statically_known_leq(x.get_size()[dim], end):
-        end = dim_size
+
+    start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
 
     src_size = list(x.get_size())
     src_size[dim] = FloorDiv(end - start + (step - 1), step)
@@ -3305,10 +3341,10 @@ def upsample_nearestnd(
     assert len(scales_x) == n
     o_sizes = output_size
 
-    scales = [i / o for i, o in zip(i_sizes, o_sizes)]
+    inv_scales = [i / o for i, o in zip(i_sizes, o_sizes)]
     for i, scale in enumerate(scales_x):
-        if scale:
-            scales[i] = scale
+        if scale is not None:
+            inv_scales[i] = 1.0 / scale
 
     def scale_fn(x, scale, size):
         # Nearest Exact: input_index = round(scale * (output_index + 0.5) - 0.5)
@@ -3325,7 +3361,7 @@ def upsample_nearestnd(
         x = idx[-n:]
         b = idx[:-n]
         return x_loader(
-            [*b, *[scale_fn(i, s, size) for i, s, size in zip(x, scales, i_sizes)]]
+            [*b, *[scale_fn(i, s, size) for i, s, size in zip(x, inv_scales, i_sizes)]]
         )
 
     return Pointwise.create(
@@ -3632,12 +3668,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     # if padding is a complicated expression, hoist it
     bounds_precomp: List[Tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
-        l_precomp = (
-            V.graph.sizevars.lookup_precomputed_size(l)
-            if isinstance(l, sympy.Expr) and not l.is_number
-            else l
-        )
-        bounds_precomp.append((l_precomp, h))
+        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))
 
     output_size = list(sizes[:n])
     mask_sizes = []
@@ -4588,7 +4619,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
     if not return_mean:
-        return x_var
+        return (x_var,)
 
     x_mean = x_mean if keepdim else squeeze(x_mean, axis)
     return x_var, x_mean
@@ -4650,29 +4681,39 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     if return_mean:
         mean.realize()
         return var, mean
-    return var
+    return (var,)
+
+
+def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
+    out_dtype = x.get_dtype()
+    compute_dtype = get_computation_dtype(out_dtype)
+    x = to_dtype(x, compute_dtype, copy=False)
+    kwargs = dict(
+        x=x,
+        axis=axis,
+        correction=correction,
+        keepdim=keepdim,
+        return_mean=return_mean,
+    )
+    output = (
+        var_mean_sum_(**kwargs)
+        if use_two_step_variance(x, axis=axis, keepdim=keepdim)
+        else var_mean_welford_(**kwargs)
+    )
+    output = tuple(to_dtype(x, out_dtype, copy=False) for x in output)
+    return output[0] if not return_mean else output
 
 
 @register_lowering([aten.var, prims.var])
 def var_(x, axis=None, *, correction=None, keepdim=False):
-    if use_two_step_variance(x, axis=axis, keepdim=keepdim):
-        return var_mean_sum_(
-            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
-        )
-
-    return var_mean_welford_(
+    return var_mean_helper_(
         x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
     )
 
 
 @register_lowering(aten.var_mean)
 def var_mean(x, axis=None, *, correction=None, keepdim=False):
-    if use_two_step_variance(x, axis=axis, keepdim=keepdim):
-        return var_mean_sum_(
-            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
-        )
-
-    return var_mean_welford_(
+    return var_mean_helper_(
         x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
     )
 
@@ -4943,7 +4984,7 @@ def prod(x, axis=None, keepdims=False, *, dtype=None):
     return fn(x, axis, keepdims, dtype=dtype)
 
 
-@register_lowering(aten.any, type_promotion_kind=None)
+@register_lowering(aten.any)
 def reduce_any(x, dim=None, keepdim=False):
     x = to_dtype(x, torch.bool)
     return make_reduction("any")(x, axis=dim, keepdims=keepdim)
@@ -5261,6 +5302,11 @@ def accumulate_grad_(variable, new_grad):
     return variable
 
 
+from torch._higher_order_ops.auto_functionalize import auto_functionalized
+
+make_fallback(auto_functionalized)
+
+
 @register_lowering(triton_kernel_wrapper_mutation)
 def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
     ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
@@ -5269,10 +5315,28 @@ def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
 
 @register_lowering(triton_kernel_wrapper_functional)
 def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
-    kwargs = {
-        key: (clone(x) if key in tensors_to_clone else x) for key, x in kwargs.items()
-    }
-    return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
+    new_kwargs = {}
+    for name, value in kwargs.items():
+        if isinstance(value, ir.TensorBox):
+            x = value.data
+            has_non_rv_views = False
+            while isinstance(x, ir.BaseView):
+                if not isinstance(x, ir.ReinterpretView):
+                    has_non_rv_views = True
+                    break
+                x = x.data
+            if has_non_rv_views:
+                # we realize the inputs wrapped into any view which is not
+                # ReinterpretView to convert them into ReinterpretView during
+                # realization; all views being ReinterpretView is assumed by
+                # the downstream code (e.g., preserving ReinterpretView in
+                # cloning; layout should be available in mutation marking)
+                value = ir.TensorBox(ir.ExternKernel.realize_input(value))
+            if name in tensors_to_clone:
+                value = clone_preserve_reinterpret_view(value)
+        new_kwargs[name] = value
+
+    return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=new_kwargs)
 
 
 try:
@@ -5416,6 +5480,18 @@ try:
                 group_size,
                 group_name,
             ),
+        )
+
+    @register_lowering(_c10d_functional.all_to_all_single)
+    def _all_to_all_single(inp, output_split_sizes, input_split_sizes, group_name):
+        return ir.TensorBox.create(
+            ir._CollectiveKernel.create_out_of_place(
+                _c10d_functional.all_to_all_single.default,
+                inp,
+                output_split_sizes,
+                input_split_sizes,
+                group_name,
+            )
         )
 
     @register_lowering(_c10d_functional.wait_tensor)

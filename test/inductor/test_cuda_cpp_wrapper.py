@@ -147,10 +147,11 @@ if RUN_CUDA:
     class BaseTest(NamedTuple):
         name: str
         device: str = "cuda"
-        tests: TorchTestCase = test_torchinductor.CudaTests()
+        tests: TorchTestCase = test_torchinductor.GPUTests()
 
     # Maintain two separate test lists for cuda and cpp for now
     for item in [
+        BaseTest("test_add_complex2"),
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_batch_norm_2d_2"),
         BaseTest("test_bernoulli1"),
@@ -165,6 +166,7 @@ if RUN_CUDA:
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_index_tensor"),
+        BaseTest("test_layer_norm"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
         BaseTest("test_mm_views"),

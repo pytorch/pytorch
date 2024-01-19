@@ -15,8 +15,9 @@ from sympy import Expr
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 
+from torch._inductor.codegen.multi_kernel import MultiKernelState
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
 
@@ -72,15 +73,22 @@ def is_float(s: str):
     return True
 
 
-def convert_arg_type(python_type: str):
+def convert_arg_type(arg: torch.Argument):
     from .cpp import CONTAINER_PYTHON_TO_CPP, PYTHON_TO_CPP
+
+    # use x.real_type instead of x.type so that we get ScalarType instead of int
+    python_type = repr(arg.real_type)  # type: ignore[attr-defined]
 
     if python_type == "Tensor":
         # Conversions rules follow https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#func
-        return f"at::{python_type} const&"
+        if arg.alias_info is not None and arg.alias_info.is_write:
+            return f"at::{python_type}&"
+        else:
+            return f"at::{python_type} const&"
 
     if python_type in PYTHON_TO_CPP:
-        return PYTHON_TO_CPP[python_type]
+        cpp_type = PYTHON_TO_CPP[python_type]
+        return cpp_type
 
     # Convert args of container types e.g. Optional[*]
     for py_container, cpp_container in CONTAINER_PYTHON_TO_CPP.items():
@@ -96,8 +104,9 @@ def convert_arg_type(python_type: str):
     raise AssertionError(f"unsupport python_type: {python_type}")
 
 
-def convert_return_type(python_type: str):
-    # TODO: support alias
+def convert_return_type(ret: torch.Argument):
+    # use x.real_type instead of x.type so that we get ScalarType instead of int
+    python_type = repr(ret.real_type)  # type: ignore[attr-defined]
     python_to_cpp = {
         "Tensor": "at::Tensor",
         "List[Tensor]": "std::vector<at::Tensor>",
@@ -105,14 +114,17 @@ def convert_return_type(python_type: str):
 
     cpp_type = python_to_cpp.get(python_type, None)
     assert cpp_type is not None, f"NYI return type: {python_type}"
+    # An output aliasing an input is returned by reference only when it's a
+    # Tensor, not when it's a Tensor[]. For example, aten.split.Tensor's output
+    # aliases the input tensor, but the op returns a vector by value.
+    if python_type == "Tensor" and ret.alias_info is not None:
+        cpp_type += "&"
     return cpp_type
 
 
 def get_cpp_op_schema(kernel):
-    # use x.real_type instead of x.type so that we get ScalarType instead of int
-    arg_types = [repr(x.real_type) for x in kernel._schema.arguments]
-    arg_names = [x.name for x in kernel._schema.arguments]
-    returns = [repr(x.real_type) for x in kernel._schema.returns]
+    args = kernel._schema.arguments
+    returns = kernel._schema.returns
 
     num_returns = len(returns)
     assert num_returns > 0, "must have at least one return value"
@@ -123,10 +135,7 @@ def get_cpp_op_schema(kernel):
         tuple_returns = ", ".join([convert_return_type(r) for r in returns])
         cpp_return_value = f"std::tuple<{tuple_returns}>"
 
-    cpp_arg_type = [
-        f"{convert_arg_type(arg_type)} {arg_name}"
-        for arg_type, arg_name in zip(arg_types, arg_names)
-    ]
+    cpp_arg_type = [f"{convert_arg_type(arg)} {arg.name}" for arg in args]
     return f"{cpp_return_value}({', '.join(cpp_arg_type)})"
 
 
@@ -194,7 +203,7 @@ class MemoryPlanningState:
 
 
 @dataclasses.dataclass
-class EnterCudaDeviceContextManagerLine:
+class EnterDeviceContextManagerLine:
     device_idx: int
     last_seen_device_guard_index: Optional[int]
 
@@ -229,14 +238,12 @@ class EnterCudaDeviceContextManagerLine:
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
-            code.writeline(f"with torch.cuda._DeviceGuard({self.device_idx}):")
+            code.writeline(f"with {V.graph.device_ops.device_guard(self.device_idx)}:")
             device_cm_stack.enter_context(code.indent())
-            code.writeline(
-                f"torch.cuda.set_device({self.device_idx}) # no-op to ensure context"
-            )
+            code.writeline(V.graph.device_ops.set_device(self.device_idx))
 
 
-class ExitCudaDeviceContextManagerLine:
+class ExitDeviceContextManagerLine:
     def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
         if not V.graph.cpp_wrapper:
             device_cm_stack.close()
@@ -377,6 +384,7 @@ class WrapperCodeGen(CodeGen):
         self.unbacked_symbol_decls = set()
         self.allow_stack_allocation = None
         self.stack_allocated_buffers = {}
+        self.computed_sizes = set()
 
         self.write_header()
         self.write_prefix()
@@ -402,6 +410,7 @@ class WrapperCodeGen(CodeGen):
 
         self.add_import_once = add_import_once
         self._metas = {}
+        self.multi_kernel_state = MultiKernelState()
 
     def write_constant(self, name, hashed):
         self.header.writeline(f"{name} = None  # {hashed}")
@@ -423,6 +432,7 @@ class WrapperCodeGen(CodeGen):
                 from torch import device, empty, empty_strided
                 from {codecache.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
+                from torch._inductor.codegen.multi_kernel import MultiKernelCall
 
                 aten = torch.ops.aten
                 inductor_ops = torch.ops.inductor
@@ -441,8 +451,10 @@ class WrapperCodeGen(CodeGen):
             import triton
             import triton.language as tl
             from torch._inductor.triton_heuristics import grid, start_graph, end_graph
-            from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-            """
+            {}
+            """.format(
+                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+            )
         )
 
     def add_meta_once(self, meta):
@@ -472,6 +484,17 @@ class WrapperCodeGen(CodeGen):
             stride = self.codegen_shape_tuple(buf.get_stride())
             self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
 
+    def codegen_input_nan_asserts(self):
+        self.prefix.writeline("# make sure graph inputs are not nan/inf")
+        for name, buf in V.graph.graph_inputs.items():
+            if isinstance(buf, sympy.Expr):
+                continue
+
+            line = f"assert not {name}.isnan().any().item()"
+            self.prefix.writeline(line)
+            line = f"assert not {name}.isinf().any().item()"
+            self.prefix.writeline(line)
+
     def write_prefix(self):
         self.prefix.splice(
             """
@@ -484,7 +507,7 @@ class WrapperCodeGen(CodeGen):
         )
         with self.prefix.indent():
             if config.triton.debug_sync_graph:
-                self.prefix.writeline("torch.cuda.synchronize()")
+                self.prefix.writeline(V.graph.device_ops.synchronize())
             inp_len = len(V.graph.graph_inputs.keys())
             if inp_len != 0:
                 lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
@@ -494,11 +517,13 @@ class WrapperCodeGen(CodeGen):
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
             if config.size_asserts:
                 self.codegen_input_size_asserts()
+            if config.nan_asserts:
+                self.codegen_input_nan_asserts()
 
     def write_get_raw_stream(self, index):
         self.write_triton_header_once()
         name = f"stream{index}"
-        self.writeline(f"{name} = get_cuda_stream({index})")
+        self.writeline(f"{name} = get_raw_stream({index})")
         return name
 
     def next_kernel_suffix(self):
@@ -506,14 +531,12 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_device_guard_enter(self, device_idx):
         self.writeline(
-            EnterCudaDeviceContextManagerLine(
-                device_idx, self.last_seen_device_guard_index
-            )
+            EnterDeviceContextManagerLine(device_idx, self.last_seen_device_guard_index)
         )
         self.last_seen_device_guard_index = device_idx
 
     def codegen_device_guard_exit(self):
-        self.writeline(ExitCudaDeviceContextManagerLine())
+        self.writeline(ExitDeviceContextManagerLine())
 
     def generate_return(self, output_refs):
         if output_refs:
@@ -582,6 +605,11 @@ class WrapperCodeGen(CodeGen):
         line += f"){self.ending}"
         self.writeline(line)
 
+    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+        indices_str = f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
+        args = [x, indices_str, values, accumulate]
+        self.writeline(self.wrap_kernel_call(kernel, args))
+
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
         name,
@@ -629,8 +657,8 @@ class WrapperCodeGen(CodeGen):
                 elif isinstance(
                     line,
                     (
-                        EnterCudaDeviceContextManagerLine,
-                        ExitCudaDeviceContextManagerLine,
+                        EnterDeviceContextManagerLine,
+                        ExitDeviceContextManagerLine,
                     ),
                 ):
                     line.codegen(self.wrapper_call, device_cm_stack)
@@ -640,14 +668,13 @@ class WrapperCodeGen(CodeGen):
             output_refs = self.get_output_refs()
             self.mark_output_type()
             if config.triton.debug_sync_graph:
-                self.wrapper_call.writeline("torch.cuda.synchronize()")
+                self.wrapper_call.writeline(V.graph.device_ops.synchronize())
 
             if config.profile_bandwidth:
                 self.generate_end_graph()
 
             self.generate_return(output_refs)
 
-        self.append_precomputed_sizes_to_prefix()
         self.finalize_prefix()
         result.splice(self.prefix)
 
@@ -752,12 +779,15 @@ class WrapperCodeGen(CodeGen):
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
 
-    def append_precomputed_sizes_to_prefix(self):
-        with self.prefix.indent():
-            for sym, expr in V.graph.sizevars.inv_precomputed_replacements.items():
-                self.prefix.writeline(
-                    f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
-                )
+    def ensure_size_computed(self, sym: sympy.Symbol):
+        if isinstance(sym, sympy.Symbol) and sym.name.startswith("ps"):
+            if sym in self.computed_sizes:
+                return
+            self.computed_sizes.add(sym)
+            expr = V.graph.sizevars.inv_precomputed_replacements[sym]
+            self.writeline(
+                f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
+            )
 
     def finalize_prefix(self):
         pass
@@ -926,6 +956,10 @@ class WrapperCodeGen(CodeGen):
             """,
             strip=True,
         )
+        from .triton import TritonKernel
+
+        if TritonKernel.gen_attr_descriptor_import():
+            compile_wrapper.splice(TritonKernel.gen_attr_descriptor_import())
         compile_wrapper.newline()
 
         from .common import SizeArg, TensorArg
@@ -1726,8 +1760,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"""
             AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map,
                                                std::shared_ptr<std::vector<ConstantHandle>> constants_array,
+                                               const std::string& device_str,
                                                std::optional<std::string> cubin_dir)
-                : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, cubin_dir) {{
+                : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, device_str, cubin_dir) {{
             """
         )
 
@@ -1758,6 +1793,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.prefix.writeline(
                     f"constants_info_[{idx}].stride = {{{stride_str}}};"
                 )
+                if name in V.graph.dynamo_flat_name_to_original_fqn:
+                    self.prefix.writeline(
+                        f"""constants_info_[{idx}].original_fqn = "{V.graph.dynamo_flat_name_to_original_fqn[name]}";"""
+                    )
 
             self.prefix.writeline("update_constants_map(std::move(constants_map));")
             self.prefix.writeline("update_constants_array(std::move(constants_array));")
@@ -2131,6 +2170,33 @@ class CppWrapperCodeGen(WrapperCodeGen):
             line += f", {','.join(kwargs)}"
         line += f"){self.ending}"
         self.writeline(line)
+
+    def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+        if (
+            V.graph.aot_mode
+            and V.graph.cpp_wrapper
+            and config.aot_inductor.abi_compatible
+        ):
+            # Make the fallback call ABI-compatible in the C++ wrapper file.
+            kernel = kernel.replace("at::", "aoti_torch_")
+            num_indices = str(
+                len(indices)
+            )  # num_indices for indexing into indices array
+            tensor_handle_array_var = (
+                f"tensor_handle_array_{next(self.kernel_callsite_id)}"
+            )
+            self.writeline(
+                f"AtenTensorHandle {tensor_handle_array_var}[] = {{{', '.join(indices)}}};"
+            )
+            args = [x, tensor_handle_array_var, num_indices, values, accumulate]
+        else:
+            indices_str = (
+                f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
+            )
+            args = [x, indices_str, values, accumulate]
+
+        args.insert(0, x)  # set x as the output tensor, this fallback mutates x.
+        self.writeline(self.wrap_kernel_call(kernel, args))
 
     def add_benchmark_harness(self, output):
         if V.graph.aot_mode:

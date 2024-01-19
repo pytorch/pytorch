@@ -403,7 +403,7 @@ def _shard_orig_param_state(
             and value.dim() > 0
             and fsdp_state.sharding_strategy != ShardingStrategy.NO_SHARD
         ):
-            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1]  # type: ignore[operator]
+            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1].clone()  # type: ignore[operator]
         new_optim_state[state_name] = value
     return new_optim_state
 
@@ -1018,10 +1018,9 @@ def _get_param_id_to_param_from_optim_input(
             'A parameter group should map "params" to a list of the '
             "parameters in the group"
         )
-        for param in param_group["params"]:  # type: ignore[index]
-            # Implicitly map `flat_param_id` (current length of the list) to
-            # `param`
-            param_id_to_param.append(param)
+        # Implicitly map `flat_param_id` (current length of the list) to
+        # `param`
+        param_id_to_param.extend(param_group["params"])  # type: ignore[index]
     return dict(enumerate(param_id_to_param))
 
 
@@ -1509,7 +1508,7 @@ def _allgather_orig_param_states(
     """
     fsdp_state = fsdp_param_info.state
     if fsdp_state.rank == 0:
-        logger.warning(
+        logger.debug(
             "CUDA Memory Summary before calling to _allgather_orig_param_states %s",
             torch.cuda.memory_summary(),
         )
