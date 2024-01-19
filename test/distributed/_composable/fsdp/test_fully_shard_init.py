@@ -19,7 +19,7 @@ from torch.testing._internal.common_fsdp import FSDPTestMultiThread
 from torch.testing._internal.common_utils import run_tests
 
 
-class TestFullyShardInitDevice(FSDPTestMultiThread):
+class TestFullyShardDeviceArg(FSDPTestMultiThread):
     """Tests the ``device`` argument."""
 
     @property
@@ -50,7 +50,7 @@ class TestFullyShardInitDevice(FSDPTestMultiThread):
                     self.assertEqual(_normalize_device(device), torch.device("cuda", 1))
 
 
-class TestFullyShardInitMesh(FSDPTestMultiThread):
+class TestFullyShardMeshArg(FSDPTestMultiThread):
     """Tests the ``mesh`` argument."""
 
     @property
@@ -74,7 +74,7 @@ class TestFullyShardInitMesh(FSDPTestMultiThread):
             fully_shard(model, mesh=mesh, device="cpu")
 
 
-class TestFullyShardInitManagedModules(FSDPTestMultiThread):
+class TestFullyShardManagedModules(FSDPTestMultiThread):
     """Tests getting the managed modules for a ``fully_shard`` module."""
 
     @property
@@ -82,7 +82,7 @@ class TestFullyShardInitManagedModules(FSDPTestMultiThread):
         return 1
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    def test_managed_modules_single_fully_shard(self):
+    def test_managed_modules_single(self):
         model = MLP(8)
         # Assume calling `fully_shard` on `model`
         managed_modules = _get_managed_modules(model)
@@ -90,7 +90,7 @@ class TestFullyShardInitManagedModules(FSDPTestMultiThread):
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    def test_managed_modules_nested_fully_shard(self):
+    def test_managed_modules_nested(self):
         model = nn.Sequential(*[MLP(8) for _ in range(2)])
         fully_shard(model[0])
         # Assume calling `fully_shard` on `model`
@@ -106,6 +106,16 @@ class TestFullyShardInitManagedModules(FSDPTestMultiThread):
         # Assume calling `fully_shard` on `model`
         managed_modules = _get_managed_modules(model)
         expected_managed_modules = list(model[1].modules()) + [model]
+        self._check_managed_modules(managed_modules, expected_managed_modules)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_managed_modules_duplicate(self):
+        mlp = MLP(8)
+        model = nn.Sequential(mlp, mlp)  # duplicate MLP
+        # Assume calling `fully_shard` on `model`
+        managed_modules = _get_managed_modules(model)
+        # Check that the duplicate module is only counted once
+        expected_managed_modules = list(mlp.modules()) + [model]
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
     def _check_managed_modules(
