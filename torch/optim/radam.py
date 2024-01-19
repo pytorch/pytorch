@@ -387,8 +387,16 @@ def _multi_tensor_radam(
         # maximum length of the approximated SMA
         rho_inf = 2 / (1 - beta2) - 1
         # compute the length of the approximated SMA
-        rho_t_list = [rho_inf - 2 * _get_value(step) * (beta2 ** _get_value(step)) /
-                      (1 - beta2 ** _get_value(step)) for step in grouped_state_steps]
+        bias_correction1 = torch._foreach_pow(beta2, grouped_state_steps)
+        torch._foreach_neg_(bias_correction1)
+        torch._foreach_add_(bias_correction1, 1)
+        bias_correction2 = torch._foreach_pow(beta2, grouped_state_steps)
+        torch._foreach_mul_(bias_correction2, grouped_state_steps)
+        torch._foreach_mul_(bias_correction2, 2)
+        torch._foreach_div_(bias_correction2, bias_correction1)
+        torch._foreach_neg_(bias_correction2)
+        torch._foreach_add_(bias_correction2, rho_inf)
+        rho_t_list = bias_correction2
 
         if weight_decay != 0:
             if decoupled_weight_decay:
@@ -416,6 +424,22 @@ def _multi_tensor_radam(
             else 0
             for rho_t in rho_t_list
         ]
+
+        sub4 = torch._foreach_sub(rho_t_list, 4)
+        sub2 = torch._foreach_sub(rho_t_list, 2)
+        num = torch._foreach_mul(sub4, sub2)
+        torch._foreach_mul_(num, rho_inf)
+        rho_inf = ((rho_inf - 4) * (rho_inf - 2))
+        denom = torch._foreach_mul(rho_t_list, rho_inf)
+        torch._foreach_div_(num, denom)
+        torch._foreach_sqrt_(num)
+
+        rect = [torch.where(rho_t > 5, num, torch.zeros_like(num)) for rho_t in rho_t_list]
+
+
+
+
+
         unrectified = [0 if rect > 0 else 1.0 for rect in rect]
 
         bias_correction1 = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
