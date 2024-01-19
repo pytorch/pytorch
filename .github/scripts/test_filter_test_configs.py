@@ -676,7 +676,7 @@ class TestConfigFilter(TestCase):
                 "description": "Keep-going in PR body",
             },
             {
-                "labels": {"ci-no-pipe-logs"},
+                "labels": {"ci-verbose-test-logs"},
                 "test_matrix": '{include: [{config: "default"}]}',
                 "job_name": "A job name",
                 "pr_body": "[ci-no-test-timeout]",
@@ -684,6 +684,16 @@ class TestConfigFilter(TestCase):
                     ci_verbose_test_logs=True, ci_no_test_timeout=True
                 ),
                 "description": "No pipe logs label and no test timeout in PR body",
+            },
+            {
+                "labels": {"ci-no-test-timeout"},
+                "test_matrix": '{include: [{config: "default"}]}',
+                "job_name": "A job name",
+                "pr_body": "[ci-verbose-test-logs]",
+                "expected": _gen_expected_string(
+                    ci_verbose_test_logs=True, ci_no_test_timeout=True
+                ),
+                "description": "No pipe logs in PR body and no test timeout in label (same as the above but swapped)",
             },
             {
                 "labels": {},
