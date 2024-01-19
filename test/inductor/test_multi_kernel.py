@@ -46,13 +46,16 @@ def _contains_multi_kernel_code(wrapper_code: str):
 @config.patch({"triton.multi_kernel": 1, "benchmark_kernel": True})
 @instantiate_parametrized_tests
 class MultiKernelTest(TestCase):
-    def test_softmax(self):
+    def test_softmax(self, expect_multi_kernel=True):
         x = torch.rand(2, 1024).cuda()
         ref = torch.softmax(x, -1)
         compiled_fn = torch.compile(torch.softmax)
-        act, (wrapper_code,) = run_and_get_code(compiled_fn, x, -1)
+        act, wrapper_code = run_and_get_code(compiled_fn, x, -1)
         self.assertTrue(torch.allclose(ref, act))
-        self.assertTrue(_contains_multi_kernel_code(wrapper_code))
+        if expect_multi_kernel:
+            self.assertTrue(_contains_multi_kernel_code(wrapper_code[0]))
+        else:
+            self.assertFalse(_contains_multi_kernel_code(wrapper_code[0]))
 
     @parametrize("force_kernel", (0, 1))
     @unittest.mock.patch.dict(
@@ -88,7 +91,21 @@ class MultiKernelTest(TestCase):
 
     @config.patch("warn_mix_layout", True)
     def test_softmax_warn_mixed_layout(self):
-        self.test_softmax()
+        self.test_softmax(True)
+
+    @config.patch("cpp_wrapper", True)
+    def test_softmax_cpp_wrapper(self):
+        """
+        Multi-kernel does not work when cpp_wrapper is enabled. So we disable
+        multi-kernel in that case.
+        """
+
+        # The same kernel may have been compiled by previous tests with
+        # cpp_wrapper disabled. Clear the cache so we go ahead to re-compile
+        # the kernel with cpp_wrapper enabled.
+        from torch._inductor import codecache
+        codecache.PyCodeCache.clear()
+        self.test_softmax(False)
 
     def test_layernorm(self):
         ln = nn.LayerNorm(1024).cuda()
