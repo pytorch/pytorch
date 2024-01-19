@@ -2876,8 +2876,11 @@ class TestExportCustomClass(TorchTestCase):
 
         custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
-        def f(x):
-            return x + x
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        f = Foo()
 
         inputs = (torch.zeros(4, 4),)
         ep = export(f, inputs)
@@ -2888,11 +2891,15 @@ class TestExportCustomClass(TorchTestCase):
                 with ep.graph.inserting_before(node):
                     setattr(ep.graph_module, "custom_obj", custom_obj)
                     getattr_node = ep.graph.get_attr("custom_obj")
+                    # Copy over an nn_module_stack as they are required.
+                    getattr_node.meta["nn_module_stack"] = node.meta["nn_module_stack"]
                     custom_node = ep.graph.call_function(
                         torch.ops._TorchScriptTesting.take_an_instance.default,
                         (getattr_node,),
                     )
                     custom_node.meta["val"] = torch.ones(4, 4)
+                    # Copy over an nn_module_stack as they are required.
+                    custom_node.meta["nn_module_stack"] = node.meta["nn_module_stack"]
                     arg0, _ = node.args
                     node.args = (arg0, custom_node)
 
