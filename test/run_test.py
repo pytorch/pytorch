@@ -517,11 +517,11 @@ def run_test(
     else:
         unittest_args.extend(
             [
-                f"--shard-id={test_module.shard}",
+                f"--shard-id={test_module.shard - 1}",
                 f"--num-shards={test_module.num_shards}",
             ]
         )
-        stepcurrent_key = f"{test_file}_{test_module.shard}_{os.urandom(8).hex()}"
+        stepcurrent_key = f"{test_file}_{test_module.shard - 1}_{os.urandom(8).hex()}"
 
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
@@ -540,6 +540,7 @@ def run_test(
         unittest_args.extend(
             get_pytest_args(
                 options,
+                stepcurrent_key,
                 is_cpp_test=is_cpp_test,
                 is_distributed_test=is_distributed_test,
             )
@@ -602,7 +603,7 @@ def run_test(
         os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    should_retry = "--subprocess" not in command and not RERUN_DISABLED_TESTS
+    num_retries = 0 if "--subprocess" in command or RERUN_DISABLED_TESTS else 2
     is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
         "BUILD_ENVRIONMENT", ""
     )
@@ -610,7 +611,7 @@ def run_test(
         THRESHOLD * 6
         if is_slow
         else THRESHOLD * 3
-        if should_retry
+        if num_retries > 0
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
         else None
@@ -622,18 +623,12 @@ def run_test(
         if IS_CI:
             output = stack.enter_context(open(log_path, "w"))
 
-        if should_retry:
-            ret_code, was_rerun = run_test_retries(
-                command,
-                test_directory,
-                env,
-                timeout,
-                stepcurrent_key,
-                output,
-                options.continue_through_error,
+        if options.continue_through_error and "--subprocess" not in command:
+            # I think subprocess is better handled by common_utils? but it's not working atm
+            ret_code, was_rerun = run_test_continue_through_error(
+                command, test_directory, env, timeout, stepcurrent_key, output
             )
         else:
-            command.append(f"--sc={stepcurrent_key}")
             ret_code, was_rerun = retry_shell(
                 command,
                 test_directory,
@@ -641,6 +636,7 @@ def run_test(
                 stderr=output,
                 env=env,
                 timeout=timeout,
+                retries=num_retries,
             )
 
             # Pytest return code 5 means no test is collected. This is needed
@@ -659,37 +655,23 @@ def run_test(
     return ret_code
 
 
-def run_test_retries(
-    command,
-    test_directory,
-    env,
-    timeout,
-    stepcurrent_key,
-    output,
-    continue_through_error,
+def run_test_continue_through_error(
+    command, test_directory, env, timeout, stepcurrent_key, output
 ):
     # Run the test with -x to stop at first failure. Try again, skipping the
     # previously run tests, repeating this until there is a test that fails 3
-    # times (same number of rVetries we typically give).
-    #
-    # If continue through error is not set, then we fail fast.
-    #
-    # If continue through error is set, then we skip that test, and keep going.
-    # Basically if the same test fails 3 times in a row, skip the test on the
-    # next run, but still fail in the end. I take advantage of the value saved
-    # in stepcurrent to keep track of the most recently run test (which is the
-    # one that failed if there was a failure).
-
-    def print_to_file(s):
-        print(s, file=output, flush=True)
+    # times (same number of rVetries we typically give).  Then we skip that
+    # test, and keep going. Basically if the same test fails 3 times in a row,
+    # skip the test on the next run, but still fail in the end. I take advantage
+    # of the value saved in stepcurrent to keep track of the most recently run
+    # test (which is the one that failed if there was a failure).
 
     num_failures = defaultdict(int)
 
-    print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
     while True:
         ret_code = shell(
-            command + [sc_command] + print_items,
+            command + [sc_command],
             test_directory,
             stdout=output,
             stderr=output,
@@ -700,7 +682,11 @@ def run_test_retries(
         if ret_code == 0:
             break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
-        print_to_file(f"Got exit code {ret_code}{signal_name}")
+        print(
+            f"Got exit code {ret_code}{signal_name}, retrying...",
+            file=output,
+            flush=True,
+        )
 
         # Read what just failed
         with open(
@@ -710,24 +696,25 @@ def run_test_retries(
 
         num_failures[current_failure] += 1
         if num_failures[current_failure] >= 3:
-            if not continue_through_error:
-                print_to_file("Stopping at first consistent failure")
-                break
             sc_command = f"--scs={stepcurrent_key}"
         else:
             sc_command = f"--sc={stepcurrent_key}"
-        print_to_file("Retrying...")
-        print_items = []  # do not continue printing them, massive waste of space
 
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
     flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
     if len(flaky_failures) > 0:
-        print_to_file(
-            "The following tests failed and then succeeded when run in a new process"
-            + f"{flaky_failures}",
+        print(
+            "The following tests failed flakily (had to be rerun in a new process,"
+            + f" doesn't include reruns froms same process): {flaky_failures}",
+            file=output,
+            flush=True,
         )
     if len(consistent_failures) > 0:
-        print_to_file(f"The following tests failed consistently: {consistent_failures}")
+        print(
+            f"The following tests failed consistently: {consistent_failures}",
+            file=output,
+            flush=True,
+        )
         return 1, True
     return 0, any(x > 0 for x in num_failures.values())
 
@@ -1053,7 +1040,9 @@ def handle_log_file(
     os.remove(file_path)
 
 
-def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
+def get_pytest_args(
+    options, stepcurrent_key, is_cpp_test=False, is_distributed_test=False
+):
     if RERUN_DISABLED_TESTS:
         # Distributed tests are too slow, so running them x50 will cause the jobs to timeout after
         # 3+ hours. So, let's opt for less number of reruns. We need at least 150 instances of the
@@ -1074,8 +1063,9 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
     ]
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
-        # We have a custom pytest shard that conflicts with the normal plugin
         pytest_args.extend(["-p", "no:xdist", "--use-pytest"])
+        if not options.continue_through_error and IS_CI:
+            pytest_args.append(f"--sc={stepcurrent_key}")
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
         # is much slower than running them directly
@@ -1648,6 +1638,7 @@ def run_tests(
 def check_pip_packages() -> None:
     packages = [
         "pytest-rerunfailures",
+        "pytest-shard",
         "pytest-flakefinder",
         "pytest-xdist",
     ]
