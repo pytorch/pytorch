@@ -5503,11 +5503,12 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
     # Since `where` allows type-promotion,
     # cast value to correct type before passing to `where`
     value = _maybe_convert_to_dtype(value, a.dtype)
-    r = torch.where(mask, value, a)  # type: ignore[arg-type]
+    r = torch.empty_like(a)
+    torch.where(mask, torch.scalar_tensor(value, device=a.device), a, out=r)  # type: ignore[arg-type]
 
     # aten.mask_fill always return a new contiguous tensor
     # contiguous() is needed to correctly model the output stride
-    return r.contiguous()
+    return r
 
 
 @register_decomposition(aten.masked_fill_)
