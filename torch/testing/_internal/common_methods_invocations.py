@@ -4425,7 +4425,10 @@ def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
     input_tensor = create_tensor(2, 1, 2, 1, 2)
     weight = create_tensor(4, 2)
     yield SampleInput(input_tensor, weight)
-    yield SampleInput(input_tensor, weight, create_tensor(4))
+    # Hide for now from test_neg_view/test_conj_view
+    # See https://github.com/pytorch/pytorch/issues/117854
+    if dtype in [torch.float32, torch.float16]:
+        yield SampleInput(input_tensor, weight, create_tensor(4))
 
 def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4, 5], [8, 8, 8]]
