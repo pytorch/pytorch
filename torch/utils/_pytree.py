@@ -101,7 +101,7 @@ class KeyEntry(Protocol):
     def __str__(self) -> str:
         ...
 
-    def access(self, parent: Any) -> Any:
+    def get(self, parent: Any) -> Any:
         ...
 
 
@@ -329,7 +329,7 @@ class SequenceKey(Generic[T]):
     def __str__(self) -> str:
         return f"[{self.idx!r}]"
 
-    def access(self, sequence: Sequence[T]) -> T:
+    def get(self, sequence: Sequence[T]) -> T:
         return sequence[self.idx]
 
 
@@ -343,7 +343,7 @@ class MappingKey(Generic[K, T]):
     def __str__(self) -> str:
         return f"[{self.key!r}]"
 
-    def access(self, mapping: Mapping[K, T]) -> T:
+    def get(self, mapping: Mapping[K, T]) -> T:
         return mapping[self.key]
 
 
@@ -354,7 +354,7 @@ class GetAttrKey:
     def __str__(self) -> str:
         return f".{self.name}"
 
-    def access(self, obj: Any) -> Any:
+    def get(self, obj: Any) -> Any:
         return getattr(obj, self.name)
 
 
@@ -1502,5 +1502,5 @@ def keystr(kp: KeyPath) -> str:
 def key_get(obj: Any, kp: KeyPath) -> Any:
     """Given an object and a key path, return the value at the key path."""
     for k in kp:
-        obj = k.access(obj)
+        obj = k.get(obj)
     return obj
