@@ -691,13 +691,14 @@ def run_test_retries(
     print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
     while True:
-        ret_code = shell(
+        ret_code = retry_shell(
             command + [sc_command] + print_items,
             test_directory,
             stdout=output,
             stderr=output,
             env=env,
             timeout=timeout,
+            retries=0,  # no retries here, we do it ourselves, this is because it handles timeout exceptions well
         )
         ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
         if ret_code == 0:
