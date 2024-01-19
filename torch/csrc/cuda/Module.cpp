@@ -864,7 +864,7 @@ PyObject* THCPModule_cudaSetSyncDebugMode(PyObject* _unused, PyObject* arg) {
   TORCH_CHECK(
       debug_mode >= 0 && debug_mode <= 2,
       "invalid value of debug_mode, expected one of 0,1,2");
-  c10::cuda::SyncDebugMode l;
+  c10::cuda::SyncDebugMode l = c10::cuda::SyncDebugMode::L_DISABLED;
   switch (debug_mode) {
     case 0:
       l = c10::cuda::SyncDebugMode::L_DISABLED;
@@ -876,7 +876,6 @@ PyObject* THCPModule_cudaSetSyncDebugMode(PyObject* _unused, PyObject* arg) {
       l = c10::cuda::SyncDebugMode::L_ERROR;
       break;
     default:
-      l = c10::cuda::SyncDebugMode::L_DISABLED;
       break; // can't happen
   }
   c10::cuda::warning_state().set_sync_debug_mode(l);
@@ -1271,6 +1270,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
 
         removeStorageDeleterFns(ptrs, freed_pointer_set);
         std::vector<c10::StorageImpl*> storages_to_add_deleters_to;
+        storages_to_add_deleters_to.reserve(storages_to_add_deleters_to_ptr.size());
         for (size_t ptr_int : storages_to_add_deleters_to_ptr) {
           storages_to_add_deleters_to.push_back((c10::StorageImpl*)ptr_int);
         }
