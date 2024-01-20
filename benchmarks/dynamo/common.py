@@ -2200,7 +2200,7 @@ class BenchmarkRunner:
         )
         return start, end
 
-    def get_fsdp_auto_wrap_policy(self, model_name: str):
+    def get_fsdp_auto_wrap_policy(self, model_name: str) -> 'ModuleWrapPolicy':
         from diffusers.models.transformer_2d import Transformer2DModel
 
         from torch.distributed.fsdp.wrap import (
