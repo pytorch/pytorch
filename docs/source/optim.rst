@@ -59,7 +59,7 @@ individual penalization weights for each parameter group::
     others = [p for name, p in self.named_parameters() if 'bias' not in name]
 
     optim.SGD([
-                    {'params': others },
+                    {'params': others},
                     {'params': bias_params, 'weight_decay': 0}
                 ], weight_decay=1e-2, lr=1e-2)
 
