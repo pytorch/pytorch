@@ -1508,8 +1508,8 @@ def _is_valid_dequant_linear_pattern(dtype, input_dim_exceeds_two, input_contigu
             # wgt before expand should with dim 2
             # Expand size should with dim 3
             # Expand size[0] should same as act size[0]
-            # Expand size[1] should same as wgt size[0]
-            # Expand size[2] should same as wgt size[1]
+            # Expand size[1] should same as wgt size[1]
+            # Expand size[2] should same as wgt size[0]
             qweight_node = match.kwargs["q_weight"]
             wgt_expand_size = match.kwargs["wgt_expand_size"]
             if not (
@@ -1518,8 +1518,8 @@ def _is_valid_dequant_linear_pattern(dtype, input_dim_exceeds_two, input_contigu
                 and len(qweight_node.meta["val"].size()) == 2
                 and len(wgt_expand_size) == 3
                 and wgt_expand_size[0] == act_node.meta["val"].size()[0]
-                and wgt_expand_size[1] == qweight_node.meta["val"].size()[0]
-                and wgt_expand_size[2] == qweight_node.meta["val"].size()[1]
+                and wgt_expand_size[1] == qweight_node.meta["val"].size()[1]
+                and wgt_expand_size[2] == qweight_node.meta["val"].size()[0]
             ):
                 return False
 

@@ -387,10 +387,6 @@ def triton_compute_type(dtype):
         triton_type_name = "float8e4nv"
     elif triton_type_name == "float8_e5m2":
         triton_type_name = "float8e5"
-    elif triton_type_name == "float8_e4m3fnuz":
-        triton_type_name = "float8e4b8"
-    elif triton_type_name == "float8_e5m2":
-        triton_type_name = "float8e5b16"
     return f"tl.{triton_type_name}"
 
 
