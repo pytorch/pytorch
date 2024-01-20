@@ -57,7 +57,6 @@ from .eval_frame import set_guard_error_hook
 from .source import (
     AttrSource,
     DefaultsSource,
-    DefaultsSource,
     GetItemSource,
     GlobalSource,
     LocalSource,
@@ -97,9 +96,9 @@ class GuardManager:
     def __init__(self):
         self.root = RootGuardManager()
 
-    def pretty_print_leaf_guard_str(self, prefix, s):
+    def pretty_print_leaf_guard_str(self, prefix, s, guard_type="Guard"):
         guards = s.split("\n")
-        guards = [prefix + "Guard: " + s for s in guards]
+        guards = [prefix + guard_type + ": " + s for s in guards]
         return "\n".join(guards) + "\n"
 
     def _debug_print(self, node, prefix):
@@ -113,7 +112,23 @@ class GuardManager:
         return s
 
     def __str__(self):
-        return "+- " + self.root.repr() + "\n" + self._debug_print(self.root, "|  ")
+        first_line = "+- " + self.root.repr() + "\n"
+        subtree = self._debug_print(self.root, "|  ")
+        epilogue_guards = ""
+        for guard in self.root.get_epilogue_lambda_guards():
+            epilogue_guards += self.pretty_print_leaf_guard_str(
+                "|  ", guard.repr(), "EpilogueGuard"
+            )
+        return first_line + subtree + epilogue_guards
+
+    def __call__(self, x):
+        # TODO - This is used in eval_frame.c, as we save GuardManager in
+        # cache_entry, instead of check_fn. This is suboptimal because we are
+        # doing a few unnecessary operations - going from C++ to Python,
+        # LOAD_ATTR of check. What we really want is to directly call
+        # check_nopybind from guard_manager. But, I have to figure out how to do
+        # that with pybind and PyObjects.
+        return self.root.check(x)
 
 
 # For user stack printing
@@ -312,7 +327,6 @@ class GuardBuilder(GuardBuilderBase):
         # eval_frame calls check_fn with f_locals dict, which is then later
         # wrapped up into a "L" dict.
         # So,
-
         root_guard_mananger = self.guard_manager.root
 
         # TODO(janimesh) - This should probably to guards object itself with a
@@ -340,7 +354,7 @@ class GuardBuilder(GuardBuilderBase):
                 )
 
         mgr = build(guard.originating_source)
-        print(mgr)
+        return mgr
 
     def add_python_lambda_leaf_guard_to_root(self, guard, code):
         make_guard_fn_args = ", ".join(CLOSURE_VARS.keys())
@@ -355,7 +369,7 @@ class GuardBuilder(GuardBuilderBase):
             extra = get_guard_debug_info(c, guard)
             guard_strs.append(f"{c:<60}{extra}")
         guard_str = "\n".join(guard_strs)
-        self.guard_manager.root.add_lambda_guard(guard_fn, guard_str)
+        self.guard_manager.root.add_epilogue_lambda_guard(guard_fn, guard_str)
 
     def TYPE_MATCH(self, guard: Guard):
         # ___check_type_id is same as `id(type(x)) == y`
@@ -672,9 +686,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = [f"utils_device.CURRENT_DEVICE == {m.CURRENT_DEVICE!r}"]
         self.add_python_lambda_leaf_guard_to_root(guard, code)
-        self._produce_guard_code(
-            guard, code
-        )
+        self._produce_guard_code(guard, code)
 
     def BACKEND_MATCH(self, guard: Guard):
         """Guard on backend matching based on id of current_backend"""
@@ -1101,8 +1113,8 @@ class CheckFunctionManager:
 
             guard.create(builder)
         print(self.guard_manager)
+        assert self.guard_manager.root.check(output_graph.local_scope)
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
-        # self.check_fn = self.guard_manager.root.check
         self._weakrefs.clear()
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and check_fn and is used to
@@ -1113,6 +1125,15 @@ class CheckFunctionManager:
         # queryable data structure such that this information is already present
         # in some form.
         self.check_fn.id_matched_objs = builder.id_matched_objs
+
+        # TODO - Use flag to choose between old guard vs new guard manager
+        self.guard_manager.id_matched_objs = builder.id_matched_objs
+        self.guard_manager.global_scope = {
+            "G": output_graph.global_scope,
+        }
+        self.guard_manager.closure_vars = CLOSURE_VARS
+        self.guard_manager.guard_fail_fn = guard_fail_fn
+        self.check_fn = self.guard_manager
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
@@ -1363,6 +1384,7 @@ def get_guard_fail_reason(
     Updates `guard_failures` with the generated reason.
     Only the first failed check of guard_fn is reported.
     """
+    return "MISSING GUARD FAIL REASON INFRA"
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
     scope["___check_tensors"] = scope["___check_tensors_verbose"]
@@ -1470,7 +1492,21 @@ def guard_error_hook(
     print(" ", " and\n  ".join(guard_fn.code_parts))
 
 
-set_guard_error_hook(guard_error_hook)
+def guard_manager_error_hook(
+    guard_manager: GuardManager,
+    code: types.CodeType,
+    f_locals: Dict[str, object],
+    index: int,
+    last: bool,
+):
+    print(
+        f"ERROR RUNNING GUARD MANAGER \n{guard_manager} FROM FRAME {code.co_name} {code.co_filename}:{code.co_firstlineno}"
+    )
+
+
+# set_guard_error_hook(guard_error_hook)
+# TODO - Use a flag to choose the hook
+set_guard_error_hook(guard_manager_error_hook)
 
 
 def unique(seq):
