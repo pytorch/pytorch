@@ -127,7 +127,11 @@ def decompose_and_inline_torch_op(tx, op, args, kwargs):
     from ..utils import get_fake_value
     from .base import MutableLocal
     from .builder import SourcelessBuilder
-    from .inline_helper import dummy_user_function_to_inline_gm
+    from .dicts import ConstDictVariable
+    from .inline_helper import (
+        dummy_user_function_to_inline_gm,
+        dummy_user_function_to_inline_gm_with_kwargs,
+    )
     from .lists import BaseListVariable
 
     # convert he arguments from VariableTracker to fake tensors + constants again
@@ -147,7 +151,7 @@ def decompose_and_inline_torch_op(tx, op, args, kwargs):
             # mostly handle tuple and scalar
             fake_value_kwargs[key] = value.as_proxy()
 
-    def get_full_args_with_default_value(func, args, kwargs):
+    def get_full_args_with_default_value(func, args):
         try:
             signature = inspect.signature(func)
         except ValueError as ve:
@@ -156,31 +160,22 @@ def decompose_and_inline_torch_op(tx, op, args, kwargs):
 
         current_i = 0
         res = []
-        for k, v in signature.parameters.items():
+        for _, v in signature.parameters.items():
             if v.default is inspect.Parameter.empty:
                 # this arg does not have default value, expect user pass
                 # it in as an arg
                 assert current_i < len(args)
                 res.append(args[current_i])
                 current_i += 1
-            elif current_i < len(args):
-                # this arg  has a default value, first check if user pass it in
-                # as an arg
-                res.append(args[current_i])
-                current_i += 1
-            elif k in kwargs:
-                # now we need to check if it is being passed as a kaways
-                res.append(kwargs.get(k))
             else:
                 # use default value
                 res.append(v.default)
         return res
 
-    # It seems like make_fx requires caller to pass into all args including
-    # those with default value.
-    complete_fake_value_args = get_full_args_with_default_value(
-        op, fake_value_args, fake_value_kwargs
-    )
+    # make_fx requires caller to pass into all args including
+    # those with default value. Note that we don't need to provide the exact
+    # value even if they are provided as kwargs.
+    complete_fake_value_args = get_full_args_with_default_value(op, fake_value_args)
     with enable_python_dispatcher():
         fx_g = make_fx(op, pre_dispatch=True)(*complete_fake_value_args)
 
@@ -190,15 +185,35 @@ def decompose_and_inline_torch_op(tx, op, args, kwargs):
     # now inline this fx graph and return the output
     # question: will there be a loop? How do I tell if op is CompositeImplicitAutograd
     user_fn_variable = SourcelessBuilder()(tx, dummy_user_function_to_inline_gm)
+    user_fn_variable_with_kwargs = SourcelessBuilder()(
+        tx, dummy_user_function_to_inline_gm_with_kwargs
+    )
     gm_variable = SourcelessBuilder()(tx, fx_g)
     cls = BaseListVariable.cls_for(list)
-    input_list_variable = cls(
+    input_args_variable = cls(
         args,
         mutable_local=MutableLocal(),
     )
-    res = tx.inline_user_function_return(
-        user_fn_variable, (gm_variable, input_list_variable), {}
-    )
+    if len(kwargs) > 0:
+        updated_kwargs = {}
+        # make_fx will modify the key for kwargs, try to reverse engineering the
+        # key mapping.
+        for k, v in kwargs.items():
+            updated_kwargs[k + "_1"] = v
+        input_kwargs_variable = ConstDictVariable(
+            updated_kwargs,
+            dict,
+            mutable_local=MutableLocal(),
+        )
+        res = tx.inline_user_function_return(
+            user_fn_variable_with_kwargs,
+            (gm_variable, input_args_variable, input_kwargs_variable),
+            {},
+        )
+    else:
+        res = tx.inline_user_function_return(
+            user_fn_variable, (gm_variable, input_args_variable), {}
+        )
     return res
 
 
