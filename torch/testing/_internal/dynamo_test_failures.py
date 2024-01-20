@@ -2073,7 +2073,6 @@ dynamo_expected_failures = {
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_False_memory_format1_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_batchnorm_grad_cpu",  # test_nn
     "TestNN.test_interpolate",  # test_nn
-    "TestNN.test_register_state_dict_pre_hook",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_True_memory_format0_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_upsamplingTrilinear3d_align_corners_True_memory_format1_cpu",  # test_nn
     "TestNN.test_fb_fc_packed",  # test_nn
@@ -2081,7 +2080,6 @@ dynamo_expected_failures = {
     "TestNNDeviceTypeCPU.test_invalid_reduction_strings_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_total_weight_is_zero_cpu",  # test_nn
     "TestNNDeviceTypeCPU.test_nll_loss_empty_tensor_reduction_mean_cpu",  # test_nn
-    "TestNN.test_register_state_dict_pre_hook_lazy_module",  # test_nn
     "TestNN.test_ParameterDict_replication",  # test_nn
     "TestNN.test_Sequential_iadd",  # test_nn
     "TestNN.test_upsamplingLinear1d",  # test_nn
@@ -2173,12 +2171,10 @@ dynamo_expected_failures = {
     "TestModuleHookNN.test_hooks",  # nn/test_module_hooks
     "TestModuleHookNN.test_hook_last_arg_requires_grad",  # nn/test_module_hooks
     "TestModuleGlobalHooks.test_module_global_hook_invalid_outputs",  # nn/test_module_hooks
-    "TestLazyModules.test_lazy_module_parameter",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_batchnorm2d_state",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv3d",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv_transposed1d",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv2d",  # nn/test_lazy_modules
-    "TestLazyModules.test_optimizer_pass",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_instancenorm3d_state",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_batchnorm3d_state",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv_transpose1d_pickle",  # nn/test_lazy_modules
@@ -2196,7 +2192,6 @@ dynamo_expected_failures = {
     "TestLazyModules.test_lazy_conv1d_pickle",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv1d",  # nn/test_lazy_modules
     "TestLazyModules.test_linear",  # nn/test_lazy_modules
-    "TestLazyModules.test_materialize_dtype",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_module_buffer",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_batchnorm1d_state",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_batchnorm_with_dict_input",  # nn/test_lazy_modules
