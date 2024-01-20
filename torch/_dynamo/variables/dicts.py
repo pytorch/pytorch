@@ -117,12 +117,8 @@ class ConstDictVariable(VariableTracker):
 
         def __eq__(self, other: "ConstDictVariable._HashableTracker") -> bool:
             Hashable = ConstDictVariable._HashableTracker
-            assert isinstance(other, Hashable) or ConstantVariable.is_literal(other)
-            if isinstance(other, Hashable):
-                return Hashable._eq_impl(self.underlying_value, other.underlying_value)
-
-            # constant
-            return Hashable._eq_impl(self.underlying_value, other)
+            assert isinstance(other, Hashable)
+            return Hashable._eq_impl(self.underlying_value, other.underlying_value)
 
     def __init__(
         self, items: Dict[VariableTracker, VariableTracker], user_cls=dict, **kwargs
