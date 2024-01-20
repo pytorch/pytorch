@@ -1180,8 +1180,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
         class M(torch.nn.Module):
             def __init__(self, use_bias, do_permute=False):
                 super().__init__()
-                self.linear = torch.nn.Linear(4, 4, use_bias)
-                self.linear2 = torch.nn.Linear(4, 4, use_bias)
+                self.linear = torch.nn.Linear(4, 3, use_bias)
+                self.linear2 = torch.nn.Linear(3, 4, use_bias)
                 self.do_permute = do_permute
 
             def forward(self, x):
