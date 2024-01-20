@@ -4,6 +4,7 @@ import torch
 
 from torch._dynamo import config as dynamo_config
 from torch._inductor import config as inductor_config
+from torch._inductor.utils import is_big_gpu
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -11,8 +12,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TestCase as TorchTestCase,
 )
-
-from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA
 
 
 @instantiate_parametrized_tests
@@ -74,6 +74,7 @@ class TestUnbackedSymints(TorchTestCase):
         torch.testing.assert_close(actual, expected)
 
     @parametrize("device", (GPU_TYPE, "cpu"))
+    @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_split_with_sizes(self, device):
         def fn(x, y):
             l = y.tolist()
@@ -83,9 +84,8 @@ class TestUnbackedSymints(TorchTestCase):
 
         example_inputs = (torch.randn((32), device=device), torch.tensor((7, 16, 9)))
 
-        with dynamo_config.patch({"capture_scalar_outputs": True}):
-            actual = torch.compile(fn, fullgraph=True)(*example_inputs)
-            expected = fn(*example_inputs)
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
 
         torch.testing.assert_close(actual, expected)
 
@@ -111,5 +111,5 @@ class TestUnbackedSymints(TorchTestCase):
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if IS_LINUX:
+    if IS_LINUX and HAS_CUDA and is_big_gpu(0) or HAS_CPU:
         run_tests()
