@@ -1493,23 +1493,9 @@ class TorchPatcher:
             sparse_adam,
         }
 
-        disabled_multi_tensor_opt_modules = {
-            adamax,
-        }
-
         for opt_mod in optimizer_modules:
             opt_name = opt_mod.__name__.split(".")[-1]
-            multi_tensor_fn_name = f"_multi_tensor_{opt_name}"
             fused_fn_name = f"_fused_{opt_name}"
-            if (
-                hasattr(opt_mod, multi_tensor_fn_name)
-                and opt_mod in disabled_multi_tensor_opt_modules
-            ):
-                setattr(
-                    opt_mod,
-                    multi_tensor_fn_name,
-                    disable(getattr(opt_mod, multi_tensor_fn_name)),
-                )
 
             if hasattr(opt_mod, fused_fn_name):
                 setattr(

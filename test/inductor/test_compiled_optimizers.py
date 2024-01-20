@@ -11,11 +11,12 @@ import torch
 
 import torch._inductor
 
-# The rest of the optimizers not yet imported: Adamax, LBFGS, SparseAdam
+# LBFGS, SparseAdam not supported
 from torch.optim import (
     Adadelta,
     Adagrad,
     Adam,
+    Adamax,
     AdamW,
     ASGD,
     NAdam,
@@ -69,7 +70,12 @@ KERNEL_COUNTS = {
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=12),
     SGD: KernelCounts(multitensor=2, singletensor=8),
-    RAdam: KernelCounts(multitensor=2, singletensor=None),
+    RAdam: KernelCounts(
+        multitensor=2, singletensor=None
+    ),  # Single tensor eager needs to be refactored to enable tracing
+    Adamax: KernelCounts(
+        multitensor=2, singletensor=None
+    ),  # Single tensor eager needs to be refactored to enable tracing
 }
 
 
