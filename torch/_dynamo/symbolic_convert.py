@@ -43,7 +43,7 @@ from .bytecode_transformation import (
 from .code_context import code_context
 from .codegen import PyCodegen
 from .current_scope_id import current_scope_id
-from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
+from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported, NestedGraphBreak
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
@@ -460,7 +460,7 @@ def break_graph_if_unsupported(*, push):
                     self.f_code.co_filename, self.lineno, self.f_code.co_name
                 )
                 return inner_fn(self, inst)
-            except Unsupported as excp:
+            except (Unsupported, NestedGraphBreak) as excp:
                 if self.generic_context_manager_depth > 0:
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
@@ -472,6 +472,9 @@ def break_graph_if_unsupported(*, push):
 
                 if not self.should_compile_partial_graph():
                     raise
+
+                if isinstance(excp, NestedGraphBreak):
+                    return
 
                 log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
 
@@ -556,9 +559,19 @@ def break_graph_if_unsupported(*, push):
 
             for _ in range(push):
                 self.push(UnknownVariable())
-            self.output.add_output_instructions(
-                self.create_call_resume_at(self.next_instruction)
-            )
+            # self.output.add_output_instructions(
+            #     self.create_call_resume_at(self.next_instruction)
+            # )
+            if isinstance(self, InstructionTranslator):
+                self.output.add_output_instructions(
+                    self.create_call_resume_at(self.next_instruction)
+                )
+            else:
+                self.resume_at_insts = (
+                    # Get rid of `RETURN_VALUE` since it is nested
+                    self.create_call_resume_at(self.next_instruction)[:-1],
+                    push,
+                )
 
         return wrapper
 
@@ -647,7 +660,27 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         """
         A call to some user defined function by inlining it.
         """
-        return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+        result, resume_at_insts = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+        if resume_at_insts is None:
+            return result
+        # An inner inlining translator has a graph break
+        # Call into its resume_at function, before running our
+        # our resume_at instructions.
+        assert result is None
+        resume_at_insts, push = resume_at_insts
+        new_co_names = list(self.output.global_scope)
+
+        for _ in range(push):
+            self.push(UnknownVariable())
+        resume_at = self.create_call_resume_at(
+            self.next_instruction, resume_at_insts, new_co_names
+        )
+        if isinstance(self, InstructionTranslator):
+            self.output.add_output_instructions(resume_at)
+            raise NestedGraphBreak()
+        else:
+            self.resume_at_insts = resume_at, 1
+            raise NestedGraphBreak()
 
     def get_line_of_code_header(self, lineno=None):
         if lineno is None:
@@ -687,6 +720,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             len(self.stack) == 0
             and self.should_compile_partial_graph()
             and self.is_non_empty_graph()
+            and not isinstance(self, InliningInstructionTranslator)
         ):
             self.current_speculation = self.speculate()
             if self.current_speculation.failed:
@@ -1325,15 +1359,96 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self, [obj, ConstantVariable.create(inst.argval)], {}
         )
 
-    def create_call_resume_at(self, offset):
-        raise AssertionError(
-            f"create_call_resume_at not overridden by subclass {type(self)}"
+    def create_call_resume_at(
+        self,
+        inst,
+        prelude: List[Instruction] = [],  # noqa: B006
+        new_co_names: List[str] = [],  # noqa: B006
+    ):
+        """
+        If prelude is non-empty, it will first run the prelude within the resume at.
+        """
+        self.instruction_pointer = None
+
+        if inst.opname == "RETURN_VALUE" and len(prelude) == 0:
+            return [create_instruction("RETURN_VALUE")]
+
+        reads = livevars_analysis(self.instructions, inst)
+        if prelude:
+            reads.update(livevars_analysis(prelude, prelude[0]))
+        argnames = tuple(
+            k
+            for k in self.symbolic_locals.keys()
+            if k in reads and k not in self.cell_and_freevars()
         )
 
-    def should_compile_partial_graph(self) -> bool:
-        raise AssertionError(
-            f"should_compile_partial_graph not overridden by subclass {type(self)}"
+        cg = PyCodegen(self)
+
+        # Python does not allow null to be an arg to a function, so
+        # we remove nulls from the stack and restore them in the
+        # prologue of the resume function
+
+        # sorted list of indices of nulls on the stack
+        null_idxes: List[int] = []
+        if sys.version_info >= (3, 11):
+            # find indices of NullVariables
+            for i, var in enumerate(self.stack):
+                if isinstance(var, NullVariable):
+                    null_idxes.append(i)
+            # generate bytecode to pop the nulls
+            null_cnt = 0
+            for i, var in enumerate(reversed(self.stack)):
+                if isinstance(var, NullVariable):
+                    for j in range(2, i + 2 - null_cnt):
+                        cg.append_output(create_instruction("SWAP", arg=j))
+                    cg.extend_output(cg.pop_null())
+                    null_cnt += 1
+
+        # we popped all nulls from the stack at runtime,
+        # so we should not count NullVariables
+        stack_len = len(self.stack) - len(null_idxes)
+        nargs = stack_len + len(argnames)
+
+        name = unique_id(f"__resume_at_{inst.offset}")
+
+        new_code: types.CodeType = ContinueExecutionCache.lookup(
+            self.f_code,
+            self.lineno,
+            inst.offset,
+            tuple(b.target.offset for b in self.block_stack),
+            stack_len,
+            argnames,
+            tuple(b.resume_fn() for b in self.block_stack),
+            tuple(null_idxes),
+            tuple(prelude),
+            tuple(new_co_names),
         )
+
+        # Add original GraphModule context to the resume function to handle
+        # the case of a graph break while tracing a GraphModule
+        orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
+            "orig_graphmodule", None
+        )
+        if orig_graphmodule_maybe is not None:
+            code_context.get_context(new_code)[
+                "orig_graphmodule"
+            ] = orig_graphmodule_maybe
+
+        if new_code.co_freevars:
+            cg.make_function_with_closure(name, new_code, True, stack_len)
+        else:
+            self.output.install_global(
+                name, types.FunctionType(new_code, self.f_globals, name)
+            )
+            cg.extend_output(cg.load_function_name(name, True, stack_len))
+
+        cg.extend_output([cg.create_load(k) for k in argnames])
+        cg.extend_output(create_call_function(nargs, False))
+        cg.append_output(create_instruction("RETURN_VALUE"))
+        return cg.get_instructions()
+
+    def should_compile_partial_graph(self):
+        return all(b.can_restore() for b in self.block_stack) and not self.one_graph
 
     @break_graph_if_unsupported(push=0)
     def STORE_SUBSCR(self, inst):
@@ -2107,89 +2222,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             return None
         return self.symbolic_locals[name]
 
-    def should_compile_partial_graph(self):
-        return (
-            all(b.can_restore() for b in self.block_stack)
-            and not self.one_graph
-            and self.generic_context_manager_depth == 0
-        )
-
-    def create_call_resume_at(self, inst):
-        self.instruction_pointer = None
-
-        if inst.opname == "RETURN_VALUE":
-            return [create_instruction("RETURN_VALUE")]
-
-        reads = livevars_analysis(self.instructions, inst)
-        argnames = tuple(
-            k
-            for k in self.symbolic_locals.keys()
-            if k in reads and k not in self.cell_and_freevars()
-        )
-
-        cg = PyCodegen(self)
-
-        # Python does not allow null to be an arg to a function, so
-        # we remove nulls from the stack and restore them in the
-        # prologue of the resume function
-
-        # sorted list of indices of nulls on the stack
-        null_idxes: List[int] = []
-        if sys.version_info >= (3, 11):
-            # find indices of NullVariables
-            for i, var in enumerate(self.stack):
-                if isinstance(var, NullVariable):
-                    null_idxes.append(i)
-            # generate bytecode to pop the nulls
-            null_cnt = 0
-            for i, var in enumerate(reversed(self.stack)):
-                if isinstance(var, NullVariable):
-                    for j in range(2, i + 2 - null_cnt):
-                        cg.append_output(create_instruction("SWAP", arg=j))
-                    cg.extend_output(cg.pop_null())
-                    null_cnt += 1
-
-        # we popped all nulls from the stack at runtime,
-        # so we should not count NullVariables
-        stack_len = len(self.stack) - len(null_idxes)
-        nargs = stack_len + len(argnames)
-
-        name = unique_id(f"__resume_at_{inst.offset}")
-
-        new_code: types.CodeType = ContinueExecutionCache.lookup(
-            self.f_code,
-            self.lineno,
-            inst.offset,
-            tuple(b.target.offset for b in self.block_stack),
-            stack_len,
-            argnames,
-            tuple(b.resume_fn() for b in self.block_stack),
-            tuple(null_idxes),
-        )
-
-        # Add original GraphModule context to the resume function to handle
-        # the case of a graph break while tracing a GraphModule
-        orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
-            "orig_graphmodule", None
-        )
-        if orig_graphmodule_maybe is not None:
-            code_context.get_context(new_code)[
-                "orig_graphmodule"
-            ] = orig_graphmodule_maybe
-
-        if new_code.co_freevars:
-            cg.make_function_with_closure(name, new_code, True, stack_len)
-        else:
-            self.output.install_global(
-                name, types.FunctionType(new_code, self.f_globals, name)
-            )
-            cg.extend_output(cg.load_function_name(name, True, stack_len))
-
-        cg.extend_output([cg.create_load(k) for k in argnames])
-        cg.extend_output(create_call_function(nargs, False))
-        cg.append_output(create_instruction("RETURN_VALUE"))
-        return cg.get_instructions()
-
     def symbolic_locals_contain_module_class(self):
         for v in self.symbolic_locals.values():
             if isinstance(v, UserDefinedClassVariable) and issubclass(
@@ -2229,7 +2261,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @classmethod
     def inline_call(cls, parent, func, args, kwargs):
         with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
-            return cls.inline_call_(parent, func, args, kwargs)
+            res = cls.inline_call_(parent, func, args, kwargs)
+            return res
 
     @staticmethod
     def check_inlineable(func):
@@ -2346,7 +2379,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except Exception as e:
             log.debug("FAILED INLINING %s", code)
             raise
-        assert tracer.symbolic_result is not None
+        except NestedGraphBreak:
+            log.debug("GRAPH BREAK WHILE INLINING %s", code)
+        # assert tracer.symbolic_result is not None
         func.export_freevars(parent, tracer)
 
         if tracer.f_globals is parent.f_globals:
@@ -2359,13 +2394,22 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if is_generator(code):
             assert isinstance(tracer, InliningGeneratorInstructionTranslator)
+            assert tracer.symbolic_result is not None
+            assert tracer.resume_at_insts is None
             assert tracer.symbolic_result.as_python_constant() is None
-            return ListIteratorVariable(
-                tracer.generated_items,
-                mutable_local=MutableLocal(),
+            return (
+                ListIteratorVariable(
+                    tracer.generated_items,
+                    mutable_local=MutableLocal(),
+                    **VariableTracker.propagate(tracer.symbolic_result),
+                ),
+                None,
             )
         else:
-            return tracer.symbolic_result
+            assert (
+                tracer.symbolic_result is not None and tracer.resume_at_insts is None
+            ) or tracer.resume_at_insts is not None
+            return tracer.symbolic_result, tracer.resume_at_insts
 
     def __init__(
         self,
@@ -2400,6 +2444,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.symbolic_result = None
         self.closure_cells = closure_cells
         self.nn_module_stack = parent.nn_module_stack.copy()
+        self.resume_at_insts = None
+        self.one_graph = parent.one_graph
 
     @property
     def fake_mode(self):
@@ -2475,10 +2521,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
 
     def should_compile_partial_graph(self):
-        return False  # inlining functions is all-or-nothing
-
-    def create_call_resume_at(self, offset):
-        unimplemented("cant resume while inlining")
+        return (
+            not isinstance(self, InliningGeneratorInstructionTranslator)
+            and super().should_compile_partial_graph()
+        )
 
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()

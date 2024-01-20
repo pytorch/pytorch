@@ -335,6 +335,8 @@ class ContinueExecutionCache:
         argnames: Tuple[str],
         setup_fns: Tuple[ReenterWith],
         null_idxes: Tuple[int],
+        prelude: Tuple[Instruction],
+        updated_co_names: Tuple[str],
     ) -> types.CodeType:
         assert offset is not None
         assert not (
@@ -352,6 +354,8 @@ class ContinueExecutionCache:
                 argnames,
                 setup_fns,
                 null_idxes,
+                prelude,
+                updated_co_names,
             )
 
         is_py311_plus = sys.version_info >= (3, 11)
@@ -388,6 +392,9 @@ class ContinueExecutionCache:
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
             )
+            for name in updated_co_names:
+                if name not in code_options["co_names"]:
+                    code_options["co_names"] += (name,)
             target = next(i for i in instructions if i.offset == offset)
 
             prefix = []
@@ -433,7 +440,7 @@ class ContinueExecutionCache:
                 )
 
             assert not hooks
-
+            prefix.extend(prelude)
             prefix.append(create_jump_absolute(target))
 
             # because the line number table monotonically increases from co_firstlineno
