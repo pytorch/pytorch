@@ -333,6 +333,15 @@ public:
       itype = complex_input ? CUDA_C_16F : CUDA_R_16F;
       otype = complex_output ? CUDA_C_16F : CUDA_R_16F;
       exec_type = CUDA_C_16F;
+    } else if (dtype == ScalarType::BFloat16) {
+      // See https://docs.nvidia.com/cuda/cufft/index.html#bfloat16-precision-cufft-transforms for restrictions
+      auto dev_prop = at::cuda::getCurrentDeviceProperties();
+      TORCH_CHECK(dev_prop->major >= 8, "cuFFT doesn't support bfloat16 type with compute "
+               "capability less than SM_80, but the device containing the input "
+               "tensor only has SM_", dev_prop->major, dev_prop->minor, ".");
+      itype = complex_input ? CUDA_C_16BF : CUDA_R_16BF;
+      otype = complex_output ? CUDA_C_16BF : CUDA_R_16BF;
+      exec_type = CUDA_C_16BF;
     } else {
       TORCH_CHECK(false, "cuFFT doesn't support tensor of type: ", dtype);
     }
