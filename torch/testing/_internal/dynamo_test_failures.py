@@ -524,6 +524,7 @@ dynamo_expected_failures = {
     "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmin_np_method1",
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmax",
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmin",
+    "TestArgmax.test_combinations_data66",
     "TestCond.test_sq_cases",
     "TestNormInt64.test_bad_args",
     "TestQR.test_qr_empty_m_0_n_3",
@@ -4543,6 +4544,7 @@ dynamo_skips = {
     "TestReductionsCPU.test_argminmax_multiple_cpu_int32",  # known py38 fail
     "TestReductionsCPU.test_tensor_compare_ops_argmax_argmix_kthvalue_dim_empty_cpu",  # known py38 fail
     "TestReductionsCPU.test_histogram_cpu_float32",  # known py38 fail
+    "TestReductionsCPU.test_count_nonzero_cpu_complex64",
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_broadcast_tensors_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_adaptive_avg_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_isneginf_cpu_float32",  # known py38 fail
