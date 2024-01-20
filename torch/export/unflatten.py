@@ -605,19 +605,12 @@ class _ModuleFrame:
         if parent_out is None:
             return
 
-        parent_out.meta["val"] = (
-            graph_outputs.meta.get("val")
-            if isinstance(graph_outputs, torch.fx.Node)
-            else [o.meta.get("val") for o in graph_outputs]
-        )
-
         if len(orig_outputs) == 1 and signature is None:
             self.parent.node_map[orig_outputs[0]] = parent_out
         else:
             for i, orig_output in enumerate(orig_outputs):
                 # Use Proxy to record getitem access.
                 proxy_out = torch.fx.Proxy(parent_out)[i].node  # type: ignore[index]
-                proxy_out.meta["val"] = copy.copy(orig_output.meta["val"])
                 self.parent.node_map[orig_output] = proxy_out
 
         if self.cached_graph_module is not None:
