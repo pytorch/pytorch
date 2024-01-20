@@ -2,7 +2,6 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
@@ -914,7 +913,7 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
 }
 
 template <class T>
-using is_not_DispatchKeySet = guts::negation<std::is_same<DispatchKeySet, T>>;
+using is_not_DispatchKeySet = std::negation<std::is_same<DispatchKeySet, T>>;
 
 // Given a function type, constructs a function_traits type that drops the first
 // parameter type if the first parameter is of type DispatchKeySet. NB:
