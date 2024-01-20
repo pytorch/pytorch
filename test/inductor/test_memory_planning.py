@@ -21,8 +21,8 @@ from torch._C import FileCheck
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import same
 from torch._inductor import config
+from torch.export import Dim
 from torch.utils._triton import has_triton
-
 
 @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
 @config.patch(memory_planning=True)
@@ -83,13 +83,11 @@ class TestMemoryPlanning(TestCase):
         from test_aot_inductor import AOTIRunnerUtil
 
         f, args = self._generate(device="cuda")
-        constraints: List[torch.export.Constraint] = [
-            torch._export.dynamic_dim(args[0], 0) >= 1,
-            torch._export.dynamic_dim(args[0], 0) <= 2048,
-        ]
+        dim0_x = Dim("dim0_x", min=1, max=2048)
+        dynamic_shapes = ({0: dim0_x}, None, None)
         with config.patch("aot_inductor.abi_compatible", True):
             result, code = run_and_get_cpp_code(
-                lambda: AOTIRunnerUtil.run("cuda", f, args, constraints=constraints)
+                lambda: AOTIRunnerUtil.run("cuda", f, args, dynamic_shapes=dynamic_shapes)
             )
 
         FileCheck().check(
