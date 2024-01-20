@@ -98,6 +98,17 @@ def foreach_all_gather_copy_out(
             all_gather_input_numel, world_size, dtype, device
         )  # no-op after 1st call
         fsdp_param.alloc_all_gather_output()
+    if True:  # fast path
+        all_gather_output = all_gather_output.view(world_size, -1)
+        out = [
+            fsdp_param.all_gather_output.view(world_size, -1)
+            for fsdp_param in fsdp_params
+        ]
+        with _unsafe_preserve_version_counters(out):
+            torch.split_with_sizes_copy(
+                all_gather_output, all_gather_input_numels, dim=1, out=out
+            )
+        return
     # TODO: Replace with foreach copy to prepare for custom kernel.
     split_sizes = all_gather_input_numels * world_size
     splits = torch.split(all_gather_output, split_sizes, dim=0)
