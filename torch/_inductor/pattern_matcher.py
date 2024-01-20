@@ -822,7 +822,7 @@ class ReplacementPatternEntry(PatternEntry):
                 if arg not in visited and hasattr(arg, "meta"):
                     visited.add(arg)
                     arg.meta["recompute"] = recompute_tag
-                    queue.extend(arg.all_input_nodes)
+                    # queue.extend(arg.all_input_nodes)
 
         with graph.inserting_before(last_node):
             replacement = Replacer(replacement_graph).run(*args)
