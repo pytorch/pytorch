@@ -36,6 +36,10 @@ def _assign_attr(
             setattr(to_module, item, t)
         to_module = t
 
+    if isinstance(from_obj, torch.ScriptObject):
+        setattr(to_module, field, from_obj)
+        return
+
     # If it is a tensor and not a parameter attribute of a module, it should be a named buffer.
     # So, we register it as a named buffer in the target module.
     if not isinstance(from_obj, torch.Tensor):
@@ -796,7 +800,7 @@ def _sink_params(
                 continue
             attr_path = state_name[len(scope) :]
             state_attr = _recursive_getattr(module, attr_path)
-            assert isinstance(state_attr, torch.Tensor)
+            assert isinstance(state_attr, (torch.Tensor, torch.ScriptObject))
 
             # Make sure the newly created get_attr node is placed after the last placeholder node
             with graph.inserting_after(the_last_input):
