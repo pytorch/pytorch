@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/DispatchKeySet.h>
 #include <c10/macros/Export.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
@@ -13,6 +14,8 @@ namespace c10 {
 
 class SymNodeImpl;
 using SymNode = c10::intrusive_ptr<SymNodeImpl>;
+
+struct TensorImpl;
 
 // When you add a method, you also need to edit
 // torch/csrc/jit/python/init.cpp
@@ -36,6 +39,9 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   };
   virtual bool is_float() {
     TORCH_CHECK(false, "NYI");
+  };
+  virtual bool is_singleton() {
+    return false;
   };
   virtual SymNode add(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
@@ -183,6 +189,12 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual c10::optional<int64_t> singleton_int() {
     return c10::nullopt;
   }
+  virtual TensorImpl* singleton_vec() {
+    TORCH_CHECK(false, "NYI");
+  }
+  virtual int64_t singleton_sum_vec() {
+    TORCH_CHECK(false, "NYI");
+  }
   virtual c10::optional<int64_t> singleton_coeff() {
     return c10::nullopt;
   }
@@ -200,6 +212,9 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   }
   virtual bool is_symbolic() {
     return true;
+  }
+  virtual c10::DispatchKeySet key_set() {
+    return c10::DispatchKeySet();
   }
   std::ostream& operator<<(std::ostream& os) {
     os << str();

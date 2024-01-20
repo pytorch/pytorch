@@ -8,12 +8,17 @@
 #include <test/cpp/api/support.h>
 
 TEST(SingletonIntTest, Comparisons) {
-  auto a = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 1)));
-  auto b = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 1)));
-  auto c = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(2, 1)));
+  auto x = torch::randn({2, 2});
+
+  auto a =
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
+          1, 1, x, 1, c10::SingletonVariant::PYTHON)));
+  auto b =
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
+          1, 1, x, 1, c10::SingletonVariant::PYTHON)));
+  auto c =
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
+          2, 1, x, 1, c10::SingletonVariant::PYTHON)));
   auto d = c10::SymInt(3);
 
   ASSERT_TRUE(a == a);
@@ -85,11 +90,15 @@ TEST(SingletonIntTest, Comparisons) {
   ASSERT_TRUE(a > 1);
 }
 
-TEST(SingletonIntTest, WiithFactor) {
-  auto a = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 5)));
-  auto b = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 10)));
+TEST(SingletonIntTest, WithFactor) {
+  auto x = torch::randn({2, 2});
+
+  auto a =
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
+          1, 5, x, 1, c10::SingletonVariant::PYTHON)));
+  auto b =
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
+          1, 10, x, 1, c10::SingletonVariant::PYTHON)));
   // eq
   ASSERT_FALSE(a == b);
   ASSERT_FALSE(a >= b);
@@ -102,4 +111,22 @@ TEST(SingletonIntTest, WiithFactor) {
   ASSERT_TRUE(a * 2 == b);
   ASSERT_TRUE(a * 3 >= b);
   ASSERT_TRUE(a * 2 == 2 * a);
+}
+
+TEST(SingletonIntTest, CppSingletonErrorsOnComparison) {
+  auto x = torch::randn({2, 2});
+
+  auto c =
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
+          -1, -1, x, -1, c10::SingletonVariant::CPP)));
+  auto p =
+      c10::SymInt(c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
+          -1, -1, x, -1, c10::SingletonVariant::PYTHON)));
+
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(c == p), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(c == c), c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW((void)(p == c), c10::Error);
 }
