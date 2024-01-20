@@ -31,6 +31,7 @@ class RAdam(Optimizer):
         decoupled_weight_decay: bool = False,
         *,
         foreach: Optional[bool] = None,
+        capturable: bool = False,
         differentiable: bool = False,
     ):
         if not 0.0 <= lr:
@@ -49,6 +50,7 @@ class RAdam(Optimizer):
             eps=eps,
             weight_decay=weight_decay,
             foreach=foreach,
+            capturable=capturable,
             decoupled_weight_decay=decoupled_weight_decay,
             differentiable=differentiable,
         )
@@ -132,6 +134,7 @@ class RAdam(Optimizer):
                 weight_decay=group["weight_decay"],
                 eps=group["eps"],
                 foreach=group["foreach"],
+                capturable=group["capturable"],
                 differentiable=group["differentiable"],
                 decoupled_weight_decay=group["decoupled_weight_decay"],
                 has_complex=has_complex,
@@ -223,6 +226,7 @@ def radam(
     decoupled_weight_decay: bool = False,
     foreach: Optional[bool] = None,
     differentiable: bool = False,
+    capturable: bool = False,
     has_complex: bool = False,
     *,
     beta1: float,
@@ -265,6 +269,7 @@ def radam(
         eps=eps,
         decoupled_weight_decay=decoupled_weight_decay,
         differentiable=differentiable,
+        capturable=capturable,
         has_complex=has_complex,
     )
 
@@ -283,6 +288,7 @@ def _single_tensor_radam(
     eps: float,
     differentiable: bool,
     decoupled_weight_decay: bool,
+    capturable: bool,
     has_complex: bool,
 ):
 
@@ -356,6 +362,7 @@ def _multi_tensor_radam(
     eps: float,
     decoupled_weight_decay: bool,
     differentiable: bool,
+    capturable: bool,
     has_complex: bool,
 ):
 
@@ -413,45 +420,60 @@ def _multi_tensor_radam(
         # Delete the local intermediate since it won't be used anymore to save on peak memory
         del grouped_grads
 
-        rect = [
-            _dispatch_sqrt(
-                (rho_t - 4)
-                * (rho_t - 2)
-                * rho_inf
-                / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
-            )
-            if rho_t > 5
-            else 0
-            for rho_t in rho_t_list
-        ]
+        if capturable:
+            num = torch._foreach_sub(rho_t_list, 4)
+            sub2 = torch._foreach_sub(rho_t_list, 2)
+            torch._foreach_mul_(num, sub2)
+            torch._foreach_mul_(num, rho_inf)
+            rho_inf = ((rho_inf - 4) * (rho_inf - 2))
+            denom = torch._foreach_mul(rho_t_list, rho_inf)
+            torch._foreach_div_(num, denom)
+            torch._foreach_sqrt_(num)
 
-        sub4 = torch._foreach_sub(rho_t_list, 4)
-        sub2 = torch._foreach_sub(rho_t_list, 2)
-        num = torch._foreach_mul(sub4, sub2)
-        torch._foreach_mul_(num, rho_inf)
-        rho_inf = ((rho_inf - 4) * (rho_inf - 2))
-        denom = torch._foreach_mul(rho_t_list, rho_inf)
-        torch._foreach_div_(num, denom)
-        torch._foreach_sqrt_(num)
+            # TODO(mlazos): we should try and get a foreach_where op https://github.com/pytorch/pytorch/issues/117884
+            rect = [torch.where(rho_t > 5, n, torch.zeros_like(n)) for n, rho_t in zip(num, rho_t_list)]
+            unrect_step_size = [torch.where(rect > 0, torch.zeros_like(rect), torch.ones_like(rect)) for rect in rect]
 
-        rect = [torch.where(rho_t > 5, num, torch.zeros_like(num)) for rho_t in rho_t_list]
+            bias_correction1 = torch._foreach_pow(beta1, grouped_state_steps)
+            torch._foreach_neg_(bias_correction1)
+            torch._foreach_add_(bias_correction1, 1)
+            torch._foreach_mul_(unrect_step_size, lr)
+            torch._foreach_div_(unrect_step_size, bias_correction1)
+            torch._foreach_neg_(unrect_step_size)
 
+            bias_correction2 = torch._foreach_pow(beta2, grouped_state_steps)
+            torch._foreach_neg_(bias_correction2)
+            torch._foreach_add_(bias_correction2, 1)
+            torch._foreach_sqrt_(bias_correction2)
+            torch._foreach_mul_(bias_correction2, lr)
+            torch._foreach_mul_(bias_correction2, rect)
+            torch._foreach_neg_(bias_correction2)
+            torch._foreach_div_(bias_correction2, bias_correction1)
+        else:
+            rect = [
+                _dispatch_sqrt(
+                    (rho_t - 4)
+                    * (rho_t - 2)
+                    * rho_inf
+                    / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
+                )
+                if rho_t > 5
+                else 0
+                for rho_t in rho_t_list
+            ]
+            unrectified = [0 if rect > 0 else 1.0 for rect in rect]
 
+            bias_correction1 = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
+            unrect_step_size = _stack_if_compiling([(lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)])
+            bias_correction2 = [
+                _dispatch_sqrt(1 - beta2 ** _get_value(step)) * (lr * rect / bc) * -1
+                for step, rect, bc in zip(grouped_state_steps, rect, bias_correction1)
+            ]
 
-
-
-        unrectified = [0 if rect > 0 else 1.0 for rect in rect]
-
-        bias_correction1 = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
-        unrect_step_size = _stack_if_compiling([(lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)])
-        bias_correction2_sqrt_times_rect_step_size = [
-            _dispatch_sqrt(1 - beta2 ** _get_value(step)) * (lr * rect / bc) * -1
-            for step, rect, bc in zip(grouped_state_steps, rect, bias_correction1)
-        ]
 
         buffer = torch._foreach_sqrt(grouped_exp_avg_sqs)
         torch._foreach_add_(buffer, eps)
-        torch._foreach_div_(buffer, bias_correction2_sqrt_times_rect_step_size)
+        torch._foreach_div_(buffer, bias_correction2)
         torch._foreach_reciprocal_(buffer)
         torch._foreach_add_(buffer, unrect_step_size)
 

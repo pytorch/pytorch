@@ -3114,8 +3114,11 @@ exit(2)
         ] + [
             (torch.optim.ASGD, {"lr": 0.1, "foreach": True, "maximize": maximize, "weight_decay": weight_decay})
             for maximize, weight_decay in product((False, True), (0.0, 0.1))
+        ] + [
+            (torch.optim.RAdam, {"lr": 0.1, "foreach": True, "decoupled_weight_decay": decoupled_weight_decay,
+                                 "weight_decay": weight_decay})
+            for decoupled_weight_decay, weight_decay in product((False, True), (0.0, 0.1))
         ]
-
 
         for optimizer_ctor, kwargs in cases:
             with self.subTest(optimizer_ctor=optimizer_ctor, kwargs=kwargs):
