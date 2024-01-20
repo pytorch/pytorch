@@ -625,10 +625,7 @@ static struct PyModuleDef _module = {
  * failure. The data structure is also accessible in Python.
  */
 struct GuardDebugInfo {
-  GuardDebugInfo(
-      bool result,
-      std::string failed_guard,
-      int num_guards_executed)
+  GuardDebugInfo(bool result, std::string failed_guard, int num_guards_executed)
       : result(result),
         failed_guard(failed_guard),
         num_guards_executed(num_guards_executed) {}
@@ -1090,6 +1087,16 @@ class RootGuardManager : public GuardManager {
     bool result = GuardManager::check_nopybind(value);
     if (!result) {
       _reset_relational_guard_state();
+      return result;
+    }
+
+    // Iterate over epilogue leaf guards.
+    for (const auto& guard : _epilogue_lambda_guards) {
+      result = result && guard->check_nopybind(value);
+      if (!result) { // early exit
+        _reset_relational_guard_state();
+        return result;
+      }
     }
     return result;
   }
@@ -1099,12 +1106,43 @@ class RootGuardManager : public GuardManager {
     GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(value);
     if (!debug_info.result) {
       _reset_relational_guard_state();
+      return debug_info;
     }
-    return debug_info;
+
+    int num_guards_executed = debug_info.num_guards_executed;
+    bool result = true;
+
+    // Iterate over epilogue leaf guards
+    for (const auto& guard : _epilogue_lambda_guards) {
+      const GuardDebugInfo& tmp_debug_info =
+          guard->check_verbose_nopybind(value);
+      result = result && tmp_debug_info.result;
+      num_guards_executed++;
+      if (!result) {
+        _reset_relational_guard_state();
+        return GuardDebugInfo(
+            false, debug_info.failed_guard, num_guards_executed);
+      }
+    }
+    return GuardDebugInfo(true, "", num_guards_executed);
   }
 
   std::string repr() const {
     return "RootGuardManager";
+  }
+
+  void add_epilogue_lambda_guard(std::unique_ptr<LeafGuard> leaf_guard) {
+    _epilogue_lambda_guards.emplace_back(std::move(leaf_guard));
+  }
+
+  // Returning raw pointers because we can't return unique_ptr and pybind does
+  // not accept a unique_ptr reference return type.
+  std::vector<LeafGuard*> get_epilogue_lambda_guards() const {
+    std::vector<LeafGuard*> ret;
+    for (const auto& guard : _epilogue_lambda_guards) {
+      ret.push_back(guard.get());
+    }
+    return ret;
   }
 
  private:
@@ -1120,6 +1158,12 @@ class RootGuardManager : public GuardManager {
   // the guard evaluates to False. This ensures that guard state is reset on
   // guard failure so that next invocation is clean.
   std::vector<std::shared_ptr<RelationalGuard>> _relational_guard_resetters;
+
+  // These guards are lambda guards, i.e., the guards that lack C++
+  // implementation. For simplicity, we add these guards at the root. They MUST
+  // be run after all other guard managers have finished to ensure that the
+  // epilogue guards do not step on some nonexistent getattr or getitem.
+  std::vector<std::unique_ptr<LeafGuard>> _epilogue_lambda_guards;
 };
 
 /**
@@ -1505,7 +1549,21 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(py::init<>())
       .def("repr", &RootGuardManager::repr)
       .def("check", &RootGuardManager::check)
-      .def("check_verbose", &RootGuardManager::check_verbose);
+      .def("check_verbose", &RootGuardManager::check_verbose)
+      // return by reference because GuardManager has the ownership of leaf
+      // guards
+      .def(
+          "get_epilogue_lambda_guards",
+          &RootGuardManager::get_epilogue_lambda_guards,
+          py::return_value_policy::reference)
+      .def(
+          "add_epilogue_lambda_guard",
+          [](RootGuardManager& self,
+             py::object lambda,
+             py::object guard_str) -> void {
+            self.add_epilogue_lambda_guard(
+                std::make_unique<PythonLambdaGuard>(lambda, guard_str));
+          });
 
   py_m.def(
       "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);
