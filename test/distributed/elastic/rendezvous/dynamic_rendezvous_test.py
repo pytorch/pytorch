@@ -15,9 +15,9 @@ import time
 from abc import ABC, abstractmethod
 from base64 import b64encode
 from datetime import datetime, timedelta
-from typing import Callable, Optional, Tuple, cast
+from typing import Callable, cast, Optional, Tuple
 from unittest import TestCase
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import call, MagicMock, Mock, patch
 
 from torch.distributed import Store
 from torch.distributed.elastic.rendezvous import (
@@ -28,11 +28,6 @@ from torch.distributed.elastic.rendezvous import (
     RendezvousTimeoutError,
 )
 from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
-    DynamicRendezvousHandler,
-    RendezvousBackend,
-    RendezvousSettings,
-    RendezvousTimeout,
-    Token,
     _Action,
     _BackendRendezvousStateHolder,
     _DistributedRendezvousOpExecutor,
@@ -46,6 +41,11 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     _RendezvousState,
     _RendezvousStateHolder,
     create_handler,
+    DynamicRendezvousHandler,
+    RendezvousBackend,
+    RendezvousSettings,
+    RendezvousTimeout,
+    Token,
 )
 
 
@@ -932,12 +932,30 @@ class TestRendezvousJoinOp(AbstractTestRendezvousOp, TestCase):
 
             self._assert_action(expected_action)
 
-    def test_waits_next_round_if_rendezvous_is_complete(self) -> None:
+    def test_treat_as_redundancy_for_next_rendezvous_if_rendezvous_is_complete(self) -> None:
+        self._max_nodes = 1
+
+        self._state.complete = True
+
+        self._assert_action(_Action.ADD_TO_REDUNDANCY_LIST)
+
+    def test_waits_next_round_if_rendezvous_is_complete_and_node_is_redundant(self) -> None:
+        self._state.redundancy_list.add(self._node)
+
         self._max_nodes = 1
 
         self._state.complete = True
 
         self._assert_waits_rendezvous_completion()
+
+    def test_remove_from_rednundancy_list(self) -> None:
+        self._state.redundancy_list.add(self._node)
+
+        self._max_nodes = 2
+
+        self._state.complete = True
+
+        self._assert_action(_Action.REMOVE_FROM_REDUNDANCY_LIST)
 
     def test_waits_next_round_if_rendezvous_is_complete_and_node_is_in_wait_list(self) -> None:
         self._state.wait_list.add(self._node)
@@ -1010,6 +1028,26 @@ class TestRendezvousJoinOp(AbstractTestRendezvousOp, TestCase):
         self._state.wait_list.add(self._node)
 
         self._assert_action(_Action.REMOVE_FROM_WAIT_LIST)
+
+    def test_no_timeout_for_redundant_node(self) -> None:
+        self._max_nodes = 1
+        self._deadline = 0
+        self._state.complete = True
+
+        self._state.redundancy_list.add(self._node)
+
+        self._assert_action(_Action.SYNC)
+
+    def test_keep_alive_for_redundant_node(self) -> None:
+        self._deadline = 0
+        self._max_nodes = 1
+        self._state.complete = True
+
+        self._state.redundancy_list.add(self._node)
+
+        keep_alive_time = self._now - self._keep_alive_interval
+        self._state.last_heartbeats[self._node] = keep_alive_time
+        self._assert_action(_Action.KEEP_ALIVE)
 
 
 class TestRendezvousCloseOp(AbstractTestRendezvousOp, TestCase):
@@ -1470,3 +1508,185 @@ class CreateHandlerTest(TestCase):
             with self.assertRaises(RendezvousError):
                 create_handler(self._store, self._backend, self._params)
                 record_mock.assert_called_once()
+
+
+def _ignore_exception(exception_type: Exception, fn: Callable):
+    try:
+        fn()
+    except exception_type as e:
+        pass
+
+def _wait_for(condition, timeout=10, interval=1, name=None):
+    def _wait_while():
+        while True:
+            if condition():
+                break
+            else:
+                time.sleep(interval)
+    wait_thread = threading.Thread(target=_wait_while, name=name)
+    wait_thread.start()
+    wait_thread.join(timeout=timeout)
+
+class _CapturingThread(threading.Thread):
+
+    def __init__(self, target=None, name=None, args=None, kwargs=None):
+        if args is None:
+            args = ()
+        if kwargs is None:
+            kwargs = {}
+        threading.Thread.__init__(self, target=target, args=args, kwargs=kwargs, name=name)
+        self._result = None
+
+    def run(self):
+        if self._target is not None:
+            self._result = self._target(*self._args, **self._kwargs)
+
+    def join(self, *args):
+        threading.Thread.join(self, *args)
+        return self._result
+
+class IntegrationTest(TestCase):
+    def setUp(self) -> None:
+        self._store = DummyStore()
+        self._handlers = []
+        self._backend = _InMemoryRendezvousBackend()
+
+    def tearDown(self) -> None:
+        for handler in self._handlers:
+            handler._stop_heartbeats()
+
+    def _create_handler(self, **kwargs) -> DynamicRendezvousHandler:
+        params = {
+            "backend": self._backend.name,
+            "endpoint": "dummy_endpoint",
+            "run_id": "dummy_run_id",
+            "min_nodes": 2,
+            "max_nodes": 2,
+            "join_timeout": "5",
+            "local_addr": f"address_{len(self._handlers)}",
+        }
+        params.update(**kwargs)
+
+        rzdv_params = RendezvousParameters(**params)
+
+        handler = create_handler(self._store, self._backend, rzdv_params)
+        self._handlers.append(handler)
+        return handler
+
+    def test_all_nodes_join_rendezvous(self) -> None:
+        handler1 = self._create_handler(min_nodes=2, max_nodes=2)
+        handler2 = self._create_handler(min_nodes=2, max_nodes=2)
+
+        handler1_thread = _CapturingThread(target=handler1.next_rendezvous)
+        handler2_thread = _CapturingThread(target=handler2.next_rendezvous)
+
+        handler1_thread.start()
+        handler2_thread.start()
+
+        store1, rank1, world_size1 = handler1_thread.join()
+        store2, rank2, world_size2 = handler2_thread.join()
+        self.assertEqual(store1.underlying_store, self._store)
+        self.assertEqual(store2.underlying_store, self._store)
+
+        self.assertNotEqual(rank1, rank2)
+
+        self.assertEqual(world_size1, 2)
+        self.assertEqual(world_size2, 2)
+
+    def test_redundancy_list(self) -> None:
+        handler1 = self._create_handler(min_nodes=2, max_nodes=2)
+        handler2 = self._create_handler(min_nodes=2, max_nodes=2)
+        handler3 = self._create_handler(min_nodes=2, max_nodes=2)
+
+        handler1_thread = _CapturingThread(target=handler1.next_rendezvous)
+        handler2_thread = _CapturingThread(target=handler2.next_rendezvous)
+        handler3_thread = _CapturingThread(
+            target=_ignore_exception,
+            args=(RendezvousTimeoutError, lambda: handler3.next_rendezvous()))
+
+        handler1_thread.start()
+        handler2_thread.start()
+
+        # establish successful rendezvous
+        handler1_thread.join()
+        handler2_thread.join()
+
+        # expect to register in redundancy list
+        handler3_thread.start()
+
+        # wait until the handler3 is registered in the redundancy list
+        _wait_for(lambda: pickle.loads(self._backend.get_state()[0]).redundancy_list)
+
+        state_and_token = self._backend.get_state()
+        state = pickle.loads(state_and_token[0])
+        addresses = [node.addr for node in state.redundancy_list]
+        self.assertListEqual(addresses, ["address_2"])
+
+    def test_redundancy_transition_to_wait_list_then_join_rendezvous(self) -> None:
+        handler1 = self._create_handler(
+            min_nodes=1,
+            max_nodes=2,
+        )
+        handler2 = self._create_handler(
+            min_nodes=1,
+            max_nodes=2,
+            keep_alive_interval=timedelta(seconds=1),
+        )
+        handler3 = self._create_handler(
+            min_nodes=1,
+            max_nodes=2,
+        )
+
+        handler1_thread = _CapturingThread(target=handler1.next_rendezvous)
+        handler2_thread = _CapturingThread(target=handler2.next_rendezvous)
+
+        handler3_thread = _CapturingThread(
+            target=_ignore_exception,
+            args=(RendezvousTimeoutError, lambda: handler3.next_rendezvous()))
+
+        handler1_thread.start()
+        handler2_thread.start()
+
+        # establish successful rendezvous
+        handler1_thread.join()
+        handler2_thread.join()
+
+        handler3_thread.start()
+
+        _wait_for(lambda: pickle.loads(self._backend.get_state()[0]).redundancy_list)
+
+        handler2._stop_heartbeats()
+
+        _wait_for(lambda: len(pickle.loads(self._backend.get_state()[0]).participants) == 1)
+        _wait_for(lambda: len(pickle.loads(self._backend.get_state()[0]).wait_list) == 1)
+
+
+class _InMemoryRendezvousBackend(RendezvousBackend):
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._state = None
+        self._token = None
+
+    @property
+    def name(self):
+        return "_in_memory_backend"
+
+    def get_state(self):
+        with self._lock:
+            if self._state is None:
+                return None
+            return (self._state, self._token)
+
+        return self._state
+
+    def set_state(self, state, token):
+        if state is None:
+            raise ValueError("State cannot be None.")
+        with self._lock:
+            if token is None and self._token is not None:
+                return None
+            if self._token != token:
+                return None
+
+            self._state = state
+            self._token = self._token + 1 if self._token is not None else 0

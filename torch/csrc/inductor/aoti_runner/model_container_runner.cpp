@@ -9,18 +9,28 @@ namespace torch::inductor {
 AOTIModelContainerRunner::AOTIModelContainerRunner(
     const std::string& model_so_path,
     size_t num_models,
-    bool is_cpu,
+    const std::string& device_str,
     const std::string& cubin_dir) {
   model_so_ = std::make_unique<at::DynamicLibrary>(model_so_path.c_str());
   TORCH_CHECK(model_so_, "Failed to load model: ", model_so_path);
   create_func_ = reinterpret_cast<decltype(create_func_)>(
-      model_so_->sym("AOTInductorModelContainerCreate"));
+      model_so_->sym("AOTInductorModelContainerCreateWithDevice"));
   delete_func_ = reinterpret_cast<decltype(delete_func_)>(
       model_so_->sym("AOTInductorModelContainerDelete"));
   get_num_outputs_func_ = reinterpret_cast<decltype(get_num_outputs_func_)>(
       model_so_->sym("AOTInductorModelContainerGetNumOutputs"));
   run_func_ = reinterpret_cast<decltype(run_func_)>(
       model_so_->sym("AOTInductorModelContainerRun"));
+  get_num_constants_func_ = reinterpret_cast<decltype(get_num_constants_func_)>(
+      model_so_->sym("AOTInductorModelContainerGetNumConstants"));
+  get_constant_name_func_ = reinterpret_cast<decltype(get_constant_name_func_)>(
+      model_so_->sym("AOTInductorModelContainerGetConstantName"));
+  get_constant_original_fqn_func_ =
+      reinterpret_cast<decltype(get_constant_original_fqn_func_)>(
+          model_so_->sym("AOTInductorModelContainerGetConstantOriginalFQN"));
+  get_constant_dtype_func_ =
+      reinterpret_cast<decltype(get_constant_dtype_func_)>(
+          model_so_->sym("AOTInductorModelContainerGetConstantDtype"));
   update_constant_buffer_func_ =
       reinterpret_cast<decltype(update_constant_buffer_func_)>(
           model_so_->sym("AOTInductorModelContainerUpdateConstantBuffer"));
@@ -37,7 +47,7 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
   AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
       &container_handle_,
       num_models,
-      is_cpu,
+      device_str.c_str(),
       cubin_dir.empty() ? nullptr : cubin_dir.c_str()));
 }
 
@@ -71,6 +81,42 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run(
 
   return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
       output_handles.data(), output_handles.size());
+}
+
+std::unordered_map<std::string, std::string> AOTIModelContainerRunner::
+    getConstantNamesToOriginalFQNs() const {
+  std::unordered_map<std::string, std::string> result;
+  size_t num_constants{0};
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      get_num_constants_func_(container_handle_, &num_constants));
+  for (size_t i = 0; i < num_constants; ++i) {
+    const char* name{nullptr};
+    const char* original_fqn{nullptr};
+    AOTI_RUNTIME_ERROR_CODE_CHECK(
+        get_constant_name_func_(container_handle_, i, &name));
+    AOTI_RUNTIME_ERROR_CODE_CHECK(
+        get_constant_original_fqn_func_(container_handle_, i, &original_fqn));
+    result.emplace(name, original_fqn);
+  }
+  return result;
+}
+
+std::unordered_map<std::string, int32_t> AOTIModelContainerRunner::
+    getConstantNamesToDtypes() const {
+  std::unordered_map<std::string, int32_t> result;
+  size_t num_constants{0};
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      get_num_constants_func_(container_handle_, &num_constants));
+  for (size_t i = 0; i < num_constants; ++i) {
+    const char* name{nullptr};
+    int32_t dtype{0};
+    AOTI_RUNTIME_ERROR_CODE_CHECK(
+        get_constant_name_func_(container_handle_, i, &name));
+    AOTI_RUNTIME_ERROR_CODE_CHECK(
+        get_constant_dtype_func_(container_handle_, i, &dtype));
+    result.emplace(name, dtype);
+  }
+  return result;
 }
 
 void AOTIModelContainerRunner::update_constant_buffer(
