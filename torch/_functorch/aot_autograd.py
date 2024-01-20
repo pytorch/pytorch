@@ -1056,13 +1056,12 @@ def aot_export_module(
     """
     if pre_dispatch and trace_joint:
         raise RuntimeError("pre_dispatch is not supported when trace_joint is True.")
-    named_parameters = dict(mod.named_parameters(remove_duplicate=False))
-    named_buffers = dict(mod.named_buffers(remove_duplicate=False))
-
-    params_and_buffers = {
-        **dict(named_parameters),
-        **dict(named_buffers),
-    }
+    named_parameters = OrderedDict(mod.named_parameters(remove_duplicate=False))
+    named_buffers = OrderedDict(mod.named_buffers(remove_duplicate=False))
+    # Use OrderedDict to ensure deterministic ordering (parameters first, then buffers)
+    params_and_buffers = OrderedDict()
+    params_and_buffers.update(named_parameters)
+    params_and_buffers.update(named_buffers)
     params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
     params_and_buffers_flat = tuple(params_and_buffers_flat)
     params_len = len(params_and_buffers_flat)
