@@ -14,34 +14,34 @@ typedef NS_ENUM(NSUInteger, MPSGraphFFTScalingMode)
 };
 #endif
 
--(MPSGraphTensor * _Nonnull) fastFourierTransformWithTensor:(MPSGraphTensor *) tensor
-                                              axes:(NSArray<NSNumber *> *) axes
-                                        descriptor:(MPSGraphFFTDescriptor *) descriptor
-                                              name:(NSString * _Nullable) name;
+-(MPSGraphTensor * _Nonnull) fastFourierTransformWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                                                      axes:(NSArray<NSNumber *> * _Nonnull) axes
+                                                descriptor:(MPSGraphFFTDescriptor * _Nonnull) descriptor
+                                                      name:(NSString * _Nullable) name;
 
--(MPSGraphTensor * _Nonnull) fastFourierTransformWithTensor:(MPSGraphTensor *) tensor
-                                        axesTensor:(MPSGraphTensor *) axesTensor
-                                        descriptor:(MPSGraphFFTDescriptor *) descriptor
-                                              name:(NSString * _Nullable) name;
+-(MPSGraphTensor * _Nonnull) fastFourierTransformWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                                                axesTensor:(MPSGraphTensor * _Nonnull) axesTensor
+                                                descriptor:(MPSGraphFFTDescriptor * _Nonnull) descriptor
+                                                      name:(NSString * _Nullable) name;
 
--(MPSGraphTensor * _Nonnull) realToHermiteanFFTWithTensor:(MPSGraphTensor *) tensor
-                                            axes:(NSArray<NSNumber *> *) axes
-                                      descriptor:(MPSGraphFFTDescriptor *) descriptor
-                                            name:(NSString * _Nullable) name;
+-(MPSGraphTensor * _Nonnull) realToHermiteanFFTWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                                                      axes:(NSArray<NSNumber *> * _Nonnull) axes
+                                                descriptor:(MPSGraphFFTDescriptor * _Nonnull) descriptor
+                                                      name:(NSString * _Nullable) name;
 
--(MPSGraphTensor * _Nonnull) realToHermiteanFFTWithTensor:(MPSGraphTensor *) tensor
-                                      axesTensor:(MPSGraphTensor *) axesTensor
-                                      descriptor:(MPSGraphFFTDescriptor *) descriptor
-                                            name:(NSString * _Nullable) name;
+-(MPSGraphTensor * _Nonnull) realToHermiteanFFTWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                                                axesTensor:(MPSGraphTensor * _Nonnull) axesTensor
+                                                descriptor:(MPSGraphFFTDescriptor * _Nonnull) descriptor
+                                                      name:(NSString * _Nullable) name;
 
--(MPSGraphTensor * _Nonnull) HermiteanToRealFFTWithTensor:(MPSGraphTensor *) tensor
-                                            axes:(NSArray<NSNumber *> *) axes
-                                      descriptor:(MPSGraphFFTDescriptor *) descriptor
-                                            name:(NSString * _Nullable) name;
+-(MPSGraphTensor * _Nonnull) HermiteanToRealFFTWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                                                      axes:(NSArray<NSNumber *> * _Nonnull) axes
+                                                descriptor:(MPSGraphFFTDescriptor * _Nonnull) descriptor
+                                                      name:(NSString * _Nullable) name;
 
--(MPSGraphTensor * _Nonnull) HermiteanToRealFFTWithTensor:(MPSGraphTensor *) tensor
-                                      axesTensor:(MPSGraphTensor *) axesTensor
-                                      descriptor:(MPSGraphFFTDescriptor *) descriptor
-                                            name:(NSString * _Nullable) name;
+-(MPSGraphTensor * _Nonnull) HermiteanToRealFFTWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                                                axesTensor:(MPSGraphTensor * _Nonnull) axesTensor
+                                                descriptor:(MPSGraphFFTDescriptor * _Nonnull) descriptor
+                                                      name:(NSString * _Nullable) name;
 
 @end
