@@ -1,10 +1,12 @@
 //  Copyright © 2023 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/UpSample.h>
-#include <MetalPerformanceShadersGraph/MPSGraphFFTDescriptor.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+
+#include <MetalPerformanceShadersGraph/MPSGraph.h>
+#include <MetalPerformanceShadersGraph/MPSGraphFourierTransformOps.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
