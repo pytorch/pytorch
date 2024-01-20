@@ -30,22 +30,22 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   // these could be pure virtual when we implement LTC versions
   virtual bool is_int() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual bool is_bool() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual bool is_float() {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode add(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode sub(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode mul(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
-  };
+  }
   virtual SymNode truediv(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
