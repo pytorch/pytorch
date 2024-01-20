@@ -1493,13 +1493,29 @@ class TorchPatcher:
             sparse_adam,
         }
 
+        excluded_single_tensor = {
+            radam,  # https://github.com/pytorch/pytorch/issues/117807
+            adamax,  # https://github.com/pytorch/pytorch/issues/117836
+        }
+
         for opt_mod in optimizer_modules:
             opt_name = opt_mod.__name__.split(".")[-1]
             fused_fn_name = f"_fused_{opt_name}"
+            single_tensor_fn_name = f"_single_tensor_{opt_name}"
 
             if hasattr(opt_mod, fused_fn_name):
                 setattr(
                     opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
+                )
+
+            if (
+                hasattr(opt_mod, single_tensor_fn_name)
+                and opt_mod in excluded_single_tensor
+            ):
+                setattr(
+                    opt_mod,
+                    single_tensor_fn_name,
+                    disable(getattr(opt_mod, single_tensor_fn_name)),
                 )
 
         optimizer_classes = [
@@ -1513,6 +1529,7 @@ class TorchPatcher:
             torch.optim.SparseAdam,
             torch.optim.LBFGS,
         }
+
         for opt in optimizer_classes:
             if opt in excluded_optimizer_classes:
                 opt.step = disable(opt.step)
