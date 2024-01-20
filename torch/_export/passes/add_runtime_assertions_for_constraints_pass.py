@@ -2,13 +2,13 @@ import math
 import operator
 import traceback
 from functools import partial
-from typing import Callable, Dict, List, NamedTuple, Set, Tuple
+from typing import Callable, Dict, List, NamedTuple, Set
 
 import sympy
 
 import torch
 import torch.fx
-from torch._export.pass_base import _ExportPassBase, ProxyValue, PassResult
+from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse, ProxyValue, PassResult
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -40,15 +40,13 @@ def _convert_range_to_int(range: ValueRanges):
     return min_val, max_val
 
 
-class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
+class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBaseDeprecatedDoNotUse):
     def __init__(
         self,
         range_constraints: Dict[sympy.Symbol, ValueRanges],
-        equality_constraints: List[Tuple[InputDim, InputDim]],
     ):
         super().__init__()
         self.range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
-        self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
         self._asserts_generated_unbacked_symbols: Set[sympy.Symbol] = set()
         self.counter = 0
 
@@ -190,14 +188,31 @@ def _get_existing_inline_assertions(
             ):
                 continue
 
-            symint_arg, compare_int = compare_arg.args
+            compare_op = compare_arg.target
+            maybe_symint_arg, compare_int = compare_arg.args
+
+            # x >= 0 will sometimes be canonicalized to -x <= 0, so in some
+            # cases the operation before the comparison is to multiply by -1. We
+            # can undo the canonicalization here
+            if (
+                maybe_symint_arg.op == "call_function" and
+                maybe_symint_arg.target == operator.mul and
+                maybe_symint_arg.args[0] == -1
+            ):
+                maybe_symint_arg = maybe_symint_arg.args[1]
+                compare_op = operator.ge
+                compare_int = -1 * compare_int
+
             if not (
-                "val" in symint_arg.meta and
-                isinstance(symint_arg.meta["val"], torch.SymInt)
+                "val" in maybe_symint_arg.meta and
+                isinstance(maybe_symint_arg.meta["val"], torch.SymInt)
             ):
                 continue
 
-            symint = symint_arg.meta["val"].node._expr
+            symint = maybe_symint_arg.meta["val"].node._expr
+            if not isinstance(symint, sympy.Symbol):
+                continue
+
             if symint not in range_constraints:
                 raise RuntimeError(f"Unable to find symint {symint} in {range_constraints}")
 
