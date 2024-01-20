@@ -1,7 +1,7 @@
 //  Copyright © 2023 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/UpSample.h>
-#include <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
+#include <MetalPerformanceShadersGraph/MPSGraphFFTDescriptor.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -104,6 +104,11 @@ static Tensor runFFTGraph(const Tensor& input,
       newCachedGraph->inputTensor = inputTensor;
       newCachedGraph->outputTensor = outputTensor;
     });
+
+    // Use utility functions to determine the shape of the output tensor
+    auto output_shape = getMPSShape(input);
+    int64_t output_height = output_shape[0].integerValue;
+    int64_t output_width = output_shape[1].integerValue;
 
     MPSNDArrayDescriptor* sizeDesc = [MPSNDArrayDescriptor descriptorWithDataType:MPSDataTypeInt32 shape:@[ @(2) ]];
     MPSNDArray* sizeNDArray = [[[MPSNDArray alloc] initWithDevice:stream->device() descriptor:sizeDesc] autorelease];
