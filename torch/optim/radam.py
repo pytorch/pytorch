@@ -62,6 +62,7 @@ class RAdam(Optimizer):
             group.setdefault("foreach", None)
             group.setdefault("differentiable", False)
             group.setdefault("decoupled_weight_decay", False)
+            group.setdefault("capturable", False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
             state_values[0]["step"]
@@ -398,16 +399,21 @@ def _multi_tensor_radam(
         # maximum length of the approximated SMA
         rho_inf = 2 / (1 - beta2) - 1
         # compute the length of the approximated SMA
-        bias_correction1 = torch._foreach_pow(beta2, grouped_state_steps)
-        torch._foreach_neg_(bias_correction1)
-        torch._foreach_add_(bias_correction1, 1)
-        bias_correction2 = torch._foreach_pow(beta2, grouped_state_steps)
-        torch._foreach_mul_(bias_correction2, grouped_state_steps)
-        torch._foreach_mul_(bias_correction2, 2)
-        torch._foreach_div_(bias_correction2, bias_correction1)
-        torch._foreach_neg_(bias_correction2)
-        torch._foreach_add_(bias_correction2, rho_inf)
-        rho_t_list = bias_correction2
+        if capturable:
+            bias_correction1 = torch._foreach_pow(beta2, grouped_state_steps)
+            torch._foreach_neg_(bias_correction1)
+            torch._foreach_add_(bias_correction1, 1)
+            bias_correction2 = torch._foreach_pow(beta2, grouped_state_steps)
+            torch._foreach_mul_(bias_correction2, grouped_state_steps)
+            torch._foreach_mul_(bias_correction2, 2)
+            torch._foreach_div_(bias_correction2, bias_correction1)
+            torch._foreach_neg_(bias_correction2)
+            torch._foreach_add_(bias_correction2, rho_inf)
+            rho_t_list = bias_correction2
+        else:
+            rho_t_list = [rho_inf - 2 * _get_value(step) * (beta2 ** _get_value(step)) /
+                          (1 - beta2 ** _get_value(step)) for step in grouped_state_steps]
+
 
         if weight_decay != 0:
             if decoupled_weight_decay:

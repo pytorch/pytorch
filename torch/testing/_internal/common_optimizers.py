@@ -580,6 +580,9 @@ def optim_error_inputs_func_nadam(device, dtype):
 
 # Weird story bro, NAdam and RAdam do not have maximize.
 def optim_inputs_func_radam(device=None):
+    cuda_supported_configs = [
+        OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+    ]
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 2e-3}, desc="non-default lr"),
@@ -592,7 +595,7 @@ def optim_inputs_func_radam(device=None):
             kwargs={"weight_decay": 0.9, "decoupled_weight_decay": True},
             desc="decoupled_weight_decay",
         ),
-    ]
+    ] + (cuda_supported_configs if str(device) == "cuda" else [])
 
 
 def optim_error_inputs_func_radam(device, dtype):
