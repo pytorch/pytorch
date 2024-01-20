@@ -340,10 +340,7 @@ _autograd_backward_strict_mode_banned_ops.extend(
 )
 
 # Enables caching of dispatches to fake tensors.
-fake_tensor_cache_enabled = (
-    os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE", "0" if is_fbcode() else "1")
-    == "1"
-)
+fake_tensor_cache_enabled = True
 
 # Enables cross checking between the fake tensor cache and dispatch.
 fake_tensor_cache_crosscheck_enabled = (
