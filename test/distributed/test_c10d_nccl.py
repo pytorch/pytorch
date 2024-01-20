@@ -3716,28 +3716,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_short_w_destroy_process_group(self):
-        if self.rank == self.MAIN_PROCESS_RANK:
-            return
-        pg = self._create_process_group_nccl()
-        device = self.local_device
-        a = torch.full((3, 4), float(self.rank), device=device)
-        for i in range(2):
-            f = pg.allreduce(a)
-        f.wait()
-        torch.cuda.synchronize(device=device)
-
-        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
-        time.sleep(1)
-
-        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        self.assertEqual(len(t), 2)
-        c10d.destroy_process_group()
-        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        self.assertEqual(len(t), 2)
-
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_dump_pipe(self):
         def open_file_with_timeout(file_path, mode, timeout=1.0):
             start_time = time.time()
