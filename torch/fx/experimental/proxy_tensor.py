@@ -619,7 +619,7 @@ def dispatch_trace(
 ) -> GraphModule:
     graph = tracer.trace(root, concrete_args)
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
-    return GraphModule(tracer.root, graph, name)
+    return fx.get_graph_module_cls()(tracer.root, graph, name)
 
 
 @contextlib.contextmanager

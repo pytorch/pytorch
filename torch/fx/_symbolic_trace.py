@@ -28,6 +28,7 @@ from torch._C import ScriptObject  # type: ignore[attr-defined]
 from ._compatibility import compatibility
 from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph
 from .graph_module import GraphModule
+from .lazy_graph_module import get_graph_module_cls
 from .node import Argument, base_types, map_aggregate
 from .proxy import ParameterProxy, Proxy, TracerBase, Scope, ScopeContextManager
 
@@ -1185,7 +1186,7 @@ def symbolic_trace(
     name = (
         root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
     )
-    return GraphModule(tracer.root, graph, name)
+    return get_graph_module_cls()(tracer.root, graph, name)
 
 
 @wrap

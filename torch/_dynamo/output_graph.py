@@ -11,6 +11,7 @@ import traceback
 import weakref
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
+from torch.fx import get_graph_module_cls
 
 import sympy
 
@@ -1055,7 +1056,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # free a bit of memory
         self.real_value_cache.clear()
 
-        gm = fx.GraphModule(root, self.graph)
+        gm = get_graph_module_cls()(root, self.graph)
         for register_finalizer in self.register_finalizer_fns:
             register_finalizer(gm)
 

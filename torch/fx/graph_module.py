@@ -316,7 +316,6 @@ class _WrappedCall:
             else:
                 raise e
 
-
 @compatibility(is_backward_compatible=True)
 class GraphModule(torch.nn.Module):
     """
@@ -810,7 +809,8 @@ class {module_name}(torch.nn.Module):
         return res
 
     def __copy__(self):
-        res = GraphModule(self, self.graph)
+        from .lazy_graph_module import get_graph_module_cls
+        res = get_graph_module_cls()(self, self.graph)
         res.meta = getattr(self, "meta", {})
         return res
 
@@ -848,7 +848,6 @@ class {module_name}(torch.nn.Module):
         new_gm = self.__copy__()
         new_gm._is_replica = True
         return new_gm
-
 
 # workarounds for issues in __torch_function__
 

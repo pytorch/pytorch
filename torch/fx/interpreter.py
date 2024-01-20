@@ -1,4 +1,5 @@
 from .graph_module import GraphModule
+from .lazy_graph_module import get_graph_module_cls
 from .graph import Graph
 from .node import Argument, Node, Target, map_arg, map_aggregate
 from .proxy import Proxy
@@ -508,4 +509,4 @@ class Transformer(Interpreter):
             def strip_proxy(a : Union[Argument, Proxy]) -> Any:
                 return a.node if isinstance(a, Proxy) else a
             self.new_graph.output(map_aggregate(result, strip_proxy))
-        return GraphModule(self.module, self.new_graph)
+        return get_graph_module_cls()(self.module, self.new_graph)

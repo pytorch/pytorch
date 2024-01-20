@@ -31,6 +31,7 @@ from torch._dynamo import (
     compiled_autograd,
     logging as dynamo_logging,
     utils as dynamo_utils,
+    config as dynamo_config,
 )
 from torch._dynamo.utils import counters, detect_fake_mode, lazy_format_graph_code
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
@@ -53,6 +54,7 @@ from .graph import GraphLowering
 from .ir import ExternKernelNode
 from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
+from ..fx import use_lazy_graph_module
 
 if config.is_fbcode():
     from torch._inductor.fb.utils import time_and_log
@@ -244,6 +246,11 @@ def fake_tensor_prop(
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
 @time_and_log(attr="compilation time (in seconds)")
+# Need this decorator for compile_fx_inner even if we already have one for
+# compile_fx. The reason is the compilation for backward graph may happen after
+# compile_fx return and we may want to use the LazyGraphModule for compiling
+# the backward graph as well.
+@use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -940,6 +947,7 @@ def fw_compiler_freezing(
     return wrapper
 
 
+@use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
 def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
