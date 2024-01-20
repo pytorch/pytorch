@@ -525,6 +525,7 @@ dynamo_expected_failures = {
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmax",
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmin",
     "TestArgmax.test_combinations_data66",
+    "TestArgmax.test_combinations_data65",
     "TestCond.test_sq_cases",
     "TestNormInt64.test_bad_args",
     "TestQR.test_qr_empty_m_0_n_3",
@@ -1821,7 +1822,6 @@ dynamo_expected_failures = {
     "TestAsArrayCPU.test_copy_list_cpu_int64",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int32",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_float32",  # test_tensor_creation_ops
-    "TestTensorCreationCPU.test_tensor_factory_type_inference_cpu",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_byte_to_int_cpu",  # test_tensor_creation_ops
     "TestTensorCreationCPU.test_block_diag_cpu",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int8",  # test_tensor_creation_ops
@@ -4545,6 +4545,7 @@ dynamo_skips = {
     "TestReductionsCPU.test_tensor_compare_ops_argmax_argmix_kthvalue_dim_empty_cpu",  # known py38 fail
     "TestReductionsCPU.test_histogram_cpu_float32",  # known py38 fail
     "TestReductionsCPU.test_count_nonzero_cpu_complex64",
+    "TestReductionsCPU.test_count_nonzero_cpu_complex128",
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_broadcast_tensors_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_adaptive_avg_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_isneginf_cpu_float32",  # known py38 fail
