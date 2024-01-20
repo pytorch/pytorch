@@ -571,6 +571,8 @@ API Reference
 
     .. automethod:: replace_all_uses
 
+.. autoclass:: torch.export.graph_signature.CustomObjArgument
+
 .. py:module:: torch.export.dynamic_shapes
 
 .. automodule:: torch.export.unflatten
@@ -578,3 +580,6 @@ API Reference
 
 .. automodule:: torch.export.wrapper
     :members:
+
+.. automodule:: torch.export.custom_obj
+.. autoclass:: torch.export.custom_obj.ScriptObjectMeta
