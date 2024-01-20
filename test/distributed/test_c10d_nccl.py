@@ -1400,7 +1400,7 @@ class DistributedDataParallelTest(
             with self.assertRaises(dist.DistBackendError):
                 pg.allreduce([inp]).wait(timedelta(seconds=5))
 
-            # Now when nonzero rank attempts to use communicator, original failure reason should be logged.j
+            # Now when nonzero rank attempts to use communicator, original failure reason should be logged.
             try:
                 pg.allreduce([torch.ones(2).cuda(self.rank)]).wait()
             except dist.DistBackendError as e:

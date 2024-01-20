@@ -1128,7 +1128,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   // threads dying due to aborted communicator and raising a SIGABRT
   // We need to include PG information in the abort reason so we can tell the
   // abort order.
-  std::string abortReason = c10::str("Process Group destroyed: ", logPrefix());
+  std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
   LOG(INFO)
       << logPrefix()
       << "ProcessGroupNCCL aborting communicators, check for 'abort finished' logs or look for abort hang";
