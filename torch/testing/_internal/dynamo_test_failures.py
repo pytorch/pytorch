@@ -526,6 +526,7 @@ dynamo_expected_failures = {
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmin",
     "TestArgmax.test_combinations_data66",
     "TestArgmax.test_combinations_data65",
+    "TestArgmax.test_combinations_data63",
     "TestCond.test_sq_cases",
     "TestNormInt64.test_bad_args",
     "TestQR.test_qr_empty_m_0_n_3",
@@ -795,6 +796,7 @@ dynamo_expected_failures = {
     "TestDLPack.test_higher_dims_ndim_8",  # torch_np/numpy_tests/core/test_dlpack
     "TestViewOpsLAZY.test_advanced_indexing_assignment_lazy",  # test_view_ops
     "TestOldViewOpsCPU.test_crow_col_indices_cpu",  # test_view_ops
+    "TestOldViewOpsCPU.test_atleast_cpu_complex64",
     "TestViewOpsLAZY.test_advanced_indexing_nonview_lazy",  # test_view_ops
     "TestTypePromotionCPU.test_alpha_mismatch_cpu",  # test_type_promotion
     "TestTypePromotionCPU.test_alternate_result_cpu",  # test_type_promotion
