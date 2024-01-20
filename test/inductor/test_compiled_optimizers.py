@@ -11,8 +11,19 @@ import torch
 
 import torch._inductor
 
-# The rest of the optimizers not yet imported: Adamax, LBFGS, RAdam, SparseAdam
-from torch.optim import Adadelta, Adagrad, Adam, AdamW, ASGD, NAdam, RMSprop, Rprop, SGD
+# The rest of the optimizers not yet imported: LBFGS, RAdam, SparseAdam
+from torch.optim import (
+    Adadelta,
+    Adagrad,
+    Adam,
+    Adamax,
+    AdamW,
+    ASGD,
+    NAdam,
+    RMSprop,
+    Rprop,
+    SGD,
+)
 
 from torch.testing._internal.common_optimizers import optim_db
 
@@ -58,6 +69,9 @@ KERNEL_COUNTS = {
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=12),
     SGD: KernelCounts(multitensor=2, singletensor=8),
+    Adamax: KernelCounts(
+        multitensor=2, singletensor=None
+    ),  # Single tensor eager needs to be refactored to enable tracing
 }
 
 
@@ -100,6 +114,9 @@ def build_compiled_opt_kwarg_db():
                             if foreach and device == "cuda"
                             else KERNEL_COUNTS[optim_info.optim_cls].singletensor
                         )
+
+                    if kwargs["kernel_count"] is None:
+                        continue
 
                     # Note on tolerances:
                     # test_adadelta_foreach_rho_weight_decay_cuda
