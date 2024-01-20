@@ -26,7 +26,7 @@ version_tuple getRuntimeVersion() {
   cudnnGetProperty(MAJOR_VERSION, &major);
   cudnnGetProperty(MINOR_VERSION, &minor);
   cudnnGetProperty(PATCH_LEVEL, &patch);
-  return version_tuple((size_t) major, (size_t) minor, (size_t) patch);
+  return version_tuple((size_t)major, (size_t)minor, (size_t)patch);
 #else
   return getCompileVersion();
 #endif
