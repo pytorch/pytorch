@@ -1,14 +1,23 @@
+import builtins
+import copy
 import functools
 import importlib
+import itertools
+import operator
 import sys
 import types
-from typing import Any, Dict
+from collections import defaultdict
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
+
+np: Optional[types.ModuleType] = None
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    pass
 
 import torch
 
-from .allowed_functions import _disallowed_function_ids, is_user_defined_allowed
-
-from .utils import hashable, is_function
+from .utils import hashable, is_function, NP_SUPPORTED_MODULES
 
 from .variables import (
     SkipFilesVariable,
@@ -101,6 +110,28 @@ manual_torch_name_rule_map = {
     "torch.sym_sqrt": TorchInGraphFunctionVariable,
     "torch.sym_ite": TorchInGraphFunctionVariable,
     "torch.Tensor#_make_wrapper_subclass": SkipFilesVariable,
+    "torch.Tensor#__init__": SkipFilesVariable,
+    "torch.cuda.set_device": SkipFilesVariable,
+    "torch.cuda.current_device": SkipFilesVariable,
+    "torch._C.autocast_decrement_nesting": SkipFilesVariable,
+    "torch._C.autocast_increment_nesting": SkipFilesVariable,
+    "torch.autograd.grad": SkipFilesVariable,
+    "torch._C.clear_autocast_cache": SkipFilesVariable,
+    "torch.distributions.constraints.is_dependent": SkipFilesVariable,
+    "torch.jit.isinstance": SkipFilesVariable,
+    "torch._C.set_anomaly_enabled": SkipFilesVariable,
+    "torch._C.set_autocast_cache_enabled": SkipFilesVariable,
+    "torch._C.set_autocast_cpu_dtype": SkipFilesVariable,
+    "torch._C.set_autocast_cpu_enabled": SkipFilesVariable,
+    "torch._C.set_autocast_enabled": SkipFilesVariable,
+    "torch._C.set_autocast_gpu_dtype": SkipFilesVariable,
+    "torch._C.set_autocast_ipu_dtype": SkipFilesVariable,
+    "torch._C.set_autocast_ipu_enabled": SkipFilesVariable,
+    "torch._C.set_autocast_xla_dtype": SkipFilesVariable,
+    "torch._C.set_autocast_xla_enabled": SkipFilesVariable,
+    "torch.resize_as_": SkipFilesVariable,
+    "torch.resize_as_sparse_": SkipFilesVariable,
+    "torch.get_default_device": TorchInGraphFunctionVariable,
 }
 
 
@@ -415,6 +446,7 @@ torch_c_binding_in_graph_functions = {
         "torch._C._get_model_ops_and_info_from_buffer",
         "torch._C._get_model_ops_and_info",
         "torch._C._get_module_info_from_flatbuffer",
+        "torch._C._get_nnpack_enabled",
         "torch._C._get_obj_in_tls",
         "torch._C._get_operation_overload",
         "torch._C._get_operator_version_map",
@@ -925,6 +957,7 @@ torch_c_binding_in_graph_functions = {
         "torch._C._set_mkldnn_enabled",
         "torch._C._set_multithreading_enabled",
         "torch._C._set_neg",
+        "torch._C._set_nnpack_enabled",
         "torch._C._set_print_stack_traces_on_fatal_signal",
         "torch._C._set_qengine",
         "torch._C._set_sdp_use_flash",
@@ -1078,9 +1111,6 @@ torch_c_binding_in_graph_functions = {
         "torch._C._warn",
         "torch._C._will_engine_execute_node",
         "torch._C._wrap_tensor_impl",
-        "torch._C.autocast_decrement_nesting",
-        "torch._C.autocast_increment_nesting",
-        "torch._C.clear_autocast_cache",
         "torch._C.fork",
         "torch._C.get_autocast_cpu_dtype",
         "torch._C.get_autocast_gpu_dtype",
@@ -1106,16 +1136,6 @@ torch_c_binding_in_graph_functions = {
         "torch._C.parse_schema",
         "torch._C.parse_type_comment",
         "torch._C.read_vitals",
-        "torch._C.set_anomaly_enabled",
-        "torch._C.set_autocast_cache_enabled",
-        "torch._C.set_autocast_cpu_dtype",
-        "torch._C.set_autocast_cpu_enabled",
-        "torch._C.set_autocast_enabled",
-        "torch._C.set_autocast_gpu_dtype",
-        "torch._C.set_autocast_ipu_dtype",
-        "torch._C.set_autocast_ipu_enabled",
-        "torch._C.set_autocast_xla_dtype",
-        "torch._C.set_autocast_xla_enabled",
         "torch._C.set_flush_denormal",
         "torch._C.set_num_interop_threads",
         "torch._C.set_num_threads",
@@ -1645,7 +1665,6 @@ torch_c_binding_in_graph_functions = {
         "torch.ge",
         "torch.geqrf",
         "torch.ger",
-        "torch.get_default_device",
         "torch.get_device",
         "torch.gradient",
         "torch.greater_equal",
@@ -1875,8 +1894,6 @@ torch_c_binding_in_graph_functions = {
         "torch.renorm",
         "torch.repeat_interleave",
         "torch.reshape",
-        "torch.resize_as_",
-        "torch.resize_as_sparse_",
         "torch.resolve_conj",
         "torch.resolve_neg",
         "torch.result_type",
@@ -2194,12 +2211,8 @@ torch_non_c_binding_in_graph_functions = {
         "torch._ops.dl_open_guard",
         "torch._ops.get_cached_ops",
         "torch._ops.key_extractor",
-        "torch._ops.mode_stack_per_key",
-        "torch._ops.pop_mode_for_key",
-        "torch._ops.push_mode_for_key",
         "torch._ops.reset_cached_ops",
         "torch._ops.resolve_key",
-        "torch._ops.temporarily_pop_mode",
         "torch._preload_cuda_deps",
         "torch._register_device_module",
         "torch._running_with_deploy",
@@ -2254,7 +2267,6 @@ torch_non_c_binding_in_graph_functions = {
         "torch.autograd.functional.vjp",
         "torch.autograd.grad_mode._enter_inference_mode",
         "torch.autograd.grad_mode._exit_inference_mode",
-        "torch.autograd.grad",
         "torch.autograd.gradcheck",
         "torch.autograd.gradgradcheck",
         "torch.autograd.graph._get_sid",
@@ -2363,7 +2375,6 @@ torch_non_c_binding_in_graph_functions = {
         "torch.cuda.clock_rate",
         "torch.cuda.cudart",
         "torch.cuda.current_blas_handle",
-        "torch.cuda.current_device",
         "torch.cuda.current_stream",
         "torch.cuda.default_stream",
         "torch.cuda.device_count",
@@ -2445,7 +2456,6 @@ torch_non_c_binding_in_graph_functions = {
         "torch.cuda.random.seed_all",
         "torch.cuda.random.seed",
         "torch.cuda.random.set_rng_state_all",
-        "torch.cuda.set_device",
         "torch.cuda.set_stream",
         "torch.cuda.set_sync_debug_mode",
         "torch.cuda.stream",
@@ -2772,7 +2782,7 @@ def load_object(name):
             val = _load_obj_from_str(x[0])
         if hasattr(val, "__wrapped__"):
             val = val.__wrapped__
-    except (AttributeError, ModuleNotFoundError):
+    except (AttributeError, ImportError):
         val = None
     return val
 
@@ -2806,6 +2816,174 @@ def is_aten_op_or_tensor_method(obj):
     )
 
 
+class FunctionIdSet:
+    """
+    Track a set of `id()`s of objects which are either allowed or not
+    allowed to go into the generated FX graph.  Use to test for torch.*,
+    numpy.*, builtins.*, etc.
+
+    Support user modification to permit customization of what can be
+    added to the graph and what will cause a graph break.
+    """
+
+    function_ids: Optional[Set[int]] = None
+    function_names: Optional[Dict[int, str]] = None
+
+    def __init__(self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]):
+        self.lazy_initializer = lazy_initializer
+
+    def __call__(self):
+        if self.function_ids is None:
+            value = self.lazy_initializer()
+            if isinstance(value, dict):
+                self.function_ids = set(value.keys())
+                self.function_names = value
+            else:
+                assert isinstance(value, set)
+                self.function_ids = value
+        return self.function_ids
+
+    def get_name(self, idx: int, default: str):
+        self()  # lazy init
+        assert self.function_names is not None
+        return self.function_names.get(idx, default)
+
+    def add(self, idx: int):
+        function_ids = self()  # lazy init
+        function_ids.add(idx)
+
+    def remove(self, idx: int):
+        function_ids = self()
+        if idx in function_ids:
+            function_ids.remove(idx)
+
+    def __contains__(self, idx: int):
+        return idx in self()
+
+
+@FunctionIdSet
+def _allowed_callable_ids() -> Dict[int, str]:
+    rv: Dict[int, str] = {}
+    return rv
+
+
+@FunctionIdSet
+def _disallowed_callable_ids() -> Dict[int, str]:
+    rv: Dict[int, str] = {}
+    return rv
+
+
+@FunctionIdSet
+def _builtin_function_ids() -> Dict[int, str]:
+    rv = {
+        id(v): f"builtins.{k}"
+        for k, v in builtins.__dict__.items()
+        if not k.startswith("_") and callable(v)
+    }
+    rv.update(
+        {
+            id(v): f"operator.{k}"
+            for k, v in operator.__dict__.items()
+            if not k.startswith("_") and callable(v)
+        }
+    )
+    rv.update(
+        {id(v): f"functools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
+    )
+    rv.update(
+        {
+            id(cast): "typing.cast",
+            id(functools.reduce): "functools.reduce",
+            id(copy.deepcopy): "copy.deepcopy",
+        }
+    )
+    return rv
+
+
+@FunctionIdSet
+def _numpy_function_ids() -> Dict[int, str]:
+    rv = dict()
+    for mod in NP_SUPPORTED_MODULES:
+        rv.update(
+            {
+                id(v): f"{mod.__name__}.{k}"
+                for k, v in mod.__dict__.items()
+                if callable(v)
+                and (getattr(v, "__module__", None) or mod.__name__) == mod.__name__
+            }
+        )
+    return rv
+
+
+@FunctionIdSet
+def _builtin_constant_ids() -> Dict[int, str]:
+    """
+    Collects constant builtins by eliminating callable items.
+    """
+    rv = {
+        id(v): f"builtins.{k}"
+        for k, v in builtins.__dict__.items()
+        if not k.startswith("_") and not callable(v)
+    }
+    return rv
+
+
+_lazy_module_init: Dict[str, List[Callable[[], None]]] = defaultdict(list)
+
+
+def add_module_init_func(name: str, init_func: Callable[[], None]) -> None:
+    """Register a module without eagerly importing it"""
+    # If the module is already imported, eagerly run init
+    assert "." not in name, f"Expected a root module name, but got {name}"
+    if name in sys.modules:
+        init_func()
+
+    # Module is not yet imported, delay processing until needed
+    assert name not in _lazy_module_init
+    _lazy_module_init[name].append(init_func)
+
+
+def _maybe_init_lazy_module(obj: object) -> None:
+    module = getattr(obj, "__module__", None)
+    if module is None:
+        return
+
+    base_module = module.split(".")[0]
+    init_funcs = _lazy_module_init.pop(base_module, None)
+    if init_funcs is not None:
+        for fn in init_funcs:
+            fn()
+
+
+def is_callable_allowed(obj) -> bool:
+    _maybe_init_lazy_module(obj)
+    return id(obj) in _allowed_callable_ids
+
+
+def is_callable_disallowed(obj) -> bool:
+    _maybe_init_lazy_module(obj)
+    return id(obj) in _disallowed_callable_ids
+
+
+def is_forbidden(obj) -> bool:
+    _maybe_init_lazy_module(obj)
+    return getattr(obj, "_dynamo_forbidden", False)
+
+
+def is_builtin_callable(obj) -> bool:
+    return id(obj) in _builtin_function_ids
+
+
+def is_builtin_constant(obj) -> bool:
+    return id(obj) in _builtin_constant_ids
+
+
+def is_numpy(obj) -> bool:
+    if np is None:
+        return False
+    return isinstance(obj, (np.ndarray, np.generic)) or id(obj) in _numpy_function_ids
+
+
 """
 Main entry point for looking up the trace rule (the Dynamo variable) for a given object.
 E.g, the lookup result of `torch.amp.autocast_mode.autocast` is `TorchCtxManagerClassVariable`.
@@ -2816,9 +2994,9 @@ def lookup(obj):
     if not hashable(obj):
         return None
     # Custom allow/disallow in graph takes precedence over the `torch_name_rule_map`.
-    if id(obj) in _disallowed_function_ids:
-        return None
-    if callable(obj) and is_user_defined_allowed(obj):
+    if callable(obj) and is_callable_disallowed(obj):
+        return SkipFilesVariable
+    if callable(obj) and is_callable_allowed(obj):
         return TorchInGraphFunctionVariable
     # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
     if isinstance(obj, functools._lru_cache_wrapper) or (
