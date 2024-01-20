@@ -53,15 +53,12 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_norm_vector_cpu_float32",
     "TestLinalgCPU.test_solve_cpu_complex128",
     "TestLinalgCPU.test_lobpcg_torchscript_cpu_float64",
-    "TestLinalgCPU.test_einsum_sublist_format_cpu_float64",
     "TestLinalgCPU.test_solve_cpu_float32",
     "TestLinalgCPU.test_addr_integral_cpu_int16",
     "TestLinalgCPU.test_norm_vector_cpu_float64",
-    "TestLinalgCPU.test_einsum_random_cpu_complex128",
     "TestLinalgCPU.test_addmm_sizes_cpu_float64",
     "TestLinalgCPU.test_norm_dtype_cpu_float64",
     "TestLinalgCPU.test_addr_integral_cpu_int8",
-    "TestLinalgCPU.test_einsum_random_cpu_float64",
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_complex64",
     "TestLinalgCPU.test_pinv_cpu_float32",
     "TestLinalgCPU.test_addr_integral_cpu_uint8",
@@ -78,7 +75,6 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_pinv_cpu_complex64",
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",
     "TestLinalgCPU.test_geqrf_cpu_complex128",
-    "TestLinalgCPU.test_einsum_sublist_format_cpu_complex128",
     "TestLinalgCPU.test_geqrf_cpu_complex64",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_float64",
     "TestLinalgCPU.test_geqrf_cpu_float64",
@@ -3059,7 +3055,6 @@ dynamo_expected_failures = {
     "TestTorch.test_contains",  # test_torch
     "TestTorch.test_new",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_map2_cpu",  # test_torch
-    "TestTorch.test_newaxis_numpy_comparison",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_ne_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_gt_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_bfloat16",  # test_torch
@@ -3086,7 +3081,6 @@ dynamo_expected_failures = {
     "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_float32",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool2d_cpu_float32",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool3d_cpu_float32",  # test_torch
-    "TestTorchDeviceTypeCPU.test_where_scalar_handcrafted_values_cpu",  # test_torch
     "TestTorch.test_upsample_nearest2d_meta",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_map_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool1d_cpu_float64",  # test_torch
