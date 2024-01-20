@@ -6371,6 +6371,7 @@
 - func: zeros(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: zeros_symint
+    NestedTensorCPU, NestedTensorCUDA: zeros_nested_symint
 
 - func: zeros.out(SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

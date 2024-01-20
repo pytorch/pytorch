@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/core/SingletonSymNodeImpl.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/NestedTensorImpl.h>
@@ -277,7 +278,23 @@ IntArrayRef NestedTensorImpl::sizes_custom() const {
   TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue.");
 }
 c10::SymIntArrayRef NestedTensorImpl::sym_sizes_custom() const {
-  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue.");
+  // C++ NT should not support any ops that do metadata mutation
+  if (C10_UNLIKELY(!sym_sizes_.has_value())) {
+    int64_t out_len = nested_sizes_.size(1) + 1;
+    std::vector<c10::SymInt> sym_sizes(out_len);
+    for (const auto i : c10::irange(out_len)) {
+      if (auto mb_size = opt_size(i)) {
+        sym_sizes[i] = c10::SymInt(*mb_size);
+      } else {
+        auto vec = nested_sizes_.select(1, i - 1);
+        // See NOTE [ SingletonVariant ]
+        sym_sizes[i] = c10::SymInt(
+          c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(-1, -1, std::move(vec), -1, c10::SingletonVariant::CPP)));
+      }
+    }
+    sym_sizes_ = sym_sizes;
+  }
+  return c10::SymIntArrayRef(*sym_sizes_);
 }
 
 c10::SymIntArrayRef NestedTensorImpl::sym_strides_custom() const {

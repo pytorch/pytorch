@@ -21,6 +21,12 @@ namespace at {
 
 namespace {
 
+inline DispatchKeySet computeDispatchKeySetFromSize(c10::SymIntArrayRef sizes) {
+  auto ks = c10::DispatchKeySet();
+  c10::impl::updateDispatchKeySetFromSize(ks, sizes);
+  return ks;
+}
+
 ${backend_select_method_definitions}
 
 bool is_pinned(const Tensor& self, c10::optional<at::Device> device) {
