@@ -180,7 +180,7 @@ def aot_dispatch_autograd(
                 + inner_meta.num_outputs_rng_offset
             )
             fw_module, bw_module = aot_config.partition_fn(
-                fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
+                fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs, num_params_buffers=aot_config.num_params_buffers,
             )
             fw_outs = next(n for n in fw_module.graph.nodes if n.op == "output").args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints

@@ -224,7 +224,7 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
 
 
 def default_partition(
-    joint_module: fx.GraphModule, _joint_inputs, *, num_fwd_outputs
+    joint_module: fx.GraphModule, _joint_inputs, *, num_fwd_outputs, num_params_buffers: int = -1,
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the :attr:`joint_module` in a manner that closely resembles the
@@ -618,7 +618,7 @@ def cleanup_recompute_tags(joint_module):
 
 def min_cut_rematerialization_partition(
     joint_module: fx.GraphModule, _joint_inputs, compiler="inductor", recomputable_ops=None,
-    *, num_fwd_outputs
+    *, num_fwd_outputs, num_params_buffers,
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the joint graph such that the backward recomputes the forward.
@@ -820,6 +820,13 @@ def min_cut_rematerialization_partition(
         return not all(is_fusible(node, user) for user in node.users)
 
     def get_node_weight(node) -> int:
+        if 'primal' in str(node):
+            primal_idx = int(str(node).split("_")[1])
+            # params and buffers have no memory cost associated with saving them for backward,
+            # because they are guaranteed to live for the duration of the model's lifetime.
+            # TODO: thing harder about this
+            if primal_idx <= num_params_buffers:
+                return 0
         mem_sz = _size_of(node)
 
         # Heuristic to bias towards nodes closer to the backwards pass
