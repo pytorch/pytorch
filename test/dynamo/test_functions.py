@@ -2206,12 +2206,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             x = x.sin()
             return x
 
-        def g(x):
-            x = x.sin()
-            print(x)
-            x = x.cos()
-            return x
-
         def fn(x):
             x = x.tan()
             x = h(x)
@@ -2227,6 +2221,40 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         # First graph is x = sin(cos(tan(x)))
         # Second graph is x = tan(cos(sin(x)))
+
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_nested_single_break_triple_inline(self):
+        def h(x):
+            x = x.cos()
+            print(x)
+            x = x.sin()
+            return x
+
+        def g(x):
+            x = x.sin()
+            x = h(x)
+            x = x.cos()
+            return x
+
+        def f(x):
+            x = x.tan()
+            x = g(x)
+            x = x.tan()
+            return x
+
+        def e(x):
+            x = x.tan()
+            x = f(x)
+            x = x.tan()
+            return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(e)
+        x = torch.randn(4)
+        res = e(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
 instantiate_parametrized_tests(FunctionTests)

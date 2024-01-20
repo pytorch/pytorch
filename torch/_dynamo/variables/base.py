@@ -212,6 +212,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         elif istype(value, tuple):
             result = tuple(cls.apply(fn, v, cache, skip_fn) for v in value)
         elif istype(value, (dict, collections.OrderedDict)):
+            assert "__name__" not in value, "_nonvar_fields should have excluded this"
             result = {
                 k: cls.apply(fn, v, cache, skip_fn) for k, v in list(value.items())
             }

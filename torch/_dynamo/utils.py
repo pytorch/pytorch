@@ -2445,24 +2445,3 @@ def maybe_enable_compiled_autograd(should_enable):
             yield ctx
     else:
         yield
-
-
-def safe_hasattr_and_no_user_defined_getattr(obj, name):
-    """
-    This is a slightly different convention from hasattr(). Where
-    hasattr tells us if an attribute exists on the object, this function
-    tells us if the attribute exists on the object AND there are no user defined
-    getattr methods.
-
-    This is useful because we want to know if an attribute exists on the object, safely,
-    without triggering user defined getattr methods.
-
-    Specifically, this method is useful for routing dynamo control flow, as it will reject
-    user defined getattr methods that could potentially cause side effects.
-
-    Note:One thing to keep in mind is that checking for SAFETY takes precedence over checking hasattr.
-    This means that for cases where we are unsafe, we will return False, even if the attribute is there.
-    """
-    if object_has_getattribute(obj) or get_custom_getattr(obj):
-        return False
-    return hasattr(obj, name)

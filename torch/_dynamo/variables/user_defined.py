@@ -36,7 +36,6 @@ from ..utils import (
     namedtuple_fields,
     object_has_getattribute,
     proxy_args_kwargs,
-    safe_hasattr_and_no_user_defined_getattr,
     tensortype_to_dtype,
 )
 from .base import MutableLocal, VariableTracker
@@ -286,10 +285,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif (
             issubclass(type(self.value), type)
-            and safe_hasattr_and_no_user_defined_getattr(self.value, "__enter__")
-            and safe_hasattr_and_no_user_defined_getattr(self.value, "__exit__")
+            and hasattr(self.value, "__enter__")
+            and hasattr(self.value, "__exit__")
             and check_constant_args(args, kwargs)
-            and self.value.__init__ == object.__init__
             and len(kwargs) == 0  # TODO(ybliang): support kwargs
         ):
             unwrapped_args = [x.as_python_constant() for x in args]
