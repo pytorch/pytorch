@@ -38,7 +38,7 @@ class GuardFn(Protocol):
     verbose_code_parts: List[str]
     global_scope: Dict[str, object]
     guard_fail_fn: Optional[Callable[[GuardFail], None]]
-    cache_entry: Optional[weakref.ref[CacheEntry]]
+    cache_entry: Optional[weakref.ref]  # type: ignore[type-arg]
 
     # maps locals of user function to bool
     def __call__(self, f_locals: Dict[str, object]) -> bool:

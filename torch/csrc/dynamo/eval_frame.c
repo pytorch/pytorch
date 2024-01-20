@@ -367,12 +367,12 @@ static struct PyGetSetDef CacheEntry_properties[] = {
     {NULL}};
 
 
-static PyObject* CacheEntry_invalidate(CacheEntry* self, PyObject* args) {
-  DEBUG_CHECK(self->extra_state != SKIP_CODE)
-  DEBUG_NULL_CHECK(self->extra_state);
+static CacheEntry* extract_cache_entry(ExtraState* extra_state);
 
+static PyObject* CacheEntry_invalidate(CacheEntry* self, PyObject* args) {
   // handle case where CacheEntry is the first entry in self->extra_state
-  if (self->extra_state->cache_entry == self) {
+  CacheEntry* first_cache_entry = extract_cache_entry(self->extra_state);
+  if (first_cache_entry != NULL && first_cache_entry == self) {
     DEBUG_CHECK((PyObject*)self->prev == Py_None);
     // will be decremented later on, so increment now
     Py_INCREF(self->next);
@@ -752,6 +752,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, size_t 
     // move it to the head
     if (e->prev != (CacheEntry*)Py_None) {
         ExtraState* extra = get_extra_state(frame->f_code);
+        DEBUG_CHECK(extra == e->extra_state);
         // Override the extra state to reflect the updated cache line.
         CacheEntry* old_cache_entry = extra->cache_entry;
         e->prev->next = e->next;
@@ -760,6 +761,9 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, size_t 
         }
         e->next = old_cache_entry;
         e->prev = (CacheEntry*)Py_None;
+        if (old_cache_entry != (CacheEntry*)Py_None) {
+          old_cache_entry->prev = e;
+        }
         extra->cache_entry = e;
     }
     return (PyObject*)e->code;

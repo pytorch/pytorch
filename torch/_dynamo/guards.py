@@ -1193,11 +1193,12 @@ class CheckFunctionManager:
         # A weakref is no longer valid, self.check_fn should return false
         if (
             self.valid
+            and hasattr(self, "check_fn")
             and self.check_fn is not DeletedGuardFn
             and (cache_entry := self.check_fn.cache_entry()) is not None
         ):
             assert isinstance(cache_entry, CacheEntry)
-            cache_entry.invalidate()
+            cache_entry.invalidate()  # type: ignore[attr-defined]
             # to make sure we don't try using check_fn again
             self.check_fn = DeletedGuardFn
         self.valid = False
