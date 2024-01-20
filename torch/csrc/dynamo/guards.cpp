@@ -1121,7 +1121,7 @@ class RootGuardManager : public GuardManager {
       if (!result) {
         _reset_relational_guard_state();
         return GuardDebugInfo(
-            false, debug_info.failed_guard, num_guards_executed);
+            false, tmp_debug_info.failed_guard, num_guards_executed);
       }
     }
     return GuardDebugInfo(true, "", num_guards_executed);

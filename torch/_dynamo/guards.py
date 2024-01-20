@@ -130,6 +130,9 @@ class GuardManager:
         # that with pybind and PyObjects.
         return self.root.check(x)
 
+    def check_verbose(self, x):
+        return self.root.check_verbose(x)
+
 
 # For user stack printing
 @functools.lru_cache(None)
@@ -1384,7 +1387,14 @@ def get_guard_fail_reason(
     Updates `guard_failures` with the generated reason.
     Only the first failed check of guard_fn is reported.
     """
-    return "MISSING GUARD FAIL REASON INFRA"
+
+    # TODO - Use a config flag for guard manager
+    if True:
+        guard_manager = guard_fn
+        guard_debug_info = guard_manager.check_verbose(f_locals)
+        assert not guard_debug_info.result
+        return guard_debug_info.failed_guard
+
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
     scope["___check_tensors"] = scope["___check_tensors_verbose"]
