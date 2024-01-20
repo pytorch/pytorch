@@ -83,7 +83,11 @@ class RAdam(Optimizer):
                 state = self.state[p]
                 # Lazy state initialization
                 if len(state) == 0:
-                    state["step"] = torch.tensor(0.0, dtype=_get_scalar_dtype())
+                    state['step'] = (
+                        torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
+                        if group['capturable']
+                        else torch.tensor(0.0, dtype=_get_scalar_dtype())
+                    )
                     # Exponential moving average of gradient values
                     state["exp_avg"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
@@ -433,11 +437,12 @@ def _multi_tensor_radam(
             # TODO(mlazos): we should try and get a foreach_where op https://github.com/pytorch/pytorch/issues/117884
             rect = [torch.where(rho_t > 5, n, torch.zeros_like(n)) for n, rho_t in zip(num, rho_t_list)]
             unrect_step_size = [torch.where(rect > 0, torch.zeros_like(rect), torch.ones_like(rect)) for rect in rect]
+            torch._foreach_mul_(unrect_step_size, lr)
 
             bias_correction1 = torch._foreach_pow(beta1, grouped_state_steps)
             torch._foreach_neg_(bias_correction1)
             torch._foreach_add_(bias_correction1, 1)
-            torch._foreach_mul_(unrect_step_size, lr)
+
             torch._foreach_div_(unrect_step_size, bias_correction1)
             torch._foreach_neg_(unrect_step_size)
 
