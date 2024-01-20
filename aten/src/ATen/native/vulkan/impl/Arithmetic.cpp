@@ -17,12 +17,13 @@ api::ShaderInfo get_shader(const OpType type) {
     case OpType::DIV:
       return VK_KERNEL(div);
   }
+  VK_THROW("Invalid OpType");
 }
 
 struct Params final {
-  api::utils::ivec4 output_sizes;
-  api::utils::ivec4 input1_sizes;
-  api::utils::ivec4 input2_sizes;
+  api::utils::ivec4 outputSizes;
+  api::utils::ivec4 input1Sizes;
+  api::utils::ivec4 input2Sizes;
   float alpha;
 };
 

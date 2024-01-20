@@ -825,8 +825,6 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
     return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false);
   }
 
-  id<MTLBuffer> outputBuffer = dst.has_storage() ? getMTLBufferStorage(dst) : getMTLBufferStorage(output);
-  int64_t outputStorageOffset = output.storage_offset() * output.element_size();
   uint32_t numThreads = output.numel();
 
   MPSStream* mpsStream = getCurrentMPSStream();
@@ -856,20 +854,12 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
     }
 
     [computeEncoder setComputePipelineState:gatherPSO];
-    [computeEncoder setBuffer:getMTLBufferStorage(src) offset:src.storage_offset() * src.element_size() atIndex:0];
-    [computeEncoder setBuffer:outputBuffer offset:outputStorageOffset atIndex:1];
+    mtl_setBuffer(computeEncoder, src, 0);
+    mtl_setBuffer(computeEncoder, dst.has_storage() ? dst : output, 1);
     [computeEncoder setBytes:&src_sizes[0] length:sizeof(uint32_t) * kernel_size atIndex:2];
     [computeEncoder setBytes:&src_strides[0] length:sizeof(uint32_t) * kernel_size atIndex:3];
     [computeEncoder setBytes:&numThreads length:sizeof(uint32_t) atIndex:4];
-
-    MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
-    NSUInteger threadsPerThreadgroup_ = gatherPSO.maxTotalThreadsPerThreadgroup;
-    if (threadsPerThreadgroup_ > numThreads) {
-      threadsPerThreadgroup_ = numThreads;
-    }
-
-    MTLSize threadsPerThreadgroup = MTLSizeMake(threadsPerThreadgroup_, 1, 1);
-    [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadsPerThreadgroup];
+    mtl_dispatch1DJob(computeEncoder, gatherPSO, numThreads);
 
     getMPSProfiler().endProfileKernel(gatherPSO);
   });
@@ -891,10 +881,7 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
     return output;
   }
 
-  id<MTLBuffer> outputBuffer = getMTLBufferStorage(output);
-  id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   uint32_t numThreads = src.numel();
-  int64_t outputStorageOffset = output.storage_offset() * output.element_size();
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
@@ -923,20 +910,12 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
       }
 
       [computeEncoder setComputePipelineState:scatterPSO];
-      [computeEncoder setBuffer:sourceBuffer offset:src.storage_offset() * src.element_size() atIndex:0];
-      [computeEncoder setBuffer:outputBuffer offset:outputStorageOffset atIndex:1];
+      mtl_setBuffer(computeEncoder, src, 0);
+      mtl_setBuffer(computeEncoder, output, 1);
       [computeEncoder setBytes:&output_sizes[0] length:sizeof(uint32_t) * kernel_size atIndex:2];
       [computeEncoder setBytes:&output_strides[0] length:sizeof(uint32_t) * kernel_size atIndex:3];
       [computeEncoder setBytes:&numThreads length:sizeof(uint32_t) atIndex:4];
-
-      MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
-      NSUInteger threadsPerThreadgroup_ = scatterPSO.maxTotalThreadsPerThreadgroup;
-      if (threadsPerThreadgroup_ > numThreads) {
-        threadsPerThreadgroup_ = numThreads;
-      }
-
-      MTLSize threadsPerThreadgroup = MTLSizeMake(threadsPerThreadgroup_, 1, 1);
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadsPerThreadgroup];
+      mtl_dispatch1DJob(computeEncoder, scatterPSO, numThreads);
 
       getMPSProfiler().endProfileKernel(scatterPSO);
     }

@@ -1638,16 +1638,16 @@ Tensor any_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdi
 
 Tensor& all_dims_out_default(
     const Tensor &self, OptionalIntArrayRef dim, bool keepdim, Tensor &result) {
-  TORCH_CHECK(self.device() == result.device(), "all: Output must be on the same device as input");
-  auto tmp = self.all(dim, keepdim);
+  TORCH_CHECK(self.device() == result.device(), "all.dims: output must be on the same device as input");
+  auto tmp = all_dims_default(self, dim, keepdim);
   at::native::resize_output(result, tmp.sizes());
   return result.copy_(tmp);
 }
 
 Tensor& any_dims_out_default(
     const Tensor &self, OptionalIntArrayRef dim, bool keepdim, Tensor &result) {
-  TORCH_CHECK(self.device() == result.device(), "any: Output must be on the same device as input");
-  auto tmp = self.any(dim, keepdim);
+  TORCH_CHECK(self.device() == result.device(), "any.dims: output must be on the same device as input");
+  auto tmp = any_dims_default(self, dim, keepdim);
   at::native::resize_output(result, tmp.sizes());
   return result.copy_(tmp);
 }
