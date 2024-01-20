@@ -26,13 +26,13 @@ load(
     "PROD_F16C_MICROKERNEL_SRCS",
     "PROD_FMA3_MICROKERNEL_SRCS",
     "PROD_FP16ARITH_MICROKERNEL_SRCS",
+    "PROD_NEONDOTFP16ARITH_AARCH64_MICROKERNEL_SRCS",
+    "PROD_NEONDOTFP16ARITH_MICROKERNEL_SRCS",
     "PROD_NEONDOT_AARCH64_MICROKERNEL_SRCS",
     "PROD_NEONDOT_MICROKERNEL_SRCS",
     "PROD_NEONFMA_MICROKERNEL_SRCS",
     "PROD_NEONFP16ARITH_AARCH64_MICROKERNEL_SRCS",
     "PROD_NEONFP16ARITH_MICROKERNEL_SRCS",
-    "PROD_NEONDOTFP16ARITH_AARCH64_MICROKERNEL_SRCS",
-    "PROD_NEONDOTFP16ARITH_MICROKERNEL_SRCS",
     "PROD_NEONFP16_MICROKERNEL_SRCS",
     "PROD_NEONI8MM_MICROKERNEL_SRCS",
     "PROD_NEONV8_MICROKERNEL_SRCS",
@@ -555,8 +555,15 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         compiler_flags = [
             "-O2",
-            "-mavx",
-        ],
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_32": [
+                "-mavx",
+            ],
+            "ovr_config//cpu:x86_64": [
+                "-mavx",
+            ],
+        }),
         fbobjc_preprocessor_flags = [
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
@@ -564,7 +571,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         labels = labels,
         platform_compiler_flags = [
             (
-                "x86",
+                "x86|x86_64|platform009|platform010",
                 [
                     "-mavx",
                 ],
@@ -626,7 +633,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         ],
     )
 
-
     fb_xplat_cxx_library(
         name = "ukernels_avx512vnni",
         srcs = PROD_AVX512VNNI_MICROKERNEL_SRCS if is_arvr_mode() else [],
@@ -638,8 +644,15 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         compiler_flags = [
             "-O2",
-            "-mavx",
-        ],
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_32": [
+                "-mavx",
+            ],
+            "ovr_config//cpu:x86_64": [
+                "-mavx",
+            ],
+        }),
         fbobjc_preprocessor_flags = [
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
@@ -800,7 +813,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         ],
     )
 
-
     fb_xplat_cxx_library(
         name = "ukernels_f16c",
         srcs = PROD_F16C_MICROKERNEL_SRCS if is_arvr_mode() else [],
@@ -812,8 +824,15 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         compiler_flags = [
             "-O2",
-            "-mf16c",
-        ],
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_32": [
+                "-mf16c",
+            ],
+            "ovr_config//cpu:x86_64": [
+                "-mf16c",
+            ],
+        }),
         fbobjc_preprocessor_flags = [
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
@@ -821,7 +840,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         labels = labels,
         platform_compiler_flags = [
             (
-                "x86",
+                "x86|x86_64|platform009|platform010",
                 [
                     "-mf16c",
                 ],
@@ -896,7 +915,22 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         compiler_flags = [
             "-O2",
-            "-mxop",
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_32": [
+                "-mxop",
+            ],
+            "ovr_config//cpu:x86_64": [
+                "-mxop",
+            ],
+        }),
+        platform_compiler_flags = [
+            (
+                "x86|x86_64|platform009|platform010",
+                [
+                    "-mxop",
+                ],
+            ),
         ],
         fbobjc_preprocessor_flags = [
             "-DXNN_PRIVATE=",
@@ -978,9 +1012,17 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         compiler_flags = [
             "-O2",
-            "-mfma",
-            "-mf16c",
-        ],
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_32": [
+                "-mfma",
+                "-mf16c",
+            ],
+            "ovr_config//cpu:x86_64": [
+                "-mfma",
+                "-mf16c",
+            ],
+        }),
         fbobjc_preprocessor_flags = [
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
@@ -988,7 +1030,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         labels = labels,
         platform_compiler_flags = [
             (
-                "^(i[3-6]86|x86|x86_64|AMD64)$",
+                "(i[3-6]86|x86|x86_64|AMD64)",
                 [
                     "-mfma",
                     "-mf16c",
@@ -1076,10 +1118,19 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         compiler_flags = [
             "-O2",
-            "-mavx2",
-            "-mfma",
-            "-mf16c",
-        ],
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_32": [
+                "-mavx2",
+                "-mfma",
+                "-mf16c",
+            ],
+            "ovr_config//cpu:x86_64": [
+                "-mavx2",
+                "-mfma",
+                "-mf16c",
+            ],
+        }),
         fbobjc_preprocessor_flags = [
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
@@ -1087,7 +1138,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         labels = labels,
         platform_compiler_flags = [
             (
-                "x86",
+                "x86|x86_64|platform009|platform010",
                 [
                     "-mavx2",
                     "-mfma",
@@ -1182,8 +1233,15 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         compiler_flags = [
             "-O2",
-            "-mavx512f",
-        ],
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_32": [
+                "-mavx512f",
+            ],
+            "ovr_config//cpu:x86_64": [
+                "-mavx512f",
+            ],
+        }),
         fbobjc_preprocessor_flags = [
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
@@ -1191,7 +1249,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         labels = labels,
         platform_compiler_flags = [
             (
-                "x86",
+                "x86|x86_64|platform009|platform010",
                 [
                     "-mavx512f",
                 ],
@@ -1226,13 +1284,25 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         compiler_flags = [
             "-O2",
-            "-mavx512f",
-            "-mavx512cd",
-            "-mavx512bw",
-            "-mavx512dq",
-            "-mavx512vl",
-            "-mavx512vbmi",
-        ],
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_32": [
+                "-mavx512f",
+                "-mavx512cd",
+                "-mavx512bw",
+                "-mavx512dq",
+                "-mavx512vl",
+                "-mavx512vbmi",
+            ],
+            "ovr_config//cpu:x86_64": [
+                "-mavx512f",
+                "-mavx512cd",
+                "-mavx512bw",
+                "-mavx512dq",
+                "-mavx512vl",
+                "-mavx512vbmi",
+            ],
+        }),
         fbobjc_preprocessor_flags = [
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
@@ -1240,7 +1310,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         labels = labels,
         platform_compiler_flags = [
             (
-                "^(i[3-6]86|x86|x86_64|AMD64)$",
+                "(i[3-6]86|x86|x86_64|AMD64)",
                 [
                     "-mavx512f",
                     "-mavx512cd",
@@ -1282,7 +1352,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ":interface",
         ],
     )
-
 
     fb_xplat_cxx_library(
         name = "ukernels_avx512_ovr_win32",
@@ -1333,12 +1402,23 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         compiler_flags = [
             "-O2",
-            "-mavx512f",
-            "-mavx512cd",
-            "-mavx512bw",
-            "-mavx512dq",
-            "-mavx512vl",
-        ],
+        ] + select({
+            "DEFAULT": [],
+            "ovr_config//cpu:x86_32": [
+                "-mavx512f",
+                "-mavx512cd",
+                "-mavx512bw",
+                "-mavx512dq",
+                "-mavx512vl",
+            ],
+            "ovr_config//cpu:x86_64": [
+                "-mavx512f",
+                "-mavx512cd",
+                "-mavx512bw",
+                "-mavx512dq",
+                "-mavx512vl",
+            ],
+        }),
         fbobjc_preprocessor_flags = [
             "-DXNN_PRIVATE=",
             "-DXNN_INTERNAL=",
@@ -1346,7 +1426,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         labels = labels,
         platform_compiler_flags = [
             (
-                "^(i[3-6]86|x86|x86_64|AMD64)$",
+                "(i[3-6]86|x86|x86_64|AMD64)",
                 [
                     "-mavx512f",
                     "-mavx512cd",
@@ -1471,7 +1551,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                     "-march=armv6",
                     "-mfpu=vfp",
                     "-munaligned-access",
-                ]
+                ],
             ),
         ],
         preferred_linkage = "static",
@@ -1566,7 +1646,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             (
                 "(aarch64|arm64)",
                 PROD_NEON_MICROKERNEL_SRCS + [PROD_NEON_AARCH64_MICROKERNEL_SRCS[0]],
-            )
+            ),
         ] if not is_arvr_mode() else [],
         labels = labels,
         preferred_linkage = "static",
@@ -1744,7 +1824,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         ],
     )
 
-
     fb_xplat_cxx_library(
         name = "ukernels_neon_fp16",
         srcs = PROD_NEONFP16_MICROKERNEL_SRCS,
@@ -1803,8 +1882,8 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ] + select({
+            "DEFAULT": [],
             "ovr_config//cpu:arm64": ["-march=armv8-a"],
-            "DEFAULT": []
         }),
         fbobjc_preprocessor_flags = [
             "-DXNN_PRIVATE=",
@@ -1862,12 +1941,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ] + select({
+            "DEFAULT": [],
             "ovr_config//cpu:arm32": [
                 "-march=armv8.2-a+dotprod",
                 "-mfpu=neon-fp-armv8",
                 "-mfloat-abi=softfp",
             ],
-            "DEFAULT": []
         }),
         fbobjc_preprocessor_flags = [
             "-DXNN_PRIVATE=",
@@ -1918,8 +1997,8 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         compiler_flags = [
             "-O2",
         ] + select({
+            "DEFAULT": [],
             "ovr_config//cpu:arm64": ["-march=armv8.2-a+dotprod"],
-            "DEFAULT": []
         }),
         fbobjc_preprocessor_flags = [
             "-DXNN_PRIVATE=",
@@ -1938,7 +2017,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             (
                 "(aarch64|arm64)",
                 PROD_NEONDOT_MICROKERNEL_SRCS + PROD_NEONDOT_AARCH64_MICROKERNEL_SRCS,
-            )
+            ),
         ] if not is_arvr_mode() else [],
         preferred_linkage = "static",
         preprocessor_flags = [
@@ -2026,7 +2105,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         ] + select({
             "DEFAULT": [],
             "ovr_config//cpu:arm64": [
-                "-march=armv8.2-a+dotprod+fp16"
+                "-march=armv8.2-a+dotprod+fp16",
             ],
         }),
         fbobjc_preprocessor_flags = [
@@ -2037,7 +2116,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             (
                 "(aarch64|arm64)",
                 [
-                    "-march=armv8.2-a+dotprod+fp16"
+                    "-march=armv8.2-a+dotprod+fp16",
                 ],
             ),
         ],
@@ -2075,13 +2154,13 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         compiler_flags = [
             "-O2",
-        ] + select ({
+        ] + select({
+            "DEFAULT": [],
             "ovr_config//cpu:arm32": [
                 "-marm",
                 "-march=armv8.2-a+fp16",
                 "-mfpu=neon-fp-armv8",
             ],
-            "DEFAULT": []
         }),
         fbobjc_preprocessor_flags = [
             "-DXNN_PRIVATE=",
@@ -2131,9 +2210,9 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         compiler_flags = [
             "-O2",
-        ] +  select({
+        ] + select({
+            "DEFAULT": [],
             "ovr_config//cpu:arm64": ["-march=armv8.2-a+fp16"],
-            "DEFAULT": []
         }),
         fbobjc_preprocessor_flags = [
             "-DXNN_PRIVATE=",
@@ -2207,8 +2286,8 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "(arm64|aarch64)",
                 [
                     "-march=armv8.2-a+i8mm+fp16",
-                ]
-            )
+                ],
+            ),
         ],
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
         preferred_linkage = "static",
@@ -2241,7 +2320,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
                 "-marm",
                 "-march=armv8.2-a+dotprod+fp16",
                 "-mfpu=neon-fp-armv8",
-            ]
+            ],
         }),
         fbobjc_preprocessor_flags = [
             "-DXNN_PRIVATE=",
