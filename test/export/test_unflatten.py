@@ -514,6 +514,7 @@ class TestUnflatten(TestCase):
 
         self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
 
+    @skipIfTorchDynamo("custom objects not supported in dynamo yet")
     def test_unflatten_constant_obj(self):
         if IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")

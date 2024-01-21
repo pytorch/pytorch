@@ -1449,6 +1449,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if config.aot_inductor.abi_compatible:
             self.header.splice("#include <torch/csrc/inductor/aoti_torch/c/shim.h>")
         else:
+            if not V.graph.aot_mode:
+                self.header.splice(
+                    """
+                    #include <pybind11/pybind11.h>
+                    """
+                )
             self.header.splice(
                 """
                 #include <ATen/ATen.h>
@@ -1622,7 +1628,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 else:
                     self.prefix.splice(
                         """
-                            py::gil_scoped_release release;
+                            pybind11::gil_scoped_release release;
                         """
                     )
 
@@ -1978,11 +1984,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return
 
         result.writeline("'''\n)")
-        # get the hash of the wrapper code to name the extension
-        wrapper_call_hash = codecache.code_hash(result.getvalue())
         result.splice(
             f"""
-            module = CppWrapperCodeCache.load(cpp_wrapper_src, '{self.call_func_name}', '{wrapper_call_hash}', {self.cuda})
+            inductor_entry = CppWrapperCodeCache.load_pybinding(["std::vector<at::Tensor>"], cpp_wrapper_src, {self.cuda})
             """
         )
 
@@ -2024,7 +2028,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     {args_str}
                     {return_str}
                 return g
-            call = _wrap_func(module.{self.call_func_name})
+            call = _wrap_func(inductor_entry)
             """
         )
 
