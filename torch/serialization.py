@@ -18,7 +18,6 @@ from typing import Any, BinaryIO, Callable, cast, Dict, Optional, Type, Tuple, U
 from typing_extensions import TypeAlias, TypeGuard  # Python 3.10+
 import copyreg
 import pickle
-import pathlib
 import torch._weights_only_unpickler as _weights_only_unpickler
 
 DEFAULT_PROTOCOL = 2
@@ -406,8 +405,8 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
 
 
-def _is_path(name_or_buffer) -> TypeGuard[Union[str, pathlib.Path]]:
-    return isinstance(name_or_buffer, (str, pathlib.Path))
+def _is_path(name_or_buffer) -> TypeGuard[Union[str, os.PathLike]]:
+    return isinstance(name_or_buffer, (str, os.PathLike))
 
 
 class _opener:
@@ -566,7 +565,7 @@ def _check_dill_version(pickle_module) -> None:
 
 
 def _check_save_filelike(f):
-    if not isinstance(f, (str, os.PathLike)) and not hasattr(f, 'write'):
+    if not _is_path(f) and not hasattr(f, 'write'):
         raise AttributeError(
             "expected 'f' to be string, path, or a file-like object with "
             "a 'write' attribute")
@@ -1013,7 +1012,7 @@ def load(
                     if not _is_path(f):
                         raise ValueError("f must be a file path in order to use the mmap argument")
                     size = os.path.getsize(f)
-                    overall_storage = torch.UntypedStorage.from_file(str(f), False, size)
+                    overall_storage = torch.UntypedStorage.from_file(os.fspath(f), False, size)
                 if weights_only:
                     try:
                         return _load(opened_zipfile,

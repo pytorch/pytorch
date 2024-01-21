@@ -10,7 +10,7 @@ if IS_WINDOWS and IS_CI:
     )
     if __name__ == "__main__":
         sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
+    raise unittest.SkipTest("requires sympy/functorch/filelock")  # noqa: F821
 
 import unittest
 from typing import List
@@ -80,7 +80,7 @@ class TestMemoryPlanning(TestCase):
 
     @skipIfRocm(msg="test_aot_inductor doesn't work on ROCm")
     def test_abi_compatible(self):
-        from test_aot_inductor import AOTInductorModelRunner
+        from test_aot_inductor import AOTIRunnerUtil
 
         f, args = self._generate(device="cuda")
         constraints: List[torch.export.Constraint] = [
@@ -89,9 +89,7 @@ class TestMemoryPlanning(TestCase):
         ]
         with config.patch("aot_inductor.abi_compatible", True):
             result, code = run_and_get_cpp_code(
-                lambda: AOTInductorModelRunner.run(
-                    "cuda", f, args, constraints=constraints
-                )
+                lambda: AOTIRunnerUtil.run("cuda", f, args, constraints=constraints)
             )
 
         FileCheck().check(
