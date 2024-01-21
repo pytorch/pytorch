@@ -1,5 +1,7 @@
 from typing import Any
 
+import typing_extensions
+
 import torch.nn as nn
 
 from torch.distributed._composable import contract
@@ -24,7 +26,7 @@ def fully_shard(
     return module
 
 
-def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> None:
+def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> typing_extensions.Never:
     raise AssertionError(
         "FSDP does not support deepcopy. Please use state dict for serialization."
     )
