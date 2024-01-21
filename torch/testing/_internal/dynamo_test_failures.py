@@ -4088,7 +4088,6 @@ dynamo_skips = {
     "TestSparseCompressedCPU.test_select_copy_SparseBSR_int64_cpu_float64",  # known py38 fail
     "TestSparseCSRCPU.test_sparse_csr_to_dense_cpu_int8",  # known py38 fail
     "TestSparseCSRCPU.test_sparse_csc_to_dense_cpu_complex128",  # known py38 fail
-    "TestSparseCSRCPU.test_sparse_to_sparse_compressed_SparseCSR_cpu_float64",  # known py38 fail
     "TestSparseCompressedCPU.test_select_copy_SparseBSC_int32_cpu_complex64",  # known py38 fail
     "TestSparseCSRCPU.test_block_triangular_solve_block_size_3_int32_noncontiguous_True_cpu_float32",  # known py38 fail
     "TestSparseCSRCPU.test_block_triangular_solve_block_size_2_int64_noncontiguous_True_cpu_float64",  # known py38 fail
@@ -4156,7 +4155,6 @@ dynamo_skips = {
     "TestSparseCompressedCPU.test_select_copy_SparseBSR_int64_cpu_complex64",  # known py38 fail
     "TestSparseCompressedCPU.test_select_copy_SparseBSC_int64_cpu_float32",  # known py38 fail
     "TestSparseCSRCPU.test_sparse_csc_to_dense_cpu_complex64",  # known py38 fail
-    "TestSparseCSRCPU.test_sparse_to_sparse_compressed_SparseCSC_cpu_float64",  # known py38 fail
     "TestSparseCompressedCPU.test_select_copy_SparseCSR_int32_cpu_float64",  # known py38 fail
     "TestSparseCompressedCPU.test_select_copy_SparseBSC_int32_cpu_float16",  # known py38 fail
     "TestSparseCompressedCPU.test_select_copy_SparseCSR_int64_cpu_uint8",  # known py38 fail
