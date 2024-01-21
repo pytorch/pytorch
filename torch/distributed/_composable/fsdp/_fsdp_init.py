@@ -1,9 +1,9 @@
-from typing import Union
-
 import torch
 
+from torch._prims_common import DeviceLikeType
 
-def _normalize_device(device: Union[torch.device, int, str]) -> torch.device:
+
+def _normalize_device(device: DeviceLikeType) -> torch.device:
     if isinstance(device, torch.device):
         if device == torch.device("cuda"):
             return torch.device("cuda", torch.cuda.current_device())

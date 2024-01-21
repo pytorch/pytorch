@@ -1,7 +1,9 @@
-from typing import Any, Union
+from typing import Any
 
-import torch
+import typing_extensions
+
 import torch.nn as nn
+from torch._prims_common import DeviceLikeType
 
 from torch.distributed._composable import contract
 from torch.distributed._composable_state import _insert_module_state
@@ -14,7 +16,7 @@ from ._fsdp_state import FSDPState
 def fully_shard(
     module: nn.Module,
     *,
-    device: Union[torch.device, int, str] = "cuda",
+    device: DeviceLikeType = "cuda",
 ):
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
@@ -33,7 +35,7 @@ def fully_shard(
     return module
 
 
-def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> None:
+def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> typing_extensions.Never:
     raise AssertionError(
         "FSDP does not support deepcopy. Please use state dict for serialization."
     )
