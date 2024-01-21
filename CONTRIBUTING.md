@@ -1,10 +1,7 @@
-Thank you for your interest in contributing to PyTorch!
-If you're a new contributor, please first take a read through our
-[Contributing Guide](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions), specifically the [Submitting a Change](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions#submitting-a-change) section
-that walks through the process of contributing a change to PyTorch.
+Thank you for your interest in contributing to PyTorch! If you're a new contributor, please familiarize yourself with our Contributing Guide, especially the Submitting a Change section, which provides a step-by-step process for contributing changes to PyTorch.
 
-The rest of this document (CONTRIBUTING.md) covers some of the more technical
-aspects of contributing to PyTorch.
+The remainder of this document (CONTRIBUTING.md) delves into the more technical aspects of contributing to PyTorch.
+
 
 # Table of Contents
 
@@ -63,102 +60,80 @@ aspects of contributing to PyTorch.
 
 <!-- tocstop -->
 
+```
 ## Developing PyTorch
-Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source). If you get stuck when developing PyTorch on your machine, check out the [tips and debugging](#tips-and-debugging) section below for common solutions.
+
+Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source). If you encounter any issues during the development of PyTorch on your machine, refer to the [tips and debugging](#tips-and-debugging) section below for common solutions.
 
 ### Tips and Debugging
 
-* If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
+1. For efficient incremental rebuilds, refer to [Make no-op build fast](#make-no-op-build-fast).
 
-* When installing with `python setup.py develop` (in contrast to `python setup.py install`) Python runtime will use
-  the current local source-tree when importing `torch` package. (This is done by creating [`.egg-link`](https://wiki.python.org/moin/PythonPackagingTerminology#egg-link) file in `site-packages` folder)
-  This way you do not need to repeatedly install after modifying Python files (`.py`).
-  However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or
-   non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
+2. When using `python setup.py develop` (as opposed to `python setup.py install`), the Python runtime utilizes the current local source-tree when importing the `torch` package. This is achieved by creating a [`.egg-link`](https://wiki.python.org/moin/PythonPackagingTerminology#egg-link) file in the `site-packages` folder. Consequently, repeated installations are unnecessary after modifying Python files (`.py`). However, reinstalling becomes necessary if you modify Python interface files (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
+   To avoid running `python setup.py develop` each time you make changes to C++/CUDA/ObjectiveC files on Linux/Mac, create a symbolic link from the `build` folder to `torch/lib`. Execute the following:
 
-  One way to avoid running `python setup.py develop` every time one makes a change to C++/CUDA/ObjectiveC files on Linux/Mac,
-  is to create a symbolic link from `build` folder to `torch/lib`, for example, by issuing following:
-  ```bash
+   ```bash
    pushd torch/lib; sh -c "ln -sf ../../build/lib/libtorch_cpu.* ."; popd
-  ```
-   Afterwards rebuilding a library (for example to rebuild `libtorch_cpu.so` issue `ninja torch_cpu` from `build` folder),
-   would be sufficient to make change visible in `torch` package.
+   ```
 
+   Subsequently, rebuilding a library (e.g., to rebuild `libtorch_cpu.so`, issue `ninja torch_cpu` from the `build` folder) is sufficient to reflect changes in the `torch` package.
 
-  To reinstall, first uninstall all existing PyTorch installs. You may need to run `pip
-  uninstall torch` multiple times. You'll know `torch` is fully
-  uninstalled when you see `WARNING: Skipping torch as it is not
-  installed`. (You should only have to `pip uninstall` a few times, but
-  you can always `uninstall` with `timeout` or in a loop if you're feeling
-  lazy.)
+   For reinstallation, first uninstall all existing PyTorch installs. You may need to run `pip uninstall torch` multiple times. Confirm `torch` is fully uninstalled when you see `WARNING: Skipping torch as it is not installed`. To streamline this process, run:
 
-  ```bash
-  conda uninstall pytorch -y
-  yes | pip uninstall torch
-  ```
+   ```bash
+   conda uninstall pytorch -y
+   yes | pip uninstall torch
+   ```
 
-  Next run `python setup.py clean`. After that, you can install in `develop` mode again.
+   Afterward, execute `python setup.py clean`. Once done, you can reinstall in `develop` mode.
 
-* If a commit is simple and doesn't affect any code (keep in mind that some docstrings contain code
-  that is used in tests), you can add `[skip ci]` (case sensitive) somewhere in your commit message to
-  [skip all build / test steps](https://github.blog/changelog/2021-02-08-github-actions-skip-pull-request-and-push-workflows-with-skip-ci/).
-  Note that changing the pull request body or title on GitHub itself has no effect.
+3. If a commit is straightforward and doesn't impact any code (bearing in mind that some docstrings contain code used in tests), you can add `[skip ci]` (case-sensitive) in your commit message to [skip all build/test steps](https://github.blog/changelog/2021-02-08-github-actions-skip-pull-request-and-push-workflows-with-skip-ci/). Note that altering the pull request body or title on GitHub itself has no effect.
 
-* If you run into errors when running `python setup.py develop`, here are some debugging steps:
-  1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
-  your CMake works and can compile this simple Hello World program without errors.
-  2. Nuke your `build` directory. The `setup.py` script compiles binaries into the `build` folder and caches many
-  details along the way, which saves time the next time you build. If you're running into issues, you can always
-  `rm -rf build` from the toplevel `pytorch` directory and start over.
-  3. If you have made edits to the PyTorch repo, commit any change you'd like to keep and clean the repo with the
-  following commands (note that clean _really_ removes all untracked files and changes.):
-      ```bash
-      git submodule deinit -f .
-      git clean -xdf
-      python setup.py clean
-      git submodule update --init --recursive # very important to sync the submodules
-      python setup.py develop                 # then try running the command again
-      ```
-  4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
-    experiment with some environment variables, you can pass them into the command:
-      ```bash
-      ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
-      ```
+4. If you encounter errors running `python setup.py develop`, follow these debugging steps:
+   - Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to ensure your CMake works and can compile a simple Hello World program without errors.
+   - Delete your `build` directory. The `setup.py` script compiles binaries into the `build` folder, caching many details along the way. Deleting `rm -rf build` from the top-level `pytorch` directory and starting over can resolve issues.
+   - If you've made edits to the PyTorch repo, commit any changes, and clean the repo with the following commands:
+     ```bash
+     git submodule deinit -f .
+     git clean -xdf
+     python setup.py clean
+     git submodule update --init --recursive
+     python setup.py develop
+     ```
+   - The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to experiment with environment variables, pass them into the command:
+     ```bash
+     ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
+     ```
 
-* If you run into issue running `git submodule update --init --recursive`. Please try the following:
-  - If you encounter an error such as
-    ```
-    error: Submodule 'third_party/pybind11' could not be updated
-    ```
-    check whether your Git local or global config file contains any `submodule.*` settings. If yes, remove them and try again.
-    (please reference [this doc](https://git-scm.com/docs/git-config#Documentation/git-config.txt-submoduleltnamegturl) for more info).
+5. If you encounter issues running `git submodule update --init --recursive`, try the following:
+   - If you see an error like
+     ```
+     error: Submodule 'third_party/pybind11' could not be updated
+     ```
+     check if your Git local or global config file contains any `submodule.*` settings. If yes, remove them and try again.
+     (Refer to [this doc](https://git-scm.com/docs/git-config#Documentation/git-config.txt-submoduleltnamegturl) for more info).
+   - If you encounter an error like
+     ```
+     fatal: unable to access 'https://github.com/pybind11/pybind11.git': could not load PEM client certificate ...
+     ```
+     it's likely due to using HTTP proxying, and the certificate may have expired. Check if the certificate is valid by running
+     ```bash
+     openssl x509 -noout -in <cert_file> -dates
+     ```
+   - If you encounter an error that some third-party modules are not checked out correctly, such as
+     ```
+     Could not find .../pytorch/third_party/pybind11/CMakeLists.txt
+     ```
+     remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.
 
-  - If you encounter an error such as
-    ```
-    fatal: unable to access 'https://github.com/pybind11/pybind11.git': could not load PEM client certificate ...
-    ```
-    this is likely that you are using HTTP proxying and the certificate expired. To check if the certificate is valid, run
-    `git config --global --list` and search for config like `http.proxysslcert=<cert_file>`. Then check certificate valid date by running
-    ```bash
-    openssl x509 -noout -in <cert_file> -dates
-    ```
+6. For Windows contributors, consult [Best Practices](https://github.com/pytorch/pytorch/wiki/Best-Practices-to-Edit-and-Compile-Pytorch-Source-Code-On-Windows).
 
-  - If you encounter an error that some third_party modules are not checked out correctly, such as
-    ```
-    Could not find .../pytorch/third_party/pybind11/CMakeLists.txt
-    ```
-    remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.
-* If you're a Windows contributor, please check out [Best Practices](https://github.com/pytorch/pytorch/wiki/Best-Practices-to-Edit-and-Compile-Pytorch-Source-Code-On-Windows).
-* For help with any part of the contributing process, please don’t hesitate to utilize our Zoom office hours! See details [here](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours)
+7. For assistance with any part of the contributing process, please utilize our Zoom office hours. Details are available [here](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours).
 
 ## Nightly Checkout & Pull
 
-The `tools/nightly.py` script is provided to ease pure Python development of
-PyTorch. This uses `conda` and `git` to check out the nightly development
-version of PyTorch and installs pre-built binaries into the current repository.
-This is like a development or editable install, but without needing the ability
-to compile any C++ code.
+Use the `tools/nightly.py` script to facilitate pure Python development of PyTorch. This script leverages `conda` and `git` to check out the nightly development version of PyTorch and installs pre-built binaries into the current repository. It is akin to a development or editable install without requiring the ability to compile any C++ code.
 
 You can use this script to check out a new nightly branch with the following:
 
@@ -167,140 +142,129 @@ You can use this script to check out a new nightly branch with the following:
 conda activate pytorch-deps
 ```
 
-Or if you would like to re-use an existing conda environment, you can pass in
-the regular environment parameters (`--name` or `--prefix`):
+Alternatively, if you prefer reusing an existing conda environment, provide the regular environment parameters (`--name` or `--prefix`):
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch -n my-env
 conda activate my-env
 ```
 
-You can also use this tool to pull the nightly commits into the current branch:
+This tool is also handy for pulling nightly commits into the current branch:
 
 ```bash
 ./tools/nightly.py pull -n my-env
 conda activate my-env
 ```
 
-Pulling will reinstall the PyTorch dependencies as well as the nightly binaries
-into the repo directory.
+Pulling will reinstall PyTorch dependencies as well as nightly binaries into the repo directory.
 
-## Codebase structure
+## Codebase Structure
 
-* [c10](c10) - Core library files that work everywhere, both server
-  and mobile. We are slowly moving pieces from [ATen/core](aten/src/ATen/core)
-  here. This library is intended only to contain essential functionality,
-  and appropriate to use in settings where binary size matters. (But
-  you'll have a lot of missing functionality if you try to use it
-  directly.)
-* [aten](aten) - C++ tensor library for PyTorch (no autograd support)
-  * [src](aten/src) - [README](aten/src/README.md)
-    * [ATen](aten/src/ATen)
-      * [core](aten/src/ATen/core) - Core functionality of ATen. This
-        is migrating to top-level c10 folder.
-      * [native](aten/src/ATen/native) - Modern implementations of
-        operators. If you want to write a new operator, here is where
-        it should go. Most CPU operators go in the top level directory,
-        except for operators which need to be compiled specially; see
-        cpu below.
-        * [cpu](aten/src/ATen/native/cpu) - Not actually CPU
-          implementations of operators, but specifically implementations
-          which are compiled with processor-specific instructions, like
-          AVX. See the [README](aten/src/ATen/native/cpu/README.md) for more
-          details.
-        * [cuda](aten/src/ATen/native/cuda) - CUDA implementations of
-          operators.
-        * [sparse](aten/src/ATen/native/sparse) - CPU and CUDA
-          implementations of COO sparse tensor operations
-        * [mkl](aten/src/ATen/native/mkl) [mkldnn](aten/src/ATen/native/mkldnn)
-          [miopen](aten/src/ATen/native/miopen) [cudnn](aten/src/ATen/native/cudnn)
-          - implementations of operators which simply bind to some
-            backend library.
-        * [quantized](aten/src/ATen/native/quantized/) - Quantized tensor (i.e. QTensor) operation implementations. [README](aten/src/ATen/native/quantized/README.md) contains details including how to implement native quantized operations.
-* [torch](torch) - The actual PyTorch library. Everything that is not
-  in [csrc](torch/csrc) is a Python module, following the PyTorch Python
-  frontend module structure.
-  * [csrc](torch/csrc) - C++ files composing the PyTorch library. Files
-    in this directory tree are a mix of Python binding code, and C++
-    heavy lifting. Consult `setup.py` for the canonical list of Python
-    binding files; conventionally, they are often prefixed with
-    `python_`. [README](torch/csrc/README.md)
-    * [jit](torch/csrc/jit) - Compiler and frontend for TorchScript JIT
-      frontend. [README](torch/csrc/jit/README.md)
-    * [autograd](torch/csrc/autograd) - Implementation of reverse-mode automatic differentiation. [README](torch/csrc/autograd/README.md)
-    * [api](torch/csrc/api) - The PyTorch C++ frontend.
-    * [distributed](torch/csrc/distributed) - Distributed training
-      support for PyTorch.
-* [tools](tools) - Code generation scripts for the PyTorch library.
-  See [README](tools/README.md) of this directory for more details.
-* [test](test) - Python unit tests for PyTorch Python frontend.
-  * [test_torch.py](test/test_torch.py) - Basic tests for PyTorch
-    functionality.
-  * [test_autograd.py](test/test_autograd.py) - Tests for non-NN
-    automatic differentiation support.
-  * [test_nn.py](test/test_nn.py) - Tests for NN operators and
-    their automatic differentiation.
-  * [test_jit.py](test/test_jit.py) - Tests for the JIT compiler
-    and TorchScript.
-  * ...
-  * [cpp](test/cpp) - C++ unit tests for PyTorch C++ frontend.
-    * [api](test/cpp/api) - [README](test/cpp/api/README.md)
-    * [jit](test/cpp/jit) - [README](test/cpp/jit/README.md)
-    * [tensorexpr](test/cpp/tensorexpr) - [README](test/cpp/tensorexpr/README.md)
-  * [expect](test/expect) - Automatically generated "expect" files
-    which are used to compare against expected output.
-  * [onnx](test/onnx) - Tests for ONNX export functionality,
-    using both PyTorch and Caffe2.
-* [caffe2](caffe2) - The Caffe2 library.
-  * [core](caffe2/core) - Core files of Caffe2, e.g., tensor, workspace,
-    blobs, etc.
-  * [operators](caffe2/operators) - Operators of Caffe2.
-  * [python](caffe2/python) - Python bindings to Caffe2.
-  * ...
-* [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
+- [c10](c10): Core library files that work everywhere, both server and mobile. The intention is to include essential functionality suitable for settings where binary size matters.
+  - [aten](aten): C++ tensor library for PyTorch (no autograd support).
+    - [src](aten/src): [README](aten/src/README.md)
+      - [ATen](aten/src/ATen): Core functionality migrating to the top-level `c10` folder.
+      - [native](aten/src/ATen/native): Modern implementations of operators. New operators belong here. Most CPU operators go in the top
 
-## Unit testing
+
+      ## Codebase Structure: PyTorch Library Components
+
+### csrc - C++ Files Composing the PyTorch Library
+
+The `csrc` directory houses C++ files that form the backbone of the PyTorch library. This directory is a blend of Python binding code and intricate C++ operations. Refer to `setup.py` for the definitive list of Python binding files, often prefixed with `python_`. Below are key components within this directory:
+
+- **jit** - Compiler and Frontend for TorchScript JIT
+  - [README](torch/csrc/jit/README.md)
+
+- **autograd** - Implementation of Reverse-Mode Automatic Differentiation
+  - [README](torch/csrc/autograd/README.md)
+
+- **api** - The PyTorch C++ Frontend
+
+- **distributed** - Distributed Training Support for PyTorch
+
+### tools - Code Generation Scripts
+
+The `tools` directory contains scripts for code generation in the PyTorch library. For a detailed overview, refer to the [README](torch/tools/README.md) within this directory.
+
+### test - Python Unit Tests for PyTorch Python Frontend
+
+The `test` directory encompasses Python unit tests for the PyTorch Python frontend. Key test files include:
+
+- **test_torch.py** - Basic tests for PyTorch functionality
+- **test_autograd.py** - Tests for non-NN automatic differentiation support
+- **test_nn.py** - Tests for NN operators and their automatic differentiation
+- **test_jit.py** - Tests for the JIT compiler and TorchScript
+
+Within the `cpp` subdirectory, you'll find C++ unit tests for the PyTorch C++ frontend. The structure includes:
+
+- **api** - [README](torch/test/cpp/api/README.md)
+- **jit** - [README](torch/test/cpp/jit/README.md)
+- **tensorexpr** - [README](torch/test/cpp/tensorexpr/README.md)
+
+### expect - Automatically Generated "Expect" Files
+
+The `expect` directory contains automatically generated "expect" files, which are employed to compare against expected output.
+
+### onnx - Tests for ONNX Export Functionality
+
+The `onnx` directory hosts tests for ONNX export functionality, utilizing both PyTorch and Caffe2.
+
+### caffe2 - The Caffe2 Library
+
+Within the `caffe2` directory, you'll find components such as:
+
+- **core** - Core files of Caffe2, including tensors, workspaces, blobs, etc.
+- **operators** - Operators of Caffe2
+- **python** - Python bindings to Caffe2
+
+### .circleci - CircleCI Configuration Management
+
+The `.circleci` directory manages CircleCI configuration. Refer to the [README](torch/.circleci/README.md) within this directory for additional details.
+
+## Unit Testing
 
 ### Python Unit Testing
 
-**Prerequisites**:
-The following packages should be installed with either `conda` or `pip`:
-- `expecttest` and `hypothesis` - required to run tests
-- `mypy` - recommended for linting
-- `pytest` - recommended to run tests more selectively
+#### Prerequisites:
 
-All PyTorch test suites are located in the `test` folder and start with
-`test_`. Run the entire test
-suite with
+Ensure the following packages are installed with either `conda` or `pip`:
+
+- `expecttest` and `hypothesis`: Required to run tests.
+- `mypy`: Recommended for linting.
+- `pytest`: Recommended to run tests more selectively.
+
+#### Running Tests:
+
+All PyTorch test suites, starting with `test_`, are located in the `test` folder. Run the entire test suite with:
 
 ```bash
 python test/run_test.py
 ```
 
-or run individual test suites using the command `python test/FILENAME.py`,
-where `FILENAME` represents the file containing the test suite you wish
-to run.
+Alternatively, run individual test suites using the command:
 
-For example, to run all the TorchScript JIT tests (located at
-`test/test_jit.py`), you would run:
+```bash
+python test/FILENAME.py
+```
+
+Replace `FILENAME` with the file containing the test suite you wish to run. For example, to run all TorchScript JIT tests (in `test/test_jit.py`), use:
 
 ```bash
 python test/test_jit.py
 ```
 
-You can narrow down what you're testing even further by specifying the
-name of an individual test with `TESTCLASSNAME.TESTNAME`. Here,
-`TESTNAME` is the name of the test you want to run, and `TESTCLASSNAME`
-is the name of the class in which it is defined.
+To narrow down testing to a specific test within a class, use the format:
 
-Going off the above example, let's say you want to run
-`test_Sequential`, which is defined as part of the `TestJit` class
-in `test/test_jit.py`. Your command would be:
+```bash
+python test/test_jit.py TESTCLASSNAME.TESTNAME
+```
+
+Here, `TESTNAME` is the name of the test, and `TESTCLASSNAME` is the name of the class where it is defined. For instance:
 
 ```bash
 python test/test_jit.py TestJit.test_Sequential
 ```
-
 **Weird note:** In our CI (Continuous Integration) jobs, we actually run the tests from the `test` folder and **not** the root of the repo, since there are various dependencies we set up for CI that expects the tests to be run from the test folder. As such, there may be some inconsistencies between local testing and CI testing--if you observe an inconsistency, please [file an issue](https://github.com/pytorch/pytorch/issues/new/choose).
 
 ### Better local unit tests with `pytest`
