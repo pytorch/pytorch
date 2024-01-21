@@ -1575,6 +1575,42 @@ class AOTInductorTestsTemplate:
         model.weight += 1
         self.check_model(model, example_inputs)
 
+    def test_triton_kernel_extern_kernel_arg(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.zeros_like(x)
+                # torch.mm is ExternKernelOut
+                add_kernel[(4,)](x, torch.mm(x, y), out, 4, 16)
+                return out
+
+        example_inputs = (
+            torch.randn(4, 4, device="cuda"),
+            torch.randn(4, 4, device="cuda"),
+        )
+
+        self.check_model(Model(), example_inputs)
+
+    def test_triton_kernel_multi_output_arg(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.zeros_like(x)
+                # torch.sort creates fallback kernel and hence MultiOutput
+                add_kernel[(4,)](x, torch.sort(y).values, out, 4, 16)
+                return out
+
+        example_inputs = (
+            torch.randn(4, 4, device="cuda"),
+            torch.randn(4, 4, device="cuda"),
+        )
+
+        self.check_model(Model(), example_inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1673,6 +1709,8 @@ CUDA_TEST_FAILURES = {
     "test_normal_functional": fail_abi_compatible_cuda(),
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_abi_compatible_cuda(is_skip=True),
+    # no ABI shim fn for torch.sort; remove this when adding one
+    "test_triton_kernel_multi_output_arg": fail_abi_compatible_cuda(is_skip=True),
 }
 
 if TEST_WITH_ROCM:
