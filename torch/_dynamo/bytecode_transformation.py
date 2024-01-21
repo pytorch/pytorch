@@ -954,6 +954,10 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
             # argval is prioritized over arg
             return instructions[i].argval is not _NotProvided
 
+        if instructions[i].opname == "LOAD_FAST":
+            if not instructions[i].argval in varnames:
+                breakpoint()
+
         if instructions[i].opname == "LOAD_GLOBAL":
             # 3.11 LOAD_GLOBAL requires both arg and argval - see create_load_global
             assert instructions[i].arg is not None
@@ -964,8 +968,12 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
                 )
             else:
                 instructions[i].arg = names[instructions[i].argval]
+        # elif instructions[i].opname == "LOAD_FAST":
+        #     # if instructions[i].argval not in varnames:
+        #     breakpoint()
         elif instructions[i].opcode in HAS_LOCAL:
             if should_compute_arg():
+                assert instructions[i].argval in varnames, breakpoint()
                 instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             if should_compute_arg():

@@ -237,7 +237,7 @@ class PyCodegen:
     def create_store(self, name) -> Instruction:
         if name in self.cell_and_freevars():
             return create_instruction("STORE_DEREF", argval=name)
-        assert name in self.code_options["co_varnames"]
+        assert name in self.code_options["co_varnames"], breakpoint()
         return create_instruction("STORE_FAST", argval=name)
 
     def create_load_global(self, name, push_null, add=False) -> Instruction:
