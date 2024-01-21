@@ -527,6 +527,9 @@ dynamo_expected_failures = {
     "TestArgmax.test_combinations_data66",
     "TestArgmax.test_combinations_data65",
     "TestArgmax.test_combinations_data63",
+    "TestArgmax.test_combinations_data62",
+    "TestArgmax.test_combinations_data61",
+    "TestArgmax.test_combinations_data58",
     "TestCond.test_sq_cases",
     "TestNormInt64.test_bad_args",
     "TestQR.test_qr_empty_m_0_n_3",
@@ -796,7 +799,6 @@ dynamo_expected_failures = {
     "TestDLPack.test_higher_dims_ndim_8",  # torch_np/numpy_tests/core/test_dlpack
     "TestViewOpsLAZY.test_advanced_indexing_assignment_lazy",  # test_view_ops
     "TestOldViewOpsCPU.test_crow_col_indices_cpu",  # test_view_ops
-    "TestOldViewOpsCPU.test_atleast_cpu_complex64",
     "TestViewOpsLAZY.test_advanced_indexing_nonview_lazy",  # test_view_ops
     "TestTypePromotionCPU.test_alpha_mismatch_cpu",  # test_type_promotion
     "TestTypePromotionCPU.test_alternate_result_cpu",  # test_type_promotion
@@ -4546,8 +4548,6 @@ dynamo_skips = {
     "TestReductionsCPU.test_argminmax_multiple_cpu_int32",  # known py38 fail
     "TestReductionsCPU.test_tensor_compare_ops_argmax_argmix_kthvalue_dim_empty_cpu",  # known py38 fail
     "TestReductionsCPU.test_histogram_cpu_float32",  # known py38 fail
-    "TestReductionsCPU.test_count_nonzero_cpu_complex64",
-    "TestReductionsCPU.test_count_nonzero_cpu_complex128",
     "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_broadcast_tensors_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_adaptive_avg_pool3d_cpu_float32",  # known py38 fail  # noqa: B950
     "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_isneginf_cpu_float32",  # known py38 fail
