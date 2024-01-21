@@ -83,7 +83,10 @@ def lift_constants_pass(
                 parent_fqn = list(
                     const_placeholder_node.meta["nn_module_stack"].values()
                 )[-1][0]
-                constant_fqn = f"{parent_fqn}.{constant_name}"
+                if len(parent_fqn) > 0:
+                    constant_fqn = f"{parent_fqn}.{constant_name}"
+                else:
+                    constant_fqn = constant_name
 
                 if isinstance(constant_val, torch.Tensor):
                     const_placeholder_node.meta["val"] = fake_mode.from_tensor(
