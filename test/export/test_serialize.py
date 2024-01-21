@@ -2,7 +2,7 @@
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
-# Owner(s): ["module: export"]
+# Owner(s): ["oncall: export"]
 import io
 import pathlib
 import tempfile
@@ -580,10 +580,6 @@ class TestOpVersioning(TestCase):
         with self.assertLogs(level='WARN') as log:
             deserializer._validate_model_opset_version(model_opset_version)
             self.assertIn("Compiler doesn't have a version table for op namespace", log.output[0])
-
-unittest.expectedFailure(
-    TestDeserialize.test_exportdb_supported_case_tensor_setattr
-)
 
 # We didn't set up kwargs input yet
 unittest.expectedFailure(

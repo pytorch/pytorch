@@ -1,4 +1,4 @@
-# Owner(s): ["module: export"]
+# Owner(s): ["oncall: export"]
 # flake8: noqa
 import unittest
 

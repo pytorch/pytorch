@@ -3,7 +3,7 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_functionalization_with_native_python_assertion)
 """
 
-# Owner(s): ["module: export"]
+# Owner(s): ["oncall: export"]
 import math
 import operator
 import unittest

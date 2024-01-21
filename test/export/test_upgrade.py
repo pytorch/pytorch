@@ -1,4 +1,4 @@
-# Owner(s): ["module: export"]
+# Owner(s): ["oncall: export"]
 import unittest
 from unittest.mock import patch
 

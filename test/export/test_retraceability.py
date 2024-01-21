@@ -1,4 +1,4 @@
-# Owner(s): ["module: export"]
+# Owner(s): ["oncall: export"]
 
 try:
     from . import test_export, testing

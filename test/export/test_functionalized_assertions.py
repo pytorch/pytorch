@@ -1,4 +1,4 @@
-# Owner(s): ["module: export"]
+# Owner(s): ["oncall: export"]
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 

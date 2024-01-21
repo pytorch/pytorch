@@ -2131,8 +2131,6 @@ class CommonTemplate:
                 torch.randint(-128, 127, (8, 8), dtype=torch.int8),
             ),
             check_lowp=True,
-            atol=5e-3,
-            rtol=5e-3,
         )
 
     @config.patch(force_mixed_mm=True)
@@ -2149,8 +2147,6 @@ class CommonTemplate:
                 torch.randn(8),
             ),
             check_lowp=True,
-            atol=5e-3,
-            rtol=5e-3,
         )
 
     @config.patch(use_mixed_mm=True)
@@ -8212,6 +8208,15 @@ class CommonTemplate:
         ref = fn(a, b)
         actual = torch.compile(fn)(a, b)
         self.assertEqual(ref, actual)
+
+    def test_randint_int64_mod(self):
+        # This used to not compile due to a wrong return type of randint64_cpu
+        # See https://github.com/pytorch/pytorch/issues/117435
+        def fn(n):
+            return torch.randint(low=-5, high=5, size=(n,), dtype=torch.int64) % 10
+
+        res = torch.compile(fn)(20)
+        self.assertTrue(torch.all((0 <= res) & (res < 10)).item())
 
 
 @dataclasses.dataclass
