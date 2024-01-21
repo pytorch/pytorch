@@ -26,8 +26,8 @@ FSDP considers the following tensors:
   over the main mesh
 - All-gather input: the ``torch.Tensor`` passed to all-gather, derived from the
   sharded parameter
-- All-gather output: the ``torch.Tensor`` resulting from all-gather, derived
-  from the all-gather input
+- All-gather output: the ``torch.Tensor`` resulting from all-gathering the
+  all-gather input
 - Unsharded parameter: parameter used for forward/backward computation, derived
   from the all-gather output; autograd leaf
 
@@ -45,9 +45,9 @@ FSDP dynamically frees and allocates the unsharded parameter. Since autograd
 can pack a reference to it or a view to save for backward, we use storage
 resizing to implement the freeing/allocation since that preserves the aliasing.
 This implies that we construct the unsharded parameter object once and write to
-it in-place thereafter. Since for the default ``torch.Tensor` original
-parameter case, the all-gather output and unsharded parameter share the same
-data, we use storage resizing on the all-gather output.
+it in-place thereafter. For the default ``torch.Tensor` original parameter
+case, the all-gather output and unsharded parameter share the same
+data, so we use storage resizing on the all-gather output.
 """
 
 
