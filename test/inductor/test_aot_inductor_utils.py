@@ -82,7 +82,7 @@ class AOTIRunnerUtil:
             disable_constraint_solver=disable_constraint_solver,
         )
         optimized = AOTIRunnerUtil.load(device, so_path)
-        return optimized(example_inputs)
+        return optimized(*example_inputs)
 
     @classmethod
     def run_multiple(
@@ -102,5 +102,5 @@ class AOTIRunnerUtil:
         optimized = AOTIRunnerUtil.load(device, so_path)
         list_output_tensors = []
         for example_inputs in list_example_inputs:
-            list_output_tensors.append(optimized(example_inputs))
+            list_output_tensors.append(optimized(*example_inputs))
         return list_output_tensors

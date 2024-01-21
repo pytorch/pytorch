@@ -801,7 +801,7 @@ class AOTInductorTestsTemplate:
             with torch.cuda.device(i):
                 example_inputs = tuple(t.cuda(i) for t in inputs)
                 optimized = AOTIRunnerUtil.load("cuda", so_path)
-                result_cuda = optimized(example_inputs)
+                result_cuda = optimized(*example_inputs)
             self.assertTrue(same(result_cpu, result_cuda.cpu()))
 
     def test_pytree_inputs(self):
@@ -1016,7 +1016,7 @@ class AOTInductorTestsTemplate:
         self.assertTrue(torch.is_grad_enabled())
 
         optimized = AOTIRunnerUtil.load(self.device, so_path)
-        actual = optimized(example_inputs)
+        actual = optimized(*example_inputs)
         actual = pytree.tree_leaves(actual)
 
         self.assertTrue(same(actual, expected))
