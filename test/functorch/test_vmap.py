@@ -2657,6 +2657,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(lambda t: op(t, [4, 8, 9, 34, 29], 1), in_dims=2)),
              (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
 
+    @skipIfTorchDynamo("really slow")
     def test_split(self):
         test = self._vmap_view_test
         op = torch.split

@@ -336,6 +336,25 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
     return copy_count
 
 
+def propagate_input_mutation_stacktraces(fx_g: torch.fx.Graph) -> None:
+    placeholders = set()
+    for n in fx_g.nodes:
+        if n.op == "placeholder":
+            placeholders.add(n)
+        if isinstance(n.target, torch._ops.OpOverload):
+            if n.target is torch.ops.aten.copy_.default:
+                # Can only copy_ into an input, and can only do so once
+                assert n.args[0] in placeholders
+                placeholders.remove(n.args[0])
+                copy_from_node = n.args[1]
+                # Pre-condition: every node has a "stack_trace" field in its meta,
+                # but copy_() nodes do not (since we manually added them during functionalization).
+                # Instead, we manually propagate here.
+                if "stack_trace" in copy_from_node.meta:
+                    assert "stack_trace" not in n.meta, str(n)
+                    n.meta["stack_trace"] = copy_from_node.meta["stack_trace"]
+
+
 def _check_if_mutation_can_be_in_graph(
     keep_input_mutations: bool,
     mutates_data,

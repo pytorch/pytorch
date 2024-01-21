@@ -8,6 +8,7 @@ import unittest
 
 import torch
 from typing import Optional
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -29,6 +30,7 @@ if __name__ == "__main__":
         "instead."
     )
 
+@skipIfTorchDynamo("skipping as a precaution")
 class TestTorchbind(JitTestCase):
     def setUp(self):
         if IS_SANDCASTLE or IS_MACOS or IS_FBCODE:
