@@ -303,7 +303,7 @@ class OpsHandler(Protocol[T]):
 
     def index_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> T:
         """
-        Converts a sympy expression into a scalar of type expr.  expr is typically
+        Converts a sympy expression into a scalar of type dtype.  expr is typically
         an indexing expression, thus the name; however, it can also be used in
         non-indexing situations.
         """
@@ -356,7 +356,7 @@ class OpsHandler(Protocol[T]):
         index: sympy.Expr,
         value: T,
         mode: StoreMode = None,
-    ) -> T:
+    ) -> None:
         """
         Store 'value' to the memory location 'name' offset by 'expr'.  If
         specified, 'mode' can require the store to be an atomic addition.
@@ -396,7 +396,7 @@ class OpsHandler(Protocol[T]):
         ...
 
     def scan(
-        self, dtype: torch.dtype, combine_fn: Callable[[T, T], T], value: T, init: T
+        self, dtype: torch.dtype, combine_fn: Callable[[T, T], T], value: T, init: int
     ) -> T:
         """
         Perform an associative scan on 'value'.
@@ -705,7 +705,7 @@ class KernelFormatterHandler:
             result = ir_fn(*args)
             return formatter.getvalue(result)
 
-    def __getattr__(self, name) -> Callable[..., str]:
+    def __getattr__(self, name) -> Callable[..., Any]:
         def inner(*args, **kwargs):
             line = getattr(self.parent_handler, name)(*args, **kwargs)
             if name == "indirect_indexing":
@@ -722,7 +722,7 @@ class KernelFormatterHandler:
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: str,
+        value: Union[str, tuple[str, ...]],
     ) -> Union[str, tuple[str, ...]]:
         line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
         num_values = reduction_num_outputs(reduction_type)

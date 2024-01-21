@@ -576,6 +576,21 @@ class CPUReproTests(TestCase):
                 (value, mask),
             )
 
+    def test_relu_with_inf_value(self):
+        # https://github.com/pytorch/pytorch/issues/117544.
+
+        def fn(out):
+            out = torch.sinh(input=out)
+            out = torch.relu(input=out)
+            return out
+
+        x = torch.Tensor([-572373.5000, 755109.1250, 330995.5625])
+        with torch.no_grad():
+            self.common(
+                fn,
+                (x,),
+            )
+
     @config.patch(implicit_fallbacks=True)
     def test_repeat_interleave(self):
         def fn(y):
@@ -2724,10 +2739,46 @@ class CPUReproTests(TestCase):
             return y.softmax(dim=-1)
 
         x = torch.randn(128, 2048)
+        opt_fn = torch.compile(fn)
         metrics.reset()
-        self.common(fn, (x,))
+        _, code = run_and_get_cpp_code(opt_fn, x)
+        self.assertTrue(same(fn(x), opt_fn(x)))
         # 4 kernels for max, exp, sum and div
         assert metrics.generated_cpp_vec_kernel_count == 4
+        FileCheck().check_count(
+            "Vectorized<int>::loadu(tmpbuf.data())", 0, exactly=True
+        ).run(code)
+
+    def test_vec_contiguous_ModularIndexing(self):
+        # https://github.com/pytorch/pytorch/issues/114488
+        class M(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.norm = torch.nn.LayerNorm(dim * 4)
+
+            def forward(self, x):
+                # the pattern from swin_base_patch4_window7_224
+                B, H, W, C = x.shape
+                x = (
+                    x.reshape(B, H // 2, 2, W // 2, 2, C)
+                    .permute(0, 1, 3, 4, 2, 5)
+                    .flatten(3)
+                )
+                x = self.norm(x)
+                return x
+
+        x = torch.randn(1, 56, 56, 128)
+        m = M(128)
+        opt_m = torch.compile(m)
+        with torch.no_grad():
+            metrics.reset()
+            _, code = run_and_get_cpp_code(opt_m, x)
+            self.assertTrue(same(m(x), opt_m(x)))
+            # Two kernels: one for reduction, one pointwises
+            assert metrics.generated_cpp_vec_kernel_count == 2
+            FileCheck().check_count(
+                "Vectorized<float>::loadu(tmpbuf.data())", 0, exactly=True
+            ).run(code)
 
 
 if __name__ == "__main__":

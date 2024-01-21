@@ -9,6 +9,13 @@ DLDataType getDLDataType(const Tensor& t) {
   dtype.lanes = 1;
   dtype.bits = t.element_size() * 8;
   switch (t.scalar_type()) {
+    case ScalarType::UInt1:
+    case ScalarType::UInt2:
+    case ScalarType::UInt3:
+    case ScalarType::UInt4:
+    case ScalarType::UInt5:
+    case ScalarType::UInt6:
+    case ScalarType::UInt7:
     case ScalarType::Byte:
     case ScalarType::UInt16:
     case ScalarType::UInt32:
@@ -104,8 +111,9 @@ static DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
       ctx.device_type = DLDeviceType::kDLROCM;
       break;
     case DeviceType::XPU:
-      ctx = at::detail::getXPUHooks().getDLPackDeviceFromATenDevice(
-          ctx, tensor.device(), tensor.data_ptr());
+      ctx.device_type = DLDeviceType::kDLOneAPI;
+      ctx.device_id =
+          at::detail::getXPUHooks().getGlobalIdxFromDevice(tensor.device());
       break;
     default:
       TORCH_CHECK(false, "Cannot pack tensors on " + tensor.device().str());
@@ -132,7 +140,7 @@ static Device getATenDevice(const DLDevice& ctx, void* data) {
       return at::Device(DeviceType::HIP, ctx.device_id);
 #endif
     case DLDeviceType::kDLOneAPI:
-      return at::detail::getXPUHooks().getATenDeviceFromDLPackDevice(ctx, data);
+      return at::detail::getXPUHooks().getDeviceFromPtr(data);
     default:
       TORCH_CHECK(
           false, "Unsupported device_type: " + c10::to_string(ctx.device_type));
