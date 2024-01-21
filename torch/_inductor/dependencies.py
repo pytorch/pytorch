@@ -466,12 +466,15 @@ class FreeUnbackedSymbolsOpsHandler:
 
         return inner
 
+    def indirect_indexing(self, index_var, size, check=True) -> sympy.Symbol:
+        return sympy_symbol(f"({str(index_var)})")
+
     def reduction(
         self,
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: str,
+        value: Union[None, tuple[None, ...]],
     ) -> Union[None, tuple[None, ...]]:
         num_values = reduction_num_outputs(reduction_type)
         return (None,) * num_values if num_values > 1 else None

@@ -344,6 +344,9 @@ class OpsHandler(Protocol[T]):
         Convert an integral x into a sympy.Expr that can be subsequently used in
         indexing computation.  'size' represents an upper bound on the what valid
         indexes can be; when 'check' is True, we check that the x is in bounds.
+
+        NB: This is typically mandatory to implement for any analysis, because you
+        MUST return a valid sympy.Expr of some sort (even if it's a meaningless symbol).
         """
         ...
 
