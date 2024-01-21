@@ -580,15 +580,6 @@ class FlattenOutputWithTreeSpecValidationOutputStep(OutputAdaptStep):
         return flattened_outputs
 
 
-def _getattr_recursive(obj, name):
-    for layer in name.split("."):
-        if hasattr(obj, layer):
-            obj = getattr(obj, layer)
-        else:
-            return None
-    return obj
-
-
 class PrependParamsBuffersConstantAotAutogradInputStep(InputAdaptStep):
     """Prepend model parameters, buffers and constants to the user input.
 
@@ -624,7 +615,7 @@ class PrependParamsBuffersConstantAotAutogradInputStep(InputAdaptStep):
             model.state_dict[name] for name in model.graph_signature.buffers  # type: ignore[union-attr,index]
         )
         ordered_constant_tensors = tuple(
-            _getattr_recursive(model.module(), name) for name in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr,index]
+            model.constants[fqn] for fqn in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr,index]
         )
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
