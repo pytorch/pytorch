@@ -343,8 +343,9 @@ class Loops(IRNode):
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         index = self._index(self.ranges)
         return set().union(
-            *(free_unbacked_symbols(e) for e in self.ranges)
-        ) | extract_free_unbacked_symbols(self.inner_fn, index)
+            *(free_unbacked_symbols(e) for e in self.ranges),
+            extract_free_unbacked_symbols(self.inner_fn, index),
+        )
 
     def __str__(self, names=("ranges",)):
         return self.str_helper(
