@@ -910,7 +910,6 @@ dynamo_expected_failures = {
     "TestDLPack.test_higher_dims_ndim_19",  # torch_np/numpy_tests/core/test_dlpack
     "TestDLPack.test_higher_dims_ndim_26",  # torch_np/numpy_tests/core/test_dlpack
     "TestDLPack.test_higher_dims_ndim_8",  # torch_np/numpy_tests/core/test_dlpack
-    "WeakTest.test_make_weak_keyed_dict_from_weak_keyed_dict",  # test_weak
     "TestViewOpsLAZY.test_advanced_indexing_assignment_lazy",  # test_view_ops
     "TestOldViewOpsCPU.test_crow_col_indices_cpu",  # test_view_ops
     "TestViewOpsLAZY.test_advanced_indexing_nonview_lazy",  # test_view_ops
@@ -2168,7 +2167,6 @@ dynamo_expected_failures = {
     "TestModuleHookNN.test_hook_cpp",  # nn/test_module_hooks
     "TestModuleHookNN.test_hook_invalid_outputs",  # nn/test_module_hooks
     "TestModuleHookNN.test_backward_hooks_interaction",  # nn/test_module_hooks
-    "TestModuleHookNN.test_hooks",  # nn/test_module_hooks
     "TestModuleHookNN.test_hook_last_arg_requires_grad",  # nn/test_module_hooks
     "TestModuleGlobalHooks.test_module_global_hook_invalid_outputs",  # nn/test_module_hooks
     "TestLazyModules.test_lazy_batchnorm2d_state",  # nn/test_lazy_modules
