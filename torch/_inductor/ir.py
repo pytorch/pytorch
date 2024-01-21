@@ -1552,7 +1552,7 @@ class Scan(Loops):
     combine_fn: Callable[..., Any]
     reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
     reduction_hint: ReductionHint
-    init: Any
+    init: int
 
     # HACK we mimick reduction
 
