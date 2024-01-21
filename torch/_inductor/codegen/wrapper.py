@@ -23,7 +23,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
-from ..ir import ComputedBuffer, InputBuffer, ReinterpretView
+from ..ir import ReinterpretView
 from ..triton_heuristics import grid as default_grid
 from ..utils import (
     cache_on_self,
@@ -1147,7 +1147,7 @@ class WrapperCodeGen(CodeGen):
             return repr(type(s)(Shim(self.val_to_arg_str(a)) for a in s))
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
-        elif isinstance(s, (ir.Buffer, ComputedBuffer, InputBuffer, ReinterpretView)):
+        elif isinstance(s, (ir.Buffer, ReinterpretView)):
             return s.codegen_reference()
         else:
             return repr(s)
@@ -2788,7 +2788,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
-        elif isinstance(val, (ComputedBuffer, InputBuffer, ReinterpretView)):
+        elif isinstance(val, (ir.Buffer, ReinterpretView)):
             return val.codegen_reference()
         elif isinstance(val, torch.device):
             return self.codegen_device(val)
