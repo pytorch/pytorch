@@ -29,11 +29,6 @@
 #include <torch/custom_class.h>
 
 namespace c10d {
-// Control whether we perform a NCCL health check or not
-// which ensures communicators are healthy at the beginning of init.
-static std::vector<std::string> TORCH_ENABLE_NCCL_HEALTH_CHECK = {
-    "TORCH_ENABLE_NCCL_HEALTH_CHECK",
-    "ENABLE_NCCL_HEALTH_CHECK"};
 
 // Control whether or not wait() is blocking or non-blocking.
 static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
@@ -88,6 +83,11 @@ static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
 // before we exit and throws timeout exception.
 static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC = {
     "TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC"};
+
+// Control the interval inside the watchdog thread to check the coordinated
+// signal from other ranks, e.g. to dump the debugging information.
+static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
+    "TORCH_NCCL_COORD_CHECK_MILSEC"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
@@ -338,28 +338,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // work has completed
     c10::optional<uint64_t> trace_id_;
     DebugLevel distDebugLevel_;
-    friend class ProcessGroupNCCL;
-  };
-
-  class CoalescedWorkNCCL
-      : public Work,
-        public std::enable_shared_from_this<CoalescedWorkNCCL> {
-   public:
-    // Constructor takes a list of WorkNCCL works
-    CoalescedWorkNCCL(
-        std::vector<ProcessGroupNCCL::WorkNCCL> works,
-        int rank,
-        OpType opType);
-
-    ~CoalescedWorkNCCL() override;
-
-    // Same as calling synchronize() for NCCL work.
-    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
-
-   protected:
-    // The cached list of CUDA devices to operate on
-    std::vector<ProcessGroupNCCL::WorkNCCL> works_;
-
     friend class ProcessGroupNCCL;
   };
 
@@ -616,12 +594,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {});
 
-  virtual c10::intrusive_ptr<ProcessGroupNCCL::CoalescedWorkNCCL>
-  initCoalescedWork(
-      const std::vector<c10::intrusive_ptr<Work>>& works,
-      int rank,
-      OpType opType);
-
  private:
   int globalRankStart;
   int globalRankStride;
@@ -697,16 +669,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // guarantee that this heuristic is the correct assignment of ranks
   // to GPUs that Python layers use, but in practice it tends to be.
   // Fortunately we don't rely on this for correctness of any tensor
-  // operations, just for ancillary uses like health checks and
-  // barriers.
+  // operations, just for ancillary uses like barriers.
   at::Device guessDeviceForRank() const;
-
-  // Performs a health check by initializing dummy NCCL communicators and then
-  // destroying them. This will help indicate and signal any NCCL-related issues
-  // prior to the first collective. The actual initialization and subsequent
-  // destruction is ran on a separate thread and the main thread is signalled
-  // about timeouts/errors to report to the application.
-  void runHealthCheck();
 
   // Destroys initialized NCCL communicators in devNCCLComMap_ given by input
   // key. Throws if there are no communicators to destroy. Also removes
@@ -852,6 +816,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Extra time of sleep when waiting for timeout dump to finish.
   int waitTimeoutDumpInMilSec_;
+
+  // Interval of check coordinated signals in ProcessGroupNCCL from other ranks
+  // e.g., trigger the dump of the debugging info for timeout when notified.
+  int coordCheckIntervalMilSec_;
 
   // Size of ring buffer where we store NCCL Traces for debugging.
   int ncclTraceBufferSize_;
@@ -1012,6 +980,12 @@ TORCH_API std::string dump_nccl_trace();
 // tracing
 TORCH_API c10::optional<std::function<std::string()>>& get_cpp_trace_dumper();
 
+// Similar to get_cpp_trace_dumper, this stores a function defined in
+// torch-python layer that lets us check whether the GIL can be acquired,
+// helpful for instrumenting in cases where a hang was observed.
+typedef bool (*gil_checker_t)();
+
+TORCH_API gil_checker_t& get_gil_checker();
 } // namespace c10d
 
 #endif // USE_C10D_NCCL

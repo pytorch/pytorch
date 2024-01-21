@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -40,7 +40,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from inductor.test_torchinductor import (
     check_model,
-    check_model_cuda,
+    check_model_gpu,
     CommonTemplate,
     copy_tests,
     TestFailure,
@@ -91,14 +91,14 @@ if HAS_CPU:
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_GPU and not TEST_WITH_ASAN:
 
-    class DynamicShapesCudaTests(TestCase):
-        common = check_model_cuda
-        device = "cuda"
+    class DynamicShapesGPUTests(TestCase):
+        common = check_model_gpu
+        device = GPU_TYPE
 
     copy_tests(
-        DynamicShapesCommonTemplate, DynamicShapesCudaTests, "cuda", test_failures
+        DynamicShapesCommonTemplate, DynamicShapesGPUTests, GPU_TYPE, test_failures
     )
 
 
@@ -108,7 +108,7 @@ class TestInductorDynamic(TestCase):
     def setUp(self):
         # HAS_CUDA also checks compute capability to skip tests
         # on older devices
-        if self.device_type == "cuda" and not HAS_CUDA:
+        if not HAS_GPU:
             self.skipTest("Triton not available")
         torch._dynamo.reset()
         super(TestCase, self).setUp()
@@ -382,6 +382,7 @@ class TestInductorDynamic(TestCase):
         res1 = opt(x1)
         self.assertEqual(ref1, res1)
 
+    # Need to comment: is xpu need this? if yes we may need to add onlyGPU
     @onlyCUDA
     def test_pad_dynamic(self, device):
         def get_same_padding(x: int, k: int, s: int, d: int):
@@ -447,6 +448,16 @@ class TestInductorDynamic(TestCase):
         a = torch.randn(32, 32, device=device)
         cfn = self.compile_fn(fn)
         self.assertEqual(fn(a), cfn(a))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_item_materialize(self, device):
+        def fn(x):
+            return x.sum(dim=0).view(4).tolist()
+
+        cfn = torch.compile(fullgraph=True)(fn)
+
+        a = torch.ones(3, 4, dtype=torch.int64, device=device)
+        self.assertEqual(cfn(a), fn(a))
 
     def test_abs(self, device):
         def fn(x, y):
@@ -561,5 +572,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ASAN:
+    if (HAS_CPU or HAS_GPU) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")
