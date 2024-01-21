@@ -57,9 +57,8 @@ def foreach_all_gather(
         ]
         inp_split_sizes = [inp.numel() for inp in param_all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
-        all_gather_output_numel = all_gather_input_numel * world_size
         all_gather_output = torch.empty(
-            (all_gather_output_numel,), dtype=dtype, device=device
+            (all_gather_input_numel * world_size,), dtype=dtype, device=device
         )
         all_gather_input = all_gather_output.narrow(
             0, all_gather_input_numel * rank, all_gather_input_numel
@@ -98,32 +97,20 @@ def foreach_all_gather_copy_out(
             all_gather_input_numel, world_size, dtype, device
         )  # no-op after 1st call
         fsdp_param.alloc_all_gather_output()
+    all_gather_output = all_gather_output.view(world_size, -1)
+    out = [
+        fsdp_param.all_gather_output.view(world_size, -1)
+        for fsdp_param in fsdp_params
+    ]
     if True:  # fast path
-        all_gather_output = all_gather_output.view(world_size, -1)
-        out = [
-            fsdp_param.all_gather_output.view(world_size, -1)
-            for fsdp_param in fsdp_params
-        ]
         with _unsafe_preserve_version_counters(out):
             torch.split_with_sizes_copy(
                 all_gather_output, all_gather_input_numels, dim=1, out=out
             )
         return
-    # TODO: Replace with foreach copy to prepare for custom kernel.
-    split_sizes = all_gather_input_numels * world_size
-    splits = torch.split(all_gather_output, split_sizes, dim=0)
-    all_param_shards: List[List[torch.Tensor]] = []
-    outs: List[torch.Tensor] = []
-    for fsdp_param_idx, fsdp_param in enumerate(fsdp_params):
-        param_shards: List[torch.Tensor] = [
-            splits[fsdp_param_idx + rank * len(fsdp_params)]
-            for rank in range(world_size)
-        ]
-        all_param_shards.append(param_shards)
-        outs.append(fsdp_param.all_gather_output)
-    with _unsafe_preserve_version_counters(outs):
-        for param_shards, out in zip(all_param_shards, outs):
-            torch.cat(param_shards, out=out)
+    splits = torch.split(all_gather_output, all_gather_input_numels, dim=1)
+    with _unsafe_preserve_version_counters(out):
+        torch._foreach_copy_(out, splits)  # one `copy_` per parameter
 
 
 @torch.no_grad()
