@@ -38,7 +38,7 @@ extensions, where:
 
 For the default ``torch.Tensor`` case, the sharded parameter and all-gather
 input share the same data, and the all-gather output and unsharded parameter
-share the same data.
+share the same data, meaning that they can be thought of as the same tensors.
 
 [Note: FSDP and autograd]
 FSDP dynamically frees and allocates the unsharded parameter. Since autograd
