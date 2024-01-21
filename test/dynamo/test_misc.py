@@ -9022,14 +9022,14 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> deferred_runtime_asserts: values don't match.
-  >  Left: {i0: [Eq(Mod(i0, 3), 0)]}
+  >  Left: {u0: [Eq(Mod(u0, 3), 0)]}
   > Right: {}
 ==> divisible: values don't match.
-  >  Left: {Mod(i0, 3)}
+  >  Left: {Mod(u0, 3)}
   > Right: {}
 ==> name_to_node: values don't match.
-  >  Left: {_assert, eq, i0, mod}
-  > Right: {i0}
+  >  Left: {_assert, eq, mod, u0}
+  > Right: {u0}
 ==> num_deferred_runtime_asserts: values don't match.
   >  Left: 1
   > Right: 0

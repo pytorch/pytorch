@@ -28,9 +28,9 @@ from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
+    free_unbacked_symbols,
     GuardOnDataDependentSymNode,
     ShapeEnv,
-    free_unbacked_symbols,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError
