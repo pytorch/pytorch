@@ -302,7 +302,7 @@ class TestPasses(TestCase):
         with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint \\[2, 5\\]."):
             ep(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
 
-    def test_functionalize_inline_contraints(self) -> None:
+    def test_functionalize_inline_constraints(self) -> None:
         def f(x):
             a = x.item()
             torch._constrain_as_value(a, 4, 7)

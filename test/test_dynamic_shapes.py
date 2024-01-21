@@ -536,7 +536,7 @@ def forward(self, x_1):
     def test_expect_true_double_digits(self):
         shape_env = ShapeEnv()
         ia = [shape_env.create_unbacked_symint() for _ in range(11)]  # allocate 10
-        self.assertEqual(str(ia[-1]), "i10")
+        self.assertEqual(str(ia[-1]), "u10")
         self.assertTrue(expect_true(sum(ia) == 20))
         self.assertEqual(len(shape_env.deferred_runtime_asserts[ia[-1].node.expr]), 1)
 

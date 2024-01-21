@@ -30,6 +30,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
     ShapeEnv,
+    free_unbacked_symbols,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError
@@ -757,7 +758,7 @@ def _export(
     gm.meta["inline_constraints"] = {
         k: v
         for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
-        if re.match(r"^[if]\d+$", str(k))
+        if free_unbacked_symbols(k)
     }
 
     num_lifted = next(
