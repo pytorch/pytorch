@@ -528,8 +528,6 @@ dynamo_expected_failures = {
     "TestArgmax.test_combinations_data65",
     "TestArgmax.test_combinations_data63",
     "TestArgmax.test_combinations_data62",
-    "TestArgmax.test_combinations_data61",
-    "TestArgmax.test_combinations_data58",
     "TestCond.test_sq_cases",
     "TestNormInt64.test_bad_args",
     "TestQR.test_qr_empty_m_0_n_3",
@@ -8569,6 +8567,8 @@ dynamo_skips = {
     "TestNnapiBackend.test_pointwise_binary",  # test_jit
     "TestTypesAndAnnotation.test_tuple_no_element_type_annotation",  # test_jit
     "TestFrozenOptimizations.test_conv_bn_folding",  # test_jit.py
+    "TestArgmax.test_combinations_data58",
+    "TestArgmax.test_combinations_data61",
 }
 
 
