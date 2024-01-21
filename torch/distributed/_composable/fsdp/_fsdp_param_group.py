@@ -6,7 +6,7 @@ import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 
 from ._fsdp_common import FSDPMeshInfo, ParamModuleInfo, TrainingState
-from ._fsdp_param import FSDPParam
+from ._fsdp_param import FSDPParam, ShardedState
 
 
 class FSDPParamGroup:
@@ -28,6 +28,7 @@ class FSDPParamGroup:
         self.mesh_info = mesh_info
         self.device = device
         self._training_state = TrainingState.IDLE
+        self._sharded_state = ShardedState.SHARDED
         self._module_fqn: Optional[str] = None  # prefixed from root module
 
 
