@@ -2151,24 +2151,13 @@ dynamo_expected_failures = {
     "PackedSequenceTest.test_total_length",  # nn/test_packed_sequence
     "TestModuleHooks.test_forward_pre_hooks_named_tuple_True",  # nn/test_module_hooks
     "TestModuleHooks.test_full_backward_pre_hooks_named_tuple_True",  # nn/test_module_hooks
-    "TestModuleHookNN.test_hook_submodule_registration",  # nn/test_module_hooks
     "TestModuleHooks.test_forward_hooks_named_tuple_False",  # nn/test_module_hooks
     "TestModuleHooks.test_full_backward_hooks_named_tuple_False",  # nn/test_module_hooks
     "TestModuleHooks.test_forward_hooks_named_tuple_True",  # nn/test_module_hooks
     "TestModuleHookNN.test_hook_inplace",  # nn/test_module_hooks
-    "TestModuleGlobalHooks.test_module_backward_global_hook_writeable",  # nn/test_module_hooks
-    "TestModuleHookNN.test_hook_buffer_registration",  # nn/test_module_hooks
     "TestModuleHooks.test_full_backward_hooks_named_tuple_True",  # nn/test_module_hooks
-    "TestModuleHookNN.test_hook_no_requires_grad",  # nn/test_module_hooks
-    "TestModuleHookNN.test_hook_backward_writeable",  # nn/test_module_hooks
     "TestModuleHooks.test_forward_pre_hooks_named_tuple_False",  # nn/test_module_hooks
-    "TestModuleHookNN.test_hook_parameter_registration",  # nn/test_module_hooks
     "TestModuleHooks.test_full_backward_pre_hooks_named_tuple_False",  # nn/test_module_hooks
-    "TestModuleHookNN.test_hook_cpp",  # nn/test_module_hooks
-    "TestModuleHookNN.test_hook_invalid_outputs",  # nn/test_module_hooks
-    "TestModuleHookNN.test_backward_hooks_interaction",  # nn/test_module_hooks
-    "TestModuleHookNN.test_hook_last_arg_requires_grad",  # nn/test_module_hooks
-    "TestModuleGlobalHooks.test_module_global_hook_invalid_outputs",  # nn/test_module_hooks
     "TestLazyModules.test_lazy_batchnorm2d_state",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv3d",  # nn/test_lazy_modules
     "TestLazyModules.test_lazy_conv_transposed1d",  # nn/test_lazy_modules
