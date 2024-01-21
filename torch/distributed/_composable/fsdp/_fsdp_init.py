@@ -1,8 +1,10 @@
-from typing import List, Set, Union
+from typing import List, Set
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+
+from torch._prims_common import DeviceLikeType
 
 from torch.distributed._tensor import DeviceMesh, init_device_mesh
 
@@ -10,7 +12,7 @@ from ._fsdp_common import _is_composable_with_fsdp
 from ._fsdp_state import _get_module_fsdp_state
 
 
-def _normalize_device(device: Union[torch.device, int, str]) -> torch.device:
+def _normalize_device(device: DeviceLikeType) -> torch.device:
     if isinstance(device, torch.device):
         if device == torch.device("cuda"):
             return torch.device("cuda", torch.cuda.current_device())
