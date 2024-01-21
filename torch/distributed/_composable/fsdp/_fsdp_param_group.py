@@ -434,19 +434,22 @@ class FSDPParamGroup:
             self._training_state = old_training_state
 
     def _to_sharded(self):
-        for fsdp_param in self.fsdp_params:
-            fsdp_param.to_sharded()
-        self._sharded_state = ShardedState.SHARDED
+        if self._sharded_state != ShardedState.SHARDED:
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.to_sharded()
+            self._sharded_state = ShardedState.SHARDED
 
     def _to_sharded_post_forward(self):
-        for fsdp_param in self.fsdp_params:
-            fsdp_param.to_sharded_post_forward()
-        self._sharded_state = ShardedState.SHARDED_POST_FORWARD
+        if self._sharded_state != ShardedState.SHARDED_POST_FORWARD:
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.to_sharded_post_forward()
+            self._sharded_state = ShardedState.SHARDED_POST_FORWARD
 
     def _to_unsharded(self):
-        for fsdp_param in self.fsdp_params:
-            fsdp_param.to_unsharded()
-        self._sharded_state = ShardedState.UNSHARDED
+        if self._sharded_state != ShardedState.UNSHARDED:
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.to_unsharded()
+            self._sharded_state = ShardedState.UNSHARDED
 
     # Hook Registration #
     def _register_post_backward_hook(
