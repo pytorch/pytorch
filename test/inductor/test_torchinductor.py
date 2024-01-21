@@ -8012,7 +8012,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn((16, 32)),), check_lowp=False)
 
-    @requires_cuda()
+    @requires_gpu()
     @torch._inductor.config.patch("layout_optimization", True)
     @torch._inductor.config.patch("keep_output_stride", False)
     @config.patch(implicit_fallbacks=True)
@@ -8052,7 +8052,7 @@ class CommonTemplate:
             # But because our custom op needs fixed layout, the assertions in the custom op will pass
             self.common(fn, (inp,), check_lowp=False)
 
-    @requires_cuda()
+    @requires_gpu()
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_fixed_layout_channels_last(self):
         class Block(nn.Module):
