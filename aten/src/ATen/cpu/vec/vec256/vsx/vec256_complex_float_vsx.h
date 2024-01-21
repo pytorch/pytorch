@@ -270,8 +270,9 @@ class Vectorized<ComplexFlt> {
   }
 
   Vectorized<ComplexFlt> abs_() const {
-    auto ret = abs_2_();
-    return ret.elwise_sqrt();
+    auto vi = el_mergeo();
+    auto vr = el_mergee();
+    return {Sleef_hypotf4_u05vsx(vr._vec0, vi._vec0), Sleef_hypotf4_u05vsx(vr._vec1, vi._vec1)};
   }
 
   Vectorized<ComplexFlt> abs() const {
