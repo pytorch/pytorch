@@ -1257,9 +1257,8 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from . import ConstantVariable
 
         if (
-            (loop_items := len(value.unpack_var_sequence(tx)))
-            < torch._dynamo.config.for_loop_medium_size_boundary
-        ):
+            loop_items := len(value.unpack_var_sequence(tx))
+        ) < torch._dynamo.config.for_loop_medium_size_boundary:
             raise CannotConvertRangeToHigherOrder(
                 f"Loop of length {loop_items} too small to consider optimizing"
             )

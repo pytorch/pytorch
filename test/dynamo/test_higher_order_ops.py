@@ -125,7 +125,6 @@ def default_args_generator(seed_value):
         yield new_args
 
 
-
 class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def _assert_wrap_fallback(self, func, args, setup=lambda: None):
         counters.clear()
@@ -3730,9 +3729,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         ):
             _assert_tensors_nonaliasing(a, a)
 
-    @torch._dynamo.config.patch(
-        for_loop_medium_size_boundary=10
-    )
+    @torch._dynamo.config.patch(for_loop_medium_size_boundary=10)
     def test_loop_to_higher_order_simple(self):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -3809,14 +3806,12 @@ class GraphModule(torch.nn.Module):
             add = res_0 + _lambda_;  res_0 = None
             add_1 = add + res;  add = None
             return (res, add_1, _lambda_)
-"""
+""",
         )
         self.assertEqual(cnt.frame_count, 1)
         self.assertLessEqual(cnt.op_count, 39)
 
-    @torch._dynamo.config.patch(
-        for_loop_medium_size_boundary=10
-    )
+    @torch._dynamo.config.patch(for_loop_medium_size_boundary=10)
     def test_loop_to_higher_order_consistent_namespace(self):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -3892,14 +3887,12 @@ class GraphModule(torch.nn.Module):
             add = res_0 + _lambda_;  res_0 = None
             add_1 = add + res;  add = None
             return (res, add_1, _lambda_)
-"""
+""",
         )
         self.assertEqual(cnt.frame_count, 1)
         self.assertLessEqual(cnt.op_count, 39)
 
-    @torch._dynamo.config.patch(
-        for_loop_medium_size_boundary=10
-    )
+    @torch._dynamo.config.patch(for_loop_medium_size_boundary=10)
     def test_loop_to_higher_order_step(self):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -3976,10 +3969,11 @@ class GraphModule(torch.nn.Module):
             add = res_0 + _lambda_;  res_0 = None
             add_1 = add + res;  add = None
             return (res, add_1, _lambda_)
-"""
+""",
         )
         self.assertEqual(cnt.frame_count, 1)
         self.assertLessEqual(cnt.op_count, 39)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

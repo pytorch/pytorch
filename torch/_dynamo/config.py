@@ -329,7 +329,7 @@ inject_BUILD_SET_unimplemented_TESTING_ONLY = False
 
 # How many iterations a for loop has to be before we decide to automatically
 # convert it to a function body.
-for_loop_medium_size_boundary = 100
+for_loop_medium_size_boundary = 2
 
 _autograd_backward_strict_mode_banned_ops = [
     "stride",
