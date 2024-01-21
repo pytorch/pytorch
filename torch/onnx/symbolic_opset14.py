@@ -191,6 +191,7 @@ def scaled_dot_product_attention(
     elif _type_utils.JitScalarType.from_value(attn_mask) in (
         _type_utils.JitScalarType.FLOAT,
         _type_utils.JitScalarType.HALF,
+        _type_utils.JitScalarType.BFLOAT16,
     ):
         mul_qk_add = g.op("Add", mul_qk, attn_mask)
     else:

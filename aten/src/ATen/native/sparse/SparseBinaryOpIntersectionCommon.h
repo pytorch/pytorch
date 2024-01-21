@@ -23,8 +23,7 @@
 #define NAME "sparse_binary_op_intersection_cpu"
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -478,4 +477,4 @@ void _sparse_binary_op_intersection_kernel_out(
 
 } // anonymous namespace
 
-}} // at::native
+} // at::native

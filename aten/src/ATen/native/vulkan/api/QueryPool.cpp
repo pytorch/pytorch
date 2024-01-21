@@ -6,6 +6,7 @@
 #endif // USE_KINETO
 
 #include <cmath>
+#include <iomanip>
 #include <iostream>
 #include <utility>
 
@@ -43,7 +44,7 @@ QueryPool::QueryPool(const QueryPoolConfig& config, const Adapter* adapter_p)
 
   shader_log().reserve(config_.initialReserveSize);
 
-  TORCH_CHECK(adapter_p, "Valid GPU device must be created for QueryPool");
+  VK_CHECK_COND(adapter_p, "Valid GPU device must be created for QueryPool");
   ns_per_tick_ = std::lround(adapter_p->timestamp_period());
   ns_per_tick_ = (ns_per_tick_ == 0) ? kDefaultNsPerTick : ns_per_tick_;
 
@@ -77,7 +78,7 @@ void QueryPool::reset(const CommandBuffer& cmd) {
 }
 
 size_t QueryPool::write_timestamp(const CommandBuffer& cmd) {
-  TORCH_CHECK(
+  VK_CHECK_COND(
       in_use_ < config_.maxQueryCount,
       "Vulkan QueryPool: Exceeded the maximum number of queries "
       "allowed by the queryPool (",
@@ -245,7 +246,7 @@ std::tuple<std::string, uint64_t> QueryPool::
   std::lock_guard<std::mutex> lock(mutex_);
 
   const size_t entry_count = shader_logs_entry_count_thread_unsafe();
-  TORCH_CHECK(
+  VK_CHECK_COND(
       (query_index >= 0 && query_index < entry_count),
       "query_index of ",
       query_index,

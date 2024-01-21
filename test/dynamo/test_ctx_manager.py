@@ -178,6 +178,30 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 9)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_across_graph_break(self):
+        def fn(x):
+            s = torch.cuda.Stream()
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+
+            print("foo")
+            tcs = torch.cuda.stream(s)
+            with tcs:
+                x = torch.relu(x)
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 9)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager2(self):
         def fn(x, s):
             x = torch.mul(x, 5)

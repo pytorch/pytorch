@@ -1,5 +1,4 @@
 import functools
-from itertools import chain
 from typing import List, Optional
 
 import torch
@@ -46,16 +45,6 @@ def check_dtype(a: Tensor, b: Tensor) -> bool:
     return a.is_floating_point() and b.is_floating_point()
 
 
-def is_symbolic(a: Optional[Tensor]) -> bool:
-    return a is not None and any(
-        isinstance(x, torch.SymInt) for x in chain(a.size(), a.stride())
-    )
-
-
-def any_is_symbolic(*args: Optional[Tensor]) -> bool:
-    return any(is_symbolic(a) for a in args)
-
-
 def should_pad_common(
     mat1: Tensor, mat2: Tensor, input: Optional[Tensor] = None
 ) -> bool:
@@ -63,7 +52,7 @@ def should_pad_common(
         torch._inductor.config.shape_padding
         and check_device(mat1, mat2)
         and check_dtype(mat1, mat2)
-        and not any_is_symbolic(mat1, mat2, input)
+        and not utils.any_is_symbolic(mat1, mat2, input)
     )
 
 

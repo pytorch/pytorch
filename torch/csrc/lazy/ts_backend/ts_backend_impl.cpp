@@ -220,7 +220,7 @@ std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
     } else {
       // TODO(whc) should this check be made more general? it's written somewhat
       // oddly
-      CHECK(
+      TORCH_CHECK(
           static_cast<c10::DeviceType>(default_device_type_->type) !=
               at::kCUDA ||
           ts_data->data().device().type() == at::kCUDA);

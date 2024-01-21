@@ -25,6 +25,11 @@
 
 namespace c10 {
 
+// dummy struct for uint1 to uint7, actual functionality
+// of these dtypes will be implemented in python with Tensor subclass
+template <unsigned int N>
+struct dummy_uint1_7_t {};
+
 // For the macros below:
 //
 // For users: If you want to macro some code for all non-QInt scalar types
@@ -77,7 +82,14 @@ namespace c10 {
   _(c10::Float8_e4m3fnuz, Float8_e4m3fnuz) /* 26 */      \
   _(uint16_t, UInt16) /* 27 */                           \
   _(uint32_t, UInt32) /* 28 */                           \
-  _(uint64_t, UInt64) /* 29 */
+  _(uint64_t, UInt64) /* 29 */                           \
+  _(c10::dummy_uint1_7_t<1>, UInt1) /* 30 */             \
+  _(c10::dummy_uint1_7_t<2>, UInt2) /* 31 */             \
+  _(c10::dummy_uint1_7_t<3>, UInt3) /* 32 */             \
+  _(c10::dummy_uint1_7_t<4>, UInt4) /* 33 */             \
+  _(c10::dummy_uint1_7_t<5>, UInt5) /* 34 */             \
+  _(c10::dummy_uint1_7_t<6>, UInt6) /* 35 */             \
+  _(c10::dummy_uint1_7_t<7>, UInt7) /* 36 */
 
 // If you want to support ComplexHalf for real, add ComplexHalf
 // into this macro (and change the name).  But beware: convert()
@@ -460,8 +472,11 @@ static inline bool isBitsType(ScalarType t) {
 }
 
 static inline bool isBarebonesUnsignedType(ScalarType t) {
-  return t == ScalarType::UInt16 || t == ScalarType::UInt32 ||
-      t == ScalarType::UInt64;
+  return t == ScalarType::UInt1 || t == ScalarType::UInt2 ||
+      t == ScalarType::UInt3 || t == ScalarType::UInt4 ||
+      t == ScalarType::UInt5 || t == ScalarType::UInt6 ||
+      t == ScalarType::UInt7 || t == ScalarType::UInt16 ||
+      t == ScalarType::UInt32 || t == ScalarType::UInt64;
 }
 
 static inline ScalarType toQIntType(ScalarType t) {

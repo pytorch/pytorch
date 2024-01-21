@@ -339,6 +339,16 @@ _autograd_backward_strict_mode_banned_ops.extend(
     [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r"^is_.*", name)]
 )
 
+# Enables caching of dispatches to fake tensors.
+fake_tensor_cache_enabled = (
+    os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE", "0" if is_fbcode() else "1")
+    == "1"
+)
+
+# Enables cross checking between the fake tensor cache and dispatch.
+fake_tensor_cache_crosscheck_enabled = (
+    os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE_CROSSCHECK", "0") == "1"
+)
 
 # support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
 # WARNING: this is an experimental flag and is subject to change.

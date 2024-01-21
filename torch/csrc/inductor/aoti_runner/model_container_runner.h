@@ -43,11 +43,11 @@ class TORCH_API AOTIModelContainerRunner {
   AOTIModelContainerRunner(
       const std::string& model_so_path,
       size_t num_models,
-      bool is_cpu,
+      const std::string& device_str,
       const std::string& cubin_dir);
 
   std::unique_ptr<at::DynamicLibrary> model_so_;
-  decltype(&AOTInductorModelContainerCreate) create_func_{nullptr};
+  decltype(&AOTInductorModelContainerCreateWithDevice) create_func_{nullptr};
   decltype(&AOTInductorModelContainerDelete) delete_func_{nullptr};
   decltype(&AOTInductorModelContainerGetNumOutputs) get_num_outputs_func_{
       nullptr};

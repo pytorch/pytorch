@@ -458,6 +458,12 @@ class DTensorSpec:
         return self.tensor_meta.shape
 
     @property
+    def stride(self) -> Tuple[int, ...]:
+        if self.tensor_meta is None:
+            raise ValueError("tensor_meta is not set")
+        return self.tensor_meta.stride
+
+    @property
     def ndim(self) -> int:
         if self.tensor_meta is None:
             raise ValueError("tensor_meta is not set")

@@ -427,7 +427,7 @@ WORLD_SIZE = 2
 
 
 def exit_if_lt_x_gpu(x):
-    if BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < x:
+    if torch.cuda.device_count() < x:
         sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
 
 
@@ -487,6 +487,8 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
     @requires_nccl()
     @with_comms()
     def test_all_gather_into_tensor_coalesced(self):
+        exit_if_lt_x_gpu(self.world_size)
+
         tensors = [
             torch.ones([4], device=f"cuda:{self.rank}"),
             torch.ones([4], device=f"cuda:{self.rank}") + 1,
@@ -620,6 +622,8 @@ class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):
     @requires_nccl()
     @with_comms()
     def test_permute_tensor_with_sub_group(self):
+        exit_if_lt_x_gpu(self.world_size)
+
         device = "cuda"
         mesh_dim_names = ["dp", "tp"]
 

@@ -410,6 +410,7 @@ static void upsample_nearest2d_backward_out_cuda_template(
     dim3 gdim{ceil_div(n, bdim.x)};
     // safe check for int32 indexing; implicitly restrict launch config for kernel
     TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
+    TORCH_CHECK(grad_output.numel() <= std::numeric_limits<int32_t>::max());
 
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest2d_backward_out_frame", [&] {

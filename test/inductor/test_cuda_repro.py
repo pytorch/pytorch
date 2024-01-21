@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import gc
 import math
 import sys
 import unittest
@@ -966,24 +967,29 @@ class CudaReproTests(TestCase):
         self.assertEqual(ref, res)
 
     @config.patch({"triton.cudagraphs": True})
+    @config.patch({"fx_graph_cache": True})
     def test_index_put_cudagraph(self):
-        def fn(x, y, z):
-            x = torch.zeros_like(x)
-            return x.index_put([y], z, True)
+        for _ in range(2):
 
-        x = torch.zeros((512, 512), device="cuda", dtype=torch.bool)
-        y = torch.zeros((512,), device="cuda", dtype=torch.int64)
-        z = torch.ones((512, 512), device="cuda", dtype=torch.bool)
+            def fn(x, y, z):
+                x = torch.zeros_like(x)
+                return x.index_put([y], z, True)
 
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
+            x = torch.zeros((512, 512), device="cuda", dtype=torch.bool)
+            y = torch.zeros((512,), device="cuda", dtype=torch.int64)
+            z = torch.ones((512, 512), device="cuda", dtype=torch.bool)
 
-        ref = fn(x, y, z)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
 
-        # run it twice to test cuda graph issue
-        res = opt_fn(x, y, z)
-        res = opt_fn(x, y, z)
+            ref = fn(x, y, z)
 
-        self.assertEqual(ref, res)
+            # run it twice to test cuda graph issue
+            res = opt_fn(x, y, z)
+            res = opt_fn(x, y, z)
+
+            self.assertEqual(ref, res)
+            torch._dynamo.reset()
+            gc.collect()
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "flash attention not supported"

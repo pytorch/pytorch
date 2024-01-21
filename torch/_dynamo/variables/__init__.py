@@ -51,6 +51,7 @@ from .misc import (
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
+    MethodWrapperVariable,
     NewCellVariable,
     NewGlobalVariable,
     NumpyVariable,
@@ -61,6 +62,7 @@ from .misc import (
     UnknownVariable,
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .sdpa import SDPAParamsVariable
 from .tensor import (
     FakeItemVariable,
     NumpyNdarrayVariable,
@@ -126,4 +128,5 @@ __all__ = [
     "UserMethodVariable",
     "VariableTracker",
     "WithExitFunctionVariable",
+    "SDPAParamsVariable",
 ]

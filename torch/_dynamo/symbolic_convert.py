@@ -433,13 +433,20 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 push and self.push(value)
                 self.jump(inst)
         else:
-            # TODO link the torch.cond doc later
-            raise exc.UserError(
-                exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
-                "Dynamic control flow is not supported at the moment. Please use "
-                "functorch.experimental.control_flow.cond to explicitly capture the control flow.",
-                case_name="cond_operands",
-            )
+            from .source import is_constant_source
+
+            if value.source is not None and is_constant_source(value.source):
+                if truth_fn(value.get_real_value()):
+                    push and self.push(value)
+                    self.jump(inst)
+            else:
+                # TODO link the torch.cond doc later
+                raise exc.UserError(
+                    exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
+                    "Dynamic control flow is not supported at the moment. Please use "
+                    "functorch.experimental.control_flow.cond to explicitly capture the control flow.",
+                    case_name="cond_operands",
+                )
 
     return inner
 
@@ -815,7 +822,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def LOAD_FAST(self, inst):
         name = inst.argval
-
         if name in self.f_locals and config.replay_record_enabled:
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
@@ -1629,7 +1635,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def DICT_MERGE(self, inst):
         v = self.pop()
         assert inst.argval > 0
-        obj = self.stack[-inst.arg]
+        obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ConstDictVariable)
         assert obj.mutable_local
         obj.call_method(self, "update", [v], {})
@@ -2239,18 +2245,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         result = skipfiles.check_verbose(func, is_inlined_call=True)
         if result.skipped:
-            from torch._dynamo.variables.misc import (
-                produce_trampoline_autograd_apply,
-                produce_trampoline_autograd_bwd,
-                produce_trampoline_autograd_fwd,
-            )
+            from torch._dynamo.variables.misc import produce_trampoline_autograd_apply
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
             if hasattr(func.fn, "_origin") and func.fn._origin in [
-                produce_trampoline_autograd_fwd,
                 produce_trampoline_autograd_apply,
-                produce_trampoline_autograd_bwd,
             ]:
                 # Known sound
                 return skipfiles.SkipResult(False, "allowlist in dynamo known function")

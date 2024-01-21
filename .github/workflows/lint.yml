@@ -11,6 +11,7 @@ on:
       - landchecks/*
   workflow_dispatch:
 
+permissions: read-all
 # The names of steps that actually test the code should be suffixed with `(nonretryable)`.
 # When any other step fails, it's job will be retried once by retryBot.
 jobs:

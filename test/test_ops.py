@@ -2095,6 +2095,20 @@ fake_autocast_backward_xfails = {
 
 @unMarkDynamoStrictTest
 class TestFakeTensor(TestCase):
+    def setUp(self):
+        # Turn on FakeTensor caching and cross-checking for these tests:
+        cache_enabled = unittest.mock.patch(
+            "torch._dynamo.config.fake_tensor_cache_enabled", True
+        )
+        cache_enabled.start()
+        self.addCleanup(cache_enabled.stop)
+
+        cache_crosscheck = unittest.mock.patch(
+            "torch._dynamo.config.fake_tensor_cache_crosscheck_enabled", True
+        )
+        cache_crosscheck.start()
+        self.addCleanup(cache_crosscheck.stop)
+
     def _test_fake_helper(self, device, dtype, op, context):
         name = op.name
         if op.variant_test_name:

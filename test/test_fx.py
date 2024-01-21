@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     find_library_location,
     run_tests,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -4454,6 +4455,7 @@ TestFunctionalTracing.generate_tests()
 
 instantiate_device_type_tests(TestOperatorSignatures, globals())
 
+@skipIfTorchDynamo("too slow")
 @skipIfNoTorchVision
 class TestVisionTracing(JitTestCase):
     def setUp(self):

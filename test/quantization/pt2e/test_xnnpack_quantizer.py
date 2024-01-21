@@ -534,6 +534,54 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
                 qconfig_mapping,
             )
 
+    def test_dynamic_linear_int4_weight(self):
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config(
+            is_per_channel=True,
+            is_dynamic=True,
+            weight_qmin=0,
+            weight_qmax=15,
+        )
+        quantizer.set_global(quantization_config)
+        m_eager = TestHelperModules.TwoLinearModule().eval()
+
+        node_occurrence = {
+            # input and output are using quantize_per_tensor and weight is using quantize_per_channel
+            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 2,
+            # note: quantize op for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+        }
+        act_affine_quant_obs = observer.PlaceholderObserver.with_args(
+            dtype=torch.qint8,
+            qscheme=torch.per_tensor_affine,
+            quant_min=-128,
+            quant_max=127,
+            eps=2**-12,
+            is_dynamic=True,
+        )
+        qconfig = QConfig(
+            activation=act_affine_quant_obs,
+            weight=per_channel_weight_observer_range_neg_127_to_127.with_args(
+                quant_min=0, quant_max=15
+            ),
+        )
+        qconfig_mapping = QConfigMapping().set_global(qconfig)
+        # Test with 2d inputs
+        example_inputs_2d = (torch.randn(9, 8),)
+        example_inputs_4d = (torch.randn(9, 10, 11, 8),)
+        for example_inputs in [example_inputs_2d, example_inputs_4d]:
+            self._test_quantizer(
+                m_eager,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                [],
+                True,
+                qconfig_mapping,
+            )
+
     def test_qat_dynamic_linear(self):
         quantizer = XNNPACKQuantizer()
         quantization_config = get_symmetric_quantization_config(

@@ -1028,6 +1028,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch._segment_reduce: lambda data, reduce="max", lengths=None, indices=None, offsets=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
         torch.select_scatter: lambda input, src, dim, index: -1,
+        torch.slice_inverse: lambda input, src, dim=0, start=None, end=None, step=1: -1,
         torch.slice_scatter: lambda input, src, dim=0, start=None, end=None, step=1: -1,
         torch.selu: lambda input, inplace=False: -1,
         torch.sigmoid: lambda input, out=None: -1,

@@ -1,74 +1,10 @@
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Resource.h>
 
-#include <c10/core/ScalarTypeToTypeMeta.h>
-
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
-
-//
-// Utility Functions
-//
-
-/*
- * This function is used to determine what image format to use for a given
- * dtype.
- *
- * TODO: enable proper format selection between kFloat and kHalf.
- *
- * Context: due to limitations of the shader compilation system, at the moment
- * it is not possible to support both 32 bit and 16 bit float formats since
- * shaders will have to specify the format qualifier of texture inputs. Right
- * now, shaders are compiled with either rgba16f or rgba32f qualifiers depending
- * on whether USE_VULKAN_FP16_INFERENCE is set. Therefore, textures must be
- * always created with the corresponding VkFormat. Consequently, kHalf tensors
- * are currently unsupported in favor of enforcing inputs to be of kFloat dtype.
- */
-VkFormat vk_format(const at::ScalarType dtype) {
-  switch (dtype) {
-    case c10::kBool:
-      return VK_FORMAT_R8G8B8A8_SINT;
-    case kFloat:
-#ifdef USE_VULKAN_FP16_INFERENCE
-      return VK_FORMAT_R16G16B16A16_SFLOAT;
-#else
-      return VK_FORMAT_R32G32B32A32_SFLOAT;
-#endif /* USE_VULKAN_FP16_INFERENCE */
-    case c10::kQUInt8:
-      return VK_FORMAT_R8G8B8A8_UINT;
-    case c10::kQInt8:
-      return VK_FORMAT_R8G8B8A8_SINT;
-    case c10::kQInt32:
-      return VK_FORMAT_R32G32B32A32_SINT;
-
-    default:
-      TORCH_CHECK(
-          false,
-          "Vulkan vk_format(): no corresponding format for dtype: ",
-          dtype);
-  }
-}
-
-/*
- * This function is used to map a texture format to a corresponding
- * c10::ScalarType. It is primarily used to set the data type of a
- * StorageBuffer object that will receive copied data from a texture.
- */
-c10::ScalarType c10_scalartype(const VkFormat image_format) {
-  switch (image_format) {
-    case VK_FORMAT_R32G32B32A32_SFLOAT:
-      return c10::kFloat;
-    case VK_FORMAT_R16G16B16A16_SFLOAT:
-      return c10::kHalf;
-    case VK_FORMAT_R8G8B8A8_UINT:
-      return c10::kQUInt8;
-
-    default:
-      TORCH_CHECK(false, "vulkan c10_scalartype(): Unknown VkFormat.");
-  }
-}
 
 //
 // MemoryBarrier
@@ -203,7 +139,7 @@ MemoryMap::MemoryMap(MemoryMap&& other) noexcept
 }
 
 MemoryMap::~MemoryMap() {
-  if (C10_UNLIKELY(!data_)) {
+  if (!data_) {
     return;
   }
 
@@ -296,7 +232,7 @@ ImageSampler::ImageSampler(ImageSampler&& other) noexcept
 }
 
 ImageSampler::~ImageSampler() {
-  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
+  if (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroySampler(device_, handle_, nullptr);
@@ -304,8 +240,15 @@ ImageSampler::~ImageSampler() {
 
 size_t ImageSampler::Hasher::operator()(
     const ImageSampler::Properties& props) const {
-  return c10::get_hash(
-      props.filter, props.mipmap_mode, props.address_mode, props.border_color);
+  size_t seed = 0;
+  seed = utils::hash_combine(seed, std::hash<VkFilter>()(props.filter));
+  seed = utils::hash_combine(
+      seed, std::hash<VkSamplerMipmapMode>()(props.mipmap_mode));
+  seed = utils::hash_combine(
+      seed, std::hash<VkSamplerAddressMode>()(props.address_mode));
+  seed =
+      utils::hash_combine(seed, std::hash<VkBorderColor>()(props.border_color));
+  return seed;
 }
 
 void swap(ImageSampler& lhs, ImageSampler& rhs) noexcept {
@@ -533,7 +476,7 @@ VkSampler SamplerCache::retrieve(const SamplerCache::Key& key) {
   std::lock_guard<std::mutex> lock(cache_mutex_);
 
   auto it = cache_.find(key);
-  if C10_UNLIKELY (cache_.cend() == it) {
+  if (cache_.cend() == it) {
     it = cache_.insert({key, SamplerCache::Value(device_, key)}).first;
   }
 
@@ -590,7 +533,7 @@ MemoryAllocator::MemoryAllocator(MemoryAllocator&& other) noexcept
 }
 
 MemoryAllocator::~MemoryAllocator() {
-  if C10_LIKELY (VK_NULL_HANDLE == allocator_) {
+  if (VK_NULL_HANDLE == allocator_) {
     return;
   }
   vmaDestroyAllocator(allocator_);
@@ -739,7 +682,7 @@ VulkanFence& VulkanFence::operator=(VulkanFence&& other) noexcept {
 }
 
 VulkanFence::~VulkanFence() {
-  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
+  if (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroyFence(device_, handle_, nullptr);
@@ -756,7 +699,7 @@ void VulkanFence::wait() {
       // The timeout (last) arg is in units of ns
       fence_status = vkWaitForFences(device_, 1u, &handle_, VK_TRUE, 100000);
 
-      TORCH_CHECK(
+      VK_CHECK_COND(
           fence_status != VK_ERROR_DEVICE_LOST,
           "Vulkan Fence: Device lost while waiting for fence!");
     } while (fence_status != VK_SUCCESS);

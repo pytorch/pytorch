@@ -22,7 +22,7 @@ done < <(find /var/lib/jenkins/.gradle -type f -print0)
 
 # Patch pocketfft (as Android does not have aligned_alloc even if compiled with c++17
 if [ -f ~/workspace/third_party/pocketfft/pocketfft_hdronly.h ]; then
-  sed -i -e "s/#if __cplusplus >= 201703L/#if 0/" ~/workspace/third_party/pocketfft/pocketfft_hdronly.h
+  sed -i -e "s/__cplusplus >= 201703L/0/" ~/workspace/third_party/pocketfft/pocketfft_hdronly.h
 fi
 
 export GRADLE_LOCAL_PROPERTIES=~/workspace/android/local.properties
@@ -40,7 +40,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-gradle-custom-build* ]]; then
   # Install torch & torchvision - used to download & dump used ops from test model.
   retry pip install torch torchvision --progress-bar off
 
-  exec "$(dirname "${BASH_SOURCE[0]}")/../../android/build_test_app_custom.sh" armeabi-v7a
+  exec "$(dirname "${BASH_SOURCE[0]}")/../android/build_test_app_custom.sh" armeabi-v7a
 fi
 
 # Run default build

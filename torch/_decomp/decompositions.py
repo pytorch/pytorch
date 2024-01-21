@@ -301,8 +301,8 @@ def _prelu_kernel_backward(
 def rrelu_with_noise(
     self: Tensor,
     noise: Tensor,
-    lower: float,
-    upper: float,
+    lower: float = 0.125,
+    upper: float = 0.3333333333333333,
     training: bool = False,
     generator: Optional[torch.Generator] = None,
 ) -> Tensor:
@@ -3286,6 +3286,18 @@ def upsample_bilinear2d_aa_vec(input, output_size, align_corners, scale_factors)
     )
 
 
+@register_decomposition(aten._upsample_bicubic2d_aa.vec)
+@aten._upsample_bicubic2d_aa.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten._upsample_bicubic2d_aa.vec.py_impl(DispatchKey.Autograd)
+def upsample_bicubic2d_aa_vec(input, output_size, align_corners, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_h = get_scale_value(scale_factors, 0)
+    scale_w = get_scale_value(scale_factors, 1)
+    return torch.ops.aten._upsample_bicubic2d_aa(
+        input, osize, align_corners, scale_h, scale_w
+    )
+
+
 @register_decomposition(aten.upsample_bilinear2d.vec)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.Autograd)
@@ -3809,18 +3821,11 @@ def mv(self, vec):
 def binary_cross_entropy_with_logits(
     self, target, weight=None, pos_weight=None, reduction=Reduction.MEAN.value
 ):
-    max_val = (-self).clamp_min(0)
     if pos_weight is not None:
         log_weight = (pos_weight - 1) * target + 1
-        loss = (1 - target) * self + log_weight * (
-            ((-max_val).exp() + (-self - max_val).exp()).log() + max_val
-        )
+        loss = (1 - target) * self - (log_weight * F.logsigmoid(self))
     else:
-        loss = (
-            (1 - target) * self
-            + max_val
-            + ((-max_val).exp() + (-self - max_val).exp()).log()
-        )
+        loss = (1 - target) * self - F.logsigmoid(self)
 
     if weight is not None:
         loss = loss * weight
@@ -4321,7 +4326,14 @@ def scaled_dot_product_flash_attention_for_cpu(
     )
 
     output, attn = aten._scaled_dot_product_attention_math.default(
-        query, key, value, None, dropout_p, is_causal, None, scale=scale
+        query,
+        key,
+        value,
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        dropout_mask=None,
+        scale=scale,
     )
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via

@@ -325,15 +325,23 @@ class GetItemSource(ChainedSource):
         return slice_class(*slice_args)
 
     def name(self):
+        # Index can be of following types
+        # 1) ConstDictKeySource
+        # 2) enum.Enum
+        # 3) index is a slice - example 1:4
+        # 4) index is a constant - example string, integer
         if isinstance(self.index, Source):
+            if not isinstance(self.index, ConstDictKeySource):
+                raise ValueError(
+                    "GetItemSource index must be a constant, enum or ConstDictKeySource"
+                )
             return f"{self.base.name()}[{self.index.name()}]"
+        elif self.index_is_slice:
+            return f"{self.base.name()}[{self.unpack_slice()!r}]"
+        elif isinstance(self.index, enum.Enum):
+            return f"{self.base.name()}[{enum_repr(self.index, self.guard_source().is_local())}]"
         else:
-            if self.index_is_slice:
-                return f"{self.base.name()}[{self.unpack_slice()!r}]"
-            elif isinstance(self.index, enum.Enum):
-                return f"{self.base.name()}[{enum_repr(self.index, self.guard_source().is_local())}]"
-            else:
-                return f"{self.base.name()}[{self.index!r}]"
+            return f"{self.base.name()}[{self.index!r}]"
 
 
 @dataclasses.dataclass(frozen=True)

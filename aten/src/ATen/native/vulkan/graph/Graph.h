@@ -6,9 +6,9 @@
 
 #include <ATen/native/vulkan/api/Context.h>
 #include <ATen/native/vulkan/api/Tensor.h>
+#include <ATen/native/vulkan/api/Types.h>
 
 #include <ATen/native/vulkan/graph/Config.h>
-#include <ATen/native/vulkan/graph/Exception.h>
 #include <ATen/native/vulkan/graph/Value.h>
 
 namespace at {
@@ -93,24 +93,24 @@ class ComputeGraph final {
     return values_[idx];
   }
 
-  inline IntArrayRef get_val_sizes(ValueRef idx) {
+  inline const std::vector<int64_t>& get_val_sizes(ValueRef idx) {
     Value& val = get_val(idx);
     if (val.isTensor()) {
       return val.toTensor().sizes();
     } else if (val.isTensorRef()) {
       return val.toTensorRef().sizes;
     }
-    VKGRAPH_THROW("Could not get sizes of value with type ", val.type());
+    VK_THROW("Could not get sizes of value with type ", val.type());
   }
 
-  inline c10::ScalarType get_val_dtype(ValueRef idx) {
+  inline api::ScalarType get_val_dtype(ValueRef idx) {
     Value& val = get_val(idx);
     if (val.isTensor()) {
       return val.toTensor().dtype();
     } else if (val.isTensorRef()) {
       return val.toTensorRef().dtype;
     }
-    VKGRAPH_THROW("Could not get dtype of value with type ", val.type());
+    VK_THROW("Could not get dtype of value with type ", val.type());
   }
 
   inline std::vector<std::unique_ptr<OpNode>>& prepack_nodes() {
@@ -125,12 +125,14 @@ class ComputeGraph final {
   // Graph Building
   //
 
-  ValueRef add_tensor(const IntArrayRef sizes, const c10::ScalarType dtype);
+  ValueRef add_tensor(
+      const std::vector<int64_t>& sizes,
+      const api::ScalarType dtype);
   ValueRef add_tensorref(
-      const IntArrayRef sizes,
-      const c10::ScalarType dtype,
+      const std::vector<int64_t>& sizes,
+      const api::ScalarType dtype,
       const void* const data);
-  ValueRef add_staging(const c10::ScalarType dtype, const size_t numel);
+  ValueRef add_staging(const api::ScalarType dtype, const size_t numel);
 
   ValueRef set_input_tensor(const ValueRef idx, const bool use_staging = true);
   ValueRef set_output_tensor(const ValueRef idx, const bool use_staging = true);

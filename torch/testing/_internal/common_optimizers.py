@@ -431,6 +431,25 @@ def optim_error_inputs_func_adam(device, dtype):
 
 
 def optim_inputs_func_adamax(device=None):
+    cuda_supported_configs = [
+        OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.9, "maximize": True, "capturable": True},
+            desc="capturable, maximize, weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0, "maximize": True, "capturable": True},
+            desc="capturable, maximize",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.9, "maximize": False, "capturable": True},
+            desc="capturable, weight_decay",
+        ),
+    ]
+
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 0.001}, desc="non-default lr"),
@@ -442,7 +461,7 @@ def optim_inputs_func_adamax(device=None):
             kwargs={"weight_decay": 0.9, "maximize": True},
             desc="maximize",
         ),
-    ]
+    ] + (cuda_supported_configs if str(device) == "cuda" else [])
 
 
 def optim_error_inputs_func_adamax(device, dtype):
@@ -704,6 +723,7 @@ def optim_error_inputs_func_rprop(device, dtype):
 def optim_inputs_func_sgd(device=None):
     return [
         OptimizerInput(params=None, kwargs={"lr": 1e-2}, desc="default"),
+        OptimizerInput(params=None, kwargs={"lr": 1e-2}, desc="Tensor lr"),
         OptimizerInput(
             params=None, kwargs={"lr": 1e-2, "momentum": 0.9}, desc="momentum"
         ),
@@ -905,6 +925,20 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_with_cuda_params",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "fails, https://github.com/pytorch/pytorch/issues/117165"
+                ),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -942,6 +976,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "fails, https://github.com/pytorch/pytorch/issues/117165"
+                ),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -977,6 +1018,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "fails, https://github.com/pytorch/pytorch/issues/117165"
+                ),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
             ),
         ),
     ),
@@ -1019,6 +1067,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "fails, https://github.com/pytorch/pytorch/issues/117165"
+                ),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1054,6 +1109,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "fails, https://github.com/pytorch/pytorch/issues/117165"
+                ),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
             ),
         ),
     ),
@@ -1100,6 +1162,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "fails, https://github.com/pytorch/pytorch/issues/117165"
+                ),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1114,6 +1183,13 @@ optim_db: List[OptimizerInfo] = [
             # Fails on MacOS 13.2.1 in CI https://github.com/pytorch/pytorch/issues/117094
             DecorateInfo(
                 skipIfMps, "TestOptimRenewed", "test_can_load_older_state_dict"
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "fails, https://github.com/pytorch/pytorch/issues/117165"
+                ),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
             ),
         ),
     ),
@@ -1152,6 +1228,27 @@ optim_db: List[OptimizerInfo] = [
                 "test_can_load_older_state_dict",
                 device_type="cuda",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors, https://github.com/pytorch/pytorch/issues/117150"
+                ),
+                "TestOptimRenewed",
+                "test_load_nontensor_step",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors, see https://github.com/pytorch/pytorch/issues/117150"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_with_cuda_params",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "fails, https://github.com/pytorch/pytorch/issues/117165"
+                ),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1173,6 +1270,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "fails, https://github.com/pytorch/pytorch/issues/117165"
+                ),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
             ),
         ),
     ),
@@ -1220,6 +1324,20 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_with_cuda_params",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "fails, https://github.com/pytorch/pytorch/issues/117165"
+                ),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1256,13 +1374,27 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_with_cuda_params",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "fails, https://github.com/pytorch/pytorch/issues/117165"
+                ),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
+            ),
         ),
     ),
     OptimizerInfo(
         SGD,
         optim_inputs_func=optim_inputs_func_sgd,
         optim_error_inputs_func=optim_error_inputs_func_sgd,
-        supported_impls=("foreach", "differentiable"),
+        supported_impls=("foreach", "differentiable", "fused"),
         supports_sparse_on=("cpu", "cuda"),
         skips=(
             DecorateInfo(
@@ -1304,6 +1436,28 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
+                ),
+                "TestOptimRenewed",
+                "test_load_nontensor_step",
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "momentum_buffer inconsistency, https://github.com/pytorch/pytorch/issues/117147"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_with_cuda_params",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "fails, https://github.com/pytorch/pytorch/issues/117165"
+                ),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1330,6 +1484,21 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_can_load_older_state_dict",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
+                "TestOptimRenewed",
+                "test_load_nontensor_step",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
+                "TestOptimRenewed",
+                "test_state_dict_with_cuda_params",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
+                "TestOptimRenewed",
+                "test_deepcopy_copies_all_public_attrs",
             ),
         ),
     ),

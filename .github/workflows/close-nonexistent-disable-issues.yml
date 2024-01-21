@@ -6,6 +6,7 @@ on:
 
 jobs:
   close-nonexistent-disable-issues:
+    environment: rockset-read-only
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     steps:

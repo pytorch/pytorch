@@ -6574,6 +6574,10 @@ class TestQuantizedConv(TestCase):
             assert len(post_op.scalars) == 2, "For post op hardtanh, expect 2 parameters passed in"
             hardtanh = torch.nn.Hardtanh(min_val=post_op.scalars[0], max_val=post_op.scalars[1])
             result_ref = hardtanh(result_ref)
+        elif post_op.unary_attr == "hardswish":
+            assert not use_transpose, "Cannot fuse hardswish with ConvTranspose"
+            hardswish = torch.nn.Hardswish()
+            result_ref = hardswish(result_ref)
 
         # Quantize reference results for comparison
         result_ref_q = torch.quantize_per_tensor(
@@ -6967,6 +6971,57 @@ class TestQuantizedConv(TestCase):
                 use_channelwise=use_channelwise,
                 qconv_output_dtype=output_dtype,
             )
+
+        # Test qconv with post op hardswish
+        @skipIfNoONEDNN
+        def test_qconv2d_hardswish_pt2e(self):
+            input_channels_per_group = 2
+            output_channels_per_group = 2
+            groups_list = [1, 10]
+            input_feature_map_shape = (10, 10)
+            kernels = (3, 3)
+            strides = (2, 2)
+            pads = (1, 1)
+            dilations = (1, 1)
+            W_scale = [1.5]
+            W_zero_point = [0]
+            use_bias_list = [False, True]
+            use_channelwise_list = [False, True]
+            output_dtype_list = [None, torch.float32, torch.bfloat16]
+            options = itertools.product(groups_list, use_bias_list, use_channelwise_list, output_dtype_list)
+
+            for groups, use_bias, use_channelwise, output_dtype in options:
+                qconv = torch.ops.onednn.qconv2d_pointwise
+                qconv_prepack = torch.ops.onednn.qconv_prepack
+                conv_op = torch.nn.Conv2d(
+                    input_channels_per_group * groups,
+                    output_channels_per_group * groups,
+                    kernels,
+                    strides,
+                    pads,
+                    dilations,
+                    groups,
+                )
+                pointwise_post_op = PointwisePostOp(unary_attr="hardswish")
+                self._test_qconv_impl_cpu_tensor(
+                    qconv,
+                    qconv_prepack,
+                    conv_op,
+                    input_channels_per_group=input_channels_per_group,
+                    input_feature_map_shape=input_feature_map_shape,
+                    output_channels_per_group=output_channels_per_group,
+                    groups=groups,
+                    kernels=kernels,
+                    strides=strides,
+                    pads=pads,
+                    dilations=dilations,
+                    W_scale=W_scale,
+                    W_zero_point=W_zero_point,
+                    use_bias=use_bias,
+                    post_op=pointwise_post_op,
+                    use_channelwise=use_channelwise,
+                    qconv_output_dtype=output_dtype,
+                )
 
     # Test qconv with post op sum
     @skipIfNoONEDNN

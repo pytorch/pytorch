@@ -611,7 +611,10 @@ class BatchLayernormFusion(BatchFusion):
 
             if group_weights is not None and group_biases is not None:
                 batch_layer_norm = graph.call_function(
-                    torch.addcmul, args=(stack_bias, stack_weight, batch_layer_norm)
+                    torch.mul, args=(stack_weight, batch_layer_norm)
+                )
+                batch_layer_norm = graph.call_function(
+                    torch.add, args=(stack_bias, batch_layer_norm)
                 )
             elif group_weights is not None and group_biases is None:
                 batch_layer_norm = graph.call_function(

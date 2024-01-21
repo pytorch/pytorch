@@ -1,4 +1,3 @@
-import collections
 from collections import defaultdict
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 import torch.utils._pytree as pytree
@@ -284,11 +283,20 @@ class _PyTreeInfo(NamedTuple):
     in_spec: pytree.TreeSpec
     out_spec: Optional[pytree.TreeSpec]
 
+@dataclass(frozen=True)
+class _ParsedStackTrace:
+    """
+    Represents the top-most frame of a parsed stack trace
+    """
+    file: str
+    lineno: str
+    name: str
+    code: str
+
 # get File:lineno code from stack_trace
 def _parse_stack_trace(stack_trace: str):
     if stack_trace is None:
         return None
-    ParsedStackTrace = collections.namedtuple("ParsedStackTrace", ["file", "lineno", "code"])
     pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
     lines = stack_trace.strip().split('\n')
     # stacktrace should have innermost frame last, so we
@@ -301,11 +309,11 @@ def _parse_stack_trace(stack_trace: str):
         if matches:
             file = matches.group(1)
             lineno = matches.group(2)
+            name = matches.group(3)
             # next line should be the code
             code = lines[idx + 1].strip()
-            return ParsedStackTrace(file, lineno, code)
+            return _ParsedStackTrace(file, lineno, name, code)
     return None
-
 
 @compatibility(is_backward_compatible=False)
 class CodeGen:
@@ -502,7 +510,8 @@ class CodeGen:
                         if parsed_stack_trace is not None:
                             lineno = parsed_stack_trace.lineno
                             code = parsed_stack_trace.code
-                            summary_str = f'File: {parsed_stack_trace.file}:{lineno}, code: {code}'
+                            name = parsed_stack_trace.name
+                            summary_str = f'File: {parsed_stack_trace.file}:{lineno} in {name}, code: {code}'
 
                         body.append(f'\n# {summary_str}\n')
                 elif prev_stacktrace != "":

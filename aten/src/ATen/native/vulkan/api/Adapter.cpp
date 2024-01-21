@@ -1,7 +1,7 @@
 #include <ATen/native/vulkan/api/Adapter.h>
-#include <c10/util/irange.h>
 
 #include <bitset>
+#include <cstring>
 #include <iomanip>
 #include <sstream>
 #include <utility>
@@ -28,7 +28,7 @@ PhysicalDevice::PhysicalDevice(VkPhysicalDevice physical_device_handle)
   // DEVICE_LOCAL property flags
   const VkMemoryPropertyFlags unified_memory_flags =
       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
-  for (const uint32_t i : c10::irange(memory_properties.memoryTypeCount)) {
+  for (size_t i = 0; i < memory_properties.memoryTypeCount; ++i) {
     if (memory_properties.memoryTypes[i].propertyFlags | unified_memory_flags) {
       has_unified_memory = true;
       break;
@@ -44,8 +44,7 @@ PhysicalDevice::PhysicalDevice(VkPhysicalDevice physical_device_handle)
       handle, &queue_family_count, queue_families.data());
 
   // Find the total number of compute queues
-  for (const uint32_t family_i : c10::irange(queue_families.size())) {
-    const VkQueueFamilyProperties& properties = queue_families[family_i];
+  for (const VkQueueFamilyProperties& properties : queue_families) {
     // Check if this family has compute capability
     if (properties.queueFlags & VK_QUEUE_COMPUTE_BIT) {
       num_compute_queues += properties.queueCount;
@@ -96,8 +95,8 @@ VkDevice create_logical_device(
   queues_to_get.reserve(num_queues_to_create);
 
   uint32_t remaining_queues = num_queues_to_create;
-  for (const uint32_t family_i :
-       c10::irange(physical_device.queue_families.size())) {
+  for (uint32_t family_i = 0; family_i < physical_device.queue_families.size();
+       ++family_i) {
     const VkQueueFamilyProperties& queue_properties =
         physical_device.queue_families.at(family_i);
     // Check if this family has compute capability
@@ -115,7 +114,7 @@ VkDevice create_logical_device(
           queue_priorities.data(), // pQueuePriorities
       });
 
-      for (const uint32_t queue_i : c10::irange(queues_to_init)) {
+      for (size_t queue_i = 0; queue_i < queues_to_init; ++queue_i) {
         // Use this to get the queue handle once device is created
         queues_to_get.emplace_back(family_i, queue_i);
       }
@@ -249,7 +248,7 @@ DeviceHandle::DeviceHandle(DeviceHandle&& other) noexcept
 }
 
 DeviceHandle::~DeviceHandle() {
-  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
+  if (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroyDevice(handle_, nullptr);
@@ -287,7 +286,7 @@ Adapter::Queue Adapter::request_queue() {
 
   uint32_t min_usage = UINT32_MAX;
   uint32_t min_used_i = 0;
-  for (const uint32_t i : c10::irange(queues_.size())) {
+  for (size_t i = 0; i < queues_.size(); ++i) {
     if (queue_usage_[i] < min_usage) {
       min_used_i = i;
       min_usage = queue_usage_[i];
@@ -299,7 +298,7 @@ Adapter::Queue Adapter::request_queue() {
 }
 
 void Adapter::return_queue(Adapter::Queue& compute_queue) {
-  for (const uint32_t i : c10::irange(queues_.size())) {
+  for (size_t i = 0; i < queues_.size(); ++i) {
     if ((queues_[i].family_index == compute_queue.family_index) &&
         (queues_[i].queue_index == compute_queue.queue_index)) {
       std::lock_guard<std::mutex> lock(queue_usage_mutex_);
@@ -395,7 +394,7 @@ std::string Adapter::stringize() const {
 
   ss << "  Memory Info {" << std::endl;
   ss << "    Memory Types [" << std::endl;
-  for (const auto i : c10::irange(mem_props.memoryTypeCount)) {
+  for (size_t i = 0; i < mem_props.memoryTypeCount; ++i) {
     ss << "      "
        << " [Heap " << mem_props.memoryTypes[i].heapIndex << "] "
        << get_memory_properties_str(mem_props.memoryTypes[i].propertyFlags)
@@ -403,7 +402,7 @@ std::string Adapter::stringize() const {
   }
   ss << "    ]" << std::endl;
   ss << "    Memory Heaps [" << std::endl;
-  for (const auto i : c10::irange(mem_props.memoryHeapCount)) {
+  for (size_t i = 0; i < mem_props.memoryHeapCount; ++i) {
     ss << "      " << mem_props.memoryHeaps[i].size << std::endl;
   }
   ss << "    ]" << std::endl;
