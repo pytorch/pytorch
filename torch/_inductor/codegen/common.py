@@ -144,6 +144,9 @@ DTYPE_TO_COMPUTATION_DTYPE = {
             torch.int32,
             torch.int64,
             torch.uint8,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
         ]
     },
 }
@@ -667,10 +670,10 @@ class KernelArgs:
         )
 
     def wrap_ptr_arg(self, buf, dtype):
-        return f"c_void_p({buf}.data_ptr())"
+        return buf
 
     def wrap_size_arg(self, size):
-        return f"c_long({size})"
+        return str(size)
 
     def cpp_argdefs(self):
         from .cpp import DTYPE_TO_CPP, INDEX_TYPE
@@ -1015,6 +1018,7 @@ class Kernel(CodeGen):
         self.inplace_update_buffers = dict()
         # Set minimum number of elements processed per thread.
         self.min_elem_per_thread = 1
+        self.kernel_name = None
 
     @contextlib.contextmanager
     def set_current_node(self, node):
@@ -1064,7 +1068,7 @@ class Kernel(CodeGen):
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
-    ):
+    ) -> None:
         raise NotImplementedError()
 
     def reduction(
@@ -1072,7 +1076,7 @@ class Kernel(CodeGen):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: CSEVariable,
+        value: Union[CSEVariable, Tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
         raise NotImplementedError()
 
@@ -1081,7 +1085,7 @@ class Kernel(CodeGen):
         dtype: torch.dtype,
         combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
         value: CSEVariable,
-        init: CSEVariable,
+        init: int,
     ) -> CSEVariable:
         raise NotImplementedError()
 
@@ -1207,7 +1211,7 @@ class Kernel(CodeGen):
             @staticmethod
             def store(
                 name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
-            ) -> CSEVariable:
+            ) -> None:
                 self.store_buffer_names.add(name)
                 if mode is None:
                     self.cse.store_cache[name] = value
@@ -1235,7 +1239,7 @@ class Kernel(CodeGen):
                 dtype: torch.dtype,
                 src_dtype: torch.dtype,
                 reduction_type: ReductionType,
-                value: CSEVariable,
+                value: Union[CSEVariable, Tuple[CSEVariable, ...]],
             ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
                 return self.reduction(dtype, src_dtype, reduction_type, value)
 
@@ -1244,7 +1248,7 @@ class Kernel(CodeGen):
                 dtype: torch.dtype,
                 combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
                 value: CSEVariable,
-                init: CSEVariable,
+                init: int,
             ) -> CSEVariable:
                 return self.scan(dtype, combine_fn, value, init)
 
