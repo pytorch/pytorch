@@ -17,7 +17,7 @@ from ._fsdp_common import (
 )
 
 """
-[Note: FSDP Tensors]
+[Note: FSDP tensors]
 FSDP considers the following tensors:
 - Original parameter: parameter passed to :class:`FSDPParam`, i.e. the one
   on the module when applying FSDP
@@ -159,8 +159,8 @@ class FSDPParam:
 
     def to_sharded_dtensor(self, tensor: torch.Tensor) -> DTensor:
         """
-        Converts a local tensor representing either the *sharded* parameter or
-        *sharded* gradient to DTensor.
+        Converts a local tensor representing either the sharded parameter or
+        sharded gradient to DTensor.
         """
         if tensor.shape != self.sharded_size and not (
             # For size-0 padding, DTensor can flatten from (0, *) to (0)
