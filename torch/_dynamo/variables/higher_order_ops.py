@@ -142,7 +142,6 @@ def validate_args_and_maybe_create_graph_inputs(
     tx,
     manually_set_subgraph_inputs,
     description,
-    proxy_for_constants=False,
 ):
     from . import AutogradFunctionContextVariable, ConstantVariable, EnumVariable
     from .builder import wrap_fx_proxy_cls
@@ -161,14 +160,8 @@ def validate_args_and_maybe_create_graph_inputs(
             # Currently, this new input is added to make the calls
             # happy, which expect a fixed number of arguments. In
             # future, we can clean this up.
-            const_proxy = tracer.create_graph_input("const")
-            if isinstance(a, ConstantVariable) and proxy_for_constants and a.as_python_constant() is not None:
-                sym_a = torch.SymInt(a.as_python_constant())
-                const_proxy.node.meta["example_value"] = sym_a
-                sym_arg = SymNodeVariable(const_proxy, sym_a)
-                new_arg = sym_arg
-            else:
-                new_arg = a
+            tracer.create_graph_input("const")
+            new_arg = a
         # Weird special case, we probably want to delete it or fold it
         # into the next case (of `a` being placeable into a graph)
         elif isinstance(a, AutogradFunctionContextVariable):
@@ -227,7 +220,6 @@ def speculate_subgraph(
     # Allow ConstantVariable return values in the output. Default only allows Tensors.
     allow_constant_outputs=False,
     log_error_on_graph_break=True,
-    proxy_for_constants=False
 ):
     if sub_kwargs is None:
         sub_kwargs = {}
@@ -246,7 +238,7 @@ def speculate_subgraph(
         )
         with tx.output.subtracer(source_target, tracer) as subtracer:
             args = validate_args_and_maybe_create_graph_inputs(
-                sub_args, subtracer, tx, manually_set_subgraph_inputs, description, proxy_for_constants=proxy_for_constants
+                sub_args, subtracer, tx, manually_set_subgraph_inputs, description
             )
 
             validate_args_and_maybe_create_graph_inputs(
@@ -255,7 +247,6 @@ def speculate_subgraph(
                 tx,
                 manually_set_subgraph_inputs=False,
                 description=description,
-                proxy_for_constants=proxy_for_constants,
             )
 
             autograd_ctx = (
@@ -1419,8 +1410,6 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 source_target=self.func,
                 allow_constant_outputs=True,
                 log_error_on_graph_break=False,
-                # REQUIRED! Without this, the store_target gets burned in
-                proxy_for_constants=True
             )
         except Unsupported as e:
             raise CannotConvertRangeToHigherOrder("graph break in function") from e
