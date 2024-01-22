@@ -1606,7 +1606,7 @@ endif()
 
 # ---[ XPU library.
 if(USE_XPU)
-  target_link_libraries(torch_xpu INTERFACE torch::xpurt)
+  target_link_libraries(torch_xpu INTERFACE torch::syclrt)
   target_link_libraries(torch_xpu PUBLIC c10_xpu)
 
   target_include_directories(
