@@ -127,7 +127,6 @@ def validate_ir(node_or_nodes):
                     torch._inductor.ir.ExpandView,
                     DynamicScalar,
                     TensorBox,
-                    sympy.Symbol,
                     sympy.logic.boolalg.Boolean,
                     Expr,
                 ),
@@ -1553,7 +1552,7 @@ class Scan(Loops):
     combine_fn: Callable[..., Any]
     reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
     reduction_hint: ReductionHint
-    init: Any
+    init: int
 
     # HACK we mimick reduction
 

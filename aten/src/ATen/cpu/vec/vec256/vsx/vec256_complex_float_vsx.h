@@ -238,18 +238,14 @@ class Vectorized<ComplexFlt> {
     return loadu(tmp);
   }
 
-  static Vectorized<ComplexFlt> horizontal_add_permD8(
+  static Vectorized<ComplexFlt> horizontal_add(
       Vectorized<ComplexFlt>& first,
       Vectorized<ComplexFlt>& second) {
-    // we will simulate it differently with 6 instructions total
-    // lets permute second so that we can add it getting horizontal sums
-    auto first_perm = first.el_swapped(); // 2perm
-    auto second_perm = second.el_swapped(); // 2perm
-    // sum
-    auto first_ret = first + first_perm; // 2add
-    auto second_ret = second + second_perm; // 2 add
-    // now lets choose evens
-    return el_mergee(first_ret, second_ret); // 2 mergee's
+    // Operates on individual floats, see _mm_hadd_ps
+    // {f0+f1, s0+s1, f2+f3, s2+s3, ...}
+    // i.e. it sums the re and im of each value and interleaves first and second:
+    // {f_re0 + f_im0, s_re0 + s_im0, f_re1 + f_im1, s_re1 + s_im1, ...}
+    return el_mergee(first, second) + el_mergeo(first, second);
   }
 
   static Vectorized<ComplexFlt> horizontal_sub_permD8(
@@ -353,10 +349,17 @@ class Vectorized<ComplexFlt> {
   static Vectorized<ComplexFlt> el_mergee(
       Vectorized<ComplexFlt>& first,
       Vectorized<ComplexFlt>& second) {
-    // as mergee phased in , we can use vec_perm with mask
     return {
         vec_mergee(first._vecb0, second._vecb0),
         vec_mergee(first._vecb1, second._vecb1)};
+  }
+
+  static Vectorized<ComplexFlt> el_mergeo(
+      Vectorized<ComplexFlt>& first,
+      Vectorized<ComplexFlt>& second) {
+    return {
+        vec_mergeo(first._vecb0, second._vecb0),
+        vec_mergeo(first._vecb1, second._vecb1)};
   }
 
   Vectorized<ComplexFlt> angle_() const {
@@ -488,25 +491,20 @@ class Vectorized<ComplexFlt> {
     // re + im*i = (a + bi)  / (c + di)
     // re = (ac + bd)/abs_2()
     // im = (bc - ad)/abs_2()
-#if 1
-    auto vi = b.el_mergeo();
-    auto vr = b.el_mergee();
-    auto abs_b = b.abs_2_();
-    vi = vi ^ isign_mask;
-    auto ret = elwise_mult(vr);
-    auto vx_swapped = el_swapped();
-    ret = vx_swapped.el_madd(vi, ret);
-    ret = ret.elwise_div(abs_b);
-#else
-    // Vectorized x86 simulation
-    auto ac_bd = elwise_mult(b);
-    auto d_c = b.el_swapped();
-    d_c = d_c ^ rsign_mask;
-    auto ad_bc = elwise_mult(d_c);
-    auto abs_b = b.abs_2_();
-    auto re_im = horizontal_add_permD8(ac_bd, ad_bc);
-    auto ret = re_im.elwise_div(abs_b);
-#endif
+    auto fabs_cd =  Vectorized{
+      vec_andc(b._vec0, sign_mask),
+      vec_andc(b._vec1, sign_mask)};          // |c|            |d|
+    auto fabs_dc =  fabs_cd.el_swapped();     // |d|            |c|
+    auto scale = fabs_cd.elwise_max(fabs_dc); // sc = max(|c|, |d|)
+    auto a2 = elwise_div(scale);              // a/sc           b/sc
+    auto b2 = b.elwise_div(scale);            // c/sc           d/sc
+    auto acbd2 = a2.elwise_mult(b2);          // ac/sc^2        bd/sc^2
+    auto dc2 = b2.el_swapped();               // d/sc           c/sc
+    dc2 = dc2 ^ rsign_mask;                   // -d/sc          c/sc
+    auto adbc2 = a2.elwise_mult(dc2);         // -ad/sc^2       bc/sc^2
+    auto ret = horizontal_add(acbd2, adbc2);  // (ac+bd)/sc^2   (bc-ad)/sc^2
+    auto denom2 = b2.abs_2_();                // (c^2+d^2)/sc^2 (c^2+d^2)/sc^2
+    ret = ret.elwise_div(denom2);
     return ret;
   }
 
@@ -589,6 +587,7 @@ class Vectorized<ComplexFlt> {
   DEFINE_MEMBER_OP(elwise_ge, ComplexFlt, vec_cmpge)
   DEFINE_MEMBER_OP(elwise_lt, ComplexFlt, vec_cmplt)
   DEFINE_MEMBER_OP(elwise_le, ComplexFlt, vec_cmple)
+  DEFINE_MEMBER_OP(elwise_max, ComplexFlt, vec_max)
 };
 
 template <>
