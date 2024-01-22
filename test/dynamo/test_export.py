@@ -1481,6 +1481,29 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         resB = graph(torch.tensor([2]))
         self.assertTrue(torch._dynamo.utils.same(resA, resB))
 
+    def test_export_with_builtin_op_on_assume_constant(self):
+        @torch._dynamo.assume_constant_result
+        def get_y(y) -> torch.Tensor:
+            return y
+
+        class Bob(torch.nn.Module):
+            def __init__(self, p, val) -> None:
+                super().__init__()
+                self.p = p
+                self.y = torch.nn.Parameter(torch.tensor(val))
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # This only looks dynamic but it's actually a constant value
+                if get_y(self.y) < self.p:
+                    return torch.cat([x, x])
+                else:
+                    return x
+
+        model = Bob(0.5, 0.3)
+        inp = torch.ones(3, 4)
+        graph, guards = torch._dynamo.export(model)(inp)
+        self.assertEqual(model(inp), graph(inp))
+
     def test_export_decomp(self):
         def f(x):
             return x.t() + x.t()
@@ -2231,33 +2254,55 @@ def forward(self, x):
             return t.x + t.y
 
         with self.assertRaisesRegex(
-            AssertionError,
-            "graph-captured input #1, of type .*Tensor.*, "
-            "is not among original inputs of types: .*Tensors",
+            UserError,
+            "It looks like one of the inputs with type .*Tensors.* "
+            "is not supported or pytree-flattenable",
         ):
-            torch._dynamo.export(
-                f, Tensors(x=torch.randn(10), y=torch.randn(10)), aten_graph=False
+            torch._dynamo.export(f, aten_graph=False)(
+                Tensors(x=torch.randn(10), y=torch.randn(10))
             )
 
         def f(x, y):
             return Tensors(x=x.sin(), y=y.cos())
 
         with self.assertRaisesRegex(
-            AssertionError,
-            "original output #1 is .*Tensors.*, "
-            "but only the following types are supported",
+            UserError,
+            "It looks like one of the outputs with type .*Tensors.* "
+            "is not supported or pytree-flattenable",
         ):
-            torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
+            torch._dynamo.export(f, aten_graph=False)(torch.randn(10), torch.randn(10))
+
+    def test_empty(self):
+        def f(x):
+            return x
+
+        exported = torch._dynamo.export(f)(torch.randn(3, 3))
+        out_graph = exported[0]
+        inp = torch.randn(3, 3)
+        self.assertTrue(torch._dynamo.utils.same(inp, out_graph(inp)))
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.ones(3, 3)
+
+            def forward(self):
+                return self.a
+
+        exported = torch._dynamo.export(M())()
+        out_graph = exported[0]
+        self.assertTrue(torch._dynamo.utils.same(torch.ones(3, 3), out_graph()))
 
     def test_none_out(self):
         def f(x, y):
             _ = x + y
 
         with self.assertRaisesRegex(
-            AssertionError,
-            "original output #1 is None, but only the following types are supported",
+            UserError,
+            "It looks like one of the outputs with type .*None.* "
+            "is not supported or pytree-flattenable",
         ):
-            torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
+            torch._dynamo.export(f, aten_graph=False)(torch.randn(10), torch.randn(10))
 
     def test_primitive_constant_output(self):
         class Foo(torch.nn.Module):
@@ -2269,8 +2314,9 @@ def forward(self, x):
         foo = Foo()
 
         with self.assertRaisesRegex(
-            AssertionError,
-            "original output #2 is 5, but only the following types are supported",
+            UserError,
+            "It looks like one of the outputs with type .*int.* "
+            "is not supported or pytree-flattenable",
         ):
             torch.export.export(foo, (torch.tensor(3),))
 
@@ -2282,8 +2328,9 @@ def forward(self, x):
 
         # new behavior
         with self.assertRaisesRegex(
-            AssertionError,
-            "original output #2 is 5, but only the following types are supported",
+            UserError,
+            "It looks like one of the outputs with type .*int.* "
+            "is not supported or pytree-flattenable",
         ):
             torch.export.export(bar, (torch.tensor(3), 5))
 
@@ -2294,8 +2341,9 @@ def forward(self, x):
         qux = Qux()
 
         with self.assertRaisesRegex(
-            AssertionError,
-            "original output #2 is 4, but only the following types are supported",
+            UserError,
+            "It looks like one of the outputs with type .*int.* "
+            "is not supported or pytree-flattenable",
         ):
             torch.export.export(qux, (torch.tensor(3), 5))
 
