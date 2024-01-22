@@ -19,9 +19,6 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-#include <cstdint>
-#include <utility>
-
 namespace torch::autograd {
 
 using SymIntSmallVec = c10::SmallVector<c10::SymInt, c10::kDimVectorStaticSize>;

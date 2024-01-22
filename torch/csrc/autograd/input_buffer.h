@@ -5,7 +5,6 @@
 // values in-place (adding an input twice will accumulate the result).
 // This behaviour is needed and used only in backward graphs.
 
-#include <memory>
 #include <utility>
 #include <vector>
 
