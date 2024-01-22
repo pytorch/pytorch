@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 
 import unittest
+import sys
 
 import torch
 from torch.testing._internal.common_device_type import (
@@ -287,6 +288,7 @@ class TestFloat8DtypeCPUOnly(TestCase):
         self.assertEqual(mul8, mul8_simulated)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on Windows yet")
+    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     @dtypes(*CUDA_FLOAT8_DTYPES)
     def test_pt2_traceable_aot_eager(self, dtype):
         @torch.compile(backend="aot_eager", fullgraph=True)
