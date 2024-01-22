@@ -40,7 +40,13 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import EventVariable, StreamVariable
-from .dicts import ConstDictVariable, DefaultDictVariable, SetVariable
+from .dicts import (
+    ConstDictVariable,
+    DefaultDictVariable,
+    DictView,
+    is_hashable,
+    SetVariable,
+)
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -112,9 +118,11 @@ class BuiltinVariable(VariableTracker):
             str.format,
             sum,
             type,
+            operator.abs,
             operator.pos,
             operator.neg,
             operator.not_,
+            operator.truth,
             operator.invert,
             operator.pow,
             operator.mul,
@@ -155,6 +163,7 @@ class BuiltinVariable(VariableTracker):
     @functools.lru_cache(None)
     def _fx_graph_functions():
         fns = {
+            operator.abs,
             operator.pos,
             operator.neg,
             operator.not_,
@@ -475,6 +484,19 @@ class BuiltinVariable(VariableTracker):
             for i in itertools.chain(args, kwargs.values())
         )
 
+    def python_and_tensor_constant_only(self, *args, **kwargs):
+        tensor_args = []
+        non_tensor_args = []
+        for i in itertools.chain(args, kwargs.values()):
+            if isinstance(i, variables.TensorVariable):
+                tensor_args.append(i)
+            else:
+                non_tensor_args.append(i)
+        return all(
+            is_constant_source(t.source) if t.source is not None else False
+            for t in tensor_args
+        ) and self.constant_args(*non_tensor_args)
+
     def unspec_python_args(self, *args, **kwargs):
         return check_unspec_python_args(args, kwargs)
 
@@ -484,6 +506,13 @@ class BuiltinVariable(VariableTracker):
             k: v.as_python_constant() for k, v in kwargs.items()
         }
 
+    def has_constant_handler(self, args, kwargs):
+        constant_args = check_constant_args(args, kwargs)
+        unspec_python_args = self.unspec_python_args(*args, **kwargs)
+        return self.can_constant_fold_through() and (
+            constant_args or unspec_python_args
+        )
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -492,14 +521,9 @@ class BuiltinVariable(VariableTracker):
 
         args = [v.realize() for v in args]
         kwargs = {k: v.realize() for k, v in kwargs.items()}
-        constant_args = check_constant_args(args, kwargs)
-        tensor_args = self.tensor_args(*args, **kwargs)
-        unspec_python_args = self.unspec_python_args(*args, **kwargs)
-        has_constant_handler = self.can_constant_fold_through() and (
-            constant_args or unspec_python_args
-        )
         assert isinstance(args, (list, tuple))
         assert isinstance(kwargs, dict)
+        tensor_args = self.tensor_args(*args, **kwargs)
 
         # args[0] is list and args[1] is unspec
         if self.fn is operator.getitem and not isinstance(
@@ -518,6 +542,17 @@ class BuiltinVariable(VariableTracker):
         ):
             try:
                 fn = self.fn
+
+                # Constant fold for constant tensor and python constants
+                if tensor_args and self.python_and_tensor_constant_only(
+                    *args, **kwargs
+                ):
+                    from ..bytecode_transformation import unique_id
+                    from .functions import invoke_and_store_as_constant
+
+                    return invoke_and_store_as_constant(
+                        tx, fn, unique_id(fn.__name__), args, kwargs
+                    )
 
                 if self.fn in IN_PLACE_DESUGARING_MAP and isinstance(
                     args[0], variables.ConstantVariable
@@ -637,6 +672,7 @@ class BuiltinVariable(VariableTracker):
             try:
                 inspect.signature(handler).bind(tx, *args, **kwargs)
             except TypeError as exc:
+                has_constant_handler = self.has_constant_handler(args, kwargs)
                 if not has_constant_handler:
                     log.warning(
                         "incorrect arg count %s %s and no constant handler",
@@ -651,11 +687,17 @@ class BuiltinVariable(VariableTracker):
                 if result is not None:
                     return result
             except Unsupported as exc:
+                has_constant_handler = self.has_constant_handler(args, kwargs)
                 if not has_constant_handler:
                     raise
                 # Actually, we will handle this just fine
                 exc.remove_from_stats()
 
+        # NB: call to has_constant_handler is deliberately delayed post generic
+        # handler because has_constant_handler calls as_python_constant
+        # internally which realizes LazyVariableTracker for ConstantVariables,
+        # unnecessarily putting guards on objects which might not actually be used.
+        has_constant_handler = self.has_constant_handler(args, kwargs)
         if has_constant_handler:
             # constant fold
             return variables.ConstantVariable.create(
@@ -676,6 +718,15 @@ class BuiltinVariable(VariableTracker):
     ) -> "VariableTracker":
         if self.fn == dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
+        if self.fn == itertools.chain and name == "from_iterable":
+            assert len(args) == 1
+            assert len(kwargs) == 0
+            obj = args[0]
+            items = []
+            for item in obj.unpack_var_sequence(tx):
+                items.extend(item.unpack_var_sequence(tx))
+            return variables.TupleVariable(items)
+
         return super().call_method(tx, name, args, kwargs)
 
     def _call_min_max(self, tx, *args):
@@ -837,22 +888,12 @@ class BuiltinVariable(VariableTracker):
             # determine the control flow
             return obj
 
-        # TODO This should probably be treated as a dict, or dicts should also be treated here
-        if self.fn == set:
-            cls = SetVariable
-        else:
-            cls = variables.BaseListVariable.cls_for(self.fn)
+        cls = variables.BaseListVariable.cls_for(self.fn)
         if obj is None:
-            if cls is SetVariable:
-                return cls(
-                    [],
-                    mutable_local=MutableLocal(),
-                )
-            else:
-                return cls(
-                    [],
-                    mutable_local=MutableLocal(),
-                )
+            return cls(
+                [],
+                mutable_local=MutableLocal(),
+            )
         elif obj.has_unpack_var_sequence(tx):
             if obj.source and not is_constant_source(obj.source):
                 if isinstance(obj, TupleIteratorVariable):
@@ -861,11 +902,6 @@ class BuiltinVariable(VariableTracker):
                     )
                 else:
                     install_guard(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
-            if cls is SetVariable:
-                return cls(
-                    list(obj.unpack_var_sequence(tx)),
-                    mutable_local=MutableLocal(),
-                )
 
             return cls(
                 list(obj.unpack_var_sequence(tx)),
@@ -875,7 +911,6 @@ class BuiltinVariable(VariableTracker):
     call_iter = _call_iter_tuple_list
     call_tuple = _call_iter_tuple_list
     call_list = _call_iter_tuple_list
-    call_set = _call_iter_tuple_list
 
     def call_callable(self, tx, arg):
         from .functions import BaseUserFunctionVariable
@@ -913,15 +948,14 @@ class BuiltinVariable(VariableTracker):
                     ListIteratorVariable,
                 ),
             ):
-                items = user_cls()
-                for x in arg.unpack_var_sequence(tx):
-                    k, v = x.unpack_var_sequence(tx)
-                    k = ConstDictVariable.get_key(k)
-                    items.update({k: v})
+                items = dict(
+                    x.unpack_var_sequence(tx) for x in arg.unpack_var_sequence(tx)
+                )
                 return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
         elif not args and kwargs:
+            items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
             return variables.ConstDictVariable(
-                dict(kwargs), user_cls=user_cls, mutable_local=MutableLocal()
+                items, user_cls=user_cls, mutable_local=MutableLocal()
             )
         unimplemented(f"{user_cls.__name__}(): {args} {kwargs}")
 
@@ -944,23 +978,33 @@ class BuiltinVariable(VariableTracker):
         )
 
         if isinstance(arg, dict):
+            arg = [ConstantVariable.create(k) for k in arg.keys()]
             return DictVariableType(
                 dict.fromkeys(arg, value), user_cls, mutable_local=MutableLocal()
             )
-        elif isinstance(
-            arg,
-            (
-                ConstDictVariable,
-                ListVariable,
-                TupleVariable,
-                ListIteratorVariable,
-            ),
+        elif arg.has_unpack_var_sequence(tx) and all(
+            is_hashable(v) for v in arg.unpack_var_sequence(tx)
         ):
-            keys = [DictVariableType.get_key(x) for x in arg.unpack_var_sequence(tx)]
+            keys = arg.unpack_var_sequence(tx)
             return DictVariableType(
                 dict.fromkeys(keys, value), user_cls, mutable_local=MutableLocal()
             )
         unimplemented(f"{user_cls.__name__}.fromkeys(): {args} {kwargs}")
+
+    def call_set(self, tx, *args, **kwargs):
+        # Can we merge this implementation and call_dict's one?
+        assert not kwargs
+        if not args:
+            return SetVariable([], mutable_local=MutableLocal())
+        assert len(args) == 1
+        arg = args[0]
+        if isinstance(arg, variables.SetVariable):
+            return arg.clone(mutable_local=MutableLocal())
+        elif arg.has_unpack_var_sequence(tx):
+            items = arg.unpack_var_sequence(tx)
+            return SetVariable(items, mutable_local=MutableLocal())
+        else:
+            unimplemented(f"set(): {args} {kwargs}")
 
     def call_zip(self, tx, *args, **kwargs):
         if kwargs:
@@ -1547,19 +1591,18 @@ class BuiltinVariable(VariableTracker):
                 _unimplemented()
             return BaseListVariable.list_compare(tx, op, left, right)
 
-        if isinstance(left, SetVariable):
-            if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
-                _unimplemented()
-            return ConstantVariable.create(
-                op(left._underlying_items, right._underlying_items)
-            )
+        # If they implement set semantics (e.g. SetVariable or DictKeys)
+        if hasattr(left, "set_items") and hasattr(right, "set_items"):
+            return ConstantVariable.create(op(left.set_items, right.set_items))
 
         if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):
             from .builder import wrap_fx_proxy_cls
 
-            if op is operator.is_ and isinstance(right, TensorVariable):
+            if op is operator.is_:
                 return ConstantVariable.create(
-                    id(extract_fake_example_value(left.as_proxy().node))
+                    isinstance(left, TensorVariable)
+                    and isinstance(right, TensorVariable)
+                    and id(extract_fake_example_value(left.as_proxy().node))
                     == id(extract_fake_example_value(right.as_proxy().node))
                 )
 
@@ -1577,6 +1620,9 @@ class BuiltinVariable(VariableTracker):
                     # not broadcastable, can't be compared
                     _unimplemented()
             tensor_cls = left if isinstance(left, TensorVariable) else right
+            proxy = tx.output.create_proxy(
+                "call_function", op, (left.as_proxy(), right.as_proxy()), {}
+            )
             return wrap_fx_proxy_cls(
                 type(tensor_cls),  # handle Ndarrays and Tensors
                 tx,
@@ -1631,8 +1677,9 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
+        if hasattr(a, "set_items") and hasattr(b, "set_items"):
+            return SetVariable(list(a.set_items & b.set_items))
         # None no-ops this handler and lets the driving function proceed
-        return None
 
     def call_or_(self, tx, a, b):
         # Rely on constant_handler
@@ -1648,6 +1695,8 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
+        if hasattr(a, "set_items") and hasattr(b, "set_items"):
+            return SetVariable(list(a.set_items | b.set_items))
         # None no-ops this handler and lets the driving function proceed
         return None
 
@@ -1661,7 +1710,10 @@ class BuiltinVariable(VariableTracker):
                 sym_num=None,
             )
 
-        if isinstance(a, ListVariable):
+        # Unwrap the underlying ConstDictVariable
+        if isinstance(a, DictView):
+            a = a.dv_dict
+        if isinstance(a, (ListVariable, ConstDictVariable)):
             return ConstantVariable.create(len(a.items) == 0)
 
         return None

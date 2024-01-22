@@ -1,14 +1,23 @@
+import builtins
+import copy
 import functools
 import importlib
+import itertools
+import operator
 import sys
 import types
-from typing import Any, Dict
+from collections import defaultdict
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
+
+np: Optional[types.ModuleType] = None
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    pass
 
 import torch
 
-from .allowed_functions import is_callable_allowed, is_callable_disallowed
-
-from .utils import hashable, is_function
+from .utils import hashable, is_function, NP_SUPPORTED_MODULES
 
 from .variables import (
     SkipFilesVariable,
@@ -2773,7 +2782,7 @@ def load_object(name):
             val = _load_obj_from_str(x[0])
         if hasattr(val, "__wrapped__"):
             val = val.__wrapped__
-    except (AttributeError, ModuleNotFoundError):
+    except (AttributeError, ImportError):
         val = None
     return val
 
@@ -2805,6 +2814,174 @@ def is_aten_op_or_tensor_method(obj):
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
     )
+
+
+class FunctionIdSet:
+    """
+    Track a set of `id()`s of objects which are either allowed or not
+    allowed to go into the generated FX graph.  Use to test for torch.*,
+    numpy.*, builtins.*, etc.
+
+    Support user modification to permit customization of what can be
+    added to the graph and what will cause a graph break.
+    """
+
+    function_ids: Optional[Set[int]] = None
+    function_names: Optional[Dict[int, str]] = None
+
+    def __init__(self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]):
+        self.lazy_initializer = lazy_initializer
+
+    def __call__(self):
+        if self.function_ids is None:
+            value = self.lazy_initializer()
+            if isinstance(value, dict):
+                self.function_ids = set(value.keys())
+                self.function_names = value
+            else:
+                assert isinstance(value, set)
+                self.function_ids = value
+        return self.function_ids
+
+    def get_name(self, idx: int, default: str):
+        self()  # lazy init
+        assert self.function_names is not None
+        return self.function_names.get(idx, default)
+
+    def add(self, idx: int):
+        function_ids = self()  # lazy init
+        function_ids.add(idx)
+
+    def remove(self, idx: int):
+        function_ids = self()
+        if idx in function_ids:
+            function_ids.remove(idx)
+
+    def __contains__(self, idx: int):
+        return idx in self()
+
+
+@FunctionIdSet
+def _allowed_callable_ids() -> Dict[int, str]:
+    rv: Dict[int, str] = {}
+    return rv
+
+
+@FunctionIdSet
+def _disallowed_callable_ids() -> Dict[int, str]:
+    rv: Dict[int, str] = {}
+    return rv
+
+
+@FunctionIdSet
+def _builtin_function_ids() -> Dict[int, str]:
+    rv = {
+        id(v): f"builtins.{k}"
+        for k, v in builtins.__dict__.items()
+        if not k.startswith("_") and callable(v)
+    }
+    rv.update(
+        {
+            id(v): f"operator.{k}"
+            for k, v in operator.__dict__.items()
+            if not k.startswith("_") and callable(v)
+        }
+    )
+    rv.update(
+        {id(v): f"functools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
+    )
+    rv.update(
+        {
+            id(cast): "typing.cast",
+            id(functools.reduce): "functools.reduce",
+            id(copy.deepcopy): "copy.deepcopy",
+        }
+    )
+    return rv
+
+
+@FunctionIdSet
+def _numpy_function_ids() -> Dict[int, str]:
+    rv = dict()
+    for mod in NP_SUPPORTED_MODULES:
+        rv.update(
+            {
+                id(v): f"{mod.__name__}.{k}"
+                for k, v in mod.__dict__.items()
+                if callable(v)
+                and (getattr(v, "__module__", None) or mod.__name__) == mod.__name__
+            }
+        )
+    return rv
+
+
+@FunctionIdSet
+def _builtin_constant_ids() -> Dict[int, str]:
+    """
+    Collects constant builtins by eliminating callable items.
+    """
+    rv = {
+        id(v): f"builtins.{k}"
+        for k, v in builtins.__dict__.items()
+        if not k.startswith("_") and not callable(v)
+    }
+    return rv
+
+
+_lazy_module_init: Dict[str, List[Callable[[], None]]] = defaultdict(list)
+
+
+def add_module_init_func(name: str, init_func: Callable[[], None]) -> None:
+    """Register a module without eagerly importing it"""
+    # If the module is already imported, eagerly run init
+    assert "." not in name, f"Expected a root module name, but got {name}"
+    if name in sys.modules:
+        init_func()
+
+    # Module is not yet imported, delay processing until needed
+    assert name not in _lazy_module_init
+    _lazy_module_init[name].append(init_func)
+
+
+def _maybe_init_lazy_module(obj: object) -> None:
+    module = getattr(obj, "__module__", None)
+    if module is None:
+        return
+
+    base_module = module.split(".")[0]
+    init_funcs = _lazy_module_init.pop(base_module, None)
+    if init_funcs is not None:
+        for fn in init_funcs:
+            fn()
+
+
+def is_callable_allowed(obj) -> bool:
+    _maybe_init_lazy_module(obj)
+    return id(obj) in _allowed_callable_ids
+
+
+def is_callable_disallowed(obj) -> bool:
+    _maybe_init_lazy_module(obj)
+    return id(obj) in _disallowed_callable_ids
+
+
+def is_forbidden(obj) -> bool:
+    _maybe_init_lazy_module(obj)
+    return getattr(obj, "_dynamo_forbidden", False)
+
+
+def is_builtin_callable(obj) -> bool:
+    return id(obj) in _builtin_function_ids
+
+
+def is_builtin_constant(obj) -> bool:
+    return id(obj) in _builtin_constant_ids
+
+
+def is_numpy(obj) -> bool:
+    if np is None:
+        return False
+    return isinstance(obj, (np.ndarray, np.generic)) or id(obj) in _numpy_function_ids
 
 
 """

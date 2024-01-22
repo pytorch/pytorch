@@ -15,6 +15,7 @@
 #include <c10/core/SafePyObject.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
 #include <c10/util/flat_hash_map.h>
@@ -109,16 +110,11 @@ struct EnableHermeticPyObject {
 class PythonKernelHolder : public c10::OperatorKernel {
   c10::SafePyObject func_;
   c10::DispatchKey dispatch_key_;
-  bool is_torch_compile_python_kernel_;
 
  public:
-  PythonKernelHolder(
-      py::object func,
-      c10::DispatchKey dispatch_key,
-      bool is_torch_compile_python_kernel = false)
+  PythonKernelHolder(py::object func, c10::DispatchKey dispatch_key)
       : func_(func.release().ptr(), getPyInterpreter()),
-        dispatch_key_(dispatch_key),
-        is_torch_compile_python_kernel_(is_torch_compile_python_kernel) {}
+        dispatch_key_(dispatch_key) {}
 
   void operator()(
       const c10::OperatorHandle& op,
@@ -177,14 +173,14 @@ class PythonKernelHolder : public c10::OperatorKernel {
 
     auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
     py::gil_scoped_acquire g;
-    std::unique_ptr<EnableHermeticPyObject> g2;
-    if (is_torch_compile_python_kernel_) {
-      // In terms of the aten operation kernel is implemented by torch.compile,
-      // we cannot assume the python object is hermetic. So we need to disable
-      // the logic.
-    } else {
-      g2 = std::make_unique<EnableHermeticPyObject>();
-    }
+    // Jan 2024: We're slated to get rid of multipy, so stop forcing hermetic
+    // mode unconditionally in all situations when you're using multipy.
+    // Eventually just delete this entirely.  (Note that you may break multipy
+    // anyway this way with dispatcher registered functions that require
+    // hermetic to be off.)
+#if defined(USE_DEPLOY)
+    EnableHermeticPyObject g2;
+#endif
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
     auto obj = py::reinterpret_steal<py::object>(PyObject_Call(
         func_.ptr(getPyInterpreter()),
@@ -194,6 +190,136 @@ class PythonKernelHolder : public c10::OperatorKernel {
       throw python_error();
     }
     pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
+  }
+};
+
+struct TensorMetaInfo {
+  c10::ScalarType dtype;
+  c10::IntArrayRef sizes;
+  c10::IntArrayRef strides;
+
+  TensorMetaInfo(
+      c10::ScalarType dtype,
+      c10::IntArrayRef sizes,
+      c10::IntArrayRef strides)
+      : dtype(dtype), sizes(sizes), strides(strides) {}
+
+  bool operator==(const TensorMetaInfo& other) const {
+    return dtype == other.dtype && sizes == other.sizes &&
+        strides == other.strides;
+  }
+};
+
+struct TensorMetaInfoHash {
+  size_t operator()(
+      const torch::impl::dispatch::TensorMetaInfo& tensor_meta_info) const {
+    auto hash = std::hash<c10::ScalarType>()(tensor_meta_info.dtype);
+    for (auto& e : tensor_meta_info.sizes) {
+      hash = c10::hash_combine(hash, std::hash<int64_t>()(e));
+    }
+    for (auto& e : tensor_meta_info.strides) {
+      hash = c10::hash_combine(hash, std::hash<int64_t>()(e));
+    }
+    return hash;
+  }
+};
+
+using AOTIKernelMetaInfo = std::vector<TensorMetaInfo>;
+
+struct AOTIKernelMetaInfoHash {
+  size_t operator()(const std::vector<torch::impl::dispatch::TensorMetaInfo>&
+                        aoti_kernel_meta_info) const {
+    size_t hash = 0;
+    for (auto& e : aoti_kernel_meta_info) {
+      hash = c10::hash_combine(hash, TensorMetaInfoHash()(e));
+    }
+    return hash;
+  }
+};
+
+class AOTIPythonKernelHolder : public c10::OperatorKernel {
+  PythonKernelHolder python_kernel_holder_;
+  c10::DispatchKey dispatch_key_;
+  c10::string_view op_name_;
+
+  using _AOTIModelContainerRunner = torch::inductor::AOTIModelContainerRunner;
+  std::unordered_map<
+      AOTIKernelMetaInfo,
+      _AOTIModelContainerRunner*,
+      AOTIKernelMetaInfoHash>
+      cache_;
+
+ public:
+  AOTIPythonKernelHolder(
+      py::object func,
+      c10::DispatchKey dispatch_key,
+      c10::string_view op_name)
+      : python_kernel_holder_(std::move(func), dispatch_key),
+        dispatch_key_(dispatch_key),
+        op_name_(op_name) {
+    // TODO: Load all aten kernel according to op_name and dispatch key
+    (void)dispatch_key_; // Suppress unused variable warning
+  }
+
+  void operator()(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet keyset,
+      torch::jit::Stack* stack) {
+    std::vector<at::Tensor> inputs;
+    auto res = unpackTensors(*stack, inputs);
+    if (!res || inputs.empty()) {
+      python_kernel_holder_(op, keyset, stack);
+      return;
+    }
+
+    auto inputs_meta_info = getInputsMetaInfo(inputs);
+    auto kernel_handle = cache_.find(inputs_meta_info);
+    if (kernel_handle == cache_.end()) {
+      // Cache miss
+      python_kernel_holder_(op, keyset, stack);
+      return;
+    }
+
+    // Cache hit
+    // TODO: Check different devices
+    auto outputs = kernel_handle->second->run(inputs);
+    for (auto& output : outputs) {
+      stack->push_back(output);
+    }
+  }
+
+ private:
+  bool unpackTensors(
+      const torch::jit::Stack& stack,
+      std::vector<at::Tensor>& inputs) {
+    for (auto& ivalue : stack) {
+      if (ivalue.isTensor()) {
+        inputs.push_back(ivalue.toTensor());
+      } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
+        // NB: use toListRef as it doesn't induce refcount bumps
+        // (toTensorListRef is not a thing)
+        for (const auto& item : ivalue.toListRef()) {
+          if (item.isNone()) {
+            continue;
+          }
+          inputs.push_back(item.toTensor());
+        }
+      } else {
+        // TODO(EIKAN): Support non-tensor parameter
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  AOTIKernelMetaInfo getInputsMetaInfo(const std::vector<at::Tensor>& inputs) {
+    AOTIKernelMetaInfo inputs_meta_info;
+    for (const auto& input : inputs) {
+      inputs_meta_info.push_back(
+          TensorMetaInfo(input.scalar_type(), input.sizes(), input.strides()));
+    }
+    return inputs_meta_info;
   }
 };
 
@@ -350,14 +476,13 @@ void initDispatchBindings(PyObject* module) {
              py::object func) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
-            bool is_compiling_aten_op = true;
             lib.impl(
                 name,
                 torch::dispatch(
                     dispatch,
                     CppFunction::makeFromBoxedFunctor(
-                        std::make_unique<PythonKernelHolder>(
-                            func, dispatch, is_compiling_aten_op))),
+                        std::make_unique<AOTIPythonKernelHolder>(
+                            func, dispatch, name))),
                 register_or_verify());
             python_registrations_[lib._resolve(name)].insert_or_assign(
                 dispatch,
