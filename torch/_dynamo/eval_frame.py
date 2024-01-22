@@ -1497,7 +1497,6 @@ class TorchPatcher:
         }
 
         disabled_multi_tensor_opt_modules = {
-            adamax,
             radam,  # data-dependent control flow
         }
 
