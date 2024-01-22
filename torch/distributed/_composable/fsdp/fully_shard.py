@@ -50,6 +50,9 @@ def fully_shard(
     _insert_module_state(module, state)
     state._module = module
     state._device = device
+    state._pre_forward_hook_handle = state._module.register_forward_pre_hook(
+        state._pre_forward, prepend=True, with_kwargs=True
+    )
 
     managed_modules = _get_managed_modules(module)
     params, buffers = _get_managed_states(managed_modules)

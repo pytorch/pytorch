@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 
 from torch.distributed._composable_state import _get_module_state, _State
+from torch.distributed.utils import _to_kwargs
+from torch.utils.hooks import RemovableHandle
 from ._fsdp_common import TrainingState
 from ._fsdp_param import FSDPParam
 
@@ -21,6 +23,7 @@ class FSDPState(_State):
         self._fsdp_param_group: Optional[FSDPParamGroup] = None
         self._is_root: Optional[bool] = None
         self._training_state: TrainingState = TrainingState.IDLE
+        self._pre_forward_hook_handle: Optional[RemovableHandle] = None
 
         # Attributes only used on the root state:
         self._all_state_refs: List[weakref.ReferenceType[FSDPState]] = []
@@ -31,6 +34,13 @@ class FSDPState(_State):
         self._lazy_init()
         if not self._is_root:
             return args, kwargs
+        with torch.profiler.record_function("FSDP::root_pre_forward"):
+            if self._device.type == "cuda":
+                with torch.profiler.record_function("FSDP::inputs_to_gpu"):
+                    args_tuple, kwargs_tuple = _to_kwargs(
+                        args, kwargs, self._device, False
+                    )  # same as DDP
+                args, kwargs = (args_tuple[0], kwargs_tuple[0])
         return args, kwargs
 
     def _lazy_init(self) -> None:
@@ -65,6 +75,13 @@ class FSDPState(_State):
         for module_name, module in root_module.named_modules():
             if module in module_to_fsdp_param_group:
                 module_to_fsdp_param_group[module]._module_fqn = module_name
+
+    def _pre_forward(
+        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        self._training_state = TrainingState.FORWARD
+        args, kwargs = self._root_pre_forward(module, args, kwargs)
+        return args, kwargs
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[FSDPState]:
