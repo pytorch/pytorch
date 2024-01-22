@@ -131,6 +131,7 @@ class UnflattenedModule(torch.nn.Module):
         self,
         export_module: ExportedProgram,
         flat_args_adapter: Optional[FlatArgsAdapter] = None,
+        inplace_buffer_mutations: bool = True,
     ):
         super().__init__()
         if export_module.graph_signature.backward_signature is not None:
@@ -144,7 +145,8 @@ class UnflattenedModule(torch.nn.Module):
         # Flag to indicate whether args have been adapted.
         self.adapted = False
 
-        _inplace_buffer_mutations(export_graph, self.graph_signature)
+        if inplace_buffer_mutations:
+            _inplace_buffer_mutations(export_graph, self.graph_signature)
         _outline_submodules(export_graph, self)
 
         self.range_constraints = export_module.range_constraints
@@ -247,7 +249,9 @@ class UnflattenedModule(torch.nn.Module):
 
 
 def unflatten(
-    module: ExportedProgram, flat_args_adapter: Optional[FlatArgsAdapter] = None
+    module: ExportedProgram,
+    flat_args_adapter: Optional[FlatArgsAdapter] = None,
+    inplace_buffer_mutations: bool = True,
 ) -> UnflattenedModule:
     """Unflatten an ExportedProgram, producing a module with the same module
     hierarchy as the original eager module. This can be useful if you are trying
@@ -263,12 +267,14 @@ def unflatten(
     Args:
         module (ExportedProgram): The ExportedProgram to unflatten.
         flat_args_adapter (Optional[FlatArgsAdapter]): Adapt flat args if input TreeSpec does not match with exported module's.
+        inplace_buffer_mutations (bool): Whether to transform buffer mutations from their functionalized form into a
+            copy_ node in the graph.
 
     Returns:
         An instance of :class:`UnflattenedModule`, which has the same module
         hierarchy as the original eager module pre-export.
     """
-    return UnflattenedModule(module, flat_args_adapter)
+    return UnflattenedModule(module, flat_args_adapter, inplace_buffer_mutations)
 
 
 def _inplace_buffer_mutations(graph: torch.fx.Graph, graph_signature) -> None:
