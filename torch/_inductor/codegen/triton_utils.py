@@ -18,6 +18,10 @@ def signature_of(arg: Union[TensorArg, SizeArg], *, size_dtype: str) -> str:
             tye = "*fp8e4nv"
         elif arg.dtype == torch.float8_e5m2:
             tye = "*fp8e5"
+        elif arg.dtype == torch.float8_e4m3fnuz:
+            tye = "*fp8e4b8"
+        elif arg.dtype == torch.float8_e5m2fnuz:
+            tye = "*fp8e5b16"
         else:
             tye = JITFunction._type_of(arg.dtype)
         if V.graph.is_unspec_arg(arg.buffer):

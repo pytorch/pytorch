@@ -85,6 +85,8 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e4m3fn();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2fnuz();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e4m3fnuz();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bfloat16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float16();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float32();

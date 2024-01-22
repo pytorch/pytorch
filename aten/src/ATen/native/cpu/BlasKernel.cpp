@@ -268,9 +268,9 @@ void gemm_core_(
 }
 
 #if !defined(C10_MOBILE)
-#define _AT_DISPATCH_GEMM_TYPES(TYPE, NAME, ...)                  \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                   \
-            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn,       \
+#define _AT_DISPATCH_GEMM_TYPES(TYPE, NAME, ...)                                                \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                                                 \
+            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, \
             TYPE, NAME, __VA_ARGS__)
 #else
 #define _AT_DISPATCH_GEMM_TYPES(TYPE, NAME, ...)         \
