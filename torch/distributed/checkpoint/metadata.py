@@ -11,7 +11,6 @@ __all__ = [
     "BytesStorageMetadata",
     "Metadata",
     "MetadataIndex",
-    "MEM_FORMAT_ENCODING",
     "TensorProperties",
 ]
 
@@ -27,7 +26,7 @@ class ChunkStorageMetadata:
     sizes: torch.Size
 
 
-class MEM_FORMAT_ENCODING(Enum):
+class _MEM_FORMAT_ENCODING(Enum):
     """Describe the memory format of a tensor."""
 
     TORCH_CONTIGUOUS_FORMAT = 0
@@ -41,20 +40,24 @@ class TensorProperties:
 
     # Regular tensor fields
     dtype: torch.dtype = field(default_factory=torch.get_default_dtype)
+    # This field is deprecated.
     layout: torch.layout = field(default=torch.strided)
+    # This field is deprecated.
     requires_grad: bool = False
+    # This field is deprecated.
     memory_format: torch.memory_format = field(default=torch.contiguous_format)
+    # This field is deprecated.
     pin_memory: bool = False
 
     def __getstate__(self):
         # Since torch.memory_format cannot be pickled!
         memory_format = self.memory_format
         if memory_format == torch.contiguous_format:
-            mem_format_encoding = MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT
+            mem_format_encoding = _MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT
         elif memory_format == torch.channels_last:
-            mem_format_encoding = MEM_FORMAT_ENCODING.TORCH_CHANNELS_LAST
+            mem_format_encoding = _MEM_FORMAT_ENCODING.TORCH_CHANNELS_LAST
         elif memory_format == torch.preserve_format:
-            mem_format_encoding = MEM_FORMAT_ENCODING.TORCH_PRESERVE_FORMAT
+            mem_format_encoding = _MEM_FORMAT_ENCODING.TORCH_PRESERVE_FORMAT
         else:
             raise RuntimeError(f"Invalid torch.memory_format: {memory_format}")
 
