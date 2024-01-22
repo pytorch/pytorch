@@ -120,6 +120,13 @@ aoti_torch_item_int64(AtenTensorHandle tensor, int64_t* ret_value);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_bool(AtenTensorHandle tensor, bool* ret_value);
 
+AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
+AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
+
+// Free the tensor object
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
+
 // Get the nbytes of the underlying storage
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_storage_size(AtenTensorHandle tensor, int64_t* ret_size);
