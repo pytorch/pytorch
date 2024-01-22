@@ -587,4 +587,5 @@ Lazy Modules Initialization
 .. py:module:: torch.nn.utils.prune
 .. py:module:: torch.nn.utils.rnn
 .. py:module:: torch.nn.utils.spectral_norm
+.. py:module:: torch.nn.utils.swap
 .. py:module:: torch.nn.utils.weight_norm

@@ -6,6 +6,7 @@ import weakref
 
 import torch
 from torch._prims_common import DeviceLikeType
+from torch.overrides import has_torch_function
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
@@ -2061,11 +2062,14 @@ class Module:
                             else:
                                 setattr(self, name, input_param)
                         elif use_swap_tensors:
+                            uses_torch_function = has_torch_function((param, input_param))
                             new_input_param = param.module_load(input_param)
-                            if (isinstance(param, torch.nn.Parameter) and
-                                    not isinstance(new_input_param, torch.nn.Parameter)):
-                                new_input_param = torch.nn.Parameter(new_input_param, requires_grad=param.requires_grad)
+                            if uses_torch_function:
+                                if (isinstance(param, torch.nn.Parameter) and
+                                        not isinstance(new_input_param, torch.nn.Parameter)):
+                                    new_input_param = torch.nn.Parameter(new_input_param, requires_grad=param.requires_grad)
                                 torch.utils.swap_tensors(param, new_input_param)
+                            # otherwise default module_load has already handled the param.copy_(input_param)
                         else:
                             param.copy_(input_param)
                 except Exception as ex:
