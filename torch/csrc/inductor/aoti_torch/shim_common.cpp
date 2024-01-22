@@ -114,6 +114,27 @@ int32_t aoti_torch_dtype_bool() {
   return (int32_t)c10::ScalarType::Bool;
 }
 
+#define AOTI_TORCH_ITEM_IMPL(dtype, ctype)                     \
+  AOTITorchError aoti_torch_item_##dtype(                      \
+      AtenTensorHandle tensor, ctype* ret_value) {             \
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({               \
+      at::Tensor* t = tensor_handle_to_tensor_pointer(tensor); \
+      *ret_value = t->item().to<ctype>();                      \
+    });                                                        \
+  }
+
+AOTI_TORCH_ITEM_IMPL(float32, float)
+AOTI_TORCH_ITEM_IMPL(float64, double)
+AOTI_TORCH_ITEM_IMPL(uint8, uint8_t)
+AOTI_TORCH_ITEM_IMPL(uint16, uint16_t)
+AOTI_TORCH_ITEM_IMPL(uint32, uint32_t)
+AOTI_TORCH_ITEM_IMPL(uint64, uint64_t)
+AOTI_TORCH_ITEM_IMPL(int8, int8_t)
+AOTI_TORCH_ITEM_IMPL(int16, int16_t)
+AOTI_TORCH_ITEM_IMPL(int32, int32_t)
+AOTI_TORCH_ITEM_IMPL(int64, int64_t)
+AOTI_TORCH_ITEM_IMPL(bool, bool)
+
 bool aoti_torch_grad_mode_is_enabled() {
   return c10::GradMode::is_enabled();
 }

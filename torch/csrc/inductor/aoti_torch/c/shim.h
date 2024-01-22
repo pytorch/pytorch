@@ -96,18 +96,29 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bool();
 
-AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
-AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
-
-// Free the tensor object
+// Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
-
-// Get a pointer to the underlying storage data
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
-    AtenTensorHandle tensor,
-    void** ret_data_ptr // returns borrowed reference
-);
+aoti_torch_item_float32(AtenTensorHandle tensor, float* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_float64(AtenTensorHandle tensor, double* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_uint8(AtenTensorHandle tensor, uint8_t* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_uint16(AtenTensorHandle tensor, uint16_t* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_uint32(AtenTensorHandle tensor, uint32_t* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_uint64(AtenTensorHandle tensor, uint64_t* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_int8(AtenTensorHandle tensor, int8_t* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_int16(AtenTensorHandle tensor, int16_t* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_int32(AtenTensorHandle tensor, int32_t* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_int64(AtenTensorHandle tensor, int64_t* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_bool(AtenTensorHandle tensor, bool* ret_value);
 
 // Get the nbytes of the underlying storage
 AOTI_TORCH_EXPORT AOTITorchError
