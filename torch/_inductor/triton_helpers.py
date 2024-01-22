@@ -180,3 +180,144 @@ def bucketize_binary_search(
         full_range = (full_range + 1) // 2
 
     return low
+
+
+@triton.jit
+def pack_value_flag(
+    value,
+    flag,
+    DTYPE_VALUE_AS_UINT: tl.constexpr,
+    DTYPE_PACK: tl.constexpr,
+):
+    # Workaround for triton bug, tensor.to doesn't unwrap constexpr values
+    DTYPE_VALUE_AS_UINT = tl.core._constexpr_to_value(DTYPE_VALUE_AS_UINT)
+    bitwidth = DTYPE_VALUE_AS_UINT.primitive_bitwidth
+    uv = value.to(DTYPE_VALUE_AS_UINT, bitcast=True).to(DTYPE_PACK)
+    return flag.to(DTYPE_PACK) | (uv << bitwidth)
+
+
+@triton.jit
+def unpack_value(
+    pack,
+    DTYPE_VALUE,
+    DTYPE_VALUE_AS_UINT,
+):
+    # Workaround for triton bug, tensor.to doesn't unwrap constexpr values
+    DTYPE_VALUE = tl.core._constexpr_to_value(DTYPE_VALUE)
+    DTYPE_VALUE_AS_UINT = tl.core._constexpr_to_value(DTYPE_VALUE_AS_UINT)
+    bitwidth = DTYPE_VALUE_AS_UINT.primitive_bitwidth
+    value_uint = (pack >> bitwidth).to(DTYPE_VALUE_AS_UINT)
+    return value_uint.to(DTYPE_VALUE, bitcast=True)
+
+
+@triton.jit
+def unpack_flag(pack, DTYPE_FLAG):
+    return pack.to(DTYPE_FLAG)
+
+
+@triton.jit
+def exclusive_scan_decoupled_lookback(
+    scratch_base,
+    block_value,
+    index,
+    combine_fn,
+    init,
+    DTYPE_VALUE: tl.constexpr,
+    DTYPE_VALUE_AS_UINT: tl.constexpr,
+    DTYPE_PACK: tl.constexpr,
+):
+    """Compute exclusive scan of a scalar value between blocks
+
+    Ref: https://research.nvidia.com/publication/2016-03_single-pass-parallel-prefix-scan-decoupled-look-back
+
+    scratch_base: Pointer to scratch space in global memory
+    block_value: Scalar value for this block
+    index: Scalar index of this block relative to the current scan
+    combine_fn: Function ``(value, value) -> value`` which is scanned over
+    init: Scalar value equal to the identiy of combine_fn
+    DTYPE_VALUE: Equal to block_value.dtype
+    DTYPE_VALUE_AS_UINT: A tl.uint{n} type equal in size to ``block_value``
+    DTYPE_PACK: Unsigned type twice the width of block_value
+
+    NOTE: This function is limited to values which are 32-bits or less.
+    """
+    pack = pack_value_flag(
+        block_value,
+        tl.full(block_value.shape, 1, DTYPE_VALUE_AS_UINT),
+        DTYPE_VALUE_AS_UINT,
+        DTYPE_PACK,
+    )
+    tl.atomic_xchg(scratch_base + index, pack, sem="relaxed")
+
+    exclusive_prefix = init
+    test_target = index - 1
+    while test_target >= 0:
+        # tl.atomic_load
+        flag = tl.full([], 0, DTYPE_VALUE_AS_UINT)
+        while flag == 0:
+            pack = tl.atomic_add(scratch_base + test_target, 0, sem="relaxed")
+            flag = unpack_flag(pack, DTYPE_VALUE_AS_UINT)
+
+        value = unpack_value(pack, DTYPE_VALUE, DTYPE_VALUE_AS_UINT)
+        exclusive_prefix = combine_fn(value, exclusive_prefix)
+
+        if flag == 2:
+            test_target = -1
+        else:
+            test_target = test_target - 1
+
+    # Make inclusive block sum visible to other blocks
+    inclusive_prefix = combine_fn(exclusive_prefix, block_value)
+    pack = pack_value_flag(
+        inclusive_prefix,
+        tl.full([], 2, DTYPE_VALUE_AS_UINT),
+        DTYPE_VALUE_AS_UINT,
+        DTYPE_PACK,
+    )
+    tl.atomic_xchg(scratch_base + index, pack, sem="relaxed")
+    return exclusive_prefix
+
+
+@triton.jit
+def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combine_fn, init):
+    """Compute exclusive scan of a scalar value between blocks
+
+    Ref: https://research.nvidia.com/publication/2016-03_single-pass-parallel-prefix-scan-decoupled-look-back
+
+    scratch_base: Pointer to scratch space in global memory
+    block_value: Scalar value for this block, must be 64-bits wide
+    index: Scalar index of this block relative to the current scan
+    combine_fn: Function ``(value, value) -> value`` which is scanned over
+    init: Scalar value equal to the identiy of combine_fn
+    """
+    block_value_u64 = block_value.to(tl.uint64, bitcast=True)
+    tl.store(scratch_base + 3 * index + 1, block_value_u64)
+    tl.debug_barrier()
+    flag_one = tl.full([], 1, tl.uint64)
+    tl.atomic_xchg(scratch_base + 3 * index + 0, flag_one, sem="release")
+
+    exclusive_prefix = init
+    test_target = index - 1
+    while test_target >= 0:
+        flag = tl.full([], 0, tl.uint64)
+        while flag == 0:
+            flag = tl.atomic_add(scratch_base + 3 * test_target + 0, 0, sem="acquire")
+
+        value_u64 = tl.load(scratch_base + 3 * test_target + flag.to(tl.int32))
+        value = value_u64.to(block_value.dtype, bitcast=True)
+        exclusive_prefix = combine_fn(value, exclusive_prefix)
+
+        if flag == 2:
+            test_target = -1
+        else:
+            test_target = test_target - 1
+
+    # Make inclusive block sum visible to other blocks
+    inclusive_prefix = combine_fn(exclusive_prefix, block_value)
+    inclusive_prefix_u64 = inclusive_prefix.to(tl.uint64, bitcast=True)
+    tl.store(scratch_base + 3 * index + 2, inclusive_prefix_u64)
+    tl.debug_barrier()
+    flag_two = tl.full([], 2, tl.uint64)
+    tl.atomic_xchg(scratch_base + 3 * index + 0, flag_two, sem="release")
+
+    return exclusive_prefix

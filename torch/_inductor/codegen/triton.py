@@ -40,7 +40,7 @@ from ..codecache import code_hash, get_path, PyCodeCache
 from ..dependencies import MemoryDep, StarDep
 from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
-from ..scheduler import BaseScheduling, WhyNoFuse
+from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..triton_heuristics import AutotuneHint
 from ..utils import (
     cache_on_self,
@@ -2495,7 +2495,7 @@ class TritonKernel(Kernel):
             from torch._dynamo.testing import rand_strided
             {}
             import torch
-            from torch._inductor.triton_heuristics import grid
+            from torch._inductor.triton_heuristics import grid, split_scan_grid
         """.format(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
@@ -2514,6 +2514,14 @@ class TritonKernel(Kernel):
             return "from triton.compiler.compiler import AttrsDescriptor"
         else:
             return ""
+
+    def _get_heuristic(self):
+        if self.persistent_reduction:
+            assert self.inside_reduction
+            return "persistent_reduction"
+        elif self.inside_reduction:
+            return "reduction"
+        return "pointwise"
 
     def codegen_kernel(self, name=None):
         from triton import next_power_of_2
@@ -2539,14 +2547,11 @@ class TritonKernel(Kernel):
             else:
                 size_hint = next_power_of_2(int(numel_hint))
             size_hints.append(size_hint)
-        if self.persistent_reduction:
-            assert self.inside_reduction
-            heuristics = "persistent_reduction"
-        elif self.inside_reduction:
-            heuristics = "reduction"
-        else:
+
+        if not self.inside_reduction:
             size_hints.pop()
-            heuristics = "pointwise"
+
+        heuristics = self._get_heuristic()
 
         if name is None:
             code.splice(
@@ -2750,6 +2755,9 @@ class TritonKernel(Kernel):
         sizes = self.dense_size_list()
         return f"[{', '.join(sizes)}]"
 
+    def _get_grid_fn(self):
+        return "grid"
+
     def add_numel_to_call_args_and_grid(self, name, call_args, grid):
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
@@ -2777,15 +2785,27 @@ class TritonKernel(Kernel):
         call_args = self.get_call_args()
         grid: List[Any] = []
         self.add_numel_to_call_args_and_grid(name, call_args, grid)
+        current_device = V.graph.scheduler.current_device
+
+        if self.args.workspace_arg is not None:
+            ws = self.args.workspace_arg
+            wrapper.generate_workspace_allocation(
+                ws.nbytes, current_device, ws.zero_fill
+            )
+
         grid = wrapper.generate_default_grid(name, grid)
         wrapper.generate_kernel_call(
             name,
             call_args,
             grid,
-            V.graph.scheduler.current_device.index,
+            current_device.index,
             cuda=True,
             triton=True,
+            grid_fn=self._get_grid_fn(),
         )
+
+        if self.args.workspace_arg is not None:
+            wrapper.make_free_by_names(["workspace"])
 
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
@@ -2887,6 +2907,13 @@ class TritonScheduling(BaseScheduling):
         _, (numel1, rnumel1) = node1.group
         _, (numel2, rnumel2) = node2.group
         why = WhyNoFuse(node1, node2)
+
+        if node1.is_split_scan() and not node2.is_split_scan():
+            if node2.is_reduction():
+                why("Split scan cannot fuse with reductions")
+        elif node2.is_split_scan() and not node1.is_split_scan():
+            if node1.is_reduction():
+                why("Split scan cannot fuse with reductions")
 
         if node1.is_reduction() and node2.is_reduction():
             reduction_can_fuse = numel1 == numel2 and rnumel1 == rnumel2
@@ -3219,18 +3246,25 @@ class TritonScheduling(BaseScheduling):
                 )
 
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
+        from torch._inductor.codegen.triton_split_scan import TritonSplitScanKernel
+
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
         reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
             node_schedule, numel, reduction_numel
         )
 
+        is_split_scan = any(
+            isinstance(node, BaseSchedulerNode) and node.is_split_scan()
+            for node in node_schedule
+        )
+        kernel_type = TritonSplitScanKernel if is_split_scan else TritonKernel
         kernel_args = tiled_groups
         kernel_kwargs = {
             "reduction_hint": reduction_hint_val,
             "mutations": mutations,
             "index_dtype": index_dtype,
         }
-        kernel = TritonKernel(
+        kernel = kernel_type(
             *kernel_args,
             **kernel_kwargs,
         )

@@ -56,7 +56,7 @@ from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
     get_desired_device_type_test_bases,
 )
-from torch.testing._internal.common_dtype import all_types
+from torch.testing._internal.common_dtype import all_types, get_all_dtypes
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_CI,
@@ -1141,6 +1141,82 @@ class CommonTemplate:
         self.common(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),))
         self.common(fn, (torch.rand((14923), dtype=torch.float16),))
 
+    def test_split_cumsum(self):
+        def fn(a):
+            return torch.cumsum(a, -1)
+
+        for dtype in get_all_dtypes(include_half=False, include_bfloat16=False, include_bool=True):
+            # Use low=0 since when the mean value is 0, cumsum at all points
+            # tends towards zero which makes the relative error term blow up
+            inp = make_tensor(10, 3, 352, 352, low=0, dtype=dtype, device=self.device)
+            self.common(fn, (inp.view(-1),), rtol=1e-5, atol=1e-5)
+            self.common(fn, (inp.view(10, -1),), rtol=1e-5, atol=1e-5)
+
+    def test_split_cumsum_low_prec(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("ir.Scan nyi on CPU")
+
+        def fn(a):
+            return torch.cumsum(a.view(-1), 0)
+
+        self.common(
+            fn,
+            (torch.rand((10, 3, 352, 352), dtype=torch.float16),),
+            reference_in_float=True,
+        )
+
+    def test_consecutive_split_cumsum(self):
+        def fn(a, b):
+            a = a.view(-1)
+            b = b.view(-1)
+            return torch.cumsum(a, 0) + torch.cumsum(b, 0)
+
+        for dtype in [torch.float32, torch.float64]:
+            a = make_tensor(10, 3, 352, 352, low=0, dtype=dtype, device=self.device)
+            b = make_tensor(10, 3, 352, 352, low=0, dtype=dtype, device=self.device)
+            self.common(fn, (a, b), rtol=1e-5, atol=1e-5)
+
+    def test_split_cumprod(self):
+        def fn(a):
+            return torch.cumprod(a, -1)
+
+        for dtype in [torch.float32, torch.float64]:
+            # Keep exponent small so products don't blow up to infinity
+            inp = make_tensor(10, 10000, low=0.9, high=1.1, dtype=dtype, device=self.device)
+            self.common(fn, (inp.view(-1),), rtol=1e-5, atol=1e-5)
+            self.common(fn, (inp.view(10, -1),), rtol=1e-5, atol=1e-5)
+
+        for dtype in [torch.int32, torch.int64]:
+            # 2^1000 definitely doesn't fit in a 32-bit int, so just a
+            # sanity check
+            inp = torch.ones(10, 10000, dtype=dtype, device=self.device)
+            self.common(fn, (inp.view(-1),), rtol=1e-5, atol=1e-5)
+            self.common(fn, (inp.view(10, -1),), rtol=1e-5, atol=1e-5)
+
+    def test_split_cumprod_low_prec(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("ir.Scan nyi on CPU")
+
+        def fn(a):
+            return torch.cumprod(a.view(-1), 0)
+
+        self.common(
+            fn,
+            (torch.rand((10, 3, 352, 352), dtype=torch.float16),),
+            reference_in_float=True,
+        )
+
+    def test_consecutive_split_cumprod(self):
+        def fn(a, b):
+            a = a.view(-1)
+            b = b.view(-1)
+            return torch.cumprod(a, 0) + torch.cumprod(b, 0)
+
+        for dtype in [torch.float32, torch.float64]:
+            a = make_tensor(10, 3, 352, 352, exclude_zero=True, dtype=dtype, device=self.device)
+            b = make_tensor(10, 3, 352, 352, exclude_zero=True, dtype=dtype, device=self.device)
+            self.common(fn, (a, b), rtol=1e5, atol=1e-5)
+
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":
             raise unittest.SkipTest(f"No {GPU_TYPE} implementation (it returns empty)")
@@ -1154,6 +1230,7 @@ class CommonTemplate:
         data = torch.randint(0, 255, (M, N), dtype=torch.uint8)
         packed = torch.cat([data, scales, offsets], dim=-1)
         self.common(fn, [packed])
+
 
     def test_expanded_reduction(self):
         if self.device == "cpu":

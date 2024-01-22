@@ -191,6 +191,9 @@ class CachingAutotuner(KernelInterface):
                 return
             self.launchers = []
             compiled_binaries = []
+            if not self.configs:
+                raise RuntimeError("No triton configs are available")
+
             for c in self.configs:
                 try:
                     compiled_binary, launcher = self._precompile_config(
@@ -1284,6 +1287,10 @@ def persistent_reduction(
     )
 
 
+# TODO: custom config for split scan
+split_scan = reduction
+
+
 def template(num_stages, num_warps, triton_meta, filename=None, inductor_meta=None):
     """
     Compile a triton template
@@ -1370,5 +1377,13 @@ def grid(*numels):
             get_grid_dim(ynumel, meta.get("YBLOCK", None)),
             get_grid_dim(znumel, meta.get("ZBLOCK", None)),
         )
+
+    return grid_fn
+
+
+def split_scan_grid(xnumel, rnumel):
+    def grid_fn(meta):
+        assert meta.get("XBLOCK", 1) == 1
+        return (ceildiv(rnumel, meta.get("RBLOCK", 1)), xnumel, 1)
 
     return grid_fn

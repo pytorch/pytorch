@@ -1646,9 +1646,7 @@ class Scan(Loops):
             combine_fn=combine_fn,
             scan_numel=scan_numel,
         )
-        if num_splits > 1:
-            # TODO: Support splitting
-            return None
+        scan_type = Scan if num_splits <= 1 else SplitScan
 
         def reindex(index, scan_index):
             assert len(scan_index) == len(scan_ranges)
@@ -1656,7 +1654,7 @@ class Scan(Loops):
             return [*index[:axis], *scan_index, *index[axis:]]
 
         result = TensorBox.create(
-            Scan(
+            scan_type(
                 device=device,
                 dtype=dtype,
                 inner_fn=inner_fn,
@@ -1698,6 +1696,12 @@ class Scan(Loops):
             reduction_type="sum",
             reduction_numel=scan_numel,
         )
+
+
+# This signifies a scan op that should go through TritonSplitScanKernel codgen on CUDA.
+@dataclasses.dataclass
+class SplitScan(Scan):
+    pass
 
 
 def is_storage_and_layout(x):
