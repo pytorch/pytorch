@@ -5,8 +5,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 
+from torch.autograd import Variable
+from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed._composable_state import _get_module_state, _State
 from torch.distributed.utils import _to_kwargs
+from torch.utils._pytree import tree_flatten
 from torch.utils.hooks import RemovableHandle
 from ._fsdp_collectives import AllGatherStateHolder
 from ._fsdp_common import TrainingState
@@ -21,6 +24,7 @@ class FSDPState(_State):
     _default_stream: torch.cuda.Stream
     _all_gather_copy_in_stream: torch.cuda.Stream
     _all_gather_stream: torch.cuda.Stream
+    _reduce_scatter_stream: torch.cuda.Stream
     # For overlapping current copy-out and next all-gather in forward
     _all_gather_state: AllGatherStateHolder
 
@@ -30,9 +34,11 @@ class FSDPState(_State):
         self._is_root: Optional[bool] = None
         self._training_state: TrainingState = TrainingState.IDLE
         self._pre_forward_hook_handle: Optional[RemovableHandle] = None
+        self._pre_backward_hook_handles: List[RemovableHandle] = []
 
         # Attributes only used on the root state:
         self._all_state_refs: List[weakref.ReferenceType[FSDPState]] = []
+        self._root_post_backward_final_callback_queued: Optional[bool] = None
 
     def _root_pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
@@ -71,6 +77,7 @@ class FSDPState(_State):
         self._default_stream = torch.cuda.current_stream()
         self._all_gather_copy_in_stream = torch.cuda.Stream(priority=high_priority)
         self._all_gather_stream = torch.cuda.Stream(priority=high_priority)
+        self._reduce_scatter_stream = torch.cuda.Stream(priority=high_priority)
         self._all_gather_state = AllGatherStateHolder()
         for state_ref in self._all_state_refs:
             state = state_ref()
@@ -81,6 +88,7 @@ class FSDPState(_State):
                     self._all_gather_copy_in_stream
                 )
                 fsdp_param_group.all_gather_stream = self._all_gather_stream
+                fsdp_param_group.reduce_scatter_stream = self._reduce_scatter_stream
                 fsdp_param_group.all_gather_state = self._all_gather_state
 
     def _init_fqns(self) -> None:
@@ -115,7 +123,50 @@ class FSDPState(_State):
     def _post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
         if self._fsdp_param_group:
             output = self._fsdp_param_group.post_forward(module, input, output)
+        output = self._register_pre_backward_hook(output)
         self._training_state = TrainingState.IDLE
+
+    def _pre_backward(self, *unused: Any) -> None:
+        self._training_state = TrainingState.PRE_BACKWARD
+        if self._is_root and not self._root_post_backward_final_callback_queued:
+            self._register_root_post_backward_final_callback()
+        if self._fsdp_param_group:
+            self._fsdp_param_group.pre_backward(*unused)
+
+    def _root_post_backward_final_callback(self) -> None:
+        if not self._is_root:
+            return
+        with torch.profiler.record_function("FSDP::root_post_backward_callback"):
+            self._training_state = TrainingState.IDLE
+            for state_ref in self._all_state_refs:
+                state = state_ref()
+                assert state is not None, "FSDPState deallocated"
+                state._training_state = TrainingState.IDLE
+                if state._fsdp_param_group:
+                    state._fsdp_param_group.finalize_backward()
+            self._root_post_backward_final_callback_queued = False
+            for handle in self._pre_backward_hook_handles:
+                handle.remove()
+            self._pre_backward_hook_handles.clear()
+
+    def _register_pre_backward_hook(self, output: Any) -> Any:
+        if not torch.is_grad_enabled():
+            return output
+
+        flat_outputs, _ = tree_flatten(output)
+        tensors = tuple(t for t in flat_outputs if t.requires_grad)
+        if tensors:
+            handle = register_multi_grad_hook(tensors, self._pre_backward, mode="any")
+            self._pre_backward_hook_handles.append(handle)
+        return output
+
+    def _register_root_post_backward_final_callback(self):
+        if self._root_post_backward_final_callback_queued:
+            return
+        self._root_post_backward_final_callback_queued = True
+        Variable._execution_engine.queue_callback(
+            self._root_post_backward_final_callback
+        )
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[FSDPState]:

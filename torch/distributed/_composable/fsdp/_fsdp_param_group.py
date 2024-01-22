@@ -5,12 +5,14 @@ import torch.distributed as dist
 import torch.nn as nn
 
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
+from torch.utils._pytree import tree_flatten, tree_unflatten
 from ._fsdp_collectives import (
     AllGatherResult,
     AllGatherState,
     AllGatherStateHolder,
     foreach_all_gather,
     foreach_all_gather_copy_out,
+    foreach_reduce_scatter,
 )
 
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, ParamModuleInfo, TrainingState
@@ -46,12 +48,17 @@ class FSDPParamGroup:
         self.default_stream: torch.cuda.Stream = default_stream
         self.all_gather_copy_in_stream: torch.cuda.Stream = default_stream
         self.all_gather_stream: torch.cuda.Stream = default_stream
+        self.reduce_scatter_stream: torch.cuda.Stream = default_stream
         self.all_gather_state = AllGatherStateHolder()
         self._init_grad_divide_factors()
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
         self._all_gather_result: Optional[AllGatherResult] = None
+        # Holds the reduce-scatter view-out CUDA event that marks the end of
+        # the group's post-backward (e.g. reduce-scatter and div), which should
+        # be waited on at the end of backward
+        self._reduce_scatter_view_out_event: Optional[torch.cuda.Event] = None
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
@@ -146,6 +153,7 @@ class FSDPParamGroup:
             self._training_state = TrainingState.FORWARD
             self.unshard()
             self.wait_for_unshard()
+            args, kwargs = self._register_post_backward_hook(args, kwargs)
             return args, kwargs
 
     def post_forward(self, module: nn.Module, input: Any, output: Any):
@@ -153,6 +161,50 @@ class FSDPParamGroup:
             self.reshard()
             self._training_state = TrainingState.IDLE
             return output
+
+    def pre_backward(self, *unused: Any):
+        with torch.profiler.record_function("FSDP::pre_backward"):
+            self._training_state = TrainingState.PRE_BACKWARD
+            self.unshard()  # no-op if prefetched
+            self.wait_for_unshard()
+
+    def _post_backward(self, *unused: Any):
+        self._training_state = TrainingState.POST_BACKWARD
+        with torch.profiler.record_function("FSDP::post_backward_reshard"):
+            # Save the autograd-computed gradients before resharding to only
+            # access the unsharded parameters when their data is present
+            fsdp_params_with_grad: List[FSDPParam] = []
+            unsharded_grads: List[torch.Tensor] = []
+            for fsdp_param in self.fsdp_params:
+                if fsdp_param.unsharded_param.grad is not None:
+                    fsdp_params_with_grad.append(fsdp_param)
+                    unsharded_grads.append(fsdp_param.unsharded_grad_data)
+                    fsdp_param.unsharded_param.grad = None
+            self.reshard()
+        if len(fsdp_params_with_grad) == 0:
+            return
+        with torch.profiler.record_function("FSDP::post_backward_reduce"):
+            self._reduce_scatter_view_out_event = foreach_reduce_scatter(
+                fsdp_params_with_grad,
+                unsharded_grads,
+                self._reduce_scatter_process_group,
+                self.reduce_scatter_stream,
+                self._orig_dtype,
+                self._orig_dtype,
+                self.device,
+                self._grad_predivide_factor,
+                self._grad_postdivide_factor,
+            )
+
+    def finalize_backward(self):
+        if self._sharded_state == ShardedState.UNSHARDED:
+            # Run post-backward here since the forward inputs did not require
+            # gradient, so the post-backward hook did not run
+            self._post_backward()
+        if self._reduce_scatter_view_out_event is not None:
+            torch.cuda.current_stream().wait_event(self._reduce_scatter_view_out_event)
+            self._reduce_scatter_view_out_event = None
+        self._training_state = TrainingState.IDLE
 
     # Utilities #
     def _to_sharded(self):
@@ -167,9 +219,42 @@ class FSDPParamGroup:
                 fsdp_param.to_unsharded()
             self._sharded_state = ShardedState.UNSHARDED
 
+    # Hook Registration #
+    def _register_post_backward_hook(
+        self, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        if not torch.is_grad_enabled():
+            return args, kwargs
+        args_list, args_spec = tree_flatten(args)
+        kwargs_list, kwargs_spec = tree_flatten(kwargs)
+        args_kwargs_list = list(args_list) + list(kwargs_list)
+        inp_tensor_indices: List[int] = []
+        inp_tensors: List[torch.Tensor] = []
+        for i, obj in enumerate(args_kwargs_list):
+            if not torch.is_tensor(obj) or not obj.requires_grad:
+                continue
+            inp_tensor_indices.append(i)
+            inp_tensors.append(obj)
+        if len(inp_tensors) == 0:
+            return args, kwargs  # no tensors that require gradients
+        inp_tensors = RegisterPostBackwardHook.apply(self, *inp_tensors)
+        for inp_tensor_idx, inp_tensor in zip(inp_tensor_indices, inp_tensors):
+            args_kwargs_list[inp_tensor_idx] = inp_tensor
+        args_list = args_kwargs_list[: len(args_list)]
+        kwargs_list = args_kwargs_list[len(args_list) :]
+        args = tree_unflatten(args_list, args_spec)
+        kwargs = tree_unflatten(kwargs_list, kwargs_spec)
+        return args, kwargs
+
     # Properties #
     @property
     def _all_gather_process_group(self) -> dist.ProcessGroup:
+        mesh_info = self.mesh_info
+        assert isinstance(mesh_info, FSDPMeshInfo)
+        return mesh_info.shard_process_group
+
+    @property
+    def _reduce_scatter_process_group(self) -> dist.ProcessGroup:
         mesh_info = self.mesh_info
         assert isinstance(mesh_info, FSDPMeshInfo)
         return mesh_info.shard_process_group
@@ -213,3 +298,20 @@ def _get_param_module_infos(
     if len(param_to_module_info) != len(params):
         raise AssertionError(f"Some parameters are not in the module tree of {module}")
     return [param_to_module_info[param] for param in params]
+
+
+class RegisterPostBackwardHook(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx,
+        param_group,
+        *inputs,
+    ):
+        # All tensors in `inputs` should require gradient
+        ctx.param_group = param_group
+        return inputs
+
+    @staticmethod
+    def backward(ctx, *grads):
+        ctx.param_group._post_backward()
+        return (None,) + grads
