@@ -268,7 +268,8 @@ and output of type {type(ret)}. But expected types to match."""
 
                 if isinstance(ret, list):
                     for r in ret:
-                        torch.ops.aten.set_.source_Storage_storage_offset(r, arg.untyped_storage(), r.storage_offset(), r.shape, r.stride())
+                        torch.ops.aten.set_.source_Storage_storage_offset(
+                            r, arg.untyped_storage(), r.storage_offset(), r.shape, r.stride())
                 else:
                     assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
                     torch.ops.aten.set_.source_Storage_storage_offset(
