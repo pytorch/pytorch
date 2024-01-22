@@ -1113,6 +1113,27 @@ class TestMaxAutotune(TestCase):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, a, bias)
             torch.testing.assert_close(Y_compiled, Y, atol=1e-1, rtol=1e-1)
 
+    def test_pad_nd(self):
+        a = torch.randn(2, 3, 4, 5).cuda()
+
+        def mpad(a):
+            return torch.constant_pad_nd(a, [0, 3, 0, 0, 0, 1], 0)
+
+        pada = mpad(a)
+        self.assertEqual(pada.shape, (2, 4, 4, 8))
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "Cutlass,Triton,ATen",
+                "trace.enabled": True,
+                "trace.output_code": True,
+                "trace.debug_dir": "/tmp/test_code_pad/",
+            }
+        ):
+            mpad_compiled = torch.compile(mpad, dynamic=False)
+            pada_compiled = mpad_compiled(a)
+            torch.testing.assert_close(pada_compiled, pada, atol=1e-1, rtol=1e-1)
+
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm(self, dynamic=False):
         """
