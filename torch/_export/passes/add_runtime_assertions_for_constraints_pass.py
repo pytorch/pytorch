@@ -209,7 +209,7 @@ def _get_existing_inline_assertions(
             ):
                 continue
 
-            symint = maybe_symint_arg.meta["val"].node._expr
+            symint = maybe_symint_arg.meta["val"].node.expr
             if not isinstance(symint, sympy.Symbol):
                 continue
 
