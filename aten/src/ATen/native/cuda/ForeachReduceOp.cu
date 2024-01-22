@@ -26,7 +26,7 @@ template <
     int depth = 1,
     int r_args_depth = 1,
     int res_arg_index = 0,
-    typename index_t = int64_t>
+    typename index_t = uint64_t>
 struct LpNormFunctor {
   static_assert(
       NormType == 1 || NormType == 2,
