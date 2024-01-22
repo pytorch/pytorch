@@ -79,12 +79,6 @@ from .exported_program import (
 from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
-from .passes.lift_constant_tensor_pass import lift_constant_tensor_pass
-from .passes.remove_runtime_assertions import _RemoveRuntimeAssertionsPass
-from .passes.replace_sym_size_ops_pass import _replace_sym_size_ops_pass
-from .passes.replace_view_ops_with_view_copy_ops_pass import (
-    ReplaceViewOpsWithViewCopyOpsPass,
-)
 from .wrappers import _wrap_submodules
 from torch._inductor import config
 
