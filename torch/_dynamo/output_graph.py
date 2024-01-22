@@ -11,6 +11,8 @@ import traceback
 import weakref
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
+from types import FunctionType
+import gc
 
 import sympy
 
@@ -1724,10 +1726,22 @@ class SubgraphTracer(fx.Tracer):
         # a specific NN method.
         if len(self.output_graph._current_tx) > 0:
             f_code = self.output_graph._current_tx[-1].f_code
-            if "orig_nnmodule" in code_context.get_context(f_code):
-                module = code_context.get_context(f_code)["orig_nnmodule"]
-                method_name = f_code.co_name
-                node.meta['nn_module_method'] = getattr(module, method_name)
+            # breakpoint()
+            """
+            TODO Problem:
+            - torch.compile(module.func1) doesn't keep the `module` info, and there is no way to get it. We need to pass it in from higher level.
+            """
+            # print(f"f_code: {f_code}")
+            # print(f"code_context.get_context(f_code): {code_context.get_context(f_code)}")
+            # if "orig_nnmodule" in code_context.get_context(f_code):
+            #     module = code_context.get_context(f_code)["orig_nnmodule"]
+            #     method_name = f_code.co_name
+            #     node.meta['nn_module_method'] = getattr(module, method_name)
+            #     print(f"node.meta['nn_module_method']: {node.meta['nn_module_method']}")
+            method_name = f_code.co_name
+            module = self.output_graph._current_tx[-1].f_locals['self']
+            node.meta['nn_module_method'] = getattr(module, method_name)
+            # print(f"node.meta['nn_module_method']: {node.meta['nn_module_method']}")
         return node
 
     # Note: we did not override erase_node since

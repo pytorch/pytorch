@@ -446,6 +446,9 @@ def _compile(
     frame_state=None,
     compile_id=None,
 ) -> Optional[GuardedCode]:
+    print(f"type(code): {type(code)}")
+
+
     from torch.fx.experimental.validator import (
         bisect,
         BisectValidationException,
