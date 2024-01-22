@@ -1371,12 +1371,14 @@ def guard_error_hook(
     print(
         f"ERROR RUNNING GUARDS {code.co_name} {code.co_filename}:{code.co_firstlineno}"
     )
-    # TODO: If we passed in the exception here, we could get a precise
-    # column number of which subexpression failed.  But that would also
-    # require us to have the TRUE code that was eval'ed, not a shoddy
-    # reconstruction (like is done here)
     print("lambda " + ", ".join(guard_fn.args) + ":")
     print(" ", " and\n  ".join(guard_fn.code_parts))
+    local_scope = {"L": f_locals, **guard_fn.closure_vars}
+    for guard in guard_fn.code_parts:
+        try:
+            eval(guard, guard_fn.global_scope, local_scope)
+        except:  # noqa: B001,E722
+            print(f"Malformed guard:\n{guard}")
 
 
 set_guard_error_hook(guard_error_hook)
