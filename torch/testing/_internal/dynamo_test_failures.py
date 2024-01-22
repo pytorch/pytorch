@@ -2864,7 +2864,6 @@ dynamo_expected_failures = {
     "TestRecordFunction.test_record_function",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_optimizer_parameters_adam",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_tensor_properties",  # profiler/test_profiler
-    "TestProfiler.test_record_function_fast",  # profiler/test_profiler
     "TestProfiler.test_profiler_fwd_bwd_link",  # profiler/test_profiler
     "TestProfiler.test_concrete_inputs_profiling",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_tensorimpl_invalidation_scalar_args",  # profiler/test_profiler
@@ -3626,7 +3625,6 @@ dynamo_expected_failures = {
     "TestCustomOp.test_impl_device_function",  # test_custom_ops
     "TestCustomOp.test_builtin_torchscript_ops",  # test_custom_ops
     "TestCustomOpTestingCPU.test_missing_functionalization_cpu",  # test_custom_ops
-    "TestCustomOpTestingCPU.test_incorrect_schema_view_cpu",  # test_custom_ops
     "TestCustomOp.test_define_with_tags_tuple",  # test_custom_ops
     "TestCustomOp.test_builtin_aten_ops_are_pt2_compliant",  # test_custom_ops
     "TestCustomOp.test_save_for_backward_inputs_are_namedtuple",  # test_custom_ops
