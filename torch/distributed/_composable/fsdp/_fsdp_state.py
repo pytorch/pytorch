@@ -40,7 +40,7 @@ class FSDPState(_State):
                     args_tuple, kwargs_tuple = _to_kwargs(
                         args, kwargs, self._device, False
                     )  # same as DDP
-                args, kwargs = (args_tuple[0], kwargs_tuple[0])
+                args, kwargs = args_tuple[0], kwargs_tuple[0]
         return args, kwargs
 
     def _lazy_init(self) -> None:
