@@ -387,7 +387,7 @@ at::Device ProcessGroupNCCL::guessDeviceForRank() const {
   }
 }
 
-const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 1000;
+const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 100;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
 
@@ -1126,7 +1126,12 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
   // Abort communicators after all threads have exited to avoid having the
   // threads dying due to aborted communicator and raising a SIGABRT
+  // We need to include PG information in the abort reason so we can tell the
+  // abort order.
   std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
+  LOG(INFO)
+      << logPrefix()
+      << "ProcessGroupNCCL aborting communicators, check for 'abort finished' logs or look for abort hang";
   abort(abortReason);
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL abort finished.";
 

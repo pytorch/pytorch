@@ -1,4 +1,4 @@
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["oncall: export"]
 # flake8: noqa
 import copy
 import dataclasses
@@ -38,7 +38,15 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyCUDA,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TestCase as TorchTestCase,
+    IS_FBCODE,
+    IS_MACOS,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
+    find_library_location,
+)
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,
@@ -432,7 +440,6 @@ class TestExport(TestCase):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureSerDer
     @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
     def test_export_func_with_default_kwargs(self):
@@ -1366,7 +1373,6 @@ def forward(self, arg_0):
             "torch.ops.aten._assert_async.msg", 2, exactly=True
         ).run(decompose_ep.graph_module.code)
 
-    @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_mixed_input(self):
         def func(a, b, alpha: int):
@@ -1525,7 +1531,6 @@ def forward(self, arg_0):
         ):
             _ = exported(torch.ones(7, 5), 6.0)
 
-    @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_runtime_assert_for_prm_str(self):
         class Foo(torch.nn.Module):
@@ -1775,7 +1780,7 @@ def forward(self, arg_0):
         ep = export(WrapperModule(f), (torch.tensor(1),))
 
         self.assertEqual(len(ep.graph_signature.input_specs), 2)
-        self.assertEqual(len(ep.tensor_constants), 1)
+        self.assertEqual(len(ep.constants), 1)
 
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -1790,7 +1795,7 @@ def forward(self, arg_0):
 
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertEqual(len(ep.state_dict), 1)
-        self.assertEqual(len(ep.tensor_constants), 2)
+        self.assertEqual(len(ep.constants), 2)
 
         inp = (torch.tensor(5),)
         self.assertTrue(torch.allclose(ep(*inp), Foo()(*inp)))
@@ -2853,5 +2858,64 @@ def forward(self, l_q_, l_k_, l_v_):
     return (getitem,)""")
 
 
-if __name__ == "__main__":
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestExportCustomClass(TorchTestCase):
+    def setUp(self):
+        if IS_FBCODE:
+            lib_file_path = "//caffe2/test/cpp/jit:test_custom_class_registrations"
+        elif IS_SANDCASTLE or IS_MACOS:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        elif IS_WINDOWS:
+            lib_file_path = find_library_location('torchbind_test.dll')
+        else:
+            lib_file_path = find_library_location('libtorchbind_test.so')
+        torch.ops.load_library(str(lib_file_path))
+
+    def test_lift_custom_obj(self):
+        # TODO: fix this test once custom class tracing is implemented
+
+        custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        f = Foo()
+
+        inputs = (torch.zeros(4, 4),)
+        ep = export(f, inputs)
+
+        # Replace one of the values with an instance of our custom class
+        for node in ep.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                with ep.graph.inserting_before(node):
+                    setattr(ep.graph_module, "custom_obj", custom_obj)
+                    getattr_node = ep.graph.get_attr("custom_obj")
+                    custom_node = ep.graph.call_function(
+                        torch.ops._TorchScriptTesting.take_an_instance.default,
+                        (getattr_node,),
+                    )
+                    custom_node.meta["val"] = torch.ones(4, 4)
+                    arg0, _ = node.args
+                    node.args = (arg0, custom_node)
+
+        from torch._export.passes.lift_constants_pass import lift_constants_pass
+        from torch._export.serde.serialize import serialize, deserialize
+        constants = lift_constants_pass(ep.graph_module, ep.graph_signature)
+        for k, v in constants.items():
+            assert k not in ep.constants
+            ep._constants[k] = v
+        serialized_vals = serialize(ep)
+        deserialized_ep = deserialize(serialized_vals)
+
+        for node in deserialized_ep.graph.nodes:
+            if (
+                node.op == "call_function" and
+                node.target == torch.ops._TorchScriptTesting.take_an_instance.default
+            ):
+                arg = node.args[0]
+                self.assertTrue(arg.op == "placeholder")
+
+
+if __name__ == '__main__':
     run_tests()
