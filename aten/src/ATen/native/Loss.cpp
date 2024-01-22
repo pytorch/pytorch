@@ -30,7 +30,6 @@
 #include <ATen/ops/kl_div_native.h>
 #include <ATen/ops/l1_loss_native.h>
 #include <ATen/ops/log.h>
-#include <ATen/ops/log_sigmoid.h>
 #include <ATen/ops/margin_ranking_loss_native.h>
 #include <ATen/ops/mean.h>
 #include <ATen/ops/min.h>
@@ -359,20 +358,21 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
   c10::MaybeOwned<Tensor> pos_weight_maybe_owned = at::borrow_from_optional_tensor(pos_weight_opt);
   const Tensor& pos_weight = *pos_weight_maybe_owned;
 
-  Tensor loss;
-  if (pos_weight.defined()) {
-      // pos_weight need to be broadcasted, thus mul(target) is not inplace.
-      auto log_weight = (pos_weight - 1).mul(target).add_(1);
-      loss = (1 - target).mul_(input).sub_(log_weight.mul_(at::log_sigmoid(input)));
-  } else {
-      loss = (1 - target).mul_(input).sub_(at::log_sigmoid(input));
-  }
+    Tensor loss;
+    auto max_val = (-input).clamp_min_(0);
+    if (pos_weight.defined()) {
+        // pos_weight need to be broadcasted, thus mul(target) is not inplace.
+        auto log_weight = (pos_weight - 1).mul(target).add_(1);
+        loss = (1 - target).mul_(input).add_(log_weight.mul_(((-max_val).exp_().add_((-input - max_val).exp_())).log_().add_(max_val)));
+    } else {
+        loss = (1 - target).mul_(input).add_(max_val).add_((-max_val).exp_().add_((-input -max_val).exp_()).log_());
+    }
 
-  if (weight.defined()) {
-      loss.mul_(weight);
-  }
+    if (weight.defined()) {
+        loss.mul_(weight);
+    }
 
-  return apply_loss_reduction(loss, reduction);
+    return apply_loss_reduction(loss, reduction);
 }
 
 Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool log_input, const bool full, const double eps, const int64_t reduction)
