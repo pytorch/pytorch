@@ -3,10 +3,10 @@ import torch._dynamo
 
 def foo():
     def h(x):
-        x = x.cos()
+        a = x.cos()
         print(x)
-        x = x.cos()
-        return x
+        b = a.cos()
+        return b
 
     def g(x):
         x = x.sin()
@@ -16,10 +16,10 @@ def foo():
 
 
     def f(x):
-        x = x.cos()
-        print(x)
-        x = g(x)
-        x = x.cos()
+        j = x.cos()
+        print(j)
+        t = g(j)
+        x = t.cos()
         return x
 
 
