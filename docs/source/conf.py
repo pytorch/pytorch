@@ -1060,6 +1060,8 @@ coverage_ignore_functions = [
     "reduce_deploy_graph_module",
     "reduce_graph_module",
     "reduce_package_graph_module",
+    # torch.fx.lazy_graph_module
+    "use_lazy_graph_module",
     # torch.fx.node
     "has_side_effect",
     "map_aggregate",
@@ -2894,6 +2896,8 @@ coverage_ignore_classes = [
     "ValidationException",
     # torch.fx.graph
     "PythonCode",
+    # torch.fx.lazy_graph_module
+    "LazyGraphModule",
     # torch.fx.immutable_collections
     "immutable_dict",
     "immutable_list",
