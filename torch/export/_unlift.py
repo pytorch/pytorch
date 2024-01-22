@@ -219,6 +219,11 @@ def _construct_inp_pos_to_param_buffer_name(
                 else:
                     setattr(new_gm, name.replace(".", "_"), value)
                 constant_name_to_corrected_name[name] = name.replace(".", "_")
+            elif name in graph_signature.lifted_custom_objs:
+                assert isinstance(value, torch.ScriptObject)
+                setattr(new_gm, name.replace(".", "_"), value)
+                constant_name_to_corrected_name[name] = name.replace(".", "_")
+
 
     count = 0
     inp_pos_to_param_buffer_name = {}
@@ -243,6 +248,16 @@ def _construct_inp_pos_to_param_buffer_name(
             if hasattr(graph_signature, "inputs_to_lifted_tensor_constants"):
                 if node.name in graph_signature.inputs_to_lifted_tensor_constants:
                     constant_name = graph_signature.inputs_to_lifted_tensor_constants[
+                        node.name
+                    ]
+                    if constant_name in constant_name_to_corrected_name:
+                        inp_pos_to_param_buffer_name[
+                            count
+                        ] = constant_name_to_corrected_name[constant_name]
+                    else:
+                        inp_pos_to_param_buffer_name[count] = constant_name
+                elif node.name in graph_signature.inputs_to_lifted_custom_objs:
+                    constant_name = graph_signature.inputs_to_lifted_custom_objs[
                         node.name
                     ]
                     if constant_name in constant_name_to_corrected_name:
