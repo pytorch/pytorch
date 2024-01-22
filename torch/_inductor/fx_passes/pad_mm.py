@@ -115,9 +115,19 @@ def pad_addmm(
             # the first one to be broadcasted over is sometimes implicit
             input = input.unsqueeze(0)
         if n_padded_length != 0 or m_padded_length != 0:
-            input_padded = aten.constant_pad_nd(
-                input, [0, n_padded_length, 0, m_padded_length]
-            )
+            bias_n_padded_length = n_padded_length
+            bias_m_padded_length = m_padded_length
+            # What if we're broadcasting?
+            if input.shape[0] == 1 and mat1.shape[0] > 1:
+                bias_m_padded_length = 0
+            if input.shape[1] == 1 and mat2.shape[1] > 1:
+                bias_n_padded_length = 0
+            if bias_m_padded_length > 0 or bias_n_padded_length > 0:
+                input_padded = aten.constant_pad_nd(
+                    input, [0, bias_n_padded_length, 0, bias_m_padded_length]
+                )
+            else:
+                input_padded = input
         else:
             input_padded = input
     else:
