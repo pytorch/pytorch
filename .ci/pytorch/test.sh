@@ -268,27 +268,12 @@ test_dynamo_shard() {
     exit 1
   fi
   python tools/dynamo/verify_dynamo.py
-  # Temporarily disable test_fx for dynamo pending the investigation on TTS
-  # regression in https://github.com/pytorch/torchdynamo/issues/784
+  # PLEASE DO NOT ADD ADDITIONAL EXCLUDES HERE.
+  # Instead, use @skipIfTorchDynamo on your tests.
   time python test/run_test.py --dynamo \
+    --exclude-inductor-tests \
     --exclude-jit-executor \
     --exclude-distributed-tests \
-    --exclude \
-      test_ao_sparsity \
-      test_autograd \
-      test_jit \
-      test_quantization \
-      test_dataloader \
-      test_reductions \
-      profiler/test_profiler \
-      profiler/test_profiler_tree \
-      test_python_dispatch \
-      test_fx \
-      test_package \
-      test_custom_ops \
-      export/test_db \
-      functorch/test_dims \
-      functorch/test_aotdispatch \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty

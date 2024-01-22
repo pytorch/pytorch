@@ -36,7 +36,7 @@ from ._sym_dispatch_mode import SymDispatchMode
 from torch.fx import Proxy
 import torch.fx.traceback as fx_traceback
 from torch import SymInt, SymFloat, SymBool
-from torch.utils.weak import WeakTensorKeyDictionary
+from torch.utils.weak import WeakTensorKeyDictionary, WeakIdKeyDictionary, _WeakHashRef
 from torch._ops import unset_mode_pre_dispatch, _set_mode_pre_dispatch, _get_dispatch_mode_pre_dispatch
 
 __all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_innermost_proxy_mode"]
@@ -52,8 +52,15 @@ CONSTANT_NUMEL_LIMIT = 1
 
 # We currently convert all SymInt to proxies before we use them.
 # This could plausibly be handled at the Dynamo level.
-pytree.register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
-
+pytree.register_pytree_node(
+    torch.Size,
+    lambda xs: (list(xs), None),
+    lambda xs, _: tuple(xs),
+    flatten_with_keys_fn=lambda xs: (
+        [(pytree.SequenceKey(i), x) for i, x in enumerate(xs)],
+        None,
+    ),
+)
 def fake_signature(fn, nargs):
     """FX gets confused by varargs, de-confuse it"""
     argnames = ",".join(f"arg{i}" for i in range(nargs))
@@ -159,6 +166,9 @@ def set_proxy_slot(obj, tracer, proxy):
         # We DO want to clobber proxies whenever we run an inplace operation
         # on a tensor, and it affects the metadata on the proxy.
         tracer.tensor_tracker[obj] = proxy
+    elif isinstance(obj, torch.ScriptObject):
+        # We DO want to clobber proxies, with a similar rationale as for tensors.
+        tracer.script_object_tracker[obj] = proxy
     else:
         # NB: Never clobber pre-existing proxy.  Although the proxies
         # are in principle equivalent, when we do graph partitioning
@@ -180,6 +190,8 @@ def has_proxy_slot(obj, tracer):
 def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
     if isinstance(obj, torch.Tensor):
         tracker = tracer.tensor_tracker
+    elif isinstance(obj, torch.ScriptObject):
+        tracker = tracer.script_object_tracker
     else:
         assert isinstance(obj, py_sym_types), type(obj)
         tracker = tracer.symnode_tracker
@@ -197,6 +209,8 @@ def extract_val(val):
     if is_fake(val):
         return snapshot_fake(val)
     elif isinstance(val, py_sym_types):
+        return val
+    elif isinstance(val, torch.ScriptObject):
         return val
     elif isinstance(val, (list, tuple)):
         return val.__class__([extract_val(x) for x in val])
@@ -295,6 +309,9 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
             set_proxy_slot(e, tracer, lambda: proxy)
+        elif isinstance(e, torch.ScriptObject):
+            set_proxy_slot(e, tracer, proxy)
+            set_meta(proxy, e)
         elif isinstance(e, (tuple, list)):
             if isinstance(proxy, fx.Proxy):
                 set_meta(proxy, e)
@@ -379,7 +396,7 @@ def fetch_sym_proxy(tracer):
     return inner
 
 
-def fetch_tensor_proxy(tracer):
+def fetch_object_proxy(tracer):
     return lambda t: get_proxy_slot(t, tracer, t)
 
 HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, FakeTensor)
@@ -415,7 +432,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
                 return r
 
     tracer = proxy_mode.tracer
-    f_args, f_kwargs = pytree.tree_map_only(torch.Tensor, fetch_tensor_proxy(tracer), (args, kwargs))
+    f_args, f_kwargs = pytree.tree_map_only((torch.Tensor, torch.ScriptObject), fetch_object_proxy(tracer), (args, kwargs))
 
     # If there are SymInts, we also should not consider this constant.
     # However, fake tensor handling of SymInts is sufficiently broken that
@@ -560,6 +577,7 @@ class PythonKeyTracer(Tracer):
         super().__init__(autowrap_modules=())
         self.tensor_tracker = WeakTensorKeyDictionary()
         self.symnode_tracker = _SymHashingDict()  # type: ignore[var-annotated]
+        self.script_object_tracker = WeakIdKeyDictionary(dict=None, ref_type=_WeakHashRef)
 
     # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
@@ -600,6 +618,8 @@ class PythonKeyTracer(Tracer):
             return get_proxy_slot(e, self, e, lambda e: e.proxy)
         elif isinstance(e, (torch.SymInt, torch.SymFloat, torch.SymBool)):
             return get_proxy_slot(e, self, e, lambda e: e())
+        elif isinstance(e, torch.ScriptObject):
+            return get_proxy_slot(e, self, e)
         else:
             return e
 

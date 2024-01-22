@@ -73,8 +73,6 @@ make_unique_base(Args&&... args) {
   return std::unique_ptr<Base>(new Child(std::forward<Args>(args)...));
 }
 
-#if defined(__cpp_lib_logical_traits) && !(defined(_MSC_VER) && _MSC_VER < 1920)
-
 template <class... B>
 using conjunction = std::conjunction<B...>;
 template <class... B>
@@ -83,37 +81,6 @@ template <bool B>
 using bool_constant = std::bool_constant<B>;
 template <class B>
 using negation = std::negation<B>;
-
-#else
-
-// Implementation taken from http://en.cppreference.com/w/cpp/types/conjunction
-template <class...>
-struct conjunction : std::true_type {};
-template <class B1>
-struct conjunction<B1> : B1 {};
-template <class B1, class... Bn>
-struct conjunction<B1, Bn...>
-    : std::conditional_t<bool(B1::value), conjunction<Bn...>, B1> {};
-
-// Implementation taken from http://en.cppreference.com/w/cpp/types/disjunction
-template <class...>
-struct disjunction : std::false_type {};
-template <class B1>
-struct disjunction<B1> : B1 {};
-template <class B1, class... Bn>
-struct disjunction<B1, Bn...>
-    : std::conditional_t<bool(B1::value), B1, disjunction<Bn...>> {};
-
-// Implementation taken from
-// http://en.cppreference.com/w/cpp/types/integral_constant
-template <bool B>
-using bool_constant = std::integral_constant<bool, B>;
-
-// Implementation taken from http://en.cppreference.com/w/cpp/types/negation
-template <class B>
-struct negation : bool_constant<!bool(B::value)> {};
-
-#endif
 
 #ifdef __cpp_lib_void_t
 
