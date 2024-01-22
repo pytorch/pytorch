@@ -59,6 +59,7 @@ from .misc import (
     SkipFilesVariable,
     StringFormatVariable,
     SuperVariable,
+    TypingVariable,
     UnknownVariable,
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
