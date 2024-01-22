@@ -6,8 +6,10 @@ from typing import List, Tuple
 
 import torch
 import torch.nn as nn
+from _test_fully_shard_common import MLP
 from torch.distributed._composable import replicate
 from torch.distributed._composable.fsdp import fully_shard
+from torch.distributed._tensor import DTensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, FSDPTestMultiThread
@@ -47,13 +49,45 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         model(x, ys)
 
 
-class TestFullyShardTrainingCore(FSDPTest):
+class TestFullyShardRegisteredParams(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_sharded_params_registered_after_forward(self):
+        """Tests that the sharded parameters are registered after forward."""
+        device = torch.device("cuda", 0)
+        # Single FSDP group
+        model = MLP(8, device)
+        fully_shard(model, device=device)
+        inp = torch.randn((2, 8), device="cuda")
+        self._assert_dtensor_params(model)
+        model(inp)
+        self._assert_dtensor_params(model)
+
+        # Multiple FSDP groups
+        model = MLP(8, device)
+        fully_shard(model.in_proj, device=device)
+        fully_shard(model.out_proj, device=device)
+        fully_shard(model, device=device)
+        self._assert_dtensor_params(model)
+        model(inp)
+        self._assert_dtensor_params(model)
+
+    def _assert_dtensor_params(self, module: nn.Module):
+        for param in module.parameters():
+            self.assertIsInstance(param, DTensor)
+
+
+class TestFullyShardTrainingCoreParity(FSDPTest):
     @property
     def world_size(self) -> int:
         return min(8, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
     def test_train_parity_single_group(self):
+        """Tests train parity with DDP for a single FSDP group."""
         self.run_subtests(
             {
                 "lin_shapes": [[(16, 15), (15, 8)], [(7, 15), (15, 3)]],
