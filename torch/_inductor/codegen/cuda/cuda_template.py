@@ -2,7 +2,7 @@ import copy
 import functools
 import itertools
 import logging
-from typing import Any, Dict, Generator, List, Optional, Sequence
+from typing import Any, Dict, Generator, List, Optional, Sequence, Union
 from unittest.mock import patch
 
 import sympy
@@ -17,6 +17,7 @@ from ...ir import (
     FlexibleLayout,
     IRNode,
     Layout,
+    ReinterpretView,
 )
 
 from ...utils import IndentedBuffer, unique
@@ -86,7 +87,7 @@ class CUDATemplate(KernelTemplate):
         """
         super().__init__(name)
         self.input_nodes = input_nodes
-        self.output_node: Buffer = Buffer("buf_out", layout)
+        self.output_node: Union[Buffer, ReinterpretView] = Buffer("buf_out", layout)
         self.input_reorder = input_reorder
         self.layout = layout
 

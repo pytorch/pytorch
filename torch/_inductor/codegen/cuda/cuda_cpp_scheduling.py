@@ -41,15 +41,17 @@ class CUDACPPScheduling(BaseScheduling):
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
-    def is_cuda_cpp_template(self, node: BaseSchedulerNode) -> bool:
+    @staticmethod
+    def is_cuda_cpp_template(node: BaseSchedulerNode) -> bool:
         return isinstance(node, SchedulerNode) and isinstance(
             node.node, CUDATemplateBuffer
         )
 
-    def is_cuda_cpp_fused_template(self, node: BaseSchedulerNode) -> bool:
-        return isinstance(node, FusedSchedulerNode) and self.is_cuda_cpp_template(
-            node.get_template_node()
-        )
+    @staticmethod
+    def is_cuda_cpp_fused_template(node: BaseSchedulerNode) -> bool:
+        return isinstance(
+            node, FusedSchedulerNode
+        ) and CUDACPPScheduling.is_cuda_cpp_template(node.get_template_node())
 
     def _can_fuse_epilogue_impl(
         self,
@@ -171,22 +173,39 @@ class CUDACPPScheduling(BaseScheduling):
                     f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}. Reason: {not_implemented_op}"  # noqa: G004, B950, G004
                 )
                 return False
-        compilation_result = self.try_fused_template_compilation(
-            cuda_template_buffer, epilogue_nodes + [additional_node]
-        )
-        if not compilation_result:
-            log.warning(
-                f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, due to compilation failure, this most likely means that the fused kernel would require too much shared memory."  # noqa: G004, B950, G004
-            )
-            return False
-        try:
-            # If retuning is enabled, let's try to run the Kernel
-            cuda_template_buffer.retune(epilogue_nodes + [additional_node])
-        except NoValidChoicesError:
-            log.warning(
-                f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, retuning did not return any viable kernel choices. This can indicate that the shared memory requirement would be too high."  # noqa: G004, B950, G004
-            )
-            return False
+        # Attempting retune is better than trying to compile with same op config,
+        # since the output layout might have changed, which enables a different op selection
+        if not config.cuda.retune_after_fusion:
+            compilation_result = None
+            try:
+                compilation_result = self.try_fused_template_compilation(
+                    cuda_template_buffer, epilogue_nodes + [additional_node]
+                )
+            except CUTLASSEVTOpNotImplementedError as e:
+                log.warning(
+                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name} due to unsupported EVT operation requirement. Message: {e}"  # noqa: G004, B950, G004
+                )
+                return False
+            except AssertionError as e:
+                log.warning(
+                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name} due to assertion failure during codegen. Reason: {e}"  # noqa: G004, B950, G004
+                )
+                return False
+            if not compilation_result:
+                log.warning(
+                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, due to compilation failure, this most likely means that the fused kernel would require too much shared memory."  # noqa: G004, B950, G004
+                )
+                return False
+        else:
+            try:
+                # If retuning is enabled, let's try to run the Kernel
+                # this has to be the last step, if it succeeds, this node has been adapted to the new epilogue
+                return cuda_template_buffer.retune(epilogue_nodes + [additional_node])
+            except NoValidChoicesError:
+                log.warning(
+                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, retuning did not return any viable kernel choices. This can indicate that the shared memory requirement would be too high."  # noqa: G004, B950, G004
+                )
+                return False
         return True
 
     @staticmethod
@@ -281,6 +300,10 @@ class CUDACPPScheduling(BaseScheduling):
         ctb.retune(
             epilogue_ir_nodes  # type: ignore[arg-type]
         )  # Retune for the epilogue nodes, if enabled ( cached )
+        if hasattr(ctb.template, "update_output_node_given_epilogue"):
+            # this is important to ensure the CUDA Template buffer is not unneccessarily allocated
+            # see CUDATemplateBuffer.should_allocate
+            ctb.template.update_output_node_given_epilogue(epilogue_ir_nodes, ctb)
         kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
         with kernel:
             for node in [template_node, *epilogue_nodes]:
