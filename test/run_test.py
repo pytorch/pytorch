@@ -361,6 +361,9 @@ CI_SERIAL_LIST = [
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
     "inductor/test_max_autotune",  # Testing, probably revert later
+    "inductor/test_torchinductor",  # OOM on test_large_block_sizes
+    "inductor/test_torchinductor_dynamic_shapes",  # OOM on test_large_block_sizes
+    "inductor/test_torchinductor_codegen_dynamic_shapes",  # OOM on test_large_block_sizes
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
@@ -440,6 +443,7 @@ JIT_EXECUTOR_TESTS = [
 
 INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
+TORCH_EXPORT_TESTS = [test for test in TESTS if test.startswith("export")]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 CPP_TESTS = [test for test in TESTS if test.startswith(CPP_TEST_PREFIX)]
@@ -1240,6 +1244,11 @@ def parse_args():
         help="exclude tests that are run for a specific jit config",
     )
     parser.add_argument(
+        "--exclude-torch-export-tests",
+        action="store_true",
+        help="exclude torch export tests",
+    )
+    parser.add_argument(
         "--exclude-distributed-tests",
         action="store_true",
         help="exclude distributed tests",
@@ -1373,6 +1382,9 @@ def get_selected_tests(options) -> List[str]:
 
     if options.exclude_inductor_tests:
         options.exclude.extend(INDUCTOR_TESTS)
+
+    if options.exclude_torch_export_tests:
+        options.exclude.extend(TORCH_EXPORT_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:

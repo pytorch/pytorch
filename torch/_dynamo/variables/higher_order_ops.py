@@ -1,6 +1,5 @@
 import contextlib
 import functools
-import itertools
 import logging
 import types
 
@@ -10,7 +9,6 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.builtin import BuiltinVariable
@@ -203,6 +201,107 @@ def validate_args_and_maybe_create_graph_inputs(
                 )
             args.append(new_arg)
         return args
+
+
+# This helper function is used to make sure two graphs share the same input signature. For example,
+# in torch.cond, two branches might lift different set of tensors as inputs. This function helps to
+# dedup the inputs and modify the graphs to take the same set of inputs.
+def _merge_graph_inputs(
+    l_graph, l_lifted_freevars, l_name, r_graph, r_lifted_freevars, r_name
+):
+    def dedup_and_sort_lifted_freevars(l_lifted_freevars, r_lifted_freevars):
+        # The nn module attributes are guaranteed to be registered into the top-level graph module during
+        # higher order op speculation. Therefore, get_attr nodes in two branches with the same
+        # target refer to the same attribute and we can safely deduplicate them with their target.
+        #
+        # Note: ideally, dynamo should just create a single proxy for the same attribute of a nn module. But
+        # true_branch and false_branch belong to two separate tracing contexts, they may register the same
+        # attribute to top level seperately. This creates two get_attr proxies for the same attribute
+        # that have different meta data such as stack_trace (one stack trace for the true_branch,
+        # and the other for false_branch). It seems better to discard the proxy explicitly in cond
+        # than make dynamo create a single proxy for the same get_attr target.
+        def shared_getattrs(l_lifted_proxies, r_lifted_proxies):
+            true_targets = {
+                proxy.node.target: proxy
+                for proxy in l_lifted_proxies
+                if proxy.node.op == "get_attr"
+            }
+            l_shared_getattrs = {}
+            r_shared_getattrs = {}
+
+            for false_proxy in r_lifted_proxies:
+                if (
+                    false_proxy.node.op == "get_attr"
+                    and false_proxy.node.target in true_targets
+                ):
+                    true_proxy = true_targets[false_proxy.node.target]
+                    l_shared_getattrs[true_proxy] = true_proxy
+                    r_shared_getattrs[false_proxy] = true_proxy
+            return l_shared_getattrs, r_shared_getattrs
+
+        l_shared_getattrs, r_shared_getattrs = shared_getattrs(
+            l_lifted_freevars.keys(), r_lifted_freevars.keys()
+        )
+
+        l_shared_freevars = (l_lifted_freevars.keys() & r_lifted_freevars.keys()).union(
+            l_shared_getattrs.keys()
+        )
+        r_shared_freevars = (l_lifted_freevars.keys() & r_lifted_freevars.keys()).union(
+            r_shared_getattrs.keys()
+        )
+        unique_l_freevars = l_lifted_freevars.keys() - l_shared_freevars
+        unique_r_freevars = r_lifted_freevars.keys() - r_shared_freevars
+
+        def _sort_by_name(vars):
+            return sorted(vars, key=lambda var: var.node.name)
+
+        return (
+            list(_sort_by_name(list(l_shared_freevars))),
+            list(_sort_by_name(list(r_shared_freevars))),
+            list(_sort_by_name(list(unique_l_freevars))),
+            list(_sort_by_name(list(unique_r_freevars))),
+        )
+
+    (l_shared, r_shared, unique_l, unique_r) = dedup_and_sort_lifted_freevars(
+        l_lifted_freevars, r_lifted_freevars
+    )
+
+    # Let's say we capture cond(pred, true_fn, false_fn, (x,))
+    # With set_graph_input set to automatic,
+    # true_fn has lifted variables x, a, b, c
+    # false_fn has lifted variables x, a, b, d
+    # Then fixup_branch_inps make sure both branches have the same signature, i.e.:
+    # - true_fn(x, a, b, c_true_branch, d_false_branch)
+    # - false_fn(x, a, b, c_true_branch, d_false_branch)
+    #
+    # More formally, the signature has three parts in the following order:
+    # 1. used in both branches: x, a, b
+    # 2. only used in true branches: c, suffixed with _true_branch
+    # 3. only used in false branches: d, suffixed with _false_branch
+    # Within each part, we re-order the nodes by name to have a derterministic ordering for testing.
+    def fixup_branch_inps(graph, lifted_freevars, shared, unique_l, unique_r):
+        def _insert_or_replace_phs(new_args, name_suffix):
+            for arg in new_args:
+                new_ph = graph.placeholder(arg.node.name + name_suffix)
+                # Override with new_ph if there exists a old placeholder.
+                if arg in lifted_freevars:
+                    old_ph = lifted_freevars[arg].node
+                    old_ph.replace_all_uses_with(new_ph)
+                    # replace_all_uses_with doesn't clean users. Clean it mannually so that we could erase it.
+                    old_ph.users = {}
+                    graph.erase_node(old_ph)
+
+        first_not_ph_node = next(
+            node for node in graph.nodes if node.op != "placeholder"
+        )
+        with graph.inserting_before(first_not_ph_node):
+            _insert_or_replace_phs(shared, "")
+            _insert_or_replace_phs(unique_l, "_" + l_name)
+            _insert_or_replace_phs(unique_r, "_" + r_name)
+
+    fixup_branch_inps(l_graph, l_lifted_freevars, l_shared, unique_l, unique_r)
+    fixup_branch_inps(r_graph, r_lifted_freevars, r_shared, unique_l, unique_r)
+    return l_graph, r_graph, l_shared, r_shared, unique_l, unique_r
 
 
 # See NOTE [HigherOrderOperator tracing design] for details of the design
@@ -403,8 +502,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return OutDtypeHigherOrderVariable(value, source, **kwargs)
         elif value is torch._functorch.eager_transforms.grad_impl:
             return FunctorchGradHigherOrderVariable(value, source, **kwargs)
-        elif value is torch._functorch.vmap.vmap_impl:
-            return FunctorchVmapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap":
             return WrapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
@@ -585,106 +682,20 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Expected branches to return tensors with same metadata. [(tensor_pair, difference)...]:{diffs}"
             )
 
-        def dedup_and_sort_lifted_freevars(true_lifted_freevars, false_lifted_freevars):
-            # The nn module attributes are guaranteed to be registered into the top-level graph module during
-            # higher order op speculation. Therefore, get_attr nodes in two branches with the same
-            # target refer to the same attribute and we can safely deduplicate them with their target.
-            #
-            # Note: ideally, dynamo should just create a single proxy for the same attribute of a nn module. But
-            # true_branch and false_branch belong to two separate tracing contexts, they may register the same
-            # attribute to top level seperately. This creates two get_attr proxies for the same attribute
-            # that have different meta data such as stack_trace (one stack trace for the true_branch,
-            # and the other for false_branch). It seems better to discard the proxy explicitly in cond
-            # than make dynamo create a single proxy for the same get_attr target.
-            def shared_getattrs(true_lifted_proxies, false_lifted_proxies):
-                true_targets = {
-                    proxy.node.target: proxy
-                    for proxy in true_lifted_proxies
-                    if proxy.node.op == "get_attr"
-                }
-                true_fn_shared_getattrs = {}
-                false_fn_shared_getattrs = {}
-
-                for false_proxy in false_lifted_proxies:
-                    if (
-                        false_proxy.node.op == "get_attr"
-                        and false_proxy.node.target in true_targets
-                    ):
-                        true_proxy = true_targets[false_proxy.node.target]
-                        true_fn_shared_getattrs[true_proxy] = true_proxy
-                        false_fn_shared_getattrs[false_proxy] = true_proxy
-                return true_fn_shared_getattrs, false_fn_shared_getattrs
-
-            true_fn_shared_getattrs, false_fn_shared_getattrs = shared_getattrs(
-                true_lifted_freevars.keys(), false_lifted_freevars.keys()
-            )
-
-            true_shared_freevars = (
-                true_lifted_freevars.keys() & false_lifted_freevars.keys()
-            ).union(true_fn_shared_getattrs.keys())
-            false_shared_freevars = (
-                true_lifted_freevars.keys() & false_lifted_freevars.keys()
-            ).union(false_fn_shared_getattrs.keys())
-            unique_true_freevars = true_lifted_freevars.keys() - true_shared_freevars
-            unique_false_freevars = false_lifted_freevars.keys() - false_shared_freevars
-
-            def _sort_by_name(vars):
-                return sorted(vars, key=lambda var: var.node.name)
-
-            return (
-                list(_sort_by_name(list(true_shared_freevars))),
-                list(_sort_by_name(list(false_shared_freevars))),
-                list(_sort_by_name(list(unique_true_freevars))),
-                list(_sort_by_name(list(unique_false_freevars))),
-            )
-
         (
+            true_graph,
+            false_graph,
             true_shared,
             false_shared,
             unique_true,
             unique_false,
-        ) = dedup_and_sort_lifted_freevars(true_lifted_freevars, false_lifted_freevars)
-
-        # Let's say we capture cond(pred, true_fn, false_fn, (x,))
-        # With set_graph_input set to automatic,
-        # true_fn has lifted variables x, a, b, c
-        # false_fn has lifted variables x, a, b, d
-        # Then fixup_branch_inps make sure both branches have the same signature, i.e.:
-        # - true_fn(x, a, b, c_true_branch, d_false_branch)
-        # - false_fn(x, a, b, c_true_branch, d_false_branch)
-        #
-        # More formally, the signature has three parts in the following order:
-        # 1. used in both branches: x, a, b
-        # 2. only used in true branches: c, suffixed with _true_branch
-        # 3. only used in false branches: d, suffixed with _false_branch
-        # Within each part, we re-order the nodes by name to have a derterministic ordering for testing.
-        def fixup_branch_inps(
-            graph, lifted_freevars, shared, unique_true, unique_false
-        ):
-            def _insert_or_replace_phs(new_args, name_suffix):
-                for arg in new_args:
-                    new_ph = graph.placeholder(arg.node.name + name_suffix)
-                    # Override with new_ph if there exists a old placeholder.
-                    if arg in lifted_freevars:
-                        old_ph = lifted_freevars[arg].node
-                        old_ph.replace_all_uses_with(new_ph)
-                        # replace_all_uses_with doesn't clean users. Clean it mannually so that we could erase it.
-                        old_ph.users = {}
-                        graph.erase_node(old_ph)
-
-            first_not_ph_node = next(
-                node for node in graph.nodes if node.op != "placeholder"
-            )
-            with graph.inserting_before(first_not_ph_node):
-                _insert_or_replace_phs(shared, "")
-                _insert_or_replace_phs(unique_true, "_true_branch")
-                _insert_or_replace_phs(unique_false, "_false_branch")
-
-        fixup_branch_inps(
-            true_graph, true_lifted_freevars, true_shared, unique_true, unique_false
-        )
-        fixup_branch_inps(
-            false_graph, false_lifted_freevars, false_shared, unique_true, unique_false
+        ) = _merge_graph_inputs(
+            true_graph,
+            true_lifted_freevars,
+            "true_branch",
+            false_graph,
+            false_lifted_freevars,
+            "false_branch",
         )
 
         true_name = add_subgraph(
@@ -1016,165 +1027,17 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 return TupleVariable([TupleVariable(items), aux])
 
 
-class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
+class FunctorchVmapHigherOrderVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import ConstantVariable, TensorVariable
-        from .builder import wrap_fx_proxy
-
         if not torch._dynamo.config.capture_func_transforms:
             unimplemented(
                 "torch.func.vmap capture is disabled, "
                 "it can be turned on by setting "
                 "`torch._dynamo.config.capture_func_transforms=True`"
             )
-
-        # unpack args
-        fn = args[0]
-        in_dims = args[1]
-        out_dims = args[2]
-        randomness = args[3]
-        chunk_size = args[4]
-        batch_input_args = args[5:]
-
-        if not isinstance(in_dims, (ConstantVariable, TupleVariable)):
-            unimplemented("torch.func.vmap: in_dims is not an int or tuple variable.")
-
-        if not isinstance(out_dims, (ConstantVariable, TupleVariable)):
-            unimplemented("torch.func.vmap: out_dims is not an int or tuple variable.")
-
-        if len(kwargs) > 0:
-            unimplemented(
-                "NYI - torch.func.vmap: kwargs arguments are currently unsupported."
-            )
-
-        if chunk_size.value is not None:
-            unimplemented(
-                "NYI - torch.func.vmap is not implemented when chunk_size is passed"
-            )
-
-        # Trace into tree_flatten with the list of batch_input_args.
-        flat_args, arg_spec = _make_inlined(tx, pytree.tree_flatten)(
-            ListVariable(batch_input_args)
-        ).unpack_var_sequence(tx)
-
-        # Transform in_dims into a list if it's not an integer literal.
-        in_dims_v = (
-            in_dims
-            if isinstance(in_dims.as_python_constant(), int)
-            else BuiltinVariable(list).call_function(tx, [in_dims], {})
-        )
-
-        # Trace into _broadcast_to_and_flatten with the transformed in_dims.
-        broadcasted_in_dims = _make_inlined(tx, pytree._broadcast_to_and_flatten)(
-            in_dims_v, arg_spec
-        )
-
-        # We want to pass unbatched input to speculate subgraph.
-        # So we loop through the inputs and select only one sample
-        # from the batch.
-        unbatched_input_args = []
-        for arg, in_dim in zip(
-            flat_args.unpack_var_sequence(tx),
-            broadcasted_in_dims.unpack_var_sequence(tx),
-        ):
-            if in_dim is not None:
-                assert isinstance(arg, TensorVariable)
-                unbatched_arg = arg.call_method(
-                    tx, "select", [in_dim, ConstantVariable.create(0)], {}
-                )
-                unbatched_input_args.append(unbatched_arg)
-            else:
-                unbatched_input_args.append(arg)
-
-        # Ban ops like `stride`, `storage_offset` in the traced functions.
-        # NOTE: We are conservatively banning more ops (vmap should be able
-        #       to handle a few of them).
-        with tx.strict_translation_mode():
-            # trace through the function with unbatched inputs.
-            _, body_graph, body_lifted_freevars = speculate_subgraph(
-                tx,
-                fn,
-                # Returns a ListVariable, since that's where we started flattening.
-                # However, we really want to pass the inner Python list as argument.
-                _make_inlined(tx, pytree.tree_unflatten)(
-                    ListVariable(unbatched_input_args), arg_spec
-                ).unpack_var_sequence(tx),
-                {},
-                "torch.vmap",
-                source_target=self.value,
-                set_subgraph_inputs="manual",
-            )
-
-        body_name = add_subgraph(
-            tx,
-            self.source,
-            "vmap_body",
-            torch.fx.GraphModule(tx.output.nn_modules, body_graph),
-        )
-        body_node = make_attr(tx, body_name)
-
-        # body_lifted_variable should not be treated as batched.
-        # So here we update `in_dims` to reflect that.
-        # NOTE: updated_in_dims is flat list, it is ok for now
-        #       as speculate_subgraph does not supports functions with non-Tensor args.
-        #       (so we graph-break above)
-        updated_in_dims = TupleVariable(
-            broadcasted_in_dims.unpack_var_sequence(tx)
-            + [
-                ConstantVariable.create(None),
-            ]
-            * len(body_lifted_freevars)
-        )
-
-        vmap_proxy_args = (
-            body_node,
-            *(arg.as_proxy() for arg in (updated_in_dims, out_dims, randomness)),
-        )
-        # vmap_proxy corresponds to `vmap_proxy = vmap(fn, *vmap_args, **vmap_kwargs)`
-        vmap_proxy = tx.output.create_proxy(
-            "call_function",
-            torch.func.vmap,
-            args=tuple(vmap_proxy_args),
-            kwargs={},
-            name="vmap_proxy",
-        )
-
-        proxy_batched_fn_args = tuple(
-            arg.as_proxy() for arg in batch_input_args
-        ) + tuple(body_lifted_freevars)
-
-        # We compute the example_value by actually calling
-        # `vmap` with FakeTensors.
-        fake_batched_fn_args = itertools.chain(
-            (get_fake_value(arg.as_proxy().node, tx) for arg in batch_input_args),
-            (get_fake_value(arg.node, tx) for arg in body_lifted_freevars),
-        )
-        actual_in_dims = tuple(
-            pytree.tree_map(lambda x: x.value, updated_in_dims.items)
-        )
-
-        # NOTE: `body_graph` might have operators which
-        # will create new tensors. So it is required
-        # that we run `vmap` under FakeMode.
-        with tx.fake_mode, enable_python_dispatcher():
-            example_value = torch._functorch.vmap.vmap_impl(
-                torch.fx.GraphModule(tx.output.nn_modules, body_graph),
-                actual_in_dims,
-                out_dims.as_python_constant(),
-                randomness.value,
-                chunk_size.value,
-                *fake_batched_fn_args,
-            )
-
-        # proxy corresponds to `call = vmap_proxy(*batched_fn_args, **batched_fn_kwargs)`
-        proxy = vmap_proxy(*proxy_batched_fn_args)
-        return wrap_fx_proxy(
-            tx=tx,
-            proxy=proxy,
-            example_value=example_value,
-        )
+        return super().call_function(tx, args, kwargs)
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
