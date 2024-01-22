@@ -3104,7 +3104,6 @@ dynamo_expected_failures = {
     "TestAutogradForwardMode.test_forward_level_cleanup",  # test_autograd
     "TestAutograd.test_gradcheck_check_forward_or_backward_only",  # test_autograd
     "TestAutogradDeviceTypeCPU.test_inplace_on_view_modify_base_cpu",  # test_autograd
-    "TestAutograd.test_full_backward_hook_double_backward",  # test_autograd
     "TestAutograd.test_gradcheck_forward_ad_batched_grad",  # test_autograd
     "TestAutograd.test_custom_function_non_tensor_inputs_outputs",  # test_autograd
     "TestNestedCheckpoint.test_nested_checkpoint_non_tensor_inputs_and_outputs_early_stop_True",  # test_autograd
@@ -3161,7 +3160,6 @@ dynamo_expected_failures = {
     "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_normal_mode_functional_op",  # test_autograd
     "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_inf_mode_inplace_op",  # test_autograd
     "TestAutogradDeviceTypeCPU.test_scatter_index_reduce_prod_gradgrad_error_cpu",  # test_autograd
-    "TestAutograd.test_current_graph_task_execution_order",  # test_autograd
     "TestAutograd.test_nested_anomaly_detect_nan",  # test_autograd
     "TestAutograd.test_nested_anomaly_printstack_cleanup",  # test_autograd
     "TestAutograd.test_post_accumulate_grad_hook_gets_cleaned_up",  # test_autograd
@@ -3633,7 +3631,6 @@ dynamo_expected_failures = {
     "TestCustomOp.test_backward_dict_invalid_keys",  # test_custom_ops
     "TestCustomOp.test_backward_tensorlist_input_requires_list_grads_with_same_numel",  # test_custom_ops
     "TestCustomOp.test_duplicate_impl",  # test_custom_ops
-    "TestCustomOpTestingCPU.test_incorrect_abstract_impl_cpu",  # test_custom_ops
     "TestCustomOp.test_backward_output_differentiability_numel",  # test_custom_ops
     "TestCustomOp.test_backward_dict_requires_keys_for_input_tensors",  # test_custom_ops
     "TestCustomOp.test_legacy_define",  # test_custom_ops
