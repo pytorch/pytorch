@@ -8651,6 +8651,15 @@ for shape in [(1,), ()]:
         # Check that the any-hook does not run if removed
         self.assertEqual(hook_order, [2, 0])
 
+    def test_multi_grad_hooks_invalid_mode(self):
+        t1 = torch.rand(2, requires_grad=True)
+        t2 = torch.rand(2, requires_grad=True)
+        regex = r"Expects mode to be one of \('all', 'any'\) but got foo"
+        with self.assertRaisesRegex(ValueError, regex):
+            torch.autograd.graph.register_multi_grad_hook(
+                (t1, t2), lambda _: None, mode="foo"
+            )
+
     def test_pynode_destruction_deadlock(self):
         script = """
 import torch
