@@ -779,7 +779,10 @@ class FxGraphCache:
         """
         Clear out the on-disk cache.
         """
-        shutil.rmtree(FxGraphCache._get_tmp_dir())
+        try:
+            shutil.rmtree(FxGraphCache._get_tmp_dir())
+        except FileNotFoundError:
+            pass
 
 
 @dataclasses.dataclass
