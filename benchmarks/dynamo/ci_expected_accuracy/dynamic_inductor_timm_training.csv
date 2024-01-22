@@ -2,7 +2,7 @@ name,accuracy,graph_breaks
 
 
 
-adv_inception_v3,pass,7
+adv_inception_v3,pass,6
 
 
 
@@ -10,7 +10,7 @@ beit_base_patch16_224,pass,7
 
 
 
-botnet26t_256,pass,7
+botnet26t_256,pass,6
 
 
 
@@ -18,11 +18,11 @@ cait_m36_384,eager_fail_to_run,0
 
 
 
-coat_lite_mini,pass,7
+coat_lite_mini,pass,6
 
 
 
-convit_base,pass,7
+convit_base,pass,6
 
 
 
@@ -50,11 +50,11 @@ dla102,pass,7
 
 
 
-dm_nfnet_f0,pass,7
+dm_nfnet_f0,pass,6
 
 
 
-dpn107,pass,7
+dpn107,pass,6
 
 
 
@@ -74,15 +74,15 @@ fbnetc_100,pass,7
 
 
 
-fbnetv3_b,pass,7
+fbnetv3_b,pass,6
 
 
 
-gernet_l,pass,
+gernet_l,pass,6
 
 
 
-ghostnet_100,pass,7
+ghostnet_100,pass,6
 
 
 
@@ -90,7 +90,7 @@ gluon_inception_v3,pass,7
 
 
 
-gmixer_24_224,pass,7
+gmixer_24_224,pass,6
 
 
 
@@ -102,7 +102,7 @@ hrnet_w18,pass,5
 
 
 
-inception_v3,pass,7
+inception_v3,pass,6
 
 
 
@@ -110,7 +110,7 @@ jx_nest_base,pass,7
 
 
 
-lcnet_050,pass,7
+lcnet_050,pass,6
 
 
 
@@ -122,7 +122,7 @@ mixer_b16_224,pass,7
 
 
 
-mixnet_l,pass,7
+mixnet_l,pass,6
 
 
 
@@ -138,7 +138,7 @@ mobilenetv3_large_100,pass,7
 
 
 
-mobilevit_s,pass,7
+mobilevit_s,pass,6
 
 
 
@@ -146,7 +146,7 @@ nfnet_l0,pass,7
 
 
 
-pit_b_224,pass,7
+pit_b_224,pass,6
 
 
 
@@ -154,11 +154,11 @@ pnasnet5large,pass,5
 
 
 
-poolformer_m36,pass,7
+poolformer_m36,pass,6
 
 
 
-regnety_002,pass,7
+regnety_002,pass,6
 
 
 
@@ -166,23 +166,23 @@ repvgg_a2,pass,7
 
 
 
-res2net101_26w_4s,pass,7
+res2net101_26w_4s,pass,6
 
 
 
-res2net50_14w_8s,pass,7
+res2net50_14w_8s,pass,6
 
 
 
-res2next50,pass,7
+res2next50,pass,6
 
 
 
-resmlp_12_224,pass,7
+resmlp_12_224,pass,6
 
 
 
-resnest101e,pass,7
+resnest101e,pass,6
 
 
 
@@ -190,11 +190,11 @@ rexnet_100,pass,7
 
 
 
-sebotnet33ts_256,pass,7
+sebotnet33ts_256,pass,6
 
 
 
-selecsls42b,pass,7
+selecsls42b,pass,6
 
 
 
@@ -206,19 +206,19 @@ swin_base_patch4_window7_224,pass,7
 
 
 
-swsl_resnext101_32x16d,pass,7
+swsl_resnext101_32x16d,pass,6
 
 
 
-tf_efficientnet_b0,pass,7
+tf_efficientnet_b0,pass,6
 
 
 
-tf_mixnet_l,pass,7
+tf_mixnet_l,pass,6
 
 
 
-tinynet_a,pass,7
+tinynet_a,pass,6
 
 
 
