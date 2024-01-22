@@ -1195,6 +1195,8 @@ class CheckFunctionManager:
             "G": builder.scope["G"],
         }
         guard_fn.guard_fail_fn = guard_fail_fn
+        # will be populated by a weakref to a CacheEntry by eval_frame.c,
+        # when the CacheEntry is constructed
         guard_fn.cache_entry = None
         return guard_fn
 

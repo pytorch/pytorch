@@ -9285,7 +9285,7 @@ fn
         # even after a _dynamo.reset[_code_caches], so we omit the following check.
         # self.assertEqual(mem1, mem2)
 
-        self.assertEqual(mem1, mem3)
+        self.assertEqual(mem2, mem3)
 
     def test_dynamo_cache_invalidate(self):
         class Mod(torch.nn.Module):

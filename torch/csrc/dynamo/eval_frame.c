@@ -370,11 +370,15 @@ static struct PyGetSetDef CacheEntry_properties[] = {
 static CacheEntry* extract_cache_entry(ExtraState* extra_state);
 
 static PyObject* CacheEntry_invalidate(CacheEntry* self, PyObject* args) {
+  // CacheEntry ownership rules:
+  // - first CacheEntry is expected to be owned by self->extra_state
+  // - subsequent CacheEntry's are owned by self->prev
+
   // handle case where CacheEntry is the first entry in self->extra_state
   CacheEntry* first_cache_entry = extract_cache_entry(self->extra_state);
   if (first_cache_entry != NULL && first_cache_entry == self) {
     DEBUG_CHECK((PyObject*)self->prev == Py_None);
-    // will be decremented later on, so increment now
+    // ExtraState now owns self->next, so incref
     Py_INCREF(self->next);
     self->extra_state->cache_entry = self->next;
   }
@@ -388,15 +392,17 @@ static PyObject* CacheEntry_invalidate(CacheEntry* self, PyObject* args) {
     self->prev->next = self->next;
     self->prev = (CacheEntry*)Py_None;
   } else {
+    // self->next has no new CacheEntry owner, so decref;
+    // generally counteracts the self->next incref done above
     Py_DECREF(self->next);
   }
   Py_INCREF(Py_None);
   self->next = (CacheEntry*)Py_None;
 
-  // Delete self
+  // Decref self
   Py_DECREF(self);
 
-  return Py_None;
+  Py_RETURN_NONE;
 }
 
 static PyMethodDef CacheEntry_methods[] = {
@@ -761,9 +767,8 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, size_t 
         }
         e->next = old_cache_entry;
         e->prev = (CacheEntry*)Py_None;
-        if (old_cache_entry != (CacheEntry*)Py_None) {
-          old_cache_entry->prev = e;
-        }
+        DEBUG_CHECK(old_cache_entry != (CacheEntry*)Py_None);
+        old_cache_entry->prev = e;
         extra->cache_entry = e;
     }
     return (PyObject*)e->code;
@@ -1113,7 +1118,10 @@ static PyObject* _custom_eval_frame(
     Py_XDECREF(check_fn_cache_entry);
     #endif
 
-    // Use a weakref to avoid circular references
+    // Use a weakref to avoid circular references.
+    // CheckFunctionManager in guards.py will make use of this weakref
+    // in order to delete the CacheEntry when CheckFunctionManager.invalidate
+    // is called.
     PyObject* cache_entry_ref = PyWeakref_NewRef((PyObject*)extra->cache_entry, NULL);
     DEBUG_NULL_CHECK(cache_entry_ref);
     int ret = PyObject_SetAttrString(check_fn, "cache_entry", cache_entry_ref);
