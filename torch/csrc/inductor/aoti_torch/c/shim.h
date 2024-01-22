@@ -127,6 +127,12 @@ AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
 
+// Get a pointer to the underlying storage data
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
+    AtenTensorHandle tensor,
+    void** ret_data_ptr // returns borrowed reference
+);
+
 // Get the nbytes of the underlying storage
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_storage_size(AtenTensorHandle tensor, int64_t* ret_size);
