@@ -130,6 +130,7 @@ def compare_tensor_meta(
     check_strides=False,
     *,
     allow_rhs_unbacked=False,
+    check_conj=True,
 ):
     """
     Checks that two tensor likes have the same shape,
@@ -171,10 +172,11 @@ def compare_tensor_meta(
             msg = f"Storage offset mismatch! Storage offsets are {a.storage_offset()} and {b.storage_offset()}!"
             raise RuntimeError(msg)
 
-    if a.is_conj() != b.is_conj():
-        raise RuntimeError(
-            f"Conj mismatch! is_conj is set to {a.is_conj()} and {b.is_conj()}"
-        )
+    if check_conj:
+        if a.is_conj() != b.is_conj():
+            raise RuntimeError(
+                f"Conj mismatch! is_conj is set to {a.is_conj()} and {b.is_conj()}"
+            )
 
     if a.is_neg() != b.is_neg():
         raise RuntimeError(
