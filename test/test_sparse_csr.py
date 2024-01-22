@@ -3091,7 +3091,7 @@ class TestSparseCSR(TestCase):
         if layout is torch.sparse_bsc:
             # SciPy doesn't have native BSC support - but our tests don't need the full
             # functionality so fake it by using a transposed BSR matrix.
-            class FakeBscMatrix(object):
+            class FakeBscMatrix:
                 def __init__(self, matrix):
                     self._matrix = matrix
                     self.shape = tuple(reversed(matrix.shape))
