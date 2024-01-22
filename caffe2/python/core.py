@@ -2012,7 +2012,7 @@ class Net:
 
     def _RecreateLookupTables(self):
         self._op_outputs = {o for op in self._net.op for o in op.output}
-        self._external_input_map = {inp for inp in self._net.external_input}
+        self._external_input_map = set(self._net.external_input)
         self._recreate_lookup_tables = False
 
     def AddGradientOperators(self, ys, skip=0):
