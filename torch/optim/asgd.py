@@ -161,7 +161,7 @@ ASGD.__doc__ = fr"""Implements Averaged Stochastic Gradient Descent.
         {_foreach_doc}
         {_maximize_doc}
         {_differentiable_doc}
-        {_capturable_doc} For ASGD, capturable is only supported when foreach is True.
+        {_capturable_doc}
 
     .. _Acceleration of stochastic approximation by averaging:
         https://dl.acm.org/citation.cfm?id=131098
