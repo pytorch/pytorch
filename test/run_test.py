@@ -34,7 +34,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
-    TEST_WITH_XPU,
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -1165,7 +1164,7 @@ def parse_args():
         "--xpu",
         "--xpu",
         action="store_true",
-        help=("If this flag is present, we will only run XPU_TEST"),
+        help=("If this flag is present, we will run xpu tests except XPU_BLOCK_LIST"),
     )
     parser.add_argument(
         "--cpp",
@@ -1375,7 +1374,10 @@ def get_selected_tests(options) -> List[str]:
         options.exclude.extend(["test_mps", "test_metal"])
 
     if options.xpu:
-        selected_tests = XPU_TEST
+        selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
+    else:
+        # Exclude all xpu specifc tests otherwise
+        options.exclude.extend(XPU_TEST)
 
     # Filter to only run onnx tests when --onnx option is specified
     onnx_tests = [tname for tname in selected_tests if tname in ONNX_TESTS]
@@ -1414,9 +1416,6 @@ def get_selected_tests(options) -> List[str]:
 
     elif TEST_WITH_ROCM:
         selected_tests = exclude_tests(ROCM_BLOCKLIST, selected_tests, "on ROCm")
-
-    elif TEST_WITH_XPU:
-        selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
 
     # skip all distributed tests if distributed package is not available.
     if not dist.is_available():
