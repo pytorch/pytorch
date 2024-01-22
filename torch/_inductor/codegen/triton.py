@@ -58,7 +58,7 @@ from ..utils import (
     unique,
     yellow_text,
 )
-from ..virtualized import ops, V
+from ..virtualized import ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .common import (
     CSE,
@@ -73,6 +73,7 @@ from .common import (
     SizeArg,
     TensorArg,
 )
+from .multi_kernel import MultiKernel
 from .triton_utils import config_of, signature_of, signature_to_meta
 
 log = logging.getLogger(__name__)
@@ -386,6 +387,10 @@ def triton_compute_type(dtype):
         triton_type_name = "float8e4nv"
     elif triton_type_name == "float8_e5m2":
         triton_type_name = "float8e5"
+    elif triton_type_name == "float8_e4m3fnuz":
+        triton_type_name = "float8e4b8"
+    elif triton_type_name == "float8_e5m2":
+        triton_type_name = "float8e5b16"
     return f"tl.{triton_type_name}"
 
 
@@ -831,6 +836,11 @@ class TritonOverrides(OpOverrides):
         return f"tl.math.ceil({x})"
 
 
+# Use mypy to check protocol implemented correctly
+def _typecheck_TritonOverrides(h: TritonOverrides) -> OpsHandler[str]:
+    return h
+
+
 class TritonKernelOverrides(TritonOverrides):
     """Map element-wise ops to Triton within a TritonKernel
 
@@ -878,6 +888,11 @@ class TritonKernelOverrides(TritonOverrides):
         return (
             f"tl.load({var} + {V.kernel.args.seed_offset('load_seed_offset', offset)})"
         )
+
+
+# Use mypy to check protocol implemented correctly
+def _typecheck_TritonKernelOverrides(h: TritonKernelOverrides) -> OpsHandler[str]:
+    return h
 
 
 @dataclasses.dataclass
@@ -1180,6 +1195,7 @@ class TritonKernel(Kernel):
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
         min_elem_per_thread=0,
+        disable_persistent_reduction=False,
     ):
         if pid_cache is None:
             pid_cache = {}
@@ -1200,7 +1216,9 @@ class TritonKernel(Kernel):
         self.last_usage: Set[str] = set()
         self.block_ptr_id = itertools.count()
 
-        self.persistent_reduction: bool = self.should_use_persistent_reduction()
+        self.persistent_reduction: bool = (
+            not disable_persistent_reduction
+        ) and self.should_use_persistent_reduction()
         self.no_x_dim = (
             self.reduction_hint == ReductionHint.INNER
             and self.persistent_reduction
@@ -1223,6 +1241,7 @@ class TritonKernel(Kernel):
             return index
 
         self.simplify_indexing = simplify_indexing
+        self.code_hash = None
 
     def need_numel_args(self):
         r"""
@@ -1244,6 +1263,13 @@ class TritonKernel(Kernel):
         threshold = {
             ReductionHint.INNER: 1024,
         }.get(self.reduction_hint, 64)
+
+        # If multi_kernel is enabled, we do more aggressive persistent reduction.
+        # This may result in some persisent reductions slower than the
+        # corresponding non-persistent reductions. MultiKernel will do benchmarking
+        # to pick the faster one.
+        if config.triton.multi_kernel:
+            threshold *= 16
         last_numel = self.numels[-1]
         if not isinstance(last_numel, (int, sympy.Integer)):
             # Not static
@@ -1869,7 +1895,9 @@ class TritonKernel(Kernel):
 
         return result_var
 
-    def store(self, name, index, value, mode=None):
+    def store(
+        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+    ) -> None:
         var = self.args.output(name)
         original_index = index
         indexing = self.indexing(index, dense_indexing=True, block_ptr=mode is None)
@@ -1914,7 +1942,7 @@ class TritonKernel(Kernel):
         offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
-    ):
+    ) -> CSEVariable:
         """
         See [Note: Inductor bucketize op]
         """
@@ -1960,7 +1988,13 @@ class TritonKernel(Kernel):
             return tuple(map(fn, value))
         return fn(value)
 
-    def reduction(self, dtype, src_dtype, reduction_type, value):
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[CSEVariable, Tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
         assert self.inside_reduction
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
@@ -2185,7 +2219,7 @@ class TritonKernel(Kernel):
 
         return result_var
 
-    def store_reduction(self, name, index, value):
+    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
         assert self.inside_reduction
         self.inside_reduction = False
         indexing = self.indexing(index, block_ptr=True)
@@ -2241,7 +2275,13 @@ class TritonKernel(Kernel):
 
         return self.helper_functions.add(helper.getvalue())
 
-    def scan(self, dtype, combine_fn, value, init):
+    def scan(
+        self,
+        dtype: torch.dtype,
+        combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
+        value: CSEVariable,
+        init: int,
+    ) -> CSEVariable:
         assert self.inside_reduction
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
@@ -2712,26 +2752,33 @@ class TritonKernel(Kernel):
         sizes = self.dense_size_list()
         return f"[{', '.join(sizes)}]"
 
-    def call_kernel(self, name: str, node: Optional[IRNode] = None):
-        wrapper = V.graph.wrapper_code
-        _, call_args, _ = self.args.python_argdefs()
-        # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
-        for i in range(len(call_args)):
-            if V.graph.is_unspec_arg(call_args[i]):
-                call_args[i] = call_args[i] + ".item()"
-        grid = []
+    def add_numel_to_call_args_and_grid(self, name, call_args, grid):
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
                 expr = tree.numel
             else:
-                expr = wrapper.generate_numel_expr(name, tree)
+                expr = V.graph.wrapper_code.generate_numel_expr(name, tree)
 
             if tree.prefix != "r" or self.inside_reduction:
                 call_args.append(expr)
             if tree.prefix != "r":
                 grid.append(expr)
 
+    def get_call_args(self):
+        _, call_args, _ = self.args.python_argdefs()
+        # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
+        for i in range(len(call_args)):
+            if V.graph.is_unspec_arg(call_args[i]):
+                call_args[i] = call_args[i] + ".item()"
+
+        return call_args
+
+    def call_kernel(self, name: str, node: Optional[IRNode] = None):
+        wrapper = V.graph.wrapper_code
+        call_args = self.get_call_args()
+        grid: List[Any] = []
+        self.add_numel_to_call_args_and_grid(name, call_args, grid)
         grid = wrapper.generate_default_grid(name, grid)
         wrapper.generate_kernel_call(
             name,
@@ -2743,9 +2790,6 @@ class TritonKernel(Kernel):
         )
 
     def codegen_nan_check(self):
-        if not config.nan_asserts:
-            return
-
         wrapper = V.graph.wrapper_code
         _, call_args, arg_types = self.args.python_argdefs()
         for arg, arg_type in zip(call_args, arg_types):
@@ -3182,11 +3226,15 @@ class TritonScheduling(BaseScheduling):
             node_schedule, numel, reduction_numel
         )
 
+        kernel_args = tiled_groups
+        kernel_kwargs = {
+            "reduction_hint": reduction_hint_val,
+            "mutations": mutations,
+            "index_dtype": index_dtype,
+        }
         kernel = TritonKernel(
-            *tiled_groups,
-            reduction_hint=reduction_hint_val,
-            mutations=mutations,
-            index_dtype=index_dtype,
+            *kernel_args,
+            **kernel_kwargs,
         )
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
@@ -3194,20 +3242,42 @@ class TritonScheduling(BaseScheduling):
         with V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
 
+        kernel_name = self.define_kernel(src_code, node_schedule)
+        log.debug("Generating kernel code with kernel_name: %s", kernel_name)
+        kernel.kernel_name = kernel_name
+        kernel.code_hash = code_hash(src_code)
+
+        if kernel.persistent_reduction and config.triton.multi_kernel:
+            kernel2 = TritonKernel(
+                *kernel_args,
+                **kernel_kwargs,
+                disable_persistent_reduction=True,
+            )
+            self.codegen_node_schedule_with_kernel(node_schedule, kernel2)
+            with V.set_kernel_handler(kernel2):
+                src_code2 = kernel2.codegen_kernel()
+            kernel_name2 = self.define_kernel(src_code2, node_schedule)
+            kernel2.kernel_name = kernel_name2
+            kernel2.code_hash = code_hash(src_code2)
+
+            final_kernel = MultiKernel([kernel, kernel2])
+        else:
+            final_kernel = kernel  # type: ignore[assignment]
+
+        with V.set_kernel_handler(final_kernel):
             for node in node_schedule:
                 if node not in (EnableReduction, DisableReduction):
                     node.mark_run()
 
-        kernel_name = self.define_kernel(src_code, node_schedule)
-        log.debug("Generating kernel code with kernel_name: %s", kernel_name)
         self.codegen_comment(node_schedule)
-        kernel.call_kernel(kernel_name)
-        kernel.codegen_nan_check()
-        V.graph.removed_buffers |= kernel.removed_buffers
-        V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
-
+        final_kernel.call_kernel(final_kernel.kernel_name)
+        if config.nan_asserts:
+            final_kernel.codegen_nan_check()
         if config.warn_mix_layout:
-            kernel.warn_mix_layout(kernel_name)
+            final_kernel.warn_mix_layout(kernel_name)
+
+        V.graph.removed_buffers |= final_kernel.removed_buffers
+        V.graph.inplaced_to_remove |= final_kernel.inplaced_to_remove
 
         if (
             V.graph.wrapper_code.supports_intermediate_hooks
@@ -3295,6 +3365,7 @@ class TritonScheduling(BaseScheduling):
             wrapper.define_kernel(
                 kernel_name, compile_wrapper.getvalue(), metadata_comment
             )
+
         return kernel_name
 
     def codegen_template(self, template_node, epilogue_nodes):
