@@ -119,13 +119,8 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
             device=device,
             dtype=torch.float32,
         )
-        if (event := all_gather_result.all_gather_event) is not None:
-            torch.cuda.current_stream().wait_event(event)
-        if async_op:
-            all_gather_result.all_gather_work.wait()
         foreach_all_gather_copy_out(
-            all_gather_result.all_gather_output,
-            all_gather_result.all_gather_input_numels,
+            all_gather_result,
             fsdp_params,
             fsdp_param_group.mesh_info.shard_process_group,
         )

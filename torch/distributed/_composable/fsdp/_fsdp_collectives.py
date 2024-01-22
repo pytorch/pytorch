@@ -60,11 +60,15 @@ def foreach_all_gather(
 
 
 def foreach_all_gather_copy_out(
-    all_gather_output: torch.Tensor,  # 1D
-    all_gather_input_numels: List[int],
+    all_gather_result: AllGatherResult,
     fsdp_params: List[FSDPParam],
     group: dist.ProcessGroup,
 ) -> None:
+    all_gather_output, _, _, all_gather_input_numels = all_gather_result
+    if (event := all_gather_result.all_gather_event) is not None:  # sync op
+        torch.cuda.current_stream().wait_event(event)
+    if (work := all_gather_result.all_gather_work) is not None:  # async op
+        work.wait()
     world_size = group.size()
     dtype, device = all_gather_output.dtype, all_gather_output.device
     for all_gather_input_numel, fsdp_param in zip(all_gather_input_numels, fsdp_params):
