@@ -23,8 +23,14 @@ class _TransformInfo(NamedTuple):
 
 def _replicate_then_shard(val: _TransformInfo) -> int:
     """
-    Replicate happens from inner to outer dimension.
-    Shard happens from outer to inner dimension.
+    This is a helper function to allow reordering _TransformInfo list. The high level
+    idea is that we want to reorder the sharding redistributions so that the DTensor
+    redistribution is consistent with its full tensor. This is built on top of two simple
+    assumptions:
+    1. Replication happens from inner to outer dimension. i.e. Shard -> Replicate
+    2. Sharding happens from outer to inner dimension, i.e. Replicate -> Shard
+
+    So we always put the replication first and put sharding later.
     """
     mesh_dim = val.mesh_dim
     src, dst = val.src_dst_placements
