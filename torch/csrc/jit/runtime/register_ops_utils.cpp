@@ -265,7 +265,8 @@ void listSelect(Stack& stack) {
   int64_t idx = pop(stack).to<int64_t>();
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
-  push(stack, getItem(list, idx));
+  auto element = getItem(list, idx);
+  push(stack, std::move(element));
 }
 
 void listLen(Stack& stack) {

@@ -1020,7 +1020,9 @@ def forward(self, primals_1):
         inp_clone = inp.clone()
         out_ref = f3(inp_ref_clone)
         out_test = f3_compiled(inp_clone)
-        self.assertTrue(all('UnbindBackward' in str(o.grad_fn) for o in out_test[:3]))
+        # We rely on autograd's view-replay here, and view-replay gives up and uses as_strided
+        # for multi-output views
+        self.assertTrue(all('AsStridedBackward' in str(o.grad_fn) for o in out_test[:3]))
 
         # The last output is not from a multi-output view, so autograd will let us mutate it.
         out_ref[-1].mul_(2)
@@ -1736,8 +1738,8 @@ def forward(self, primals_1):
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
     as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
-    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
+    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
+    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_3);  as_strided_2 = as_strided_3 = None
     return [as_strided_scatter, add_1]""")  # noqa: B950
 
     def test_input_mutation_aliases_other_input2(self):
@@ -1762,8 +1764,8 @@ def forward(self, primals_1):
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
     as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0)
-    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
+    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0)
+    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_3);  as_strided_2 = as_strided_3 = None
     return [as_strided_scatter, add_1]""")  # noqa: B950
 
     def test_input_mutation_aliases_and_output_alias(self):
@@ -1786,8 +1788,8 @@ def forward(self, primals_1):
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
-    as_strided_8 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    view_1 = torch.ops.aten.view.default(as_strided_8, [4]);  as_strided_8 = None
+    as_strided_6 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    view_1 = torch.ops.aten.view.default(as_strided_6, [4]);  as_strided_6 = None
     return [as_strided_scatter, view_1]""")  # noqa: B950
 
     def test_input_aliased_with_mutation_output_alias(self):
@@ -1816,8 +1818,8 @@ def forward(self, primals_1, primals_2):
     mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
     add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
-    as_strided_7 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    view_1 = torch.ops.aten.view.default(as_strided_7, [-1]);  as_strided_7 = None
+    as_strided_6 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    view_1 = torch.ops.aten.view.default(as_strided_6, [-1]);  as_strided_6 = None
     return [as_strided_scatter, add, view_1]""")  # noqa: B950
 
     def test_input_metadata_mutation_aliases(self):
@@ -1907,11 +1909,11 @@ def forward(self, primals_1, primals_2, primals_3):
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
     add_1 = torch.ops.aten.add.Tensor(primals_2, primals_3);  primals_2 = primals_3 = None
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    unsqueeze_1 = torch.ops.aten.unsqueeze.default(as_strided_5, 0);  as_strided_5 = None
+    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(as_strided_3, 0);  as_strided_3 = None
     add_2 = torch.ops.aten.add.Tensor(add_1, unsqueeze_1);  add_1 = None
-    as_strided_14 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    view_2 = torch.ops.aten.view.default(as_strided_14, [-1]);  as_strided_14 = None
+    as_strided_11 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    view_2 = torch.ops.aten.view.default(as_strided_11, [-1]);  as_strided_11 = None
     return [as_strided_scatter, add_2, view_2, unsqueeze_1]""")  # noqa: B950
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
@@ -1975,8 +1977,8 @@ def forward(self, primals_1, primals_2):
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
     as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     t = torch.ops.aten.t.default(view);  view = None
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    add = torch.ops.aten.add.Tensor(as_strided_5, as_strided_2);  as_strided_5 = as_strided_2 = None
+    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    add = torch.ops.aten.add.Tensor(as_strided_3, as_strided_2);  as_strided_3 = as_strided_2 = None
     view_1 = torch.ops.aten.view.default(add, [-1])
     t_1 = torch.ops.aten.t.default(t)
     unsqueeze = torch.ops.aten.unsqueeze.default(view_1, 0)
@@ -2733,45 +2735,6 @@ class TestMod(torch.nn.Module):
         return self.fn(self.p, *args)
 
 class TestAOTExport(AOTTestCase):
-
-    def test_aot_export_ban_dropout_mut_pre_dispatch(self):
-        def fn(p, x):
-            y = torch.ops.aten.dropout.default(x, 0.1, train=False)
-            y.add_(1)
-            return (y,)
-
-        mod = TestMod(fn)
-        inp = torch.randn(2, 2)
-
-        with self.assertRaisesRegex(RuntimeError, "cannot mutate tensors with frozen storage"):
-            aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
-
-        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=False)
-        self.assertExpectedInline(str(gm.code).strip(), """\
-def forward(self, arg0_1, arg1_1):
-    clone = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
-    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
-    return (add,)""")
-
-        fw_graph_cell = [None]
-        bw_graph_cell = [None]
-
-        compiled_outs = aot_function(
-            fn,
-            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
-            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
-            partition_fn=default_partition,
-            decompositions=default_decompositions,
-            dynamic=True)(*inp)
-        fw_graph = fw_graph_cell[0]
-        bw_graph = bw_graph_cell[0]
-
-        self.assertExpectedInline(str(fw_graph.code).strip(), """\
-def forward(self, arg0_1, arg1_1):
-    clone = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
-    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
-    return (add,)""")
-
 
     def test_aot_export_predispatch_func_simple(self):
         def fn(p, x):
@@ -4213,46 +4176,6 @@ class TestAOTModuleSimplified(AOTTestCase):
         compiled_f = aot_module_simplified(mod, inputs, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
         res = compiled_f(*inputs)
         res[0].sum().backward()
-
-    def test_aot_module_simplified_preserves_stack_trace_from_mutation(self):
-        class MockModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                x_view = x[0]
-                x_view.mul_(2)
-                return (x + x, )
-
-        tracer = torch.fx.Tracer()
-        tracer.record_stack_traces = True
-        graph = tracer.trace(MockModule())
-        mod = torch.fx.GraphModule(tracer.root, graph)
-
-        for node in mod.graph.nodes:
-            if node.op == 'output':
-                continue
-            self.assertTrue(node.stack_trace is not None)
-            assert 'test_aotdispatch.py' in node.stack_trace
-
-        def assert_compiler(gm: torch.fx.GraphModule, _):
-            assert torch.ops.aten.copy_.default in [x.target for x in gm.graph.nodes]
-            for node in gm.graph.nodes:
-                if node.target == torch.ops.aten.copy_.default:
-                    assert 'stack_trace' in node.meta
-                    assert 'x_view.mul_(2)' in node.meta['stack_trace']
-            return gm.forward  # return a python callable
-
-        x = torch.randn(128, 20)
-        inputs = [x]
-
-        aot_module_simplified(
-            mod,
-            inputs,
-            fw_compiler=assert_compiler,
-            bw_compiler=assert_compiler,
-            keep_inference_input_mutations=True,
-        )
 
     def test_aot_module_simplified_fake_tensor_gm_raises(self):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()

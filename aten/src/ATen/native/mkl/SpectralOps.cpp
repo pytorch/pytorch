@@ -307,10 +307,6 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 
 Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
   TORCH_CHECK(self.is_complex());
-  if (dim.empty()) {
-    return self.clone();
-  }
-
   auto out = at::empty(self.sizes(), self.options());
   pocketfft::shape_t axes(dim.begin(), dim.end());
   if (self.scalar_type() == kComplexFloat) {
@@ -560,10 +556,6 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 // n-dimensional complex to complex FFT/IFFT
 Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
   TORCH_CHECK(self.is_complex());
-  if (dim.empty()) {
-    return self.clone();
-  }
-
   const auto sorted_dims = _sort_dims(self, dim);
   auto out = at::empty(self.sizes(), self.options());
   return _exec_fft(out, self, self.sizes(), sorted_dims, normalization, forward);

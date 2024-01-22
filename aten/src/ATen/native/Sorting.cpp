@@ -72,6 +72,9 @@ TORCH_META_FUNC(topk)
 
 TORCH_META_FUNC2(sort, stable)
 (const Tensor& self, c10::optional<bool> stable, int64_t dim, bool descending) {
+  TORCH_INTERNAL_ASSERT(
+      stable.has_value(),
+      "sort(): c10::optional<bool> for stable has to have value.");
   maybe_wrap_dim(dim, self.dim());
 
   // See issue: https://github.com/pytorch/pytorch/issues/65863
@@ -950,7 +953,7 @@ TORCH_IMPL_FUNC(sort_stable_out)
     indices.zero_();
   } else {
     dim = maybe_wrap_dim(dim, self.dim());
-    sort_stub(self.device().type(), self, values, indices, dim, descending, stable.value_or(false));
+    sort_stub(self.device().type(), self, values, indices, dim, descending, stable.value());
   }
 }
 

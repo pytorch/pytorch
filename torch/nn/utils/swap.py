@@ -7,10 +7,12 @@ def set_swap_module_params_on_conversion(value: bool) -> None:
     change the existing parameters in-place when converting an ``nn.Module``.
 
     When enabled, the following methods will swap the existing parameters in-place:
-    #. ``module.{device}()`` (e.g. ``module.cuda()``) for moving module between devices
-    #. ``module.{dtype}()`` (e.g. ``module.float()``) for converting module to a different dtype
-       (for converting module to a different dtype)
+
+    #. ``module.{device}()`` (e.g. ``module.cuda()``) for moving a module between devices
+    #. ``module.{dtype}()`` (e.g. ``module.float()``) for converting a module to a different dtype
+       (for converting a module to a different dtype)
     #. ``module.to()``
+
     """
     global _swap_module_params_on_conversion
     _swap_module_params_on_conversion = value

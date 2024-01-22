@@ -207,7 +207,6 @@ MOD_INLINELIST = {
     "torch.autograd.function",
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
-    "torch.export.wrapper",
     "torch.fx._pytree",
     "torch.fx.passes.shape_prop",
     "torch.nn",
@@ -219,7 +218,6 @@ MOD_INLINELIST = {
     "torch.utils._foreach_utils",
     "torch.utils._pytree",
     "torch._tensor",
-    "torch._higher_order_ops.strict_mode",
 }
 
 

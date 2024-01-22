@@ -13,7 +13,7 @@ from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
+from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import _pt2_selective_checkpoint_context_fn_gen, checkpoint
@@ -658,55 +658,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
-    def test_compile_selective_checkpoint_partial_ctx_fn(self):
-        def selective_checkpointing_context_fn(no_recompute_list):
-            return _pt2_selective_checkpoint_context_fn_gen(
-                _get_custom_policy(no_recompute_list=no_recompute_list)
-            )
-
-        def gn(x, y):
-            return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
-
-        def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(
-                gn,
-                x,
-                y,
-                use_reentrant=False,
-                context_fn=functools.partial(
-                    selective_checkpointing_context_fn, [torch.ops.aten.mm.default]
-                ),
-            )
-
-        x = torch.randn(4, 4, requires_grad=True, device="cuda")
-        y = torch.randn(4, 4, requires_grad=True, device="cuda")
-
-        fw_compiler = functools.partial(
-            count_ops,
-            freq=2,
-            op=torch.ops.aten.mm.default,
-        )
-        bw_compiler = functools.partial(
-            count_ops,
-            # We would've expected 6 here
-            # (2 matmul recompute and 2 mm ops per fwd matmul, so 2 + 2 * 2 = 6)
-            # if we didn't enable selective checkpointing.
-            freq=4,
-            op=torch.ops.aten.mm.default,
-        )
-        backend = aot_autograd(
-            fw_compiler=fw_compiler,
-            bw_compiler=bw_compiler,
-            partition_fn=min_cut_rematerialization_partition,
-        )
-        self._validate(fn, backend, x, y)
-        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
-
-    @requires_cuda()
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @torch._dynamo.config.patch(
-        "_experimental_support_context_fn_in_torch_utils_checkpoint", True
-    )
     def test_compile_selective_checkpoint_outplace_op(self):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
@@ -907,7 +858,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             self._validate(fn, backend, x, y)
 
     @requires_cuda()
-    @skipIfRocm
     def test_autocast_flash_attention(self):
         def fn(primals_1, primals_2, primals_3):
             return torch.ops.aten._scaled_dot_product_efficient_attention.default(

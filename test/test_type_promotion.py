@@ -941,10 +941,8 @@ class TestTypePromotion(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype
     @onlyCPU
-    # NB: skip uint16,32,64 as PyTorch doesn't implement promotion for them
-    @dtypes(*list(itertools.product(
-        set(numpy_to_torch_dtype_dict.values()) - {torch.uint16, torch.uint32, torch.uint64},
-        set(numpy_to_torch_dtype_dict.values()) - {torch.uint16, torch.uint32, torch.uint64})))
+    @dtypes(*list(itertools.product(set(numpy_to_torch_dtype_dict.values()),
+                                    set(numpy_to_torch_dtype_dict.values()))))
     def test_numpy_array_binary_ufunc_promotion(self, device, dtypes):
         import operator
         np_type = torch_to_numpy_dtype_dict[dtypes[0]]

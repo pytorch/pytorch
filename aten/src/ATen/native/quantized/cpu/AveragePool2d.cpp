@@ -18,6 +18,7 @@
 #endif
 
 #include <c10/util/irange.h>
+#include <c10/util/math_compat.h>
 
 #include <algorithm>
 #include <cmath>

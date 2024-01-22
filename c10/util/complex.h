@@ -320,7 +320,7 @@ struct alignas(sizeof(T) * 2) complex {
   constexpr void real(T value) {
     real_ = value;
   }
-  C10_HOST_DEVICE constexpr T imag() const {
+  constexpr T imag() const {
     return imag_;
   }
   constexpr void imag(T value) {

@@ -25,7 +25,7 @@ Tensor binary_op_scalar(
   vTensor v_output{
       context,
       v_self.sizes(),
-      v_self.dtype(),
+      self_arg.scalar_type(),
   };
 
   const float other_val = alpha_arg ? other.to<float>() * alpha_arg->to<float>()
@@ -167,7 +167,7 @@ Tensor binary_op_tensor(
   vTensor v_output{
       context,
       utils::broadcast_size(self_arg, other_arg),
-      v_self.dtype(),
+      self_arg.scalar_type(),
   };
 
   const double alpha = alpha_arg ? alpha_arg->to<double>() : 1.0;
@@ -244,7 +244,7 @@ Tensor quantized_binary_op_tensor(
       utils::broadcast_size(self_arg, other_arg),
       scale,
       zero_point,
-      api::kQUInt8,
+      c10::kQUInt8,
   };
 
   const double scale1 = v_self.get_scale();

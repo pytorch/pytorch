@@ -50,7 +50,8 @@
 #include <library_types.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -810,4 +811,5 @@ Tensor sparse_sparse_matmul_cuda(const Tensor& mat1_, const Tensor& mat2_) {
   return output;
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

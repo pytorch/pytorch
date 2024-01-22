@@ -10,7 +10,6 @@ from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
 
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
 class CutomizedCtxManager:
@@ -175,30 +174,6 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 9)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_across_graph_break(self):
-        def fn(x):
-            s = torch.cuda.Stream()
-            x = torch.mul(x, 5)
-            x = torch.add(x, 2)
-
-            print("foo")
-            tcs = torch.cuda.stream(s)
-            with tcs:
-                x = torch.relu(x)
-            x = torch.add(x, 1)
-            x = torch.cos(x)
-            return x
-
-        x = torch.randn((2, 2), device="cuda")
-        ref = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
-        self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 9)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -403,7 +378,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION or TEST_WITH_ROCM,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Can't run fused SDPA on this platform",
     )
     def test_autocast_sdpa(self):

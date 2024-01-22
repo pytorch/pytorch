@@ -8,8 +8,6 @@ on:
     - cron: 37 7 * * 1
   workflow_dispatch:
 
-permissions: read-all
-
 jobs:
   update-commit-hash:
     runs-on: ubuntu-latest
@@ -21,21 +19,18 @@ jobs:
           fetch-depth: 0
       - name: update-xla-commit-hash
         continue-on-error: true
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        uses: ./.github/actions/update-commit-hash
         with:
           repo-name: xla
           branch: master
-          pin-folder: .ci/docker/ci_commit_pins
-          test-infra-ref: main
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
       - name: update-triton-commit-hash
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        uses: ./.github/actions/update-commit-hash
         with:
           repo-owner: openai
           repo-name: triton
           branch: main
           pin-folder: .ci/docker/ci_commit_pins
-          test-infra-ref: main
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}

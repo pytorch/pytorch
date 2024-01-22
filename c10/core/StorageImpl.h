@@ -4,8 +4,6 @@
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/SymInt.h>
-#include <c10/core/impl/COW.h>
-#include <c10/core/impl/COWDeleter.h>
 #include <c10/core/impl/PyObjectSlot.h>
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
@@ -119,7 +117,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   at::DataPtr& mutable_data_ptr() {
-    maybe_materialize_cow();
     return data_ptr_;
   }
 
@@ -129,10 +126,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   // Returns the previous data_ptr
   at::DataPtr set_data_ptr(at::DataPtr&& data_ptr) {
-    // We need to materialize the old COW DataPtr because it is
-    // being returned as mutable.
-    maybe_materialize_cow();
-    return set_data_ptr_no_materialize_cow(std::move(data_ptr));
+    at::DataPtr old_data_ptr(std::move(data_ptr_));
+    data_ptr_ = std::move(data_ptr);
+    return old_data_ptr;
   }
 
   void set_data_ptr_noswap(at::DataPtr&& data_ptr) {
@@ -144,7 +140,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void* mutable_data() {
-    maybe_materialize_cow();
     return data_ptr_.mutable_get();
   }
 
@@ -222,26 +217,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return &pyobj_slot_;
   }
 
- protected:
-  // materialize_cow_storage needs to call set_data_ptr_no_materlize_cow
-  friend void c10::impl::cow::materialize_cow_storage(StorageImpl& storage);
-
-  // Returns the previous data_ptr. If the old data_ptr was COW,
-  // this avoids materializing it
-  at::DataPtr set_data_ptr_no_materialize_cow(at::DataPtr&& data_ptr) {
-    at::DataPtr old_data_ptr(std::move(data_ptr_));
-    data_ptr_ = std::move(data_ptr);
-    return old_data_ptr;
-  }
-
  private:
-  // Triggers a copy if this is a copy-on-write tensor.
-  void maybe_materialize_cow() {
-    if (data_ptr_.get_deleter() == impl::cow::cow_deleter) {
-      impl::cow::materialize_cow_storage(*this);
-    }
-  }
-
   DataPtr data_ptr_;
   SymInt size_bytes_;
   bool size_bytes_is_heap_allocated_;

@@ -25,30 +25,12 @@
 
 namespace c10 {
 
-// dummy struct for uint1 to uint7, actual functionality
-// of these dtypes will be implemented in python with Tensor subclass
-template <unsigned int N>
-struct dummy_uint1_7_t {};
-
 // For the macros below:
-//
-// For users: If you want to macro some code for all non-QInt scalar types
-// (i.e. types with complete information, you probably want one of the
-// AT_FORALL_SCALAR_TYPES / AT_FORALL_SCALAR_TYPES_AND macros below, which are
-// designed to behave similarly to the Dispatch macros with the same name.
-//
-// For adding a new dtype: In the beginning, we had an idea that there was a
-// list of all scalar types, and you could use AT_FORALL_SCALAR_TYPES to
-// iterate over them.  But over the years we added weird types which couldn't
-// be handled uniformly everywhere and so in the end we ended up with some
-// mish-mosh of some helper macros, but mostly use sites making a call about
-// what dtypes they can or can't support.  So if you want to add a new dtype,
-// the preferred resolution is to find a dtype similar to what you want,
-// grep for it and edit all the sites you find this way.  If you need to add
-// a completely new kind of dtype, you're going to have to laboriously audit
-// all of the sites everywhere to figure out how it should work.  Consulting
-// some old PRs where we added new dtypes (check history of this file) can
-// help give you an idea where to start.
+// NB: If you want to macro some code for all non-QInt scalar types (i.e. types
+// with complete information, you probably want one of the
+// AT_FORALL_SCALAR_TYPES / AT_FORALL_SCALAR_TYPES_AND
+// macros below, which are designed to behave similarly to the Dispatch macros
+// with the same name.
 
 // NB: Order matters for this macro; it is relied upon in
 // _promoteTypesLookup and the serialization format.
@@ -79,25 +61,11 @@ struct dummy_uint1_7_t {};
   _(c10::Float8_e5m2, Float8_e5m2) /* 23 */              \
   _(c10::Float8_e4m3fn, Float8_e4m3fn) /* 24 */          \
   _(c10::Float8_e5m2fnuz, Float8_e5m2fnuz) /* 25 */      \
-  _(c10::Float8_e4m3fnuz, Float8_e4m3fnuz) /* 26 */      \
-  _(uint16_t, UInt16) /* 27 */                           \
-  _(uint32_t, UInt32) /* 28 */                           \
-  _(uint64_t, UInt64) /* 29 */                           \
-  _(c10::dummy_uint1_7_t<1>, UInt1) /* 30 */             \
-  _(c10::dummy_uint1_7_t<2>, UInt2) /* 31 */             \
-  _(c10::dummy_uint1_7_t<3>, UInt3) /* 32 */             \
-  _(c10::dummy_uint1_7_t<4>, UInt4) /* 33 */             \
-  _(c10::dummy_uint1_7_t<5>, UInt5) /* 34 */             \
-  _(c10::dummy_uint1_7_t<6>, UInt6) /* 35 */             \
-  _(c10::dummy_uint1_7_t<7>, UInt7) /* 36 */
+  _(c10::Float8_e4m3fnuz, Float8_e4m3fnuz) /* 26 */
 
 // If you want to support ComplexHalf for real, add ComplexHalf
 // into this macro (and change the name).  But beware: convert()
 // doesn't work for all the conversions you need...
-//
-// TODO: To add unsigned int types here, we must define accumulate type.
-// But uint8 currently accumulates into int64, so we would have to make
-// an inconsistent choice for the larger types.  Difficult.
 #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_F8NZ(_) \
   _(uint8_t, Byte)                                                      \
   _(int8_t, Char)                                                       \
@@ -114,8 +82,6 @@ struct dummy_uint1_7_t {};
   _(at::Float8_e5m2, Float8_e5m2)                                       \
   _(at::Float8_e4m3fn, Float8_e4m3fn)
 
-// This macro controls many of our C++ APIs, including constructors
-// for Scalar as well as the data() and item() accessors on Tensor
 #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(_) \
   _(uint8_t, Byte)                             \
   _(int8_t, Char)                              \
@@ -191,8 +157,6 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
 
 #undef SPECIALIZE_CppTypeToScalarType
 
-// NB: despite its generic sounding name, the macros that don't take _AND
-// are mostly only used by tensorexpr
 #define AT_FORALL_INT_TYPES(_) \
   _(uint8_t, Byte)             \
   _(int8_t, Char)              \
@@ -208,11 +172,6 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
   _(int64_t, Long)                \
   _(float, Float)                 \
   _(double, Double)
-
-// These macros are often controlling how many template instantiations we
-// create for kernels.  It is typically inappropriate to add new dtypes here,
-// instead, new types should be added to use sites on a case-by-case basis.
-// We generally are not accepting new dtypes due to binary size concerns.
 
 #define AT_FORALL_SCALAR_TYPES_AND(SCALARTYPE, _) \
   _(uint8_t, Byte)                                \
@@ -425,9 +384,7 @@ static inline size_t elementSize(ScalarType t) {
 static inline bool isIntegralType(ScalarType t, bool includeBool) {
   bool isIntegral =
       (t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||
-       t == ScalarType::Long || t == ScalarType::Short ||
-       t == ScalarType::UInt16 || t == ScalarType::UInt32 ||
-       t == ScalarType::UInt64);
+       t == ScalarType::Long || t == ScalarType::Short);
 
   return isIntegral || (includeBool && t == ScalarType::Bool);
 }
@@ -469,14 +426,6 @@ static inline bool isBitsType(ScalarType t) {
   return t == ScalarType::Bits1x8 || t == ScalarType::Bits2x4 ||
       t == ScalarType::Bits4x2 || t == ScalarType::Bits8 ||
       t == ScalarType::Bits16;
-}
-
-static inline bool isBarebonesUnsignedType(ScalarType t) {
-  return t == ScalarType::UInt1 || t == ScalarType::UInt2 ||
-      t == ScalarType::UInt3 || t == ScalarType::UInt4 ||
-      t == ScalarType::UInt5 || t == ScalarType::UInt6 ||
-      t == ScalarType::UInt7 || t == ScalarType::UInt16 ||
-      t == ScalarType::UInt32 || t == ScalarType::UInt64;
 }
 
 static inline ScalarType toQIntType(ScalarType t) {

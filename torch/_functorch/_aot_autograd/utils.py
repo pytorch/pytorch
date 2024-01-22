@@ -12,7 +12,9 @@ import torch
 import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
-KNOWN_TYPES = [torch.Tensor, int, str, float, bool, type(None)] + list(py_sym_types)
+KNOWN_TYPES = tuple(
+    [torch.Tensor, int, str, float, bool, type(None)] + list(py_sym_types)
+)
 
 original_zip = zip
 

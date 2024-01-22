@@ -8,7 +8,6 @@ cxx_library(
             "test/**/*.cpp",
             "benchmark/**/*.cpp",
             "cuda/**/*.cpp",
-            "xpu/**/*.cpp",
         ],
     ),
       deps = [
@@ -31,7 +30,6 @@ cxx_library(
             "test/**/*.h",
             "benchmark/**/*.h",
             "cuda/**/*.h",
-            "xpu/**/*.h",
         ],
     ),
     exported_linker_flags = [],

@@ -310,7 +310,7 @@ def escape(n):
 
 
 def is_cuda_tensor(obj):
-    return isinstance(obj, torch.Tensor) and obj.is_cuda and not isinstance(obj, torch._subclasses.FakeTensor)
+    return isinstance(obj, torch.Tensor) and obj.is_cuda
 
 def cuda_allocation_context():
     snapshot = torch.cuda.memory._snapshot()

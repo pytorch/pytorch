@@ -4,17 +4,15 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/vk_api.h>
-
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
+#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/QueryPool.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Shader.h>
-#include <ATen/native/vulkan/api/Utils.h>
 
 namespace at {
 namespace native {
@@ -241,21 +239,21 @@ class UniformParamsBuffer final {
 class StorageBuffer final {
  private:
   Context* context_p_;
-  ScalarType dtype_;
+  c10::ScalarType dtype_;
   size_t numel_;
   VulkanBuffer vulkan_buffer_;
 
  public:
   StorageBuffer(
       Context* context_p,
-      const ScalarType dtype,
+      const c10::ScalarType dtype,
       const size_t numel,
       const bool gpuonly = false)
       : context_p_(context_p),
         dtype_(dtype),
         numel_(numel),
         vulkan_buffer_(context_p_->adapter_ptr()->vma().create_storage_buffer(
-            element_size(dtype_) * numel_,
+            c10::elementSize(dtype_) * numel_,
             gpuonly)) {}
 
   StorageBuffer(const StorageBuffer&) = delete;
@@ -268,7 +266,7 @@ class StorageBuffer final {
     context_p_->register_buffer_cleanup(vulkan_buffer_);
   }
 
-  inline ScalarType dtype() {
+  inline c10::ScalarType dtype() {
     return dtype_;
   }
 
@@ -302,7 +300,7 @@ inline void arg_is_empty(bool& any_is_empty, const VulkanImage& image) {
 template <typename... Arguments>
 inline bool any_arg_is_empty(Arguments&&... arguments) {
   bool any_is_empty = false;
-  VK_UNUSED const int _[]{
+  C10_UNUSED const int _[]{
       0,
       (arg_is_empty(any_is_empty, std::forward<Arguments>(arguments)), 0)...,
   };
@@ -315,7 +313,7 @@ inline void bind(
     DescriptorSet& descriptor_set,
     const std::index_sequence<Indices...>&,
     Arguments&&... arguments) {
-  VK_UNUSED const int _[]{
+  C10_UNUSED const int _[]{
       0,
       (descriptor_set.bind(Indices, std::forward<Arguments>(arguments)), 0)...,
   };

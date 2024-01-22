@@ -142,21 +142,6 @@ kernel void histogramdd<DTYPE>(                               \
 REGISTER_HISTOGRAMDD_OP(float);
 REGISTER_HISTOGRAMDD_OP(half);
 
-kernel void kernel_index_offset(constant uint         * strides         [[buffer(0)]],
-                                device uint           * data_offsets    [[buffer(1)]],
-                                constant uint         * iter_shape      [[buffer(2)]],
-                                constant uint         & num_dimensions  [[buffer(3)]],
-                                uint thread_index [[thread_position_in_grid]]) {
-    data_offsets[thread_index] = 0;
-    uint32_t idx = thread_index;
-    for (uint32_t dim = 0; dim < num_dimensions; dim++) {
-        uint32_t reversed_dim = num_dimensions - dim -1;
-        uint32_t remainder = idx % iter_shape[reversed_dim];
-        idx /= iter_shape[reversed_dim];
-
-        data_offsets[thread_index] += remainder * strides[reversed_dim];
-    }
-}
 )HISTOGRAM_METAL";
 
 static id<MTLLibrary> compileHistogramOpLibrary(id<MTLDevice> device) {
@@ -264,22 +249,23 @@ void histogramdd_kernel_impl(Tensor& hist_output,
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   const uint32_t nDim = input.sizes().size();
-  TORCH_CHECK(input.numel() * input.element_size() <= UINT32_MAX, "histogramdd(): Tensor is larger than 4Gb");
 
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+  dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      MTLSize gridSize = MTLSizeMake(stridedIndicesNumThreads, 1, 1);
       const IntArrayRef& inputShape = input.sizes();
       std::vector<uint32_t> inputShapeData(inputShape.size());
       std::vector<uint32_t> strides(input.strides().begin(), input.strides().end());
 
       for (const auto i : c10::irange(inputShape.size())) {
-        inputShapeData[i] = static_cast<uint32_t>(inputShape[i]);
+        TORCH_CHECK(i <= UINT32_MAX);
+        inputShapeData[i] = (uint32_t)(inputShape[i]);
       }
 
       id<MTLBuffer> stridedIndicesBuffer = [[device newBufferWithLength:stridedIndicesNumThreads * sizeof(uint)
                                                                 options:0] autorelease];
-      id<MTLComputePipelineState> stridedIndicesPSO = histogramPipelineState(device, "kernel_index_offset");
+      id<MTLComputePipelineState> stridedIndicesPSO = MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offset");
 
       [computeEncoder setComputePipelineState:stridedIndicesPSO];
       [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim atIndex:0];
@@ -287,7 +273,12 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       [computeEncoder setBytes:inputShapeData.data() length:sizeof(uint32_t) * inputShape.size() atIndex:2];
       [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
 
-      mtl_dispatch1DJob(computeEncoder, stridedIndicesPSO, stridedIndicesNumThreads);
+      NSUInteger stridedIndicesTGSize = stridedIndicesPSO.maxTotalThreadsPerThreadgroup;
+      if (stridedIndicesTGSize > stridedIndicesNumThreads)
+        stridedIndicesTGSize = stridedIndicesNumThreads;
+
+      MTLSize stridedIndicesThreadGroupSize = MTLSizeMake(stridedIndicesTGSize, 1, 1);
+      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:stridedIndicesThreadGroupSize];
 
       const std::string kernel = "histogramdd_" + scalarToMetalTypeString(input.scalar_type());
       id<MTLComputePipelineState> histogramPSO = histogramPipelineState(device, kernel);

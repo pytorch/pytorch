@@ -756,8 +756,6 @@ struct TORCH_API IValue final {
   IValue(at::ArrayRef<T> v);
   template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(const std::vector<T>& v);
-  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
-  IValue(std::vector<T>&& v);
   template <class T, size_t N>
   IValue(std::array<T, N> v);
 
@@ -774,9 +772,6 @@ struct TORCH_API IValue final {
   IValue(at::OptionalArrayRef<T> v);
   template <class T, enable_if_symint<T> = nullptr>
   IValue(const std::vector<T>& v);
-  template <class T, enable_if_symint<T> = nullptr>
-  IValue(std::vector<T>&& v);
-
 
   template <class T>
   using enable_if_ilist_is_ivalue_constructible = std::enable_if_t<

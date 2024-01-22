@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: export"]
+# Owner(s): ["module: dynamo"]
 
 try:
     from . import test_export, testing
