@@ -847,6 +847,10 @@ class WrapperCodeGen(CodeGen):
         # define the variable and assign it None
         self.writeline(f"{node.get_name()} = None")
 
+    def codegen_scalar_to_tensor(self, expr, dtype):
+        # Only needed for cpp wrapper
+        pass
+
     def benchmark_compiled_module(self, output):
         def add_fake_input(name, shape, stride, device, dtype):
             output.writeline(
@@ -1366,6 +1370,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.arg_var_id = count()
         self.used_cached_dtypes = set()
         self.cached_output_id = count()
+        self.scalar_to_tensor_id = count()
 
         from .cpp import cexpr, CppPrinter
 
@@ -2245,6 +2250,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     "at::k", "to"
                 )
                 self.writeline(f"auto {node.sym} = {data}.item().{convert_type}();")
+
+    def codegen_scalar_to_tensor(self, expr, dtype):
+        name = f"scalar_to_tensor_{next(self.scalar_to_tensor_id)}"
+        dtype_str = str(dtype).split(".")[-1]
+        self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
+        self.wrapper_call.writeline(
+            f"aoti_torch_value_to_tensor_{dtype_str}({expr}, &{name}_handle);"
+        )
+        self.wrapper_call.writeline(f"RAIIAtenTensorHandle {name}({name}_handle);")
+        return name
 
     def can_stack_allocate_buffer(self, buffer):
         return (

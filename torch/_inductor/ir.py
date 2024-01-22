@@ -3008,7 +3008,16 @@ class ShapeAsConstantBuffer(IRNode):
         expr = V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))
         if V.graph.cpp_wrapper:
             # wrap scalar to 0-d tensor for cpp wrapper
-            return f"torch::tensor({expr})"
+            if config.aot_inductor.abi_compatible:
+                assert self.shape in V.graph.symbol_to_dtype, (
+                    "Needs symbol %s's original dtype for ShapeAsConstantBuffer codegen"
+                    % self.shape
+                )
+                return V.graph.wrapper_code.codegen_scalar_to_tensor(
+                    expr, V.graph.symbol_to_dtype[self.shape]
+                )
+            else:
+                return f"torch::tensor({expr})"
         else:
             return expr
 
@@ -4416,6 +4425,8 @@ class DynamicScalar(ExternKernel):
             assert sym.args[1] == 1, sym
             self.sym = sym.args[0]
             self.is_bool = True
+
+        V.graph.symbol_to_dtype[self.sym] = data.get_dtype()
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return {self.sym}

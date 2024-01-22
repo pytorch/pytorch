@@ -7,6 +7,7 @@
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/inductor_ops.h>
+#include <torch/torch.h>
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
@@ -54,6 +55,11 @@ c10::optional<T> pointer_to_optional(T* ptr) {
 template <class T, class U, typename = std::enable_if_t<!std::is_same_v<T, U>>>
 c10::optional<T> pointer_to_optional(U* ptr) {
   return ptr ? c10::make_optional<T>(T(*ptr)) : c10::nullopt;
+}
+
+AtenTensorHandle new_tensor_handle(at::Tensor&& tensor) {
+  at::Tensor* new_tensor = new at::Tensor(std::move(tensor));
+  return tensor_pointer_to_tensor_handle(new_tensor);
 }
 
 } // namespace
@@ -134,6 +140,31 @@ AOTI_TORCH_ITEM_IMPL(int16, int16_t)
 AOTI_TORCH_ITEM_IMPL(int32, int32_t)
 AOTI_TORCH_ITEM_IMPL(int64, int64_t)
 AOTI_TORCH_ITEM_IMPL(bool, bool)
+
+#define AOTI_TORCH_VALUE_TO_TENSOR_IMPL(dtype, ctype, ttype)       \
+  AOTITorchError aoti_torch_value_to_tensor_##dtype(               \
+      ctype value, AtenTensorHandle* ret_new_tensor) {             \
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({                   \
+      *ret_new_tensor =                                            \
+          new_tensor_handle(torch::tensor({value}, torch::ttype)); \
+    });                                                            \
+  }
+
+AOTI_TORCH_VALUE_TO_TENSOR_IMPL(float32, float, kFloat32)
+AOTI_TORCH_VALUE_TO_TENSOR_IMPL(float64, double, kFloat64)
+AOTI_TORCH_VALUE_TO_TENSOR_IMPL(uint8, uint8_t, kUInt8)
+AOTI_TORCH_VALUE_TO_TENSOR_IMPL(uint16, uint16_t, kUInt16)
+// error: conversion from ‘uint32_t’ {aka ‘unsigned int’} to
+// ‘torch::detail::TensorDataContainer’ is ambiguous
+// AOTI_TORCH_VALUE_TO_TENSOR_IMPL(uint32, uint32_t, kUInt32)
+// error: conversion from ‘uint64_t’ {aka ‘long unsigned int’} to
+// ‘torch::detail::TensorDataContainer’ is ambiguous
+// AOTI_TORCH_VALUE_TO_TENSOR_IMPL(uint64, uint64_t, kUInt64)
+AOTI_TORCH_VALUE_TO_TENSOR_IMPL(int8, int8_t, kInt8)
+AOTI_TORCH_VALUE_TO_TENSOR_IMPL(int16, int16_t, kInt16)
+AOTI_TORCH_VALUE_TO_TENSOR_IMPL(int32, int32_t, kInt32)
+AOTI_TORCH_VALUE_TO_TENSOR_IMPL(int64, int64_t, kInt64)
+AOTI_TORCH_VALUE_TO_TENSOR_IMPL(bool, bool, kBool)
 
 bool aoti_torch_grad_mode_is_enabled() {
   return c10::GradMode::is_enabled();

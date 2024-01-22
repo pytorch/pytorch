@@ -120,6 +120,39 @@ aoti_torch_item_int64(AtenTensorHandle tensor, int64_t* ret_value);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_bool(AtenTensorHandle tensor, bool* ret_value);
 
+// Functions for wrapping a scalar value to a single-element tensor
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_value_to_tensor_float32(
+    float value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_value_to_tensor_float64(
+    double value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_value_to_tensor_uint8(
+    uint8_t value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_value_to_tensor_uint16(
+    uint16_t value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_value_to_tensor_uint32(
+    uint32_t value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_value_to_tensor_uint64(
+    uint64_t value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_value_to_tensor_int8(int8_t value, AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_value_to_tensor_int16(
+    int16_t value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_value_to_tensor_int32(
+    int32_t value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_value_to_tensor_int64(
+    int64_t value,
+    AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_value_to_tensor_bool(bool value, AtenTensorHandle* ret_new_tensor);
+
 AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
 AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
 

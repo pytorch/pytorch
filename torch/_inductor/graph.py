@@ -255,6 +255,7 @@ class GraphLowering(torch.fx.Interpreter):
         ] = (
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
+        self.symbol_to_dtype: Dict[sympy.Symbol, torch.dtype] = {}
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs = False
         self.disable_cudagraphs_reason = ""
