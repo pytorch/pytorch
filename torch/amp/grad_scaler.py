@@ -483,8 +483,7 @@ class GradScaler:
         affect the scale GradScaler uses internally.)
 
         Args:
-            new_scale (float or :class:`torch.cuda.FloatTensor` or :class:`torch.FloatTensor`,
-            optional, default=None):  New scale factor.
+            new_scale (float or :class:`torch.Tensor`, optional, default=None):  New scale factor.
 
         .. warning::
             :meth:`update` should only be called at the end of the iteration, after ``scaler.step(optimizer)`` has
@@ -509,11 +508,7 @@ class GradScaler:
             else:
                 reason = "new_scale should be a float or a 1-element torch.cuda.FloatTensor or \
                     torch.FloatTensor with requires_grad=False."
-                if self._device == "cuda":
-                    assert isinstance(new_scale, torch.cuda.FloatTensor), reason  # type: ignore[attr-defined]
-                else:
-                    assert isinstance(new_scale, torch.FloatTensor), reason  # type: ignore[attr-defined]
-
+                assert new_scale.device.type == self._device, reason
                 assert new_scale.numel() == 1, reason
                 assert new_scale.requires_grad is False, reason
                 self._scale.copy_(new_scale)
