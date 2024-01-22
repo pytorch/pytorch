@@ -12,12 +12,18 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TestCase as TorchTestCase,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_CUDA,
+    skipCUDAIf,
+)
 
 
 @instantiate_parametrized_tests
 class TestUnbackedSymints(TorchTestCase):
     @parametrize("device", (GPU_TYPE, "cpu"))
+    @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand(self, device):
         def fn(x, y):
@@ -39,6 +45,7 @@ class TestUnbackedSymints(TorchTestCase):
         torch.testing.assert_close(actual, expected)
 
     @parametrize("device", (GPU_TYPE, "cpu"))
+    @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand_mismatch(self, device):
         def fn(x):
@@ -50,6 +57,7 @@ class TestUnbackedSymints(TorchTestCase):
             actual = torch.compile(fn, fullgraph=True)(x)
 
     @parametrize("device", (GPU_TYPE, "cpu"))
+    @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_autotuning(self, device):
         def fn(x, y):
@@ -74,6 +82,7 @@ class TestUnbackedSymints(TorchTestCase):
         torch.testing.assert_close(actual, expected)
 
     @parametrize("device", (GPU_TYPE, "cpu"))
+    @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_split_with_sizes(self, device):
         def fn(x, y):
@@ -90,6 +99,7 @@ class TestUnbackedSymints(TorchTestCase):
         torch.testing.assert_close(actual, expected)
 
     @parametrize("device", (GPU_TYPE, "cpu"))
+    @skipCUDAIf(not HAS_CUDA, "requires cuda")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_view_of_slice(self, device):
         # Tests View.create(slice, size_with_unbacked_symint)
