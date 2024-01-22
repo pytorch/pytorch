@@ -1315,6 +1315,7 @@ def must_serial(file: Union[str, ShardedTest]) -> bool:
         or file in CI_SERIAL_LIST
         or file in JIT_EXECUTOR_TESTS
         or file in ONNX_SERIAL_LIST
+        or NUM_PROCS == 1
     )
 
 
