@@ -485,7 +485,7 @@ def register_multi_grad_hook(
 
         @functools.wraps(fn)
         def wrapped_fn(*args, **kwargs):
-            nonlocal ran_hook
+            nonlocal lock, ran_hook
             id = torch._C._current_graph_task_id()
             assert id != -1, "expected this hook to be called inside a backward call"
             with lock:
