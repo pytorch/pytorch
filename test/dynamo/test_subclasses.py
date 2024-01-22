@@ -23,12 +23,12 @@ from torch.nested._internal.nested_tensor import (
     jagged_from_tensor_and_lengths,
     ViewBufferFromNested,
 )
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     subtest,
 )
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -1193,7 +1193,6 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
                 "device": device,
                 "dtype": dtype,
             }
-            # Need more extensive testing with various settings dtype/device etc.
             x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
 
             def fn1(nt):
