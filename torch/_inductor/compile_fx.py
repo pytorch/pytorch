@@ -29,9 +29,9 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo import (
     compiled_autograd,
+    config as dynamo_config,
     logging as dynamo_logging,
     utils as dynamo_utils,
-    config as dynamo_config,
 )
 from torch._dynamo.utils import counters, detect_fake_mode, lazy_format_graph_code
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
@@ -43,6 +43,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
+from ..fx import use_lazy_graph_module  # type: ignore[attr-defined]
 from ..fx.graph import _PyTreeCodeGen
 from . import config, metrics
 from .debug import DebugContext
@@ -54,7 +55,6 @@ from .graph import GraphLowering
 from .ir import ExternKernelNode
 from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
-from ..fx import use_lazy_graph_module
 
 if config.is_fbcode():
     from torch._inductor.fb.utils import time_and_log

@@ -11,7 +11,6 @@ import traceback
 import weakref
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
-from torch.fx import get_graph_module_cls
 
 import sympy
 
@@ -30,6 +29,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch._utils_internal import signpost_event
+from torch.fx import get_graph_module_cls  # type: ignore[attr-defined]
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass

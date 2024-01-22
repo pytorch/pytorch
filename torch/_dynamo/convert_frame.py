@@ -8,7 +8,8 @@ import types
 import typing
 import weakref
 from typing import Any, Callable, Dict, List, Optional, Set
-from torch.fx import use_lazy_graph_module
+
+from torch.fx import use_lazy_graph_module  # type: ignore[attr-defined]
 
 try:
     import numpy as np

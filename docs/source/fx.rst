@@ -1166,6 +1166,7 @@ API Reference
 .. py:module:: torch.fx.experimental.validator
 .. py:module:: torch.fx.graph
 .. py:module:: torch.fx.graph_module
+.. py:module:: torch.fx.lazy_graph_module
 .. py:module:: torch.fx.immutable_collections
 .. py:module:: torch.fx.interpreter
 .. py:module:: torch.fx.node

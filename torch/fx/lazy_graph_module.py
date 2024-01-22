@@ -1,9 +1,12 @@
-from torch.fx import GraphModule
 from contextlib import contextmanager
-import os
+
+from torch.fx import GraphModule
+from ._compatibility import compatibility
 
 _use_lazy_graph_module = False
 
+
+@compatibility(is_backward_compatible=False)
 @contextmanager
 def use_lazy_graph_module(should_use: bool):
     try:
@@ -14,9 +17,13 @@ def use_lazy_graph_module(should_use: bool):
     finally:
         _use_lazy_graph_module = prior
 
+
+@compatibility(is_backward_compatible=False)
 def get_graph_module_cls():
     return LazyGraphModule if _use_lazy_graph_module else GraphModule
 
+
+@compatibility(is_backward_compatible=False)
 class LazyGraphModule(GraphModule):
     @classmethod
     def from_graphmodule(cls, gm: GraphModule):
@@ -27,7 +34,7 @@ class LazyGraphModule(GraphModule):
 
     def real_recompile(self):
         if self._needs_recompile():
-             self._real_recompile()
+            self._real_recompile()
 
     @classmethod
     def _needs_recompile(cls):
@@ -49,9 +56,17 @@ class LazyGraphModule(GraphModule):
 
     @classmethod
     def recompile(cls):
-        cls.forward = cls._lazy_forward 
+        cls.forward = cls._lazy_forward
 
     @property
     def code(self) -> str:
         self.real_recompile()
-        return super().code()
+        return super().code
+
+    def __str__(self) -> str:
+        """
+        str(GraphModule) will access the _code attribute. Make sure recompile
+        happens so _code attribute is available.
+        """
+        self.real_recompile()
+        return super().__str__()

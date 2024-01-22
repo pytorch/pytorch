@@ -694,6 +694,12 @@ class Tracer(TracerBase):
         _is_fx_tracing_flag = True
         try:
             if isinstance(root, torch.nn.Module):
+
+                # do real recompilation for LazyGraphModule before retracing
+                from torch.fx.lazy_graph_module import LazyGraphModule
+                if isinstance(root, LazyGraphModule):
+                    root.real_recompile()
+
                 self.root = root
 
                 assert hasattr(
