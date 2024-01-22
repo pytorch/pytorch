@@ -2017,7 +2017,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
         model_cpu = model.cpu().float()
         output_cpu = model(input_tensor.float().cpu())
         self.assertEqual(output.cpu().float(), output_cpu, atol=1e-3, rtol=1e-3)
-        print(torch.cuda.memory_reserved())
 
     @onlyCUDA
     @skipCUDAIfNoCudnn
