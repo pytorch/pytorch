@@ -1167,9 +1167,7 @@ def init_process_group(
             NCCL: the communicator is immediately formed (calling
             ``ncclCommInit*`` immediately rather than the normal lazy
             call) and sub-groups will use ``ncclCommSplit`` when
-            possible to avoid unnecessary overhead of group creation. If you
-            want to know NCCL initialization error early, you can also use this
-            field.
+            possible to avoid unnecessary overhead of group creation.
 
     .. note:: To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
         on a system that supports MPI.

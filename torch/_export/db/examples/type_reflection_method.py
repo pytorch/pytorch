@@ -14,28 +14,18 @@ class A:
     tags={"python.builtin"},
     support_level=SupportLevel.SUPPORTED,
 )
-class TypeReflectionMethod(torch.nn.Module):
+def type_reflection_method(x):
     """
-    type() calls on custom objects followed by attribute accesses are not allowed
+    type() calls on custom objects followed by method calls are not allowed
     due to its overly dynamic nature.
     """
-
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        a = A()
-        return type(a).func(x)
+    a = A()
+    return type(a).func(x)
 
 
-@export_rewrite_case(parent=TypeReflectionMethod)
-class TypeReflectionMethodRewrite(torch.nn.Module):
+@export_rewrite_case(parent=type_reflection_method)
+def type_reflection_method_rewrite(x):
     """
     Custom object class methods will be inlined.
     """
-
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        return A.func(x)
+    return A.func(x)

@@ -112,7 +112,7 @@ class InterpreterModule(torch.nn.Module):
 
 class FlatArgsAdapter(abc.ABC):
     """
-    Adapts input arguments with ``input_spec`` to align ``target_spec``.
+    Adapts input arguments with `input_spec` to align `target_spec`.
     """
 
     @abc.abstractmethod
@@ -122,7 +122,7 @@ class FlatArgsAdapter(abc.ABC):
         input_spec: pytree.TreeSpec,
         input_args: List[Any],
     ) -> List[Any]:
-        """NOTE: This adapter may mutate given ``flat_args``."""
+        """NOTE: This adapter may mutate given `flat_args`."""
         ...
 
 
@@ -255,10 +255,10 @@ def unflatten(
     hierachy instead of the flat graph that :mod:`torch.export` usually produces.
 
     .. note:: The args/kwargs of unflattened modules will not necessarily match
-        the eager module, so doing a module swap (e.g. :code:`self.submod =
-        new_mod`) will not necessarily work. If you need to swap a module out, you
-        need to set the :code:`preserve_module_call_signature` parameter of
-        :func:`torch.export.export`.
+    the eager module, so doing a module swap (e.g. :code:`self.submod =
+    new_mod`) will not necessarily work. If you need to swap a module out, you
+    need to set the :code:`preserve_module_call_signature` parameter of
+    :func:`torch.export.export`.
 
     Args:
         module (ExportedProgram): The ExportedProgram to unflatten.
@@ -605,19 +605,12 @@ class _ModuleFrame:
         if parent_out is None:
             return
 
-        parent_out.meta["val"] = (
-            graph_outputs.meta.get("val")
-            if isinstance(graph_outputs, torch.fx.Node)
-            else [o.meta.get("val") for o in graph_outputs]
-        )
-
         if len(orig_outputs) == 1 and signature is None:
             self.parent.node_map[orig_outputs[0]] = parent_out
         else:
             for i, orig_output in enumerate(orig_outputs):
                 # Use Proxy to record getitem access.
                 proxy_out = torch.fx.Proxy(parent_out)[i].node  # type: ignore[index]
-                proxy_out.meta["val"] = copy.copy(orig_output.meta["val"])
                 self.parent.node_map[orig_output] = proxy_out
 
         if self.cached_graph_module is not None:

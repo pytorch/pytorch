@@ -288,7 +288,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             opts.rootTensor = rootTensor
             work = pg.broadcast(xs, opts)
             work.wait()
-            return xs
+            return work.result()
 
         # Every rank is root once
         for i in range(self.world_size):
@@ -322,13 +322,12 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         # sparse allreduce call is wrapped in a try catch since the c10d API is only available in the nccl experimental branch
         try:
-            tensor_list = [sparse_tensor]
-            work = pg.allreduce(tensor_list)
+            work = pg.allreduce([sparse_tensor])
             work.wait()
 
-            # tensor_list is a list of size 1, with the allreduce output as a dense tensor
+            # work.result() returns a list of size 1, with the allreduce output as a dense tensor
             a = torch.tensor([[2, 4, 0], [8, 0, 12]]).to(self.rank)
-            self.assertEqual(tensor_list[0], a)
+            self.assertEqual(work.result()[0], a)
         except RuntimeError as e:
             if "allreduce_sparse is only available in the NCCL experimental branch." in str(e):
                 pass
@@ -1385,6 +1384,8 @@ class DistributedDataParallelTest(
         # otherwise process will be taken down and we can't check for errors.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
+        # TODO: smaller timeout can fail since PG NCCl does health check in
+        # constructor. Look into reducing this test's runtime.
         store = c10d.FileStore(self.file_name, self.world_size)
         # provide sufficient timeout to initialize NCCL comm.
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timedelta(seconds=15))
@@ -3300,6 +3301,23 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             self.assertEqual(expected_tensor, t)
 
     @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_nccl_barrier_timeout(self):
+        os.environ["TORCH_ENABLE_NCCL_HEALTH_CHECK"] = "1"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        if self.rank == 0:
+            with self.assertRaisesRegex(
+                dist.DistBackendError, "Health check failure"
+            ):
+                c10d.init_process_group(
+                    backend="nccl",
+                    rank=self.rank,
+                    world_size=self.world_size,
+                    store=store,
+                    timeout=timedelta(seconds=10),
+                )
+
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_nccl_barrier_device_ids(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -3906,9 +3924,6 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
     def test_timeout_dumps(self, timing_enabled):
-        # We need to completely disable the coordinated timeout dump to avoid rank 0
-        # also timeout so that we set the check frequency to be very large (25 min).
-        os.environ['TORCH_NCCL_COORD_CHECK_MILSEC'] = '1500000'
 
         if self.rank == self.MAIN_PROCESS_RANK:
             # wait for rank0 to crash before looking for its output file
@@ -3945,7 +3960,7 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
 instantiate_parametrized_tests(NCCLTraceTestDumpOnTimeout)
 instantiate_parametrized_tests(NCCLTraceTest)
 
-class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
+class NCCLTraceTestTimeoutDumpOnIdleRanks(NCCLTraceTestDumpOnTimeoutBase):
     def _check_return_codes(self, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
@@ -3954,7 +3969,7 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_timeout_dumps_on_stuck_ranks(self):
+    def test_timeout_dumps_on_idle_ranks(self):
 
         if self.rank == self.MAIN_PROCESS_RANK:
             # wait for both rank0 and 1 to crash before looking for both ranks' output
@@ -3973,7 +3988,12 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
                 self.assertEqual(t[0]['state'], 'completed')
             return
 
+        # Set heartbeat timeout to a shorter one (default timeout is 2 min).
+        os.environ[
+            "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"
+        ] = f"{NCCLTraceTestDumpOnTimeoutBase.timeout_sec * 2}"
         pg = self._create_process_group_nccl()
+
         device = self.local_device
         with torch.cuda.device(device):
             a = torch.full((3, 4), float(self.rank), device=device)
@@ -3982,14 +4002,12 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
             if self.rank == 0:
                 pg.allreduce(a).wait()
 
-            # rank 0 will get stuck, timeout and then signal a timeout to all ranks.
+            # rank 0 will crash before it passes the sync, but rank1 will exit quickly and cleanly
             torch.cuda.synchronize()
 
+            # Force rank 1 to idle so that it also gets debug info dump triggered.
             if self.rank == 1:
-                # Force rank 1 to idle so that it will eventually timeout as well after
-                # getting the global signal to dump the debugging info.
-                time.sleep(600)
-
+                time.sleep(6)
 
 if __name__ == "__main__":
     assert (

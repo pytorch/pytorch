@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 class HierarchicalModelAverager(averagers.ModelAverager):
     r"""
     Runs hierarchical model averaging (`hierarchical SGD <https://arxiv.org/pdf/2010.12998.pdf>`_).
-
     Process groups of different sizes are organized in a hierarchy, and they average parameters
     by using different periods concurrently after the warm-up stage.
     This is an extension of :class:`~torch.distributed.algorithms.model_averaging.averagers.PeriodicModelAverager`
@@ -136,8 +135,8 @@ class HierarchicalModelAverager(averagers.ModelAverager):
 
     def _find_process_group(self):
         """
-        Return a process group as the value of an ``period_process_group_dict`` entry.
-
+        Returns a process group as the value of an ``period_process_group_dict`` entry,
+        if ``step`` can be divided by a period in the keys of ``period_process_group_dict``.
         If ``step`` can be divided by multiple periods in the keys of ``period_process_group_dict``,
         then the returned process group is the one corresponding to the largest period,
         since this process group will be used for averaging parameters at this ``step``.
@@ -150,9 +149,7 @@ class HierarchicalModelAverager(averagers.ModelAverager):
 
     def average_parameters(self, params: Union[Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]]):
         """
-        Averages parameters or parameter groups of an optimizer.
-
-        Averaging only occurs if ``step`` is no less than ``warmup_steps``
+        Averages parameters or parameter groups of an optimizer if ``step`` is no less than ``warmup_steps``
         and it can be divided by a period in the keys of ``period_process_group_dict``,
         where ``step`` is increased by 1 at each iteration in the training loop.
         If ``step`` can be divided by multiple periods in the keys of ``period_process_group_dict``,
