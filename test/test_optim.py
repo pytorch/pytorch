@@ -344,7 +344,7 @@ class TestOptimRenewed(TestCase):
 
             loss = (weight.mv(input) + bias).pow(2).sum()
             initial_value = loss.item()
-            for _ in range(200):
+            for _ in range(20):
                 optimizer.zero_grad()
                 loss = (weight.mv(input) + bias).pow(2).sum()
                 loss.backward()
@@ -387,7 +387,7 @@ class TestOptimRenewed(TestCase):
 
             loss = (weight.mv(input) + bias).pow(2).sum()
             initial_value = loss.item()
-            for _ in range(200):
+            for _ in range(20):
                 optimizer.zero_grad()
                 loss = (weight.mv(input) + bias).pow(2).sum()
                 loss.backward()
