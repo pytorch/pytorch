@@ -34,9 +34,6 @@ class ASGD(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        if foreach is False and capturable:
-            raise ValueError("Capturable not supported with single tensor ASGD")
-
         defaults = dict(
             lr=lr,
             lambd=lambd,
@@ -206,8 +203,6 @@ def asgd(
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_asgd
     else:
-        if capturable and not is_compiling():
-            raise RuntimeError("Capturable not supported with single tensor ASGD")
         func = _single_tensor_asgd
 
     func(
