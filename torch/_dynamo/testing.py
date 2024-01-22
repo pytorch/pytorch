@@ -255,7 +255,7 @@ def standard_test(
     if not config.assume_static_by_default and expected_ops_dynamic is not None:
         expected_ops = expected_ops_dynamic
 
-    actual = CompileCounter()
+    actual = CompileCounterWithBackend(self.backend)
 
     args1 = [torch.randn(10, 10) for _ in range(nargs)]
     args2 = [torch.randn(10, 10) for _ in range(nargs)]

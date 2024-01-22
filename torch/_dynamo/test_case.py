@@ -16,7 +16,6 @@ from . import config, reset, utils
 
 log = logging.getLogger(__name__)
 
-
 def run_tests(needs=()):
     from torch.testing._internal.common_utils import run_tests
 
@@ -58,6 +57,10 @@ class TestCase(TorchTestCase):
                 log_compilation_metrics=False,
             ),
         )
+
+    @property
+    def backend(self):
+        return torch._dynamo.config._test_backend_override
 
     def setUp(self):
         self._prior_is_grad_enabled = torch.is_grad_enabled()
