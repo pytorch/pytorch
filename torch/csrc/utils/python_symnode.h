@@ -106,7 +106,10 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
 
   c10::TensorImpl* singleton_vec() override {
     py::gil_scoped_acquire acquire;
-    return getPyObj().attr("singleton_vec")().cast<at::Tensor>().unsafeGetTensorImpl();
+    return getPyObj()
+        .attr("singleton_vec")()
+        .cast<at::Tensor>()
+        .unsafeGetTensorImpl();
   }
 
   int64_t singleton_sum_vec() override {

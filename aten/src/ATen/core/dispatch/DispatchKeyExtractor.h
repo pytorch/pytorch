@@ -167,6 +167,12 @@ public:
         for (const at::Tensor& tensor : ivalue.toTensorList()) {
           ks = ks | tensor.key_set();
         }
+      } else if (C10_UNLIKELY(ivalue.isSymIntList())) {
+        for (const auto& elt : ivalue.toSymIntVector()) {
+          if (elt.is_heap_allocated()) {
+            ks = ks | elt.toSymNode()->key_set();
+          }
+        }
       }
       // Tensor?[] translates to a c10::List<IValue> so we need to peek inside
       else if (C10_UNLIKELY(ivalue.isList())) {

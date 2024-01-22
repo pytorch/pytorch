@@ -179,6 +179,11 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
     return coeff_;
   }
 
+  // If we would like to have singleton_vec() as a virtual method, it must
+  // be defined on SymNodeImpl, which exists in c10 only. This means we cannot
+  // return normal Tensor. The workaround here is to return a pointer instead.
+  // Instead of using this method directly, please use get_singleton_vec, if you
+  // need a regular Tensor.
   c10::TensorImpl* singleton_vec() override {
     return vec_.unsafeGetTensorImpl();
   }
@@ -237,9 +242,6 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
   c10::DispatchKeySet key_set_;
 };
 
-// If we would like to have singleton_vec() as a virtual method, it must return
-// a TensorImpl* instead of a normal Tensor. We then rely on this helper to
-// wrap that back into a Tensor.
 TORCH_API at::Tensor get_singleton_vec(const c10::SymNode& node);
 
 } // namespace c10
