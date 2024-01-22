@@ -25,7 +25,7 @@ from torch.export import export, WrapperModule
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo
 from torch.utils import _pytree as pytree
 
 
@@ -61,6 +61,7 @@ def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
     return [str(arg) for arg in args]
 
 
+@skipIfTorchDynamo("recursively running dynamo on export is unlikely")
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestPasses(TestCase):
     def test_runtime_assert_one_dim(self) -> None:
@@ -302,7 +303,7 @@ class TestPasses(TestCase):
         with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint \\[2, 5\\]."):
             ep(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
 
-    def test_functionalize_inline_contraints(self) -> None:
+    def test_functionalize_inline_constraints(self) -> None:
         def f(x):
             a = x.item()
             torch._constrain_as_value(a, 4, 7)
