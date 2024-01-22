@@ -3,6 +3,7 @@
 
 import torch
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
+from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -277,6 +278,25 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertTrue(dtc.successful())
             d_out = op_call(*d_args, **d_kwargs)
             self.assertEqual(d_out.full_tensor(), out)
+
+    @with_comms
+    def test_new_full(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        placements = [[Shard(0)], [Replicate()]]
+        for placement in placements:
+            global_tensor = torch.randn(12, 8)
+            input_dt = distribute_tensor(global_tensor, device_mesh, placement)
+            # TODO: Currently CommDebugMode cannot capture communications within DTensor op dispatcher.
+            # Need to revisit the assertions once we have correct CommDebugMode support.
+            comm_mode = CommDebugMode()
+            with comm_mode:
+                new_full_dt = input_dt.new_full((4, 8), 42.0)
+                # new_full creates a replicated tensor, which should not trigger any communication.
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+            new_full_expected = torch.full((4, 8), 42.0)
+            self.assertEqual(input_dt.placements, placement)
+            self.assertTrue(new_full_dt.placements[0].is_replicate())
+            self.assertEqual(new_full_expected, new_full_dt.to_local())
 
     @with_comms
     def test_index(self):

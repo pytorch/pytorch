@@ -172,11 +172,20 @@ def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     ],
     schema_info=RuntimeSchemaInfo(1, ["dtype"]),
 )
-def new_factory_strategy(mesh: DeviceMesh, _) -> StrategyType:
+def new_factory_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # TODO: maybe we should generate all possible shardings intead of just stay
     # replicated for new factory methods
-    replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
-    return OpStrategy([PlacementStrategy(replica_spec)])
+    input_strategy = op_schema.args_schema[0]
+    new_factory_strategy = OpStrategy([])
+    assert isinstance(input_strategy, OpStrategy)
+    for arg_strategy in input_strategy.strategies:
+        input_spec = arg_strategy.out_spec
+        replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
+        new_factory_strategy.strategies.append(
+            PlacementStrategy(output_spec=replica_spec, input_specs=(input_spec,))
+        )
+
+    return new_factory_strategy
 
 
 @register_op_strategy(aten.bucketize.Tensor)
