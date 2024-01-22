@@ -33,7 +33,6 @@ from copy import copy
 from ctypes import c_void_p, cdll, CDLL
 from dataclasses import field
 from functools import partial
-from importlib import abc
 from pathlib import Path
 from threading import Thread
 from time import sleep, time
@@ -46,7 +45,7 @@ from torch._dynamo.device_interface import (
     get_interface_for_device,
     get_registered_device_interfaces,
 )
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import cache_dir, developer_warning, is_linux
@@ -642,11 +641,14 @@ class FxGraphCache:
         return [s for s in inputs if isinstance(s, torch.SymInt)]
 
     @staticmethod
-    def _get_shape_env() -> ShapeEnv:
+    def _get_shape_env() -> Optional[ShapeEnv]:
         """
         Helper to get the shape env from the tracing context.
         """
-        return torch._guards.TracingContext.get().fake_mode.shape_env
+        ctx = torch._guards.TracingContext.try_get()
+        if not ctx:
+            return None
+        return ctx.fake_mode.shape_env
 
     @staticmethod
     def _lookup_graph(
@@ -674,6 +676,7 @@ class FxGraphCache:
 
             # Evaluate the guard expression in the current context.
             shape_env = FxGraphCache._get_shape_env()
+            assert shape_env is not None
             symints = FxGraphCache._filter_symints(example_inputs)
 
             # If there's not a cache hit, we don't want the evaluation to
@@ -719,6 +722,7 @@ class FxGraphCache:
         # Tensor shapes are already captured in the hash for the cache key. Any
         # Tensor arg with a symbolic shape will have a SymInt arg for the graph.
         shape_env = FxGraphCache._get_shape_env()
+        assert shape_env is not None
         symints = FxGraphCache._filter_symints(example_inputs)
         disk_compiled_graph.guards_expr = shape_env.produce_guards_expression(symints)
 
@@ -805,11 +809,14 @@ class CompiledFxGraph:
 
     _boxed_call: Optional[bool] = None
 
+    disabled_cudagraphs_reason: Optional[str] = None
+
     def __init__(
         self,
         compiled_artifact: Optional[Callable[..., Any]],
         graph: GraphLowering,
         output_strides: List[Optional[Tuple[int, ...]]],
+        disabled_cudagraphs_reason: Optional[str],
     ):
         self.compiled_artifact = compiled_artifact
         self.cache_key = graph.cache_key
@@ -822,6 +829,7 @@ class CompiledFxGraph:
         self.constants = graph.constants
         self.output_strides = output_strides
         self.guards_expr = None
+        self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
 
     def __call__(self, inputs: List[Any]) -> Any:
         return self.get_current_callable()(inputs)
@@ -1703,6 +1711,7 @@ def cpp_prefix() -> str:
 
 # Given a path to an input cpp file and an output path,
 # Attempts to compile the file, storing the output in "output_path"
+@dynamo_timed
 def compile_file(
     input_path: Union[str, List[str]], output_path: str, cmd: List[str]
 ) -> None:
@@ -1785,7 +1794,8 @@ class CppCodeCache:
             raise
 
     @classmethod
-    def load(cls, source_code: str) -> Union[CDLL, ModuleType]:
+    def load(cls, source_code: str, cuda: bool = False) -> Union[CDLL, ModuleType]:
+        cls.cpp_compile_command_flags.update({"cuda": cuda})
         picked_vec_isa = pick_vec_isa()
         cpp_command = repr(
             cpp_compile_command(
@@ -1823,9 +1833,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         "include_pytorch": True,
         "shared": True,
     }
+    entry_function = "kernel"
+    call_entry_function = "kernel(%s);Py_RETURN_NONE;"
+    extra_parse_arg = ""
     suffix_template = textwrap.dedent(
         """
-        // Python bindings to call kernel():
+        // Python bindings to call %s():
         #define PY_SSIZE_T_CLEAN
         #include <Python.h>
         #include <sstream>
@@ -1846,14 +1859,15 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             return result;
         }
 
-        static PyObject* kernel_py(PyObject* self, PyObject* args) {
+        %s
+
+        static PyObject* %s_py(PyObject* self, PyObject* args) {
             try {
                 if(!PyTuple_CheckExact(args))
                     [[unlikely]] throw std::runtime_error("tuple args required");
                 if(PyTuple_GET_SIZE(args) != %s)
                     [[unlikely]] throw std::runtime_error("requires %s args");
-                kernel(%s);
-                Py_RETURN_NONE;
+                %s
             } catch(std::exception const& e) {
                 PyErr_SetString(PyExc_RuntimeError, e.what());
                 return nullptr;
@@ -1864,13 +1878,13 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         }
 
         static PyMethodDef py_methods[] = {
-            {"kernel", kernel_py, METH_VARARGS, ""},
+            {"%s", %s_py, METH_VARARGS, ""},
             {NULL, NULL, 0, NULL}};
 
         static struct PyModuleDef py_module =
-            {PyModuleDef_HEAD_INIT, "kernel", NULL, -1, py_methods};
+            {PyModuleDef_HEAD_INIT, "%s", NULL, -1, py_methods};
 
-        PyMODINIT_FUNC PyInit_kernel(void) {
+        PyMODINIT_FUNC PyInit_%s(void) {
             const char* str_addr = std::getenv("_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR");
             if(!str_addr) {
                 PyErr_SetString(PyExc_RuntimeError, "_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR must be set");
@@ -1892,29 +1906,62 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             torch._C._dynamo.guards._torchinductor_pyobject_tensor_data_ptr  # type: ignore[attr-defined]
         )
         return importlib.machinery.ExtensionFileLoader(
-            f"{key}.kernel", path
+            f"{key}.{cls.entry_function}", path
         ).load_module()  # type: ignore[call-arg]
 
     @classmethod
-    def load_pybinding(cls, argtypes: List[str], source_code: str) -> Any:
+    def load_pybinding(
+        cls, argtypes: List[str], source_code: str, cuda: bool = False
+    ) -> Any:
         """
         Wrap a C++ function in fast Python bindings.
 
         Args:
-            argtypes: The types of args to kernel(), e.g. ["float*", "long"]
-            source_code: C++ source code containing a kernel() function
+            argtypes: The types of args to ENTRY_FUNCTION(), e.g. ["float*", "long"]
+            source_code: C++ source code containing a ENTRY_FUNCTION() function
 
         Returns:
-            A python version of kernel()
+            A python version of ENTRY_FUNCTION()
         """
         parseargs = ", ".join(
             f"parse_arg<{argtype.replace('const ', '')}>(args, {n})"
             for n, argtype in enumerate(argtypes)
         )
-        suffix = cls.suffix_template % (len(argtypes), len(argtypes), parseargs)
-        result = cls.load(source_code + suffix)
+        suffix = cls.suffix_template % (
+            cls.entry_function,
+            cls.extra_parse_arg,
+            cls.entry_function,
+            len(argtypes),
+            len(argtypes),
+            cls.call_entry_function % parseargs,
+            cls.entry_function,
+            cls.entry_function,
+            cls.entry_function,
+            cls.entry_function,
+        )
+        result = cls.load(source_code + suffix, cuda)
         assert isinstance(result, ModuleType)
-        return result.kernel
+        return getattr(result, cls.entry_function)
+
+
+class CppWrapperCodeCache(CppPythonBindingsCodeCache):
+    cache: Dict[str, Union[CDLL, ModuleType]] = {}
+    clear = staticmethod(cache.clear)
+    cpp_compile_command_flags = {
+        "include_pytorch": True,
+        "shared": True,
+    }
+    entry_function = "inductor_entry_cpp"
+    call_entry_function = "return THPVariable_WrapList(inductor_entry_cpp(%s));"
+    extra_parse_arg = textwrap.dedent(
+        """
+        #include <torch/csrc/autograd/python_variable.h>
+
+        template <> inline std::vector<at::Tensor> parse_arg<std::vector<at::Tensor>>(PyObject* args, size_t n) {
+            return THPVariable_UnpackList(PyTuple_GET_ITEM(args, n));
+        }
+        """
+    )
 
 
 class PyCodeCache:
@@ -1998,81 +2045,6 @@ class PyCodeCache:
             ]
 
         return parse_stack_trace(entry)
-
-
-class CppWrapperCodeCache:
-    cache: Dict[str, CDLL] = dict()
-    clear = staticmethod(cache.clear)
-
-    @classmethod
-    def load(cls, source_code: str, func_name: str, key: str, cuda: bool) -> CDLL:
-        name = f"inline_extension_{key}"
-        cpp_wrapper_dir = cpp_wrapper_cache_dir(name)
-        os.makedirs(cpp_wrapper_dir, exist_ok=True)
-
-        ext = "so"
-        filepath = os.path.join(cpp_wrapper_dir, f"{name}.{ext}")
-        log.debug("Cpp wrapper code path %s", filepath)
-
-        if key not in cls.cache:
-            log.debug("Cpp wrapper cache miss for %s", filepath)
-            from filelock import FileLock
-
-            lock_dir = get_lock_dir()
-            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-            with lock:
-                if not os.path.exists(filepath):
-                    log.debug("Cpp wrapper building %s", filepath)
-
-                    _cpp_flags = cpp_flags()
-                    _opt_flags = optimization_flags()
-                    _shared = get_shared()
-                    _warning_all_flag = get_warning_all_flag()
-                    (
-                        _ipaths,
-                        _lpaths,
-                        _libs,
-                        _macros,
-                        _build_arch_flags,
-                    ) = get_include_and_linking_paths(
-                        vec_isa=pick_vec_isa(),
-                        cuda=cuda,
-                    )
-                    _use_custom_generated_macros = use_custom_generated_macros()
-                    _cpp_wrapper_flags = cpp_wrapper_flags()
-
-                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_build_arch_flags} {_macros} \
-                    {_cpp_wrapper_flags} {_use_custom_generated_macros}"
-                    # For CPP wrapper, add -ffast-math during linking to make CPU flush denormals.
-                    # CPP wrapper leverages cpp_extension which will do the compilation and linking in two stages.
-                    # We need to explicitly add -ffast-math as a linking flag.
-                    # For the default python wrapper, the compilation and linking are done in one command thus -ffast-math
-                    # will take effect in both compilation and linking.
-                    extra_ldflags = f"{_shared} {_lpaths} {_libs} -ffast-math"
-
-                    mod = torch.utils.cpp_extension.load_inline(
-                        name=name,
-                        build_directory=cpp_wrapper_dir,
-                        cpp_sources=[source_code],
-                        functions=[func_name],
-                        extra_cflags=[extra_cflags],
-                        extra_ldflags=[extra_ldflags],
-                        extra_include_paths=_ipaths,
-                        use_pch=True,
-                    )
-                    log.debug("Cpp wrapper done building %s", filepath)
-                else:
-                    log.debug("Found target .so, cpp wrapper loading %s", filepath)
-                    spec = importlib.util.spec_from_file_location(name, filepath)  # type: ignore[attr-defined]
-                    assert spec is not None
-                    mod = importlib.util.module_from_spec(spec)  # type: ignore[attr-defined]
-                    assert isinstance(spec.loader, abc.Loader)
-                    spec.loader.exec_module(mod)
-                    log.debug("Cpp wrapper done loading %s", filepath)
-
-                cls.cache[key] = mod
-
-        return cls.cache[key]
 
 
 class TritonCodeCache:
@@ -2521,6 +2493,18 @@ class AsyncCompile:
             return TritonFuture(kernel_name, source_code, future)
         else:
             return _load_kernel(kernel_name, source_code)
+
+    def multi_kernel(self, *args, **kwargs) -> ModuleType:
+        """
+        Async compile the python shim for multi-kernel.
+        """
+
+        def task():
+            from torch._inductor.codegen.multi_kernel import MultiKernelCall
+
+            return MultiKernelCall(*args, **kwargs)
+
+        return self.submit(task)
 
     def cpp(self, source_code: str) -> ModuleType:
         def task():

@@ -576,6 +576,21 @@ class CPUReproTests(TestCase):
                 (value, mask),
             )
 
+    def test_relu_with_inf_value(self):
+        # https://github.com/pytorch/pytorch/issues/117544.
+
+        def fn(out):
+            out = torch.sinh(input=out)
+            out = torch.relu(input=out)
+            return out
+
+        x = torch.Tensor([-572373.5000, 755109.1250, 330995.5625])
+        with torch.no_grad():
+            self.common(
+                fn,
+                (x,),
+            )
+
     @config.patch(implicit_fallbacks=True)
     def test_repeat_interleave(self):
         def fn(y):
@@ -874,6 +889,7 @@ class CPUReproTests(TestCase):
                 scale = torch.tensor(scale)
             with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
+                torch._inductor.codecache.FxGraphCache.clear()
                 metrics.reset()
                 self.common(fn, (x, scale, zero_point, use_dequant, use_quant))
                 assert metrics.generated_cpp_vec_kernel_count == 1
