@@ -6,7 +6,7 @@ import torch
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import (
     _ProxyTensor,
-    fetch_object_proxy,
+    fetch_tensor_proxy,
     get_innermost_proxy_mode,
     get_proxy_slot,
     set_proxy_slot,
@@ -193,7 +193,7 @@ class CommTensor(torch.Tensor):
                     lambda e: e.proxy,
                     tree_map_only(
                         torch.Tensor,
-                        fetch_object_proxy(tracer),
+                        fetch_tensor_proxy(tracer),
                         (unwrapped_args, unwrapped_kwargs),
                     ),
                 )

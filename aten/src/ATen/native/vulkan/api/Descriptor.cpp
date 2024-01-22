@@ -1,7 +1,6 @@
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Utils.h>
 
-#include <algorithm>
 #include <utility>
 
 namespace at {
@@ -77,7 +76,7 @@ DescriptorSet& DescriptorSet::bind(
 }
 
 VkDescriptorSet DescriptorSet::get_bind_handle() const {
-  std::vector<VkWriteDescriptorSet> write_descriptor_sets;
+  c10::SmallVector<VkWriteDescriptorSet, 6u> write_descriptor_sets;
 
   for (const ResourceBinding& binding : bindings_) {
     VkWriteDescriptorSet write{
@@ -195,7 +194,7 @@ DescriptorPool::DescriptorPool(
       config_(config),
       mutex_{},
       piles_{} {
-  std::vector<VkDescriptorPoolSize> type_sizes{
+  c10::SmallVector<VkDescriptorPoolSize, 4u> type_sizes{
       {
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           config_.descriptorUniformBufferCount,

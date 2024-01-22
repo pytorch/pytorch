@@ -35,7 +35,6 @@ Exceptions
 .. autoclass:: RendezvousTimeoutError
 .. autoclass:: RendezvousConnectionError
 .. autoclass:: RendezvousStateError
-.. autoclass:: RendezvousGracefulExitError
 
 Implementations
 ---------------

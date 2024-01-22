@@ -20,7 +20,7 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils import _pytree as pytree
 
 
-__all__ = ["_ExportPassBaseDeprecatedDoNotUse"]
+__all__ = ["_ExportPassBase"]
 
 
 Argument = Any
@@ -43,7 +43,7 @@ class ExportPassBaseError(RuntimeError):
     pass
 
 
-class _ExportPassBaseDeprecatedDoNotUse(PassBase):
+class _ExportPassBase(PassBase):
     """
     Interpreter-based pass class to help users maintain the IR spec while writing
     transformations.
@@ -55,7 +55,10 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
 
 
     class ExportTracer(PythonKeyTracer):
-        def __init__(self, callback: "_ExportPassBaseDeprecatedDoNotUse", codegen: CodeGen) -> None:
+        """
+        Tracer used to create nodes during the retracing part of the Expo_ExportPassBasertPassBase
+        """
+        def __init__(self, callback: "_ExportPassBase", codegen: CodeGen) -> None:
             super().__init__()
             self.callback = callback
             self.root = torch.nn.Module()
@@ -150,7 +153,10 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             node.meta["tensor_meta"] = pytree.tree_map(make_tensor_meta, value)
 
     class ExportInterpreter(fx.Interpreter):
-        def __init__(self, callback: "_ExportPassBaseDeprecatedDoNotUse", gm: fx.GraphModule) -> None:
+        """
+        Interpreter to callback on any _ExportPassBase functions
+        """
+        def __init__(self, callback: "_ExportPassBase", gm: fx.GraphModule) -> None:
             super().__init__(gm)
             self.callback = callback
             self.node: torch.fx.Node = next(iter(gm.graph.nodes))
@@ -200,8 +206,8 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                 pred, true_fn, false_fn, inputs = args
                 return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
             elif target == torch.ops.higher_order.map_impl:
-                f, mapped_args, operands = args  # type: ignore[assignment]
-                return self.callback.call_map(f, mapped_args, operands, meta)
+                f, num_args, *rest = args  # type: ignore[assignment]
+                return self.callback.call_map(f, num_args, list(rest), meta)
             # For other unregistered HigherOrderOps, just interpret them blindly
             elif isinstance(target, torch._ops.HigherOrderOperator):
                 return self.callback._fx(
@@ -357,17 +363,18 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
     def call_map(
         self,
         f: torch.fx.GraphModule,
-        mapped_args: List[ProxyValue],
-        operands: List[ProxyValue],
+        num_args: int,
+        args: List[ProxyValue],
         meta: NodeMetadata,
     ) -> ProxyValue:
-        xs = _unstack_pytree([arg.data for arg in mapped_args])[0]
-        f_branch = self.call_submodule(f, tuple(xs + [arg.data for arg in operands]))
+        xs = _unstack_pytree([arg.data for arg in args[:num_args]])[0]
+        pos_args = args[num_args:]
+        f_branch = self.call_submodule(f, tuple(xs + [arg.data for arg in pos_args]))
         assert f_branch is not None
         return self._fx(
             "call_function",
             torch.ops.higher_order.map_impl,
-            (f_branch.graph_module, mapped_args, operands),
+            (f_branch.graph_module, num_args, *args),
             {},
             meta,
         )

@@ -17,7 +17,8 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 struct Node;
 struct Value;
 struct Graph;
@@ -381,13 +382,13 @@ TORCH_API void ensureUniqueIfOutOfPlaced(
 
 template <
     typename T,
-    typename = torch::enable_if_t<
-        (!std::is_convertible_v<torch::decay_t<T>, at::TensorList> &&
-         !std::is_convertible_v<torch::decay_t<T>, c10::List<at::Tensor>> &&
-         !std::is_convertible_v<torch::decay_t<T>, at::Tensor> &&
-         !std::is_convertible_v<
-             torch::decay_t<T>,
-             c10::intrusive_ptr<c10::ivalue::Object>>)>>
+    typename = torch::enable_if_t<(
+        !std::is_convertible<torch::decay_t<T>, at::TensorList>::value &&
+        !std::is_convertible<torch::decay_t<T>, c10::List<at::Tensor>>::value &&
+        !std::is_convertible<torch::decay_t<T>, at::Tensor>::value &&
+        !std::is_convertible<
+            torch::decay_t<T>,
+            c10::intrusive_ptr<c10::ivalue::Object>>::value)>>
 void addOutput(Node* node, T&&) {
   AT_ERROR(
       "Found an unsupported argument type ",
@@ -409,4 +410,5 @@ TORCH_API autograd::Variable getSizeOf(
 TORCH_API autograd::Variable getNumelOf(const autograd::Variable& var);
 
 } // namespace tracer
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

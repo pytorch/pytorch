@@ -5,8 +5,10 @@
 
 #include <torch/csrc/python_headers.h>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 void init_legacy_variable(PyObject* module);
 
 }
+} // namespace torch

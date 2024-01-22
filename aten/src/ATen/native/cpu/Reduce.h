@@ -7,7 +7,6 @@
 #include <c10/util/irange.h>
 
 #include <sstream>
-#include <type_traits>
 
 namespace at { namespace native { inline namespace CPU_CAPABILITY {
 
@@ -155,7 +154,7 @@ static void set_results(const std::tuple<res_t...>& result, const TensorIterator
 }
 
 template <typename T, typename... Args>
-struct all_same : std::conjunction<
+struct all_same : guts::conjunction<
   std::is_same<T, Args>...
 > {};
 

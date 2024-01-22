@@ -14,19 +14,15 @@ from torch._export.db.case import export_case, ExportArgs, SupportLevel
     tags={"python.data-structure"},
     support_level=SupportLevel.SUPPORTED,
 )
-class FnWithKwargs(torch.nn.Module):
+def fn_with_kwargs(pos0, tuple0, *myargs, mykw0, **mykwargs):
     """
     Keyword arguments are not supported at the moment.
     """
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, pos0, tuple0, *myargs, mykw0, **mykwargs):
-        out = pos0
-        for arg in tuple0:
-            out = out * arg
-        for arg in myargs:
-            out = out * arg
-        out = out * mykw0
-        out = out * mykwargs["input0"] * mykwargs["input1"]
-        return out
+    out = pos0
+    for arg in tuple0:
+        out = out * arg
+    for arg in myargs:
+        out = out * arg
+    out = out * mykw0
+    out = out * mykwargs["input0"] * mykwargs["input1"]
+    return out

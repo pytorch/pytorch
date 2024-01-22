@@ -129,9 +129,6 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   conda-py3_8-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
     needs: conda-py3_8-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
@@ -147,6 +144,8 @@ jobs:
       use_s3: False
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -247,9 +246,6 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   conda-py3_9-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
     needs: conda-py3_9-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
@@ -265,6 +261,8 @@ jobs:
       use_s3: False
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -365,9 +363,6 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   conda-py3_10-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
     needs: conda-py3_10-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
@@ -383,6 +378,8 @@ jobs:
       use_s3: False
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -483,9 +480,6 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   conda-py3_11-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
     needs: conda-py3_11-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
@@ -501,6 +495,8 @@ jobs:
       use_s3: False
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -601,9 +597,6 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   conda-py3_12-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
     needs: conda-py3_12-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
@@ -619,6 +612,8 @@ jobs:
       use_s3: False
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml

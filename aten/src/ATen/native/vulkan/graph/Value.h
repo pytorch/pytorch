@@ -8,6 +8,7 @@
 #include <ATen/native/vulkan/api/Tensor.h>
 
 #include <ATen/native/vulkan/graph/Constant.h>
+#include <ATen/native/vulkan/graph/Exception.h>
 #include <ATen/native/vulkan/graph/Types.h>
 
 namespace at {
@@ -110,7 +111,7 @@ struct Value final {
   }
 
   inline vTensor& toTensor() {
-    VK_CHECK_COND(
+    VKGRAPH_CHECK(
         isTensor(),
         "Expected value to have type TENSOR, got ",
         tag,
@@ -131,7 +132,7 @@ struct Value final {
   }
 
   inline api::StorageBuffer& toStaging() {
-    VK_CHECK_COND(
+    VKGRAPH_CHECK(
         isStaging(),
         "Expected value to have type STAGING, got ",
         tag,
@@ -152,7 +153,7 @@ struct Value final {
   }
 
   inline TensorRef& toTensorRef() {
-    VK_CHECK_COND(
+    VKGRAPH_CHECK(
         isTensorRef(),
         "Expected value to have type TENSORREF, got ",
         tag,

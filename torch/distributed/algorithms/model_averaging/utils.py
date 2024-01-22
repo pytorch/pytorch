@@ -16,7 +16,6 @@ def average_parameters(
 ):
     """
     Averages all the given parameters.
-
     For allreduce efficiency, all the parameters are flattened into a contiguous buffer.
     Thus, it requires extra memory of the same size as the given parameters.
     """
@@ -44,9 +43,7 @@ def average_parameters(
 
 def get_params_to_average(params: Union[Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]]):
     """
-    Return a list of parameters that need to average.
-
-    This filters out the parameters that do not contain any gradients.
+    Returns a list of parameters that need to average, which filters out the parameters that do not contain any gradients.
     Args:
         params: The parameters of a model or parameter groups of an optimizer.
     """
@@ -68,5 +65,7 @@ def get_params_to_average(params: Union[Iterable[torch.nn.Parameter], Iterable[D
 
 
 def average_parameters_or_parameter_groups(params: Union[Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]], process_group: ProcessGroup):
-    """Averages parameters of a model or parameter groups of an optimizer."""
+    """
+    Averages parameters of a model or parameter groups of an optimizer.
+    """
     average_parameters(iter(get_params_to_average(params)), process_group)

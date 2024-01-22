@@ -11,13 +11,9 @@ dim1_x = Dim("dim1_x")
     tags={"torch.dynamic-shape"},
     dynamic_shapes={"x": {1: dim1_x}},
 )
-class ScalarOutput(torch.nn.Module):
+def scalar_output(x):
     """
     Returning scalar values from the graph is supported, in addition to Tensor
     outputs. Symbolic shapes are captured and rank is specialized.
     """
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        return x.shape[1] + 1
+    return x.shape[1] + 1

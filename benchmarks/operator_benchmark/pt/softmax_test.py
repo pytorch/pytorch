@@ -24,12 +24,7 @@ softmax_configs_short = op_bench.config_list(
 
 
 softmax_configs_long = op_bench.cross_product_configs(
-    N=[8, 16],
-    C=[3],
-    H=[256, 512],
-    W=[256, 512],
-    device=["cpu", "cuda"],
-    tags=["long"],
+    N=[8, 16], C=[3], H=[256, 512], W=[256, 512], device=["cpu", "cuda"], tags=["long"]
 )
 
 
@@ -45,30 +40,14 @@ softmax_ops_list = op_bench.op_list(
 softmax_two_dims_ops_list = op_bench.op_list(
     attr_names=["op_name", "op_func"],
     attrs=[
-        ["Softmax", nn.Softmax],
         ["LogSoftmax", nn.LogSoftmax],
     ],
 )
 
 
 softmax_two_dims_configs = op_bench.config_list(
-    attr_names=["M", "N", "dim"],
-    attrs=[
-        [700, 23258, 0],
-        [700, 23258, 1],
-        [1024, 23258, 1],
-        [128, 128, 1],
-        [48, 128, 1],
-        [16, 1024, 1],
-        [32, 1024, 1],
-        [48, 1024, 1],
-        [16, 512, 1],
-        [32, 512, 1],
-        [48, 512, 1],
-        [16, 256, 1],
-        [32, 256, 1],
-        [48, 256, 1],
-    ],
+    attr_names=["N", "seq_len", "dim"],
+    attrs=[[700, 23258, 0], [700, 23258, 1], [1024, 23258, 1]],
     cross_product_configs={
         "device": ["cpu", "cuda"],
     },
@@ -86,8 +65,8 @@ class SoftmaxBenchmark(op_bench.TorchBenchmarkBase):
 
 
 class Softmax2DimsBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, dim, device, op_func):
-        self.inputs = {"input": torch.rand(M, N, device=device)}
+    def init(self, N, seq_len, dim, device, op_func):
+        self.inputs = {"input": torch.rand(N, seq_len, device=device)}
         self.op_func = op_func(dim=dim)
 
     def forward(self, input):

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/DeviceGuard.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/macros/Macros.h>
@@ -10,13 +11,7 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
 
-#include <c10/core/Device.h>
-#include <c10/core/DeviceType.h>
-#include <c10/core/Stream.h>
-#include <c10/core/impl/PyInterpreter.h>
-#include <c10/util/Optional.h>
 #include <cuda_runtime_api.h>
-#include <cstdint>
 
 namespace c10 {
 namespace cuda {
@@ -35,21 +30,21 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   Device exchangeDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_cuda());
     int old_device_index = c10::cuda::ExchangeDevice(d.index());
-    return Device(DeviceType::CUDA, static_cast<DeviceIndex>(old_device_index));
+    return Device(DeviceType::CUDA, old_device_index);
   }
   Device getDevice() const override {
-    int device = 0;
+    int device;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    return Device(DeviceType::CUDA, static_cast<DeviceIndex>(device));
+    return Device(DeviceType::CUDA, device);
   }
   c10::optional<Device> uncheckedGetDevice() const noexcept {
-    int device = 0;
+    int device;
     const auto err = C10_CUDA_ERROR_HANDLED(c10::cuda::GetDevice(&device));
     C10_CUDA_CHECK_WARN(err);
     if (err != cudaSuccess) {
       return c10::nullopt;
     }
-    return Device(DeviceType::CUDA, static_cast<DeviceIndex>(device));
+    return Device(DeviceType::CUDA, device);
   }
   void setDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_cuda());
@@ -109,7 +104,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     if (!event)
       return;
     auto cuda_event = static_cast<cudaEvent_t>(event);
-    int orig_device = 0;
+    int orig_device;
     C10_CUDA_CHECK_WARN(c10::cuda::GetDevice(&orig_device));
     C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(device_index));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();

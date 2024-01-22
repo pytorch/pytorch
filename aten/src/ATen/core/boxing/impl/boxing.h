@@ -10,7 +10,6 @@
 #include <ATen/core/boxing/BoxedKernel.h>
 
 #include <c10/util/Metaprogramming.h>
-#include <type_traits>
 
 namespace c10 {
 namespace impl {
@@ -39,7 +38,7 @@ template <class T, class Enable = void>
 struct has_ivalue_to : std::false_type {};
 
 template <class T>
-struct has_ivalue_to<T, std::void_t<decltype(std::declval<IValue>().to<T>())>>
+struct has_ivalue_to<T, guts::void_t<decltype(std::declval<IValue>().to<T>())>>
 : std::true_type
 {};
 
@@ -50,7 +49,7 @@ struct has_ivalue_to<T, std::void_t<decltype(std::declval<IValue>().to<T>())>>
 // A boxable arg type is one that IValue has a constructor for.
 template <typename T>
 using can_box =
-  std::disjunction<
+  guts::disjunction<
     std::is_constructible<IValue, std::decay_t<T>>,
     // TensorOptions are not directly constructible into IValue,
     // but torch::jit::push knows how to handle them
@@ -58,18 +57,18 @@ using can_box =
   >;
 
 template <typename... Ts>
-using can_box_all = std::conjunction<can_box<Ts>...>;
+using can_box_all = guts::conjunction<can_box<Ts>...>;
 
 // an unboxable result is one that can be extracted from an IValue
 template <typename T>
 using can_unbox =
-   std::conjunction<
-    std::disjunction<
+  guts::conjunction<
+    guts::disjunction<
       has_ivalue_to<T>,
       // void returns are ok
       std::is_same<void, T>
     >,
-    std::negation<std::is_lvalue_reference<T>>
+    guts::negation<std::is_lvalue_reference<T>>
   >;
 
 //

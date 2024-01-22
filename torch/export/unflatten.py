@@ -112,7 +112,7 @@ class InterpreterModule(torch.nn.Module):
 
 class FlatArgsAdapter(abc.ABC):
     """
-    Adapts input arguments with ``input_spec`` to align ``target_spec``.
+    Adapts input arguments with `input_spec` to align `target_spec`.
     """
 
     @abc.abstractmethod
@@ -122,7 +122,7 @@ class FlatArgsAdapter(abc.ABC):
         input_spec: pytree.TreeSpec,
         input_args: List[Any],
     ) -> List[Any]:
-        """NOTE: This adapter may mutate given ``flat_args``."""
+        """NOTE: This adapter may mutate given `flat_args`."""
         ...
 
 
@@ -148,7 +148,7 @@ class UnflattenedModule(torch.nn.Module):
         _outline_submodules(export_graph, self)
 
         self.range_constraints = export_module.range_constraints
-        self.equality_constraints: List = []
+        self.equality_constraints = export_module.equality_constraints
 
         state_dict = export_module.state_dict
         for name in self.graph_signature.parameters:
@@ -192,15 +192,11 @@ class UnflattenedModule(torch.nn.Module):
         self.check_input_constraints = True
 
     def forward(self, *args, **kwargs):
-        flat_args, in_spec = pytree.tree_flatten((args, kwargs))
         if is_fx_tracing():
-            return_val = torch.fx.Interpreter(self, graph=self.graph).run(
-                *flat_args, enable_io_processing=False
+            return torch.fx.Interpreter(self, graph=self.graph).run(
+                *args, enable_io_processing=False
             )
-            # For scalar return value, fx.Graph wraps in a tuple
-            if isinstance(return_val, tuple) and len(return_val) == 1:
-                return return_val[0]
-            return return_val
+        flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
         assert self.module_call_graph[0].fqn == ""
         signature = self.module_call_graph[0].signature
@@ -255,10 +251,10 @@ def unflatten(
     hierachy instead of the flat graph that :mod:`torch.export` usually produces.
 
     .. note:: The args/kwargs of unflattened modules will not necessarily match
-        the eager module, so doing a module swap (e.g. :code:`self.submod =
-        new_mod`) will not necessarily work. If you need to swap a module out, you
-        need to set the :code:`preserve_module_call_signature` parameter of
-        :func:`torch.export.export`.
+    the eager module, so doing a module swap (e.g. :code:`self.submod =
+    new_mod`) will not necessarily work. If you need to swap a module out, you
+    need to set the :code:`preserve_module_call_signature` parameter of
+    :func:`torch.export.export`.
 
     Args:
         module (ExportedProgram): The ExportedProgram to unflatten.
@@ -760,8 +756,7 @@ def _sink_params(
         return
 
     graph = module.graph
-    inputs = list(filter(lambda n: n.op == "placeholder", graph.nodes))
-    the_last_input = inputs[-1]
+    inputs = filter(lambda n: n.op == "placeholder", graph.nodes)
 
     # Also remove from call_module nodes
     call_module_nodes = filter(lambda n: n.op == "call_module", graph.nodes)
@@ -787,8 +782,7 @@ def _sink_params(
             state_attr = _recursive_getattr(module, attr_path)
             assert isinstance(state_attr, torch.Tensor)
 
-            # Make sure the newly created get_attr node is placed after the last placeholder node
-            with graph.inserting_after(the_last_input):
+            with graph.inserting_after(node):
                 new_node = graph.create_node("get_attr", ".".join(attr_path))
 
             node.replace_all_uses_with(new_node, propagate_meta=True)

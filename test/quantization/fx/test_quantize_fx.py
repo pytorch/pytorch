@@ -191,7 +191,6 @@ from torch.testing._internal.common_quantized import (
 from torch.testing._internal.common_utils import (
     TemporaryFileName,
     IS_ARM64,
-    skipIfTorchDynamo,
 )
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
@@ -9262,7 +9261,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 out = model_quantized(input.to(device_after))
                 self.assertEqual(out.device.type, device_after)
 
-    @skipIfTorchDynamo("too slow")
     @skip_if_no_torchvision
     def test_model_dropout(self):
         from torchvision import models

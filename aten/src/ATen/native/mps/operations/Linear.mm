@@ -68,26 +68,31 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const c10::opt
                                                               dimension:-1
                                                           withDimension:-2
                                                                    name:nil];
-      // matrixMultiplicationWithPrimary crashes for 5D tensors, see https://github.com/pytorch/pytorch/issues/114942
-      bool doReshape = input.dim() > 4;
-      if (!doReshape && is_bias_defined) {
-        // workaround to improve the performance with 3D+ inputs
-        doReshape =
-            input_size.size() > 2 && input_size[0] > 1 && input_size[1] >= 1 && input_size[1] <= 32 && bias.dim() <= 1;
-      }
-      auto inputFlattened = doReshape ? [mpsGraph flatten2DTensor:inputTensor axis:-1 name:nil] : inputTensor;
-      auto outputTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:inputFlattened
-                                                          secondaryTensor:weightTransposeTensor
-                                                                     name:nil];
+      MPSGraphTensor* outputTensor = nil;
 
-      if (is_bias_defined) {
+      if (!is_bias_defined) {
+        outputTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:inputTensor
+                                                       secondaryTensor:weightTransposeTensor
+                                                                  name:nil];
+      } else {
+        MPSGraphTensor* inputFlattened = inputTensor;
+        bool doReshape = false;
+        // workaround to improve the performance with 3D+ inputs
+        if (input_size.size() > 2 && input_size[0] > 1 && input_size[1] >= 1 && input_size[1] <= 32 &&
+            bias.dim() <= 1) {
+          doReshape = true;
+          inputFlattened = [mpsGraph flatten2DTensor:inputTensor axis:-1 name:nil];
+        }
+
         newCachedGraph->biasTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, bias);
-        outputTensor = [mpsGraph additionWithPrimaryTensor:outputTensor
-                                           secondaryTensor:newCachedGraph->biasTensor_
-                                                      name:nil];
-      }
-      if (doReshape) {
-        outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:getMPSShape(output_size) name:nil];
+        MPSGraphTensor* xMulWTTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:inputFlattened
+                                                                       secondaryTensor:weightTransposeTensor
+                                                                                  name:nil];
+        MPSGraphTensor* biasedTensor = [mpsGraph additionWithPrimaryTensor:xMulWTTensor
+                                                           secondaryTensor:newCachedGraph->biasTensor_
+                                                                      name:nil];
+        outputTensor = doReshape ? [mpsGraph reshapeTensor:biasedTensor withShape:getMPSShape(output_size) name:nil]
+                                 : biasedTensor;
       }
 
       newCachedGraph->inputTensor_ = inputTensor;
@@ -154,23 +159,15 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
   @autoreleasepool {
     string key = "mps_linear_backward_input" + getTensorsStringKey({grad_output, weight_reshaped});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
-      newCachedGraph->weightTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, weight_reshaped);
-      newCachedGraph->gradOutputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
+      MPSGraphTensor* weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight_reshaped);
+      MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
 
-      // MPS matrixMultiplication crashes for 5D+ tensors on 14.2.1 with `New volume should match old volume`
-      // See https://github.com/pytorch/pytorch/issues/114942 for more details
-      bool needReshape = grad_output.dim() > 4;
-      auto gradOutputTensor = needReshape
-          ? [mpsGraph flatten2DTensor:newCachedGraph->gradOutputTensor_ axis:-1 name:nil]
-          : newCachedGraph->gradOutputTensor_;
+      MPSGraphTensor* outputTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:gradOutputTensor
+                                                                     secondaryTensor:weightTensor
+                                                                                name:nil];
 
-      auto outputTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:gradOutputTensor
-                                                          secondaryTensor:newCachedGraph->weightTensor_
-                                                                     name:nil];
-      if (needReshape) {
-        outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:getMPSShape(output) name:nil];
-      }
-
+      newCachedGraph->weightTensor_ = weightTensor;
+      newCachedGraph->gradOutputTensor_ = gradOutputTensor;
       newCachedGraph->outputTensor_ = outputTensor;
     });
 

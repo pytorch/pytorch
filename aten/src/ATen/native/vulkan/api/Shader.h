@@ -4,13 +4,13 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/vk_api.h>
-
+#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Types.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <c10/util/flat_hash_map.h>
+#include <c10/util/hash.h>
 
 #include <mutex>
-#include <unordered_map>
 
 namespace at {
 namespace native {
@@ -19,7 +19,7 @@ namespace api {
 
 class ShaderLayout final {
  public:
-  using Signature = std::vector<VkDescriptorType>;
+  using Signature = c10::SmallVector<VkDescriptorType, 6u>;
 
   explicit ShaderLayout(VkDevice, const Signature&);
 
@@ -58,7 +58,7 @@ struct ShaderInfo final {
   // Shader Metadata
   utils::uvec3 out_tile_size{1u, 1u, 1u};
 
-  std::vector<uint32_t> tile_size;
+  c10::SmallVector<uint32_t, 4> tile_size;
   StorageType bias_storage_type{StorageType::UNKNOWN};
   StorageType weight_storage_type{StorageType::UNKNOWN};
 
@@ -68,12 +68,12 @@ struct ShaderInfo final {
       std::string,
       const uint32_t*,
       const uint32_t,
-      std::vector<VkDescriptorType>);
+      const std::vector<VkDescriptorType>&);
   explicit ShaderInfo(
       std::string,
       const uint32_t*,
       const uint32_t,
-      std::vector<VkDescriptorType>,
+      const std::vector<VkDescriptorType>&,
       const std::vector<uint32_t>& tile_size,
       const StorageType bias_storage_type,
       const StorageType weight_storage_type);
@@ -128,8 +128,7 @@ class ShaderLayoutCache final {
       size_t hashed = 0u;
 
       for (const VkDescriptorType type : signature) {
-        hashed =
-            utils::hash_combine(hashed, std::hash<VkDescriptorType>()(type));
+        hashed = c10::hash_combine(hashed, c10::get_hash(type));
       }
 
       return hashed;
@@ -142,7 +141,7 @@ class ShaderLayoutCache final {
   std::mutex cache_mutex_;
 
   VkDevice device_;
-  std::unordered_map<Key, Value, Hasher> cache_;
+  ska::flat_hash_map<Key, Value, Hasher> cache_;
 
  public:
   VkDescriptorSetLayout retrieve(const Key&);
@@ -166,13 +165,7 @@ class ShaderCache final {
 
   struct Hasher {
     inline size_t operator()(const ShaderInfo& source) const {
-      size_t seed = 0;
-      seed = utils::hash_combine(
-          seed, std::hash<const uint32_t*>()(source.src_code.bin));
-      seed = utils::hash_combine(
-          seed, std::hash<uint32_t>()(source.src_code.size));
-
-      return seed;
+      return c10::get_hash(source.src_code.bin, source.src_code.size);
     }
   };
 
@@ -182,7 +175,7 @@ class ShaderCache final {
   std::mutex cache_mutex_;
 
   VkDevice device_;
-  std::unordered_map<Key, Value, Hasher> cache_;
+  ska::flat_hash_map<Key, Value, Hasher> cache_;
 
  public:
   VkShaderModule retrieve(const Key&);

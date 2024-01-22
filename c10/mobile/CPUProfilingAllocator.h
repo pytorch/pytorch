@@ -1,9 +1,6 @@
 #pragma once
 
-#include <c10/macros/Export.h>
 #include <c10/util/flat_hash_map.h>
-#include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <vector>
 

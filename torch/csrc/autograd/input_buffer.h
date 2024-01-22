@@ -5,6 +5,7 @@
 // values in-place (adding an input twice will accumulate the result).
 // This behaviour is needed and used only in backward graphs.
 
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -12,7 +13,8 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/autograd/variable.h>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 struct InputBuffer {
   explicit InputBuffer(size_t size) : buffer(size) {}
@@ -42,4 +44,5 @@ struct InputBuffer {
   std::vector<Variable> buffer;
 };
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

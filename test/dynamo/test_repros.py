@@ -15,7 +15,6 @@ import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
-from enum import Enum
 from functools import wraps
 from typing import List
 
@@ -1040,27 +1039,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(a_ref.grad, a_test.grad)
         self.assertEqual(b_ref.grad, b_test.grad)
 
-    # https://github.com/pytorch/pytorch/issues/111603
-    def test_tuple_enum_as_key_dict(self):
-        class MyEnum(Enum):
-            A = "a"
-
-        class SomeModel(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(1, 1)
-
-            def forward(self, x) -> torch.Tensor:
-                return self.linear(x[MyEnum.A])
-
-        x = {MyEnum.A: torch.rand(8, 1)}
-        model_pytorch = SomeModel()
-        model = torch.compile(model_pytorch)
-        # Executing twice works
-        model(x)
-        y = model(x)
-        self.assertEqual(y, model_pytorch(x))
-
     def test_embedding_backward_broadcasting_decomp(self):
         def f(grad_output, indices):
             num_weights = 10
@@ -1508,35 +1486,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 4)
-
-    def test_issue114171(self):
-        device = torch.device("cpu")
-
-        def fcnn(in_dim, out_dim, hidden_dim, activation=torch.nn.GELU):
-            layers = [
-                torch.nn.Linear(in_dim, hidden_dim, device=device),
-                activation(),
-                torch.nn.Linear(hidden_dim, out_dim, device=device),
-            ]
-            return torch.nn.Sequential(*layers)
-
-        class testmodel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.interaction_networks = torch.nn.ModuleList(
-                    [fcnn(262, 1174, 400) for _ in range(4)]
-                )
-
-            def interact(self, x, cycle):
-                return self.interaction_networks[cycle](x)
-
-        model = testmodel()
-        forward_aot = torch.compile(
-            model.interact, fullgraph=True, dynamic=True, backend="eager"
-        )
-
-        x = torch.rand([111, 262], device=device)
-        y2 = forward_aot(x, 2)  # previously failed
 
     def test_issue175(self):
         n_heads = 2

@@ -60,7 +60,6 @@
 #include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/functorch/init.h>
-#include <torch/csrc/inductor/aoti_runner/pybind.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
@@ -117,7 +116,6 @@ THPGenerator* THPDefaultCPUGenerator = nullptr;
 ////////////////////////////////////////////////////////////////////////////////
 
 static PyObject* THPModule_initNames(PyObject* self, PyObject* arg) {
-  HANDLE_TH_ERRORS
   static std::vector<std::string> names;
 
   THPObjectPtr types(PySequence_Fast(arg, "expected a sequence"));
@@ -129,13 +127,13 @@ static PyObject* THPModule_initNames(PyObject* self, PyObject* arg) {
   names.reserve(names.size() + num_classes);
   for (Py_ssize_t i = 0; i < num_classes; i++) {
     PyObject* obj = PySequence_Fast_GET_ITEM(types.get(), i);
-    TORCH_CHECK(PyType_Check(obj), "expected a PyTypeObject");
+    THPUtils_assert(PyType_Check(obj), "expected a PyTypeObject");
     PyTypeObject* type = (PyTypeObject*)obj;
 
     THPObjectPtr module_name(PyObject_GetAttrString(obj, "__module__"));
     if (!module_name)
       return nullptr;
-    TORCH_CHECK(
+    THPUtils_assert(
         THPUtils_checkString(module_name.get()),
         "expected __module__ to be a string");
     std::string name = THPUtils_unpackString(module_name.get());
@@ -143,7 +141,6 @@ static PyObject* THPModule_initNames(PyObject* self, PyObject* arg) {
     type->tp_name = names.back().c_str();
   }
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 //
 // Callback for python part. Used for additional initialization of python
@@ -209,29 +206,27 @@ static PyObject* THPModule_initExtension(
 // checks if our build environment is misconfigured.
 
 static PyObject* THPModule_crashIfCsrcASAN(PyObject* module, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       THPUtils_checkLong(arg),
-      "crash_if_csrc_asan expects an int, but got ",
+      "crash_if_csrc_asan expects an int, "
+      "but got %s",
       THPUtils_typename(arg));
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
   volatile char x[3];
   x[THPUtils_unpackInt(arg)] = 0;
   // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   return THPUtils_packInt32(x[0]);
-  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPModule_crashIfCsrcUBSAN(PyObject* module, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       THPUtils_checkLong(arg),
-      "crash_if_csrc_ubsan expects an int, but got ",
+      "crash_if_csrc_ubsan expects an int, "
+      "but got %s",
       THPUtils_typename(arg));
   int32_t x = THPUtils_unpackInt(arg);
   double y = 1.0 / x;
   return THPUtils_packInt32((int)y);
-  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPModule_crashIfvptrUBSAN(PyObject* module, PyObject* noarg) {
@@ -254,14 +249,12 @@ static PyObject* THPModule_crashIfvptrUBSAN(PyObject* module, PyObject* noarg) {
 }
 
 static PyObject* THPModule_crashIfATenASAN(PyObject* module, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       THPUtils_checkLong(arg),
       "crash_if_aten_asan expects an int, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   return THPUtils_packInt32(at::_crash_if_asan(THPUtils_unpackInt(arg)));
-  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPModule_abort(PyObject* module, PyObject* noargs) {
@@ -272,16 +265,15 @@ static PyObject* THPModule_abort(PyObject* module, PyObject* noargs) {
 static PyObject* THPModule_crashIfDebugAssertsFail(
     PyObject* module,
     PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       THPUtils_checkLong(arg),
-      "crash_if_debug_asserts_fail expects an int, but got ",
+      "crash_if_debug_asserts_fail expects an int, "
+      "but got %s",
       THPUtils_typename(arg));
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       THPUtils_unpackInt(arg) != 424242,
       "Expect anything but 424242 as an input for debug builds");
   return THPUtils_packInt32(0);
-  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPModule_getNumThreads(PyObject* module, PyObject* noargs) {
@@ -290,12 +282,13 @@ static PyObject* THPModule_getNumThreads(PyObject* module, PyObject* noargs) {
 
 static PyObject* THPModule_setNumThreads(PyObject* module, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       THPUtils_checkLong(arg),
-      "set_num_threads expects an int, but got ",
+      "set_num_threads expects an int, "
+      "but got %s",
       THPUtils_typename(arg));
   int nthreads = (int)THPUtils_unpackLong(arg);
-  TORCH_CHECK(nthreads > 0, "set_num_threads expects a positive integer");
+  THPUtils_assert(nthreads > 0, "set_num_threads expects a positive integer");
   at::set_num_threads(nthreads);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -311,13 +304,13 @@ static PyObject* THPModule_setNumInteropThreads(
     PyObject* module,
     PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       THPUtils_checkLong(arg),
       "set_num_interop_threads expects an int, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   int nthreads = (int)THPUtils_unpackLong(arg);
-  TORCH_CHECK(
+  THPUtils_assert(
       nthreads > 0, "set_num_interop_threads expects a positive integer");
   at::set_num_interop_threads(nthreads);
   Py_RETURN_NONE;
@@ -426,11 +419,11 @@ PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
 PyObject* THPModule_inferSize(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   Py_ssize_t num_args = args ? (Py_ssize_t)PyTuple_Size(args) : 0;
-  TORCH_CHECK(num_args == 2, "expected exactly 2 arguments");
+  THPUtils_assert(num_args == 2, "expected exactly 2 arguments");
   PyObject* arg1 = PyTuple_GET_ITEM(args, 0);
-  TORCH_CHECK(THPSize_Check(arg1), "expected a torch.Size as argument 1");
+  THPUtils_assert(THPSize_Check(arg1), "expected a torch.Size as argument 1");
   PyObject* arg2 = PyTuple_GET_ITEM(args, 1);
-  TORCH_CHECK(THPSize_Check(arg2), "expected a torch.Size as argument 2");
+  THPUtils_assert(THPSize_Check(arg2), "expected a torch.Size as argument 2");
 
   auto size1 = THPUtils_unpackLongs(arg1);
   auto size2 = THPUtils_unpackLongs(arg2);
@@ -442,15 +435,13 @@ PyObject* THPModule_inferSize(PyObject* _unused, PyObject* args) {
 static PyObject* THPModule_setBackcompatBroadcastWarn(
     PyObject* module,
     PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "set_backcompat_broadcast_warn expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   setBackCompatBroadcastWarn(arg == Py_True);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPModule_getBackcompatBroadcastWarn(
@@ -465,15 +456,13 @@ static PyObject* THPModule_getBackcompatBroadcastWarn(
 static PyObject* THPModule_setBackcompatKeepdimWarn(
     PyObject* module,
     PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "set_backcompat_keepdim_warn expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   setBackCompatKeepdimWarn(arg == Py_True);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPModule_getBackcompatKeepdimWarn(
@@ -541,7 +530,7 @@ void DLPack_Capsule_Destructor(PyObject* data) {
 
 PyObject* THPModule_toDLPack(PyObject* _unused, PyObject* data) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(THPVariable_Check(data), "data must be a Tensor");
+  THPUtils_assert(THPVariable_Check(data), "data must be a Tensor");
   DLManagedTensor* dlMTensor = at::toDLPack(THPVariable_Unpack(data));
   return PyCapsule_New(dlMTensor, "dltensor", DLPack_Capsule_Destructor);
   END_HANDLE_TH_ERRORS
@@ -572,9 +561,10 @@ static PyObject* THModule_rename_privateuse1_backend(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       THPUtils_checkString(arg),
-      "_rename_privateuse1_backend expects a str, but got ",
+      "_rename_privateuse1_backend expects a str, "
+      "but got %s",
       THPUtils_typename(arg));
   const std::string backend_name = THPUtils_unpackString(arg);
   c10::register_privateuse1_backend(backend_name);
@@ -591,15 +581,13 @@ static PyObject* THModule_get_privateuse1_backend_name(
 }
 
 PyObject* THPModule_setAllowTF32CuDNN(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "set_allow_tf32_cublas expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   at::globalContext().setAllowTF32CuDNN(arg == Py_True);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_allowTF32CuDNN(PyObject* _unused, PyObject* noargs) {
@@ -612,16 +600,14 @@ PyObject* THPModule_allowTF32CuDNN(PyObject* _unused, PyObject* noargs) {
 PyObject* THPModule_setFloat32MatmulPrecision(
     PyObject* _unused,
     PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       THPUtils_checkString(arg),
       "set_float32_matmul_precision expects a str, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   std::string s = THPUtils_unpackString(arg);
   at::globalContext().setFloat32MatmulPrecision(s);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_float32MatmulPrecision(
@@ -637,15 +623,13 @@ PyObject* THPModule_float32MatmulPrecision(
   return THPUtils_packString(s);
 }
 PyObject* THPModule_setSDPUseFlash(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "set_sdp_use_math expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   at::globalContext().setSDPUseFlash(arg == Py_True);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 PyObject* THPModule_userEnabledFlashSDP(PyObject* _unused, PyObject* noargs) {
   if (at::globalContext().userEnabledFlashSDP())
@@ -654,15 +638,13 @@ PyObject* THPModule_userEnabledFlashSDP(PyObject* _unused, PyObject* noargs) {
     Py_RETURN_FALSE;
 }
 PyObject* THPModule_setSDPUseMemEfficient(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "set_sdp_use_math expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   at::globalContext().setSDPUseMemEfficient(arg == Py_True);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 PyObject* userEnabledMemEfficientSDP(PyObject* _unused, PyObject* noargs) {
   if (at::globalContext().userEnabledMemEfficientSDP())
@@ -671,15 +653,13 @@ PyObject* userEnabledMemEfficientSDP(PyObject* _unused, PyObject* noargs) {
     Py_RETURN_FALSE;
 }
 PyObject* THPModule_setSDPUseMath(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "set_sdp_use_math expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   at::globalContext().setSDPUseMath(arg == Py_True);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 PyObject* THPModule_userEnabledMathSDP(PyObject* _unused, PyObject* noargs) {
   if (at::globalContext().userEnabledMathSDP())
@@ -688,15 +668,13 @@ PyObject* THPModule_userEnabledMathSDP(PyObject* _unused, PyObject* noargs) {
     Py_RETURN_FALSE;
 }
 PyObject* THPModule_setUserEnabledCuDNN(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "set_enabled_cudnn expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   at::globalContext().setUserEnabledCuDNN(arg == Py_True);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_userEnabledCuDNN(PyObject* _unused, PyObject* noargs) {
@@ -707,15 +685,13 @@ PyObject* THPModule_userEnabledCuDNN(PyObject* _unused, PyObject* noargs) {
 }
 
 PyObject* THPModule_setUserEnabledMkldnn(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "set_enabled_mkldnn expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   at::globalContext().setUserEnabledMkldnn(arg == Py_True);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_userEnabledMkldnn(PyObject* _unused, PyObject* noargs) {
@@ -727,10 +703,10 @@ PyObject* THPModule_userEnabledMkldnn(PyObject* _unused, PyObject* noargs) {
 
 PyObject* THPModule_setDeterministicCuDNN(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "set_deterministic_cudnn expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   at::globalContext().setDeterministicCuDNN(arg == Py_True);
   Py_RETURN_NONE;
@@ -782,8 +758,8 @@ PyObject* THPModule_setDeterministicFillUninitializedMemory(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      PyBool_Check(arg), "expected a bool, but got ", THPUtils_typename(arg));
+  THPUtils_assert(
+      PyBool_Check(arg), "expected a bool, but got %s", THPUtils_typename(arg));
   at::globalContext().setDeterministicFillUninitializedMemory(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -799,15 +775,13 @@ PyObject* THPModule_deterministicFillUninitializedMemory(
 }
 
 PyObject* THPModule_setUserEnabledNNPACK(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "set_enabled_NNPACK expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   at::globalContext().setUserEnabledNNPACK(arg == Py_True);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_userEnabledNNPACK(PyObject* _unused, PyObject* noargs) {
@@ -818,15 +792,13 @@ PyObject* THPModule_userEnabledNNPACK(PyObject* _unused, PyObject* noargs) {
 }
 
 PyObject* THPModule_setWarnAlways(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "setWarnOnlyOnce expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   c10::WarningUtils::set_warnAlways(arg == Py_True);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_warnAlways(PyObject* _unused, PyObject* noargs) {
@@ -853,15 +825,13 @@ PyObject* THPModule_warnDeprecation(PyObject* _unused, PyObject* noargs) {
 }
 
 PyObject* THPModule_setBenchmarkCuDNN(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "set_benchmark_cudnn expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   at::globalContext().setBenchmarkCuDNN(arg == Py_True);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_benchmarkCuDNN(PyObject* _unused, PyObject* noargs) {
@@ -872,15 +842,13 @@ PyObject* THPModule_benchmarkCuDNN(PyObject* _unused, PyObject* noargs) {
 }
 
 PyObject* THPModule_setAllowTF32CuBLAS(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "set_allow_tf32_cublas expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   at::globalContext().setAllowTF32CuBLAS(arg == Py_True);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_allowTF32CuBLAS(PyObject* _unused, PyObject* noargs) {
@@ -893,15 +861,13 @@ PyObject* THPModule_allowTF32CuBLAS(PyObject* _unused, PyObject* noargs) {
 PyObject* THPModule_setAllowFP16ReductionCuBLAS(
     PyObject* _unused,
     PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "set_allow_fp16_reduction_cublas expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   at::globalContext().setAllowFP16ReductionCuBLAS(arg == Py_True);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_allowFP16ReductionCuBLAS(
@@ -916,15 +882,13 @@ PyObject* THPModule_allowFP16ReductionCuBLAS(
 PyObject* THPModule_setAllowBF16ReductionCuBLAS(
     PyObject* _unused,
     PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "set_allow_bf16_reduction_cublas expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   at::globalContext().setAllowBF16ReductionCuBLAS(arg == Py_True);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_allowBF16ReductionCuBLAS(
@@ -937,17 +901,15 @@ PyObject* THPModule_allowBF16ReductionCuBLAS(
 }
 
 PyObject* THPModule_setFlushDenormal(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "flush_denormal expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   if (!at::globalContext().setFlushDenormal(arg == Py_True)) {
     Py_RETURN_FALSE;
   };
   Py_RETURN_TRUE;
-  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_getDefaultDtype(PyObject* _unused, PyObject* arg) {
@@ -968,12 +930,12 @@ PyObject* THPModule_getDefaultDevice(PyObject* _unused, PyObject* arg) {
 }
 
 PyObject* THPModule_setQEngine(PyObject* /* unused */, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       THPUtils_checkLong(arg),
       "set_qengine expects an int, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
+  HANDLE_TH_ERRORS
   auto qengine = THPUtils_unpackLong(arg);
   at::globalContext().setQEngine(static_cast<at::QEngine>(qengine));
   Py_RETURN_NONE;
@@ -1010,15 +972,13 @@ PyObject* THPModule_isEnabledXNNPACK(PyObject* _unused, PyObject* noargs) {
 PyObject* THPModule_setCheckSparseTensorInvariants(
     PyObject* _unused,
     PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "set_check_sparse_tensor_invariants expects a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   at::globalContext().setCheckSparseTensorInvariants(arg == Py_True);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_checkSparseTensorInvariants(
@@ -1034,13 +994,13 @@ PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   bool isTHPFunction = THPFunction_Check(arg);
   bool isTHPCppFunction = torch::autograd::THPCppFunction_Check(arg);
-  TORCH_CHECK(
+  THPUtils_assert(
       isTHPFunction || isTHPCppFunction,
       "_will_engine_execute_node expects an grad_fn, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   const auto exec_info = torch::autograd::get_current_graph_task_exec_info();
-  TORCH_CHECK(
+  THPUtils_assert(
       exec_info,
       "_get_should_execute_nodes should only be called during the backward pass");
   torch::autograd::Node* node = nullptr;
@@ -1146,10 +1106,10 @@ static PyObject* THPModule_set_display_vmap_fallback_warnings_mode(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(
+  THPUtils_assert(
       PyBool_Check(arg),
       "enabled must be a bool, "
-      "but got ",
+      "but got %s",
       THPUtils_typename(arg));
   at::globalContext().setDisplayVmapFallbackWarnings(arg == Py_True);
   Py_RETURN_NONE;
@@ -1514,7 +1474,6 @@ PyObject* initModule() {
   torch::profiler::initPythonBindings(module);
   torch::python::init_bindings(module);
   torch::lazy::initLazyBindings(module);
-  torch::inductor::initAOTIRunnerBindings(module);
 #ifdef USE_ITT
   torch::profiler::initIttBindings(module);
 #endif
@@ -1975,28 +1934,6 @@ Call this whenever a new thread is created in order to propagate values from
         }
         return map;
       });
-
-  py_module.def(
-      "_storage_address",
-      [](const at::Tensor& tensor) {
-        return reinterpret_cast<std::intptr_t>(
-            tensor.storage().unsafeGetStorageImpl());
-      },
-      "Gets the memory address of the Tensor's StorageImpl.");
-
-  py_module.def(
-      "_data_address",
-      [](const at::Tensor& tensor) {
-        return reinterpret_cast<std::intptr_t>(tensor.storage().data());
-      },
-      "Gets the memory address of the Tensor's data pointer.");
-
-  py_module.def(
-      "_is_cow_tensor",
-      [](const at::Tensor& tensor) {
-        return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
-      },
-      "Checks if a tensor's data pointer is COW");
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator =

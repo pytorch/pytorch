@@ -28,21 +28,7 @@ def test_cpu():
 
 HAS_CPU = LazyVal(test_cpu)
 
-HAS_CUDA = torch.cuda.is_available() and has_triton()
-
-HAS_GPU = HAS_CUDA
-
-GPUS = ["cuda"]
-
-HAS_MULTIGPU = any(
-    getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
-    for gpu in GPUS
-)
-
-tmp_gpus = [x for x in GPUS if getattr(torch, x).is_available()]
-assert len(tmp_gpus) <= 1
-GPU_TYPE = "cuda" if len(tmp_gpus) == 0 else tmp_gpus.pop()
-del tmp_gpus
+HAS_CUDA = has_triton()
 
 @register_backend
 def count_bytes_inductor(gm, example_inputs):

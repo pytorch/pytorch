@@ -14,7 +14,6 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import Inp
 from torch._guards import Source
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
-from torch.export.custom_obj import ScriptObjectMeta
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
@@ -30,11 +29,6 @@ def fakify(mode, t, t_constraints, source, sources):
     by tensor ids, the source for the tensor, and an accumulator mapping
     tensor dimensions to their sources.
     """
-    if t is None or isinstance(t, torch.ScriptObject):
-        return t
-    if not isinstance(t, torch.Tensor):
-        raise ValueError("Only tensors allowed as input")
-
     n_dims = len(t.shape)
     symbolic_context = StatelessSymbolicContext(
         dynamic_sizes=[DimDynamic.STATIC] * n_dims,
@@ -156,8 +150,6 @@ def make_constraints(fake_mode, src_equalities, original_signature, gm):
     input_dims = defaultdict(list)
     for node in gm.graph.nodes:
         if node.op != "placeholder":
-            continue
-        if node.meta["val"] is None or isinstance(node.meta["val"], ScriptObjectMeta):
             continue
         for i, d in enumerate(node.meta["val"].shape):
             if isinstance(d, torch.SymInt):

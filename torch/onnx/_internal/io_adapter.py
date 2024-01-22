@@ -315,7 +315,7 @@ class ConvertComplexToRealRepresentationInputStep(InputAdaptStep):
         """
         return (
             tuple(
-                torch.view_as_real(arg.resolve_conj())
+                torch.view_as_real(arg)
                 if isinstance(arg, torch.Tensor) and arg.is_complex()
                 else arg
                 for arg in model_args
@@ -531,7 +531,7 @@ class ConvertComplexToRealRepresentationOutputStep(OutputAdaptStep):
             A tuple of the model output.
         """
         return [
-            torch.view_as_real(output.resolve_conj())
+            torch.view_as_real(output)
             if isinstance(output, torch.Tensor) and torch.is_complex(output)
             else output
             for output in model_outputs

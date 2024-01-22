@@ -1,5 +1,3 @@
-#include <utility>
-
 #include <ATen/native/vulkan/api/Shader.h>
 
 namespace at {
@@ -21,19 +19,19 @@ ShaderInfo::ShaderInfo(
     std::string name,
     const uint32_t* const spirv_bin,
     const uint32_t size,
-    std::vector<VkDescriptorType>  layout)
+    const std::vector<VkDescriptorType>& layout)
     : src_code{
           spirv_bin,
           size,
       },
       kernel_name{std::move(name)},
-      kernel_layout{std::move(layout)} {}
+      kernel_layout{layout} {}
 
 ShaderInfo::ShaderInfo(
     std::string name,
     const uint32_t* const spirv_bin,
     const uint32_t size,
-    std::vector<VkDescriptorType>  layout,
+    const std::vector<VkDescriptorType>& layout,
     const std::vector<uint32_t>& tile_size,
     const StorageType bias_storage_type,
     const StorageType weight_storage_type)
@@ -42,7 +40,7 @@ ShaderInfo::ShaderInfo(
           size,
       },
       kernel_name{std::move(name)},
-      kernel_layout{std::move(layout)},
+      kernel_layout{layout},
       tile_size(tile_size),
       bias_storage_type(bias_storage_type),
       weight_storage_type(weight_storage_type) {
@@ -65,7 +63,7 @@ ShaderLayout::ShaderLayout(
     VkDevice device,
     const ShaderLayout::Signature& signature)
     : device_(device), handle_{VK_NULL_HANDLE} {
-  std::vector<VkDescriptorSetLayoutBinding> bindings;
+  c10::SmallVector<VkDescriptorSetLayoutBinding, 6u> bindings;
 
   uint32_t binding_num = 0u;
   for (const VkDescriptorType type : signature) {
@@ -96,7 +94,7 @@ ShaderLayout::ShaderLayout(ShaderLayout&& other) noexcept
 }
 
 ShaderLayout::~ShaderLayout() {
-  if (VK_NULL_HANDLE == handle_) {
+  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroyDescriptorSetLayout(device_, handle_, nullptr);
@@ -141,7 +139,7 @@ ShaderModule::ShaderModule(ShaderModule&& other) noexcept
 }
 
 ShaderModule::~ShaderModule() {
-  if (VK_NULL_HANDLE == handle_) {
+  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroyShaderModule(device_, handle_, nullptr);
@@ -180,7 +178,7 @@ VkDescriptorSetLayout ShaderLayoutCache::retrieve(
   std::lock_guard<std::mutex> lock(cache_mutex_);
 
   auto it = cache_.find(key);
-  if (cache_.cend() == it) {
+  if C10_UNLIKELY (cache_.cend() == it) {
     it = cache_.insert({key, ShaderLayoutCache::Value(device_, key)}).first;
   }
 
@@ -212,7 +210,7 @@ VkShaderModule ShaderCache::retrieve(const ShaderCache::Key& key) {
   std::lock_guard<std::mutex> lock(cache_mutex_);
 
   auto it = cache_.find(key);
-  if (cache_.cend() == it) {
+  if C10_UNLIKELY (cache_.cend() == it) {
     it = cache_.insert({key, ShaderCache::Value(device_, key)}).first;
   }
 
