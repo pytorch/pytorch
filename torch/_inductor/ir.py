@@ -341,11 +341,14 @@ class Loops(IRNode):
     ranges: List[Expr]
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
-        index = self._index(self.ranges)
         return set().union(
             *(free_unbacked_symbols(e) for e in self.ranges),
-            extract_free_unbacked_symbols(self.inner_fn, index),
+            self.inner_fn_free_unbacked_symbols(),
         )
+
+    def inner_fn_free_unbacked_symbols(self):
+        index = self._index(self.ranges)
+        return extract_free_unbacked_symbols(self.inner_fn, index)
 
     def __str__(self, names=("ranges",)):
         return self.str_helper(
@@ -617,6 +620,11 @@ class Reduction(Loops):
             index,
             rindex,
         )
+
+    def inner_fn_free_unbacked_symbols(self):
+        index = self._index(self.ranges)
+        rindex = self._index(self.reduction_ranges, "r")
+        return extract_free_unbacked_symbols(self.inner_fn, index, rindex)
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
