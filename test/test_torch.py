@@ -56,6 +56,7 @@ import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
     tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN, TEST_MULTIGPU,
     _create_scaling_case, _create_scaling_models_optimizers)
+from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
@@ -2459,6 +2460,7 @@ else:
                         self.assertEqual(y1.grad, y2.grad, rtol=0, atol=0.001)
 
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_cdist_large(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(1000, 10, device=device)
@@ -2469,6 +2471,7 @@ else:
 
     @slowTest
     @tf32_on_and_off(0.01)
+    @bf32_on_and_off(0.01)
     def test_cdist_large_batch(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 1000, 10, device=device)
@@ -2478,6 +2481,7 @@ else:
             self.assertEqual(expected, actual)
 
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_cdist_non_contiguous(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(5, 7, device=device).mT
@@ -2505,6 +2509,7 @@ else:
             self.assertEqual(expected, actual)
 
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_cdist_non_contiguous_batch(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 2, 5, 7, device=device).mT
@@ -5541,10 +5546,7 @@ else:
             if lazy_init_scale:
                 # Dummy a.scale() call lazy-inits a._scale Tensor.
                 a.scale(torch.tensor([4.0], dtype=torch.float32, device=device))
-                if device.type == "cuda":
-                    self.assertTrue(isinstance(a._scale, torch.cuda.FloatTensor))
-                else:
-                    self.assertTrue(isinstance(a._scale, torch.FloatTensor))
+                self.assertTrue(a._scale.device.type == device.type)
             # The following three lines should work whether or not cuda is available.
             serialized = pickle.dumps(a)
             b = pickle.loads(serialized)

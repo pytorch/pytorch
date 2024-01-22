@@ -1754,6 +1754,8 @@ class ShapeEnv:
         duck_shape=True,
         # For debugging
         co_fields=None,
+        # XXX Add any new settings that could affect FakeTensor evaluation
+        # to: torch._subclasses.fake_tensor._ShapeEnvSettings
     ):
         # Not directly used by ShapeEnv; indirectly used by FakeTensor
         self.allow_scalar_outputs = allow_scalar_outputs
