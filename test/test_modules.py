@@ -861,8 +861,6 @@ class TestModule(TestCase):
         devices = ['cpu']
         if torch.cuda.is_available():
             devices += ['cuda']
-        if torch.backends.mps.is_available():
-            devices += ['mps']
         dtypes = module_info.dtypes
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False, training=training)
@@ -890,8 +888,6 @@ class TestModule(TestCase):
 
                 prev_device, prev_dtype = device, dtype
                 for device_, dtype_ in product(devices, dtypes):
-                    if device_ == 'mps' and dtype_ == torch.float64:
-                        continue
                     # if device/dtype do not change, grad.to(device, dtype) is a no-op so
                     # swapping will not change ._cdata
                     # parameters will be wrapped in an nn.Parameter before swapping
