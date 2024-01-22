@@ -559,20 +559,9 @@ def break_graph_if_unsupported(*, push):
 
             for _ in range(push):
                 self.push(UnknownVariable())
-            # self.output.add_output_instructions(
-            #     self.create_call_resume_at(self.next_instruction)
-            # )
             if isinstance(self, InstructionTranslator):
                 self.output.add_output_instructions(
                     self.create_call_resume_at(self.next_instruction)
-                )
-            else:
-                self.resume_at_insts = (
-                    # Get rid of `RETURN_VALUE` since it is nested
-                    self.create_call_resume_at(self.next_instruction),
-                    # self.create_call_resume_at(self.next_instruction)[:-1],
-                    push,
-                    self
                 )
 
         return wrapper
@@ -662,39 +651,31 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         """
         A call to some user defined function by inlining it.
         """
-        result, resume_at_insts, tracer = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
-        if resume_at_insts is None:
-            return result
-        # An inner inlining translator has a graph break
-        # Call into its resume_at function, before running our
-        # our resume_at instructions.
-        assert result is None
-        resume_at_insts, push, tracer = resume_at_insts
+        tracers = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+        last_tracer = tracers[-1]
+        if last_tracer.symbolic_result:
+            return last_tracer.symbolic_result
         new_co_names = list(self.output.global_scope)
 
-        for _ in range(push):
+        # TODO(voz): Actually compute the push properly! Do not land as such. Tracer should
+        # smuggle the push a la what it does when it calls create_call_resume_at
+        for _ in range(1):
             self.push(UnknownVariable())
-        breakpoint()
-        # resume_at_insts = tracer.output.output_instructions + resume_at_insts
-        cg = PyCodegen(tracer)
-        # old_co_names_s = set(tracer.code_options['co_names'])
-        # new_co_names_s = set(new_co_names)
-        # overlapping_co_names = tuple(old_co_names_s | new_co_names_s)
-        # tracer.code_options['co_names'] = overlapping_co_names
-        # tracer.code_options['co_varnames'] = tracer.code_options['co_varnames'] + ('graph_out',)
-        breakpoint()
-        out = torch._dynamo.bytecode_transformation.clean_and_assemble_instructions(resume_at_insts, torch._dynamo.bytecode_transformation.get_code_keys(), cg.code_options)
-        breakpoint()
-        resume_at = out[0][:-1] + self.create_call_resume_at(
-            self.next_instruction, [], []
-        )
-        breakpoint()
         if isinstance(self, InstructionTranslator):
+            outs = []
+            for tracer in tracers:
+                cg = PyCodegen(tracer)
+                resume_at_insts = tracer.create_call_resume_at(tracer.next_instruction)
+                out = torch._dynamo.bytecode_transformation.clean_and_assemble_instructions(resume_at_insts, torch._dynamo.bytecode_transformation.get_code_keys(), cg.code_options)
+                outs = outs + out[0][:-1]
+            resume_at = outs + self.create_call_resume_at(
+                self.next_instruction, [], []
+            )
             self.output.add_output_instructions(resume_at)
             raise NestedGraphBreak()
         else:
-            self.resume_at_insts = resume_at, 1, tracer
-        raise NestedGraphBreak()
+            self.nested_break_chain = tracers
+            raise NestedGraphBreak()
 
     def get_line_of_code_header(self, lineno=None):
         if lineno is None:
@@ -1426,7 +1407,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         name = unique_id(f"__resume_at_{inst.offset}")
         # fail = True
         # count = self.code_object["co_nlocals"]
-        breakpoint()
+        # breakpoint()
         new_code: types.CodeType = ContinueExecutionCache.lookup(
             self.f_code,
             self.lineno,
@@ -2411,21 +2392,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if is_generator(code):
             assert isinstance(tracer, InliningGeneratorInstructionTranslator)
             assert tracer.symbolic_result is not None
-            assert tracer.resume_at_insts is None
             assert tracer.symbolic_result.as_python_constant() is None
-            return (
-                ListIteratorVariable(
-                    tracer.generated_items,
-                    mutable_local=MutableLocal(),
-                    **VariableTracker.propagate(tracer.symbolic_result),
-                ),
-                None,
-            )
+            return tracer.nested_break_chain + [tracer]
         else:
-            assert (
-                tracer.symbolic_result is not None and tracer.resume_at_insts is None
-            ) or tracer.resume_at_insts is not None
-            return tracer.symbolic_result, tracer.resume_at_insts, tracer
+            return tracer.nested_break_chain + [tracer]
 
     def __init__(
         self,
@@ -2460,7 +2430,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.symbolic_result = None
         self.closure_cells = closure_cells
         self.nn_module_stack = parent.nn_module_stack.copy()
-        self.resume_at_insts = None
+        self.nested_break_chain = []
         self.one_graph = parent.one_graph
 
     @property
