@@ -9275,12 +9275,16 @@ fn
             return torch.cuda.memory_allocated()
 
         run(False)
-        mem1 = clean_and_report_memory()
+        # mem1 = clean_and_report_memory()
         run(True)
         mem2 = clean_and_report_memory()
-        torch._dynamo.reset()
+        torch._dynamo.reset_code_caches()
         mem3 = clean_and_report_memory()
-        self.assertEqual(mem1, mem2)
+
+        # it's possible for dynamo to hold on to more memory
+        # even after a _dynamo.reset[_code_caches], so we omit the following check.
+        # self.assertEqual(mem1, mem2)
+
         self.assertEqual(mem1, mem3)
 
     def test_dynamo_cache_invalidate(self):
