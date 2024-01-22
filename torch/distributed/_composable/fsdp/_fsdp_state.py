@@ -47,6 +47,10 @@ class FSDPState(_State):
         if not self._is_root:
             return args, kwargs
         with torch.profiler.record_function("FSDP::root_pre_forward"):
+            # Wait for optimizer before implicitly prefetched all-gathers
+            current_stream = torch.cuda.current_stream()
+            self._all_gather_copy_in_stream.wait_stream(current_stream)
+            self._all_gather_stream.wait_stream(current_stream)
             if self._device.type == "cuda":
                 with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
