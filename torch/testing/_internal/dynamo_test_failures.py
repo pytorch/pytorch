@@ -2899,13 +2899,11 @@ dynamo_expected_failures = {
     "TestTorchTidyProfiler.test_sparse_tensors",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_optimizer",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_tensorimpl_invalidation_keep_alive",  # profiler/test_profiler
-    "TestExperimentalUtils.test_utils_compute_queue_depth",  # profiler/test_profiler
     "TestExperimentalUtils.test_profiler_pattern_match_helper",  # profiler/test_profiler
     "TestProfiler.test_export_stacks",  # profiler/test_profiler
     "TestProfiler.test_source_multithreaded_basic_work_in_main_thread_True",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_mkldnn_tensors",  # profiler/test_profiler
     "TestRecordFunction.test_datapipe_with_record_function",  # profiler/test_profiler
-    "TestProfiler.test_memory_profiler",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_tensor_lists",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_pointers_and_ids",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_nnmodule_params",  # profiler/test_profiler
