@@ -1707,6 +1707,7 @@ new_module_tests = [
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         check_gradgrad=False,
         default_dtype=torch.double,
+        decorator=skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/117971")
     ),
     dict(
         module_name='Embedding',

@@ -688,7 +688,7 @@ for test_param in supported_tests:
     if 'constructor' not in test_param:
         name = test_param.pop('module_name')
         test_param['constructor'] = getattr(nn, name)
-    decorator = test_param.pop('decorator', None)
+    decorator = test_param.pop('decorator', lambda test: test)
     test = ContextManagerTests(**test_param)
     test_name = test.get_name()
     if hasattr(TestExpandedWeightModule, test_name):
@@ -696,9 +696,6 @@ for test_param in supported_tests:
     test_name_multi_input = test.get_name() + "_multiple_inputs"
     if hasattr(TestExpandedWeightModule, test_name_multi_input):
         raise RuntimeError('Found two tests with the same name: ' + test_name)
-    if decorator is None:
-        def decorator(test):
-            return test
     if test.test_cpu:
         setattr(TestExpandedWeightModule, test_name, decorator(lambda self, test=test: test.test_context_manager(self, 'cpu')))
         setattr(TestExpandedWeightModule, test_name_multi_input,
