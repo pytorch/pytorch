@@ -41,6 +41,7 @@ class FSDPParamGroup:
         self.mesh_info = mesh_info
         self.device = device
         self._training_state = TrainingState.IDLE
+        # Group's sharded state always matches its parameters' sharded states
         self._sharded_state = ShardedState.SHARDED
         self._init_mp_dtypes()
         self._module_fqn: Optional[str] = None  # prefixed from root module
