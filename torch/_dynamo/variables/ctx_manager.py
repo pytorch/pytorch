@@ -634,7 +634,7 @@ class StreamVariable(VariableTracker):
         # design, to unblock current work, we lift the stream into a global and then codegen bytecode to load it from there.
         name = f"_stream_{self.device}_{id(self.value)}"
         if name not in codegen.tx.output.global_scope:
-            codegen.tx.output.install_global(name, self.value)
+            codegen.tx.output.install_global_unsafe(name, self.value)
 
         return [codegen.create_load_global(name, push_null=False, add=True)]
 
