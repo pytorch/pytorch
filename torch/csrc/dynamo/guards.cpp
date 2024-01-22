@@ -645,6 +645,9 @@ struct GuardDebugInfo {
  */
 class LeafGuard {
  public:
+  LeafGuard(py::object guard_str)
+      : _guard_str(py::cast<std::string>(guard_str)) {}
+
   // check function could be called from python. This is useful for debugging
   // purpose.
   bool check(py::handle value) {
@@ -664,11 +667,17 @@ class LeafGuard {
     return GuardDebugInfo(result, failed_guard, 0);
   }
 
+  std::string repr() {
+    return _guard_str;
+  }
+
   // This is on the hot path and avoids any refcounting code from pybind. This
   // is not exposed to Python and can only be called from C++.
   virtual bool check_nopybind(PyObject* value) = 0;
-  virtual std::string repr() = 0;
   virtual ~LeafGuard() = default;
+
+ private:
+  std::string _guard_str;
 };
 
 /**
@@ -683,12 +692,11 @@ class LeafGuard {
  */
 class PythonLambdaGuard : public LeafGuard {
  public:
-  PythonLambdaGuard(py::object guard_check_fn, py::object guard_str) {
-    if (py::isinstance<py::function>(guard_check_fn) &&
-        py::isinstance<py::str>(guard_str)) {
+  PythonLambdaGuard(py::object guard_check_fn, py::object guard_str)
+      : LeafGuard(guard_str) {
+    if (py::isinstance<py::function>(guard_check_fn)) {
       _guard_check_fn = py::cast<py::function>(guard_check_fn);
       _guard_check_fn_pyobj = _guard_check_fn.ptr();
-      _guard_str = py::cast<py::str>(guard_str);
     } else {
       throw py::type_error("PythonLambdaGuard expects (callable, str)");
     }
@@ -702,15 +710,54 @@ class PythonLambdaGuard : public LeafGuard {
     return result;
   }
 
-  std::string repr() override {
-    return _guard_str;
-  }
-
  private:
   // The user provided lambda function for check_fn.
   py::function _guard_check_fn;
   PyObject* _guard_check_fn_pyobj;
-  std::string _guard_str;
+};
+
+class TYPE_MATCH : public LeafGuard {
+ public:
+  // type_id = id(type(obj))
+  TYPE_MATCH(py::object type_id, py::object guard_str)
+      : LeafGuard(guard_str), _expected(py::cast<unsigned long>(type_id)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return Py_TYPE(value) == (void*)_expected;
+  }
+
+ private:
+  // id of the type of the original object.
+  unsigned long _expected;
+};
+
+class ID_MATCH : public LeafGuard {
+ public:
+  // obj_id = id(obj)
+  ID_MATCH(py::object obj_id, py::object guard_str)
+      : LeafGuard(guard_str), _expected(py::cast<unsigned long>(obj_id)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return value == (void*)_expected;
+  }
+
+ private:
+  // id of the original object.
+  unsigned long _expected;
+};
+
+class EQUALS_MATCH : public LeafGuard {
+ public:
+  EQUALS_MATCH(py::object value, py::object guard_str)
+      : LeafGuard(guard_str), _value(value.ptr()) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return PyObject_RichCompareBool(value, _value, Py_EQ);
+  }
+
+ private:
+  // value to compare against.
+  PyObject* _value;
 };
 
 /**
@@ -736,6 +783,8 @@ class PythonLambdaGuard : public LeafGuard {
  */
 class RelationalGuard : public LeafGuard {
  public:
+  RelationalGuard(py::object guard_str) : LeafGuard(guard_str) {}
+
   // reset the relational guard state on guard failure. This is called by the
   // guard manager.
   virtual void reset_state_on_guard_failure() = 0;
@@ -746,7 +795,8 @@ class RelationalGuard : public LeafGuard {
  */
 class NoTensorAliasingGuard : public RelationalGuard {
  public:
-  NoTensorAliasingGuard() : _is_first_call(true) {}
+  NoTensorAliasingGuard(py::object guard_str)
+      : RelationalGuard(guard_str), _is_first_call(true) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     if (_is_first_call) {
@@ -757,11 +807,6 @@ class NoTensorAliasingGuard : public RelationalGuard {
     bool result = _first_tensor != value;
     _is_first_call = true;
     return result;
-  }
-
-  std::string repr() override {
-    // TODO - Generate better error  msg
-    return "Tensor aliasing guard failed";
   }
 
   void reset_state_on_guard_failure() override {
@@ -1370,12 +1415,15 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
   PyObject* _accessor_fn;
 };
 
-void install_no_tensor_aliasing_guard(GuardManager* x, GuardManager* y) {
+void install_no_tensor_aliasing_guard(
+    GuardManager* x,
+    GuardManager* y,
+    py::object guard_str) {
   // TODO(anijain2305) - Support arbitrary number of tensors instead of just
   // two. Adds tensor X is not tensor Y. This is a an example of relational
   // guard. There is one guard object that is shared between two guard managers.
   std::shared_ptr<RelationalGuard> guard =
-      std::make_shared<NoTensorAliasingGuard>();
+      std::make_shared<NoTensorAliasingGuard>(guard_str);
 
   // Register the resetter on the toor gaurd mananger, so that it can reset the
   // newly added relational guard when the guard eval fails.
@@ -1449,6 +1497,17 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "PythonLambdaGuard")
       .def(py::init<py::function, py::str>())
       .def("__call__", &PythonLambdaGuard::check);
+  py::class_<TYPE_MATCH, LeafGuard, std::shared_ptr<TYPE_MATCH>>(
+      py_m, "TYPE_MATCH")
+      .def(py::init<py::object, py::str>())
+      .def("__call__", &TYPE_MATCH::check);
+  py::class_<ID_MATCH, LeafGuard, std::shared_ptr<ID_MATCH>>(py_m, "ID_MATCH")
+      .def(py::init<py::object, py::str>())
+      .def("__call__", &ID_MATCH::check);
+  py::class_<EQUALS_MATCH, LeafGuard, std::shared_ptr<EQUALS_MATCH>>(
+      py_m, "EQUALS_MATCH")
+      .def(py::init<py::object, py::str>())
+      .def("__call__", &EQUALS_MATCH::check);
   py::class_<NoTensorAliasingGuard, std::shared_ptr<NoTensorAliasingGuard>>(
       py_m, "NoTensorAliasingGuard");
 
@@ -1508,6 +1567,28 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object guard_str) -> void {
             self.add_leaf_guard(
                 std::make_shared<PythonLambdaGuard>(lambda, guard_str));
+          })
+      .def(
+          "add_type_match_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object guard_str) -> void {
+            self.add_leaf_guard(std::make_shared<TYPE_MATCH>(value, guard_str));
+          })
+      .def(
+          "add_id_match_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object guard_str) -> void {
+            self.add_leaf_guard(std::make_shared<ID_MATCH>(value, guard_str));
+          })
+      .def(
+          "add_equals_match_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object guard_str) -> void {
+            self.add_leaf_guard(
+                std::make_shared<EQUALS_MATCH>(value, guard_str));
           })
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
