@@ -691,7 +691,7 @@ def run_test_retries(
     print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
     while True:
-        ret_code = retry_shell(
+        ret_code, _ = retry_shell(
             command + [sc_command] + print_items,
             test_directory,
             stdout=output,
