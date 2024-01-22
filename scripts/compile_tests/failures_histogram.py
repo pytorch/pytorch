@@ -22,19 +22,18 @@ def skip_reason(testcase):
 
 
 IGNORED_REASONS = {
+    # We don't run OpInfo tests under Dynamo
     "Policy: we don't run OpInfo tests w/ Dynamo",
+    # We don't run ModuleInfo tests under Dynamo
     "Policy: we don't run ModuleInfo tests w/ Dynamo",
-    "NP_VER: fail on CI",
-    "Excluded from CUDA tests",
+    # We don't run CUDA tests in CI (yet)
+    'Excluded from CUDA tests',
+    # We don't run CUDA tests in CI (yet)
     "CUDA not found",
+    # We don't run CUDA tests in CI (yet)
     "Only runs on cuda",
-    "NumPy not found",
-    "test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test",
-    "Skipped",
-    "Skipped!",
-    "",
-    "test doesn't currently work with dynamo",
-    "Not a TorchDynamo suitable test",
+    # We don't run slow tests in CI
+    'test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test',
 }
 
 
