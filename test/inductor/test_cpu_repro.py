@@ -2781,7 +2781,7 @@ class CPUReproTests(TestCase):
 
         shape = [int(dim) for dim in shape.split(",")]
         x = torch.rand(*shape, device="cpu", dtype=dtype)
-        self.common(fp8_cast, (x,), atol=5e-1, rtol=5e-1)
+        self.common(fp8_cast, (x,))
 
 
 if __name__ == "__main__":
