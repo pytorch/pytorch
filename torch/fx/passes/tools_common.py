@@ -1,4 +1,4 @@
-from typing import List, Tuple, Union, Dict, Any, Set, Mapping
+from typing import List, Tuple, Union, Dict, Any, Set, Mapping, Optional
 import collections
 from dataclasses import dataclass
 
@@ -123,7 +123,7 @@ class FxNetAccFusionsFinder:
         self,
         fusion_group: "FxNetAccFusionsFinder.FusionGroup",
         inputs: Union[NodeSet, NodeList],
-        visited: NodeSet,
+        visited: Optional[NodeSet] = None,
     ):
         """
         Start from inputs and going reverse topological order. If any upstream node
@@ -131,9 +131,10 @@ class FxNetAccFusionsFinder:
         """
         for arg in inputs:
             # skip the node if already seen
-            if arg in visited:
-                continue
-            visited.add(arg)
+            if visited is not None:
+                if arg in visited:
+                    continue
+                visited.add(arg)
 
             # Skip placeholder and get_attr because they won't be in the fusion group.
             if arg.op not in CALLABLE_NODE_OPS:
