@@ -2765,7 +2765,7 @@ class CPUReproTests(TestCase):
                 "Vectorized<float>::loadu(tmpbuf.data())", 0, exactly=True
             ).run(code)
 
-    def test_logical_op_store_to_lp_data_dtype(self):
+    def test_logical_op_store_to_lowp_data_dtype(self):
         # https://github.com/pytorch/pytorch/issues/117624
         # https://github.com/pytorch/pytorch/issues/117627
         def fn(out1, out2, input, other):

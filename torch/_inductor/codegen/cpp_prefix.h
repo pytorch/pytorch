@@ -365,7 +365,9 @@ inline at::vec::Vectorized<float> mask_convert_to_float(at::vec::Vectorized<floa
 }
 
 template <typename scalar_t>
-inline at::vec::Vectorized<scalar_t> mask_convert_to_lp(at::vec::Vectorized<float> src) {
+inline
+typename std::enable_if<std::is_same<scalar_t, bfloat16>::value || std::is_same<scalar_t, half>::value, at::vec::Vectorized<scalar_t>>::type
+mask_convert_to_lowp(at::vec::Vectorized<float> src) {
   auto fp_vec = mask_convert_to_float(src);
   return cvt_fp32_to_lowp_fp<scalar_t>(fp_vec);
 }
