@@ -296,8 +296,10 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
   Tensor dense_buffer = dense.to(commonDtype);
   Tensor values = sparse._values().to(commonDtype);
 
-  r.resize_as_(dense);
-  r.copy_(dense_buffer);
+  if (!is_same_tensor(r, dense_buffer)) {
+    r.resize_as_(dense);
+    r.copy_(dense_buffer);
+  }
 
   Tensor indices = sparse._indices();
   int64_t nDim = dense.dim();

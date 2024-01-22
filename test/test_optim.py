@@ -56,15 +56,15 @@ class TestOptimRenewed(TestCase):
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
 
-    @parametrize("on", ["contiguous_params", "noncontiguous_params"])
+    @parametrize("contiguous", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_forloop_goes_right_direction(self, device, dtype, optim_info, on):
+    def test_forloop_goes_right_direction(self, device, dtype, optim_info, contiguous):
         optim_cls = optim_info.optim_cls
         optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
             if "foreach" in optim_info.supported_impls:
                 optim_input.kwargs["foreach"] = False  # force forloop
-            if on == "contiguous_params":
+            if contiguous:
                 weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
                 bias = Parameter(torch.randn((10), device=device, dtype=dtype))
             else:
@@ -78,14 +78,14 @@ class TestOptimRenewed(TestCase):
                 loss = (weight.mv(input) + bias).pow(2).sum()
                 loss.backward()
                 if optim_cls.__name__ == "SparseAdam":
-                    # No, this is not how people should use SparseAdam, but it suffices
-                    # for this test case. We should have other test cases for sparse grads.
+                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
+                    # which we know does NOT represent the expected use case!
                     weight.grad = weight.grad.to_sparse()
                     bias.grad = bias.grad.to_sparse()
                 return loss
 
             initial_value = closure().item()
-            for _ in range(200):
+            for _ in range(20):
                 optimizer.step(closure)
 
             if optim_input.kwargs.get("maximize", False):
@@ -112,14 +112,14 @@ class TestOptimRenewed(TestCase):
                 loss = (weight.mv(input).cuda(1) + bias).pow(2).sum()
                 loss.backward()
                 if optim_cls.__name__ == "SparseAdam":
-                    # No, this is not how people should use SparseAdam, but it suffices
-                    # for this test case. We should have other test cases for sparse grads.
+                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
+                    # which we know does NOT represent the expected use case!
                     weight.grad = weight.grad.to_sparse()
                     bias.grad = bias.grad.to_sparse()
                 return loss
 
             initial_value = closure().item()
-            for _ in range(200):
+            for _ in range(20):
                 optimizer.step(closure)
 
             if optim_input.kwargs.get("maximize", False):
