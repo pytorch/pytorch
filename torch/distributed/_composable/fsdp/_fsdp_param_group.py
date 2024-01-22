@@ -13,12 +13,7 @@ from ._fsdp_collectives import (
     foreach_all_gather_copy_out,
 )
 
-from ._fsdp_common import (
-    _raise_assert_with_print,
-    FSDPMeshInfo,
-    ParamModuleInfo,
-    TrainingState,
-)
+from ._fsdp_common import FSDPMeshInfo, ParamModuleInfo, TrainingState
 from ._fsdp_param import FSDPParam, ShardedState
 
 
@@ -154,12 +149,8 @@ class FSDPParamGroup:
     @property
     def _all_gather_process_group(self) -> dist.ProcessGroup:
         mesh_info = self.mesh_info
-        group = mesh_info.shard_process_group
-        if group is None:
-            _raise_assert_with_print(
-                f"Mesh without a shard mesh dim does not need all-gather: {mesh_info.mesh}"
-            )
-        return group
+        assert isinstance(mesh_info, FSDPMeshInfo)
+        return mesh_info.shard_process_group
 
     @property
     def _use_all_gather_stream(self) -> bool:
