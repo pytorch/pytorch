@@ -946,14 +946,12 @@ static inline void _transpose_mxn_half_16_16(__m256i t[], __m512i u[]) {
   // k0-k15  o0-o15
   // l0-l15  p0-p15
   __m512i r[8];
-  r[0] = _mm512_inserti64x4(_mm512_castsi256_si512(t[0]), t[4], 0x01);
-  r[1] = _mm512_inserti64x4(_mm512_castsi256_si512(t[1]), t[5], 0x01);
-  r[2] = _mm512_inserti64x4(_mm512_castsi256_si512(t[2]), t[6], 0x01);
-  r[3] = _mm512_inserti64x4(_mm512_castsi256_si512(t[3]), t[7], 0x01);
-  r[4] = _mm512_inserti64x4(_mm512_castsi256_si512(t[8]), t[12], 0x01);
-  r[5] = _mm512_inserti64x4(_mm512_castsi256_si512(t[9]), t[13], 0x01);
-  r[6] = _mm512_inserti64x4(_mm512_castsi256_si512(t[10]), t[14], 0x01);
-  r[7] = _mm512_inserti64x4(_mm512_castsi256_si512(t[11]), t[15], 0x01);
+
+#pragma unroll(4)
+  for (int i = 0; i < 4; i++) { 
+    r[i] = _mm512_inserti64x4(_mm512_castsi256_si512(t[i]), t[i + 4], 0x01);
+    r[i + 4] = _mm512_inserti64x4(_mm512_castsi256_si512(t[i + 8]), t[i + 12], 0x01);
+  }
 
   // u0: a0a1 b0b1 a2a3 b2b3 a8a9 b8b9 a10a11 b10b11   e0e1 f0f1 e2e3 f2f3 e8e9 f8f9 e10e11 f10f11
   // u1: a4a5 b4b5 a6a7 b6b7 a12a13 b12b13 a14a15 b14b15   e4e5 f4f5 e6e7 f6f7 e12e13 f12f13 e14e15 f14f15
@@ -961,14 +959,11 @@ static inline void _transpose_mxn_half_16_16(__m256i t[], __m512i u[]) {
   // u3: c4c5 d4b5 c6c7 d6b7 c12c13 d12d13 c14c15 d14d15   g4g5 h4h5 g6g7 h6h7 g12g13 h12h13 g14g15 h14h15
   // i j  m n
   // k l  o p
-  u[0] = _mm512_unpacklo_epi32(r[0], r[1]);
-  u[1] = _mm512_unpackhi_epi32(r[0], r[1]);
-  u[2] = _mm512_unpacklo_epi32(r[2], r[3]);
-  u[3] = _mm512_unpackhi_epi32(r[2], r[3]);
-  u[4] = _mm512_unpacklo_epi32(r[4], r[5]);
-  u[5] = _mm512_unpackhi_epi32(r[4], r[5]);
-  u[6] = _mm512_unpacklo_epi32(r[6], r[7]);
-  u[7] = _mm512_unpackhi_epi32(r[6], r[7]);
+#pragma unroll(4)
+  for (int i = 0; i < 8; i += 2) {
+    u[i] = _mm512_unpacklo_epi32(r[i], r[i + 1]);
+    u[i + 1] = _mm512_unpackhi_epi32(r[i], r[i + 1]);
+  }
 
   // r0: a0a1 b0b1 c0c1 d0d1 a8a9 b8b9 c8c9 d8d9  e0e1 f0f1 g0g1 h0h1 e8e9 f8f9 g8g9 h8h9
   // r1: a2a3 b2b3 c2c3 d2d3 a10a11 b10b11 c10c11 d10d11  e2e3 f2f3 g2g3 h2h3 e10e11 f10f11 g10g11 h10h11
@@ -1019,16 +1014,23 @@ static inline void _transpose_mxn_half_16_16(__m256i t[], __m512i u[]) {
       0x001a0018,
       0x000e000c,
       0x000a0008);
-  u[0] = _mm512_permutex2var_epi16(r[0], const1, r[4]); // 0-- 1--
-  u[4] = _mm512_permutex2var_epi16(r[0], const2, r[4]); // 8-- 9--
-  u[2] = _mm512_permutex2var_epi16(r[2], const1, r[6]); // 4-- 5--
-  u[6] = _mm512_permutex2var_epi16(r[2], const2, r[6]); // 12-- 13--
-  u[1] = _mm512_permutex2var_epi16(r[1], const1, r[5]); // 2-- 3--
-  u[5] = _mm512_permutex2var_epi16(r[1], const2, r[5]); // 10-- 11--
-  u[3] = _mm512_permutex2var_epi16(r[3], const1, r[7]); // 6-- 7--
-  u[7] = _mm512_permutex2var_epi16(r[3], const2, r[7]); // 14-- 15--
+
+  // 0-- 1--
+  // 8-- 9--
+  // 2-- 3--
+  // 10-- 11--
+  // 4-- 5--
+  // 12-- 13--
+  // 6-- 7--
+  // 14-- 15--
+#pragma unroll(4)
+  for (int i = 0; i < 4; i++) {
+    u[i] = _mm512_permutex2var_epi16(r[i], const1, r[i + 4]);
+    u[i + 4] = _mm512_permutex2var_epi16(r[i], const2, r[i + 4]);
+  }
 }
 
+// TODO(Leslie): Add the AVX2 Version of transpose_mxn for BFloat16 and Float16
 // Code referred to FBGEMM:
 // https://github.com/pytorch/FBGEMM/blob/39a423e4ad1a04b77fea81c7d09c3e6f8984fae9/src/UtilsAvx512.cc#L1483-L1607
 template<>
@@ -1055,6 +1057,8 @@ inline void transpose_mxn<BFloat16, 16, 16>(
   // o: o0  o1  o2  o3  o4  o5  o6  o7  o8  o9  o10 o11 o12 o13 o14 o15
   // p: p0  p1  p2  p3  p4  p5  p6  p7  p8  p9  p10 p11 p12 p13 p14 p15
   __m256i t[16];
+
+#pragma unroll(16)
   for (int i = 0; i < 16; i++) {
     t[i] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i * ld_src));
   }
@@ -1062,6 +1066,7 @@ inline void transpose_mxn<BFloat16, 16, 16>(
   __m512i u[8];
   _transpose_mxn_half_16_16(t, u);
 
+#pragma unroll(8)
   for (int i = 0; i < 8; i++) {
     _mm256_storeu_si256(
       reinterpret_cast<__m256i*>(dst + (i * 2) * ld_dst),
@@ -1098,6 +1103,8 @@ inline void transpose_mxn<Half, 16, 16>(
   // o: o0  o1  o2  o3  o4  o5  o6  o7  o8  o9  o10 o11 o12 o13 o14 o15
   // p: p0  p1  p2  p3  p4  p5  p6  p7  p8  p9  p10 p11 p12 p13 p14 p15
   __m256i t[16];
+
+#pragma unroll(16)
   for (int i = 0; i < 16; i++) {
     t[i] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i * ld_src));
   }
@@ -1105,6 +1112,7 @@ inline void transpose_mxn<Half, 16, 16>(
   __m512i u[8];
   _transpose_mxn_half_16_16(t, u);
 
+#pragma unroll(8)
   for (int i = 0; i < 8; i++) {
     _mm256_storeu_si256(
       reinterpret_cast<__m256i*>(dst + (i * 2) * ld_dst),
@@ -1135,6 +1143,7 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
   // t[16]: 512 544 513 545 514 546 515 547 520 552 521 553 522 554 523 555 528 ... 571
   // ...
   // t[31]: 964 996 965 997 966 998 967 999 972 1004 973 1005 974 1006 975 1007 980 ... 1023
+#pragma unroll(16)
   for (int i = 0; i < 16; ++i) {
     d[i * 2] = _mm512_unpacklo_epi16(r[i * 2], r[i * 2 + 1]);
     d[i * 2 + 1] = _mm512_unpackhi_epi16(r[i * 2], r[i * 2 + 1]);
@@ -1159,6 +1168,7 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
   // t[16]: 512 544 576 608 513 545 577 609 520 552 584 616 521 553 585 617 528 ... 633
   // ...
   // t[31]: 902 934 966 998 903 935 967 999 910 942 974 1006 911 943 975 1007 918 ... 1023
+#pragma unroll(8)
   for (int i = 0; i < 8; ++i) {
     r[i * 4] = _mm512_unpacklo_epi32(d[i * 4], d[i * 4 + 2]);
     r[i * 4 + 1] = _mm512_unpackhi_epi32(d[i * 4], d[i * 4 + 2]);
@@ -1185,6 +1195,7 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
   // t[16]: 512 544 576 608 640 672 704 736 520 552 584 616 648 680 712 744 528 ... 760
   // ...
   // t[31]: 775 807 839 871 903 935 967 999 783 815 847 879 911 943 975 1007 791 ... 1023
+#pragma unroll(4)
   for (int i = 0; i < 4; ++i) {
     d[i * 8] = _mm512_unpacklo_epi64(r[i * 8], r[i * 8 + 4]);
     d[i * 8 + 1] = _mm512_unpackhi_epi64(r[i * 8], r[i * 8 + 4]);
@@ -1233,6 +1244,7 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
       0x000000000000000a,
       0x0000000000000003,
       0x0000000000000002);
+#pragma unroll(8)
   for (int i = 0; i < 8; ++i) {
     r[i] = _mm512_permutex2var_epi64(d[i], /*idx*/const1, d[i + 8]);
     r[i + 8] = _mm512_permutex2var_epi64(d[i], /*idx*/const2, d[i + 8]);
@@ -1277,6 +1289,7 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
       0x0000000000000006,
       0x0000000000000005,
       0x0000000000000004);
+#pragma unroll(16)
   for (int i = 0; i < 16; ++i) {
     d[i] = _mm512_permutex2var_epi64(r[i], /*idx*/const3, r[i + 16]);
     d[i + 16] = _mm512_permutex2var_epi64(r[i], /*idx*/const4, r[i + 16]);
@@ -1292,26 +1305,8 @@ inline void transpose_mxn<BFloat16, 32, 32>(
     BFloat16* dst,
     int64_t ld_dst) {
   // Load from memory
-  // t[0]: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 ... 31
-  // t[1]: 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 ... 63
-  // t[2]: 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 ... 95
-  // t[3]: 96 97 98 99 100 101 102 103 104 105 106 107 108 109 110 111 112 ... 127
-  // t[4]: 128 129 130 131 132 133 134 135 136 137 138 139 140 141 142 143 144 ... 159
-  // t[5]: 160 161 162 163 164 165 166 167 168 169 170 171 172 173 174 175 176 ... 191
-  // t[6]: 192 193 194 195 196 197 198 199 200 201 202 203 204 205 206 207 208 ... 223
-  // t[7]: 224 225 226 227 228 229 230 231 232 233 234 235 236 237 238 239 240 ... 255
-  // t[8]: 256 257 258 259 260 261 262 263 264 265 266 267 268 269 270 271 272 ... 287
-  // t[9]: 288 289 290 291 292 293 294 295 296 297 298 299 300 301 302 303 304 ... 319
-  // t[10]: 320 321 322 323 324 325 326 327 328 329 330 331 332 333 334 335 336 ... 351
-  // t[11]: 352 353 354 355 356 357 358 359 360 361 362 363 364 365 366 367 368 ... 383
-  // t[12]: 384 385 386 387 388 389 390 391 392 393 394 395 396 397 398 399 400 ... 415
-  // t[13]: 416 417 418 419 420 421 422 423 424 425 426 427 428 429 430 431 432 ... 447
-  // t[14]: 448 449 450 451 452 453 454 455 456 457 458 459 460 461 462 463 464 ... 479
-  // t[15]: 480 481 482 483 484 485 486 487 488 489 490 491 492 493 494 495 496 ... 511
-  // t[16]: 512 513 514 515 516 517 518 519 520 521 522 523 524 525 526 527 528 ... 543
-  // ...
-  // t[31]: 992 993 994 995 996 997 998 999 1000 1001 1002 1003 1004 1005 1006 1007 1008 ... 1023
   __m512i r[32];
+#pragma unroll(32)
   for (int i = 0; i < 32; ++i) {
     r[i] = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + i* ld_src));
   }
@@ -1320,6 +1315,7 @@ inline void transpose_mxn<BFloat16, 32, 32>(
   _transpose_mxn_half_32_32(r, d);
 
   // Store to dst
+#pragma unroll(32)
   for (int i = 0; i < 32; ++i) {
     _mm512_storeu_si512(dst + i* ld_dst, d[i]);
   }
@@ -1332,25 +1328,7 @@ inline void transpose_mxn<Half, 32, 32>(
     Half* dst,
     int64_t ld_dst) {
   // Load from memory
-  // t[0]: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 ... 31
-  // t[1]: 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 ... 63
-  // t[2]: 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 ... 95
-  // t[3]: 96 97 98 99 100 101 102 103 104 105 106 107 108 109 110 111 112 ... 127
-  // t[4]: 128 129 130 131 132 133 134 135 136 137 138 139 140 141 142 143 144 ... 159
-  // t[5]: 160 161 162 163 164 165 166 167 168 169 170 171 172 173 174 175 176 ... 191
-  // t[6]: 192 193 194 195 196 197 198 199 200 201 202 203 204 205 206 207 208 ... 223
-  // t[7]: 224 225 226 227 228 229 230 231 232 233 234 235 236 237 238 239 240 ... 255
-  // t[8]: 256 257 258 259 260 261 262 263 264 265 266 267 268 269 270 271 272 ... 287
-  // t[9]: 288 289 290 291 292 293 294 295 296 297 298 299 300 301 302 303 304 ... 319
-  // t[10]: 320 321 322 323 324 325 326 327 328 329 330 331 332 333 334 335 336 ... 351
-  // t[11]: 352 353 354 355 356 357 358 359 360 361 362 363 364 365 366 367 368 ... 383
-  // t[12]: 384 385 386 387 388 389 390 391 392 393 394 395 396 397 398 399 400 ... 415
-  // t[13]: 416 417 418 419 420 421 422 423 424 425 426 427 428 429 430 431 432 ... 447
-  // t[14]: 448 449 450 451 452 453 454 455 456 457 458 459 460 461 462 463 464 ... 479
-  // t[15]: 480 481 482 483 484 485 486 487 488 489 490 491 492 493 494 495 496 ... 511
-  // t[16]: 512 513 514 515 516 517 518 519 520 521 522 523 524 525 526 527 528 ... 543
-  // ...
-  // t[31]: 992 993 994 995 996 997 998 999 1000 1001 1002 1003 1004 1005 1006 1007 1008 ... 1023
+#pragma unroll(32)
   __m512i r[32];
   for (int i = 0; i < 32; ++i) {
     r[i] = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + i* ld_src));
@@ -1360,6 +1338,7 @@ inline void transpose_mxn<Half, 32, 32>(
   _transpose_mxn_half_32_32(r, d);
 
   // Store to dst
+#pragma unroll(32)
   for (int i = 0; i < 32; ++i) {
     _mm512_storeu_si512(dst + i* ld_dst, d[i]);
   }
