@@ -58,7 +58,7 @@ from ..utils import (
     unique,
     yellow_text,
 )
-from ..virtualized import ops, V
+from ..virtualized import ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .common import (
     CSE,
@@ -387,10 +387,6 @@ def triton_compute_type(dtype):
         triton_type_name = "float8e4nv"
     elif triton_type_name == "float8_e5m2":
         triton_type_name = "float8e5"
-    elif triton_type_name == "float8_e4m3fnuz":
-        triton_type_name = "float8e4b8"
-    elif triton_type_name == "float8_e5m2":
-        triton_type_name = "float8e5b16"
     return f"tl.{triton_type_name}"
 
 
@@ -836,6 +832,11 @@ class TritonOverrides(OpOverrides):
         return f"tl.math.ceil({x})"
 
 
+# Use mypy to check protocol implemented correctly
+def _typecheck_TritonOverrides(h: TritonOverrides) -> OpsHandler[str]:
+    return h
+
+
 class TritonKernelOverrides(TritonOverrides):
     """Map element-wise ops to Triton within a TritonKernel
 
@@ -883,6 +884,11 @@ class TritonKernelOverrides(TritonOverrides):
         return (
             f"tl.load({var} + {V.kernel.args.seed_offset('load_seed_offset', offset)})"
         )
+
+
+# Use mypy to check protocol implemented correctly
+def _typecheck_TritonKernelOverrides(h: TritonKernelOverrides) -> OpsHandler[str]:
+    return h
 
 
 @dataclasses.dataclass
@@ -1885,7 +1891,9 @@ class TritonKernel(Kernel):
 
         return result_var
 
-    def store(self, name, index, value, mode=None):
+    def store(
+        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+    ) -> None:
         var = self.args.output(name)
         original_index = index
         indexing = self.indexing(index, dense_indexing=True, block_ptr=mode is None)
@@ -1930,7 +1938,7 @@ class TritonKernel(Kernel):
         offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
-    ):
+    ) -> CSEVariable:
         """
         See [Note: Inductor bucketize op]
         """
@@ -1976,7 +1984,13 @@ class TritonKernel(Kernel):
             return tuple(map(fn, value))
         return fn(value)
 
-    def reduction(self, dtype, src_dtype, reduction_type, value):
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[CSEVariable, Tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
         assert self.inside_reduction
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
@@ -2201,7 +2215,7 @@ class TritonKernel(Kernel):
 
         return result_var
 
-    def store_reduction(self, name, index, value):
+    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
         assert self.inside_reduction
         self.inside_reduction = False
         indexing = self.indexing(index, block_ptr=True)
@@ -2257,7 +2271,13 @@ class TritonKernel(Kernel):
 
         return self.helper_functions.add(helper.getvalue())
 
-    def scan(self, dtype, combine_fn, value, init):
+    def scan(
+        self,
+        dtype: torch.dtype,
+        combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
+        value: CSEVariable,
+        init: int,
+    ) -> CSEVariable:
         assert self.inside_reduction
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)

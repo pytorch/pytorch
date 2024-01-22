@@ -316,22 +316,22 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             actual_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_d_x_ : torch.Tensor, L_d_y_0_ : torch.Tensor, L_d_y_1_2_ : torch.Tensor):
-        l_d_x_ = L_d_x_
-        l_d_y_0_ = L_d_y_0_
-        l_d_y_1_2_ = L_d_y_1_2_
+    def forward(self, L_d_dict_keys_getitem_L_d_0_ : torch.Tensor, L_d_dict_keys_getitem_L_d_1_0_ : torch.Tensor, L_d_dict_keys_getitem_L_d_1_1_2_ : torch.Tensor):
+        l_d_dict_keys_getitem_l_d_0_ = L_d_dict_keys_getitem_L_d_0_
+        l_d_dict_keys_getitem_l_d_1_0_ = L_d_dict_keys_getitem_L_d_1_0_
+        l_d_dict_keys_getitem_l_d_1_1_2_ = L_d_dict_keys_getitem_L_d_1_1_2_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_d_x_, l_d_y_0_, l_d_y_1_2_);  wrap_body_0 = l_d_x_ = l_d_y_0_ = l_d_y_1_2_ = None
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_d_dict_keys_getitem_l_d_0_, l_d_dict_keys_getitem_l_d_1_0_, l_d_dict_keys_getitem_l_d_1_1_2_);  wrap_body_0 = l_d_dict_keys_getitem_l_d_0_ = l_d_dict_keys_getitem_l_d_1_0_ = l_d_dict_keys_getitem_l_d_1_1_2_ = None
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_d_x_, l_d_y_0_, l_d_y_1_2_):
-            sin = l_d_x_.sin();  l_d_x_ = None
-            cos = l_d_y_0_.cos();  l_d_y_0_ = None
+        def forward(self, l_d_dict_keys_getitem_l_d_0_, l_d_dict_keys_getitem_l_d_1_0_, l_d_dict_keys_getitem_l_d_1_1_2_):
+            sin = l_d_dict_keys_getitem_l_d_0_.sin();  l_d_dict_keys_getitem_l_d_0_ = None
+            cos = l_d_dict_keys_getitem_l_d_1_0_.cos();  l_d_dict_keys_getitem_l_d_1_0_ = None
             add = sin + cos;  sin = cos = None
-            sin_1 = l_d_y_1_2_.sin();  l_d_y_1_2_ = None
+            sin_1 = l_d_dict_keys_getitem_l_d_1_1_2_.sin();  l_d_dict_keys_getitem_l_d_1_1_2_ = None
             sub = add - sin_1;  add = sin_1 = None
             return (sub,)
 """,  # NOQA: B950
