@@ -6,7 +6,14 @@ from typing import cast, Dict, List, Optional, Sequence, Tuple, Union
 
 from ... import ir
 from ...config import cuda as inductor_cuda_config
-from ...ir import Buffer, CUDATemplateBuffer, FixedLayout, IRNode, Layout
+from ...ir import (
+    Buffer,
+    CUDATemplateBuffer,
+    FixedLayout,
+    IRNode,
+    Layout,
+    ReinterpretView,
+)
 from ..common import ChoiceCaller, IndentedBuffer
 
 from . import cutlass_utils
@@ -18,7 +25,10 @@ from .cutlass_epilogue_gen import (
     EVT_EXTRA_HEADER,
 )
 
-from .pointwise_stride_utils import extract_pointwise_load_strides
+from .pointwise_stride_utils import (
+    extract_epilogue_storage_layout,
+    extract_pointwise_load_strides,
+)
 
 log = logging.getLogger(__name__)
 
@@ -53,6 +63,7 @@ extern "C" {
     return 0;
   }
   // check for null pointers after workspace size, since querying workspace size doesn't require valid data pointers
+#ifndef CUTLASS_BACKEND_DISABLE_CHECKS
   {{kernel.check_not_null(X)}}
   {{kernel.check_not_null(W)}}
   {{kernel.check_not_null(Bias)}}
@@ -64,6 +75,7 @@ extern "C" {
     auto status = gemm_op.can_implement(arguments);
     CUTLASS_CHECK(status);
   }
+#endif
 #ifdef CUTLASS_DEBUG_TRACE_LEVEL
 #if CUTLASS_DEBUG_TRACE_LEVEL == 1
   {
@@ -379,6 +391,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         non_fuseable = non_fuseable and (
             not inductor_cuda_config.cutlass_prefer_evt_capable_ops
         )
+        no_evt_fallback = False
         if fuseable:
             cutlass_template_evt = CUTLASSGemmTemplate(
                 input_nodes,  # type: ignore[arg-type]
@@ -388,13 +401,25 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 input_reorder=input_reorder,
                 can_fuse_epilogue=True,
             )
+            if "epilogue_nodes" in extra_kwargs:
+                no_evt_fallback = True
+                epilogue_nodes = extra_kwargs["epilogue_nodes"]
+                template_buffer_node = extra_kwargs.get("template_buffer_node", None)
+                assert (
+                    template_buffer_node is not None
+                ), "Passing epilogue_nodes requires template_buffer_node to be also passed"
+                # This change of output node can change the output layout, which affects which ops
+                # are available
+                cutlass_template_evt.update_output_node_given_epilogue(
+                    epilogue_nodes, template_buffer_node
+                )
             # This will list only ops capable of EVT fusion
             ops_evt = cutlass_template_evt.gen_ops()
             for op in ops_evt:
                 cutlass_template_evt.maybe_append_choice(choices, op=op, **extra_kwargs)
         else:
             ops_evt = []
-        if non_fuseable or len(ops_evt) == 0:
+        if non_fuseable or (len(ops_evt) == 0 and not no_evt_fallback):
             if fuseable:
                 # list both fuseable and non-fuseable ops, and treat them all as non-fuseable
                 can_fuse_epilogue = False
@@ -682,7 +707,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         X: Buffer,
         W: Buffer,
         Bias: Optional[Buffer],
-        Y: Buffer,
+        Y: Union[Buffer, ReinterpretView],
     ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]  # noqa: F821
         # This is a workaround to deal with cases where the input layouts have changed
         # between autotuning and rendering. This happens if the inputs layout
@@ -695,19 +720,21 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         a_layout = X.get_layout()
         b_layout = W.get_layout()
         c_layout = Bias.get_layout() if Bias is not None else None
-        d_layout = Y.get_layout()
-        all_match = all(
+
+        d_layout = copy.deepcopy(Y.get_layout())
+        match_list = [
             CUTLASSGemmTemplate.layout_match(buf.get_layout(), op_layout)
             for buf, op_layout in zip(
                 (X, W, Bias, Y),
                 (op.A.layout, op.B.layout, op.C.layout, op.D.layout),
             )
             if buf is not None
-        )
+        ]
+        all_match = all(match_list)
         if all_match:
             return op
-        log.debug(
-            f"Cutlass GEMM Layout change: Input and/or output layouts have changed between autotuning and call to render on {self}. Applying workaround. This can lead to suboptimal performance."  # noqa: G004, B950
+        log.warning(
+            f"Cutlass GEMM Layout change: Input and/or output layouts have changed between autotuning/retuning and call to render on {self}. Applying workaround. This can lead to suboptimal performance. Match List: {match_list}"  # noqa: G004, B950
         )
         new_op = copy.deepcopy(op)
 
@@ -960,7 +987,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
         if epilogue_nodes is not None and len(epilogue_nodes) > 0:
-            self.output_node = cast(Buffer, epilogue_nodes[-1])
+            self.update_output_node_given_epilogue(epilogue_nodes, template_buffer_node)
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
@@ -1001,7 +1028,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         # The layouts might have changed between autotuning and this call if they were FlexibleLayout
         # we need to adapt, which might lead to suboptimal performance.
         # Also there might be a Bias / additional input node which was not present during autotuning
-        # @TODO kadeng: Find a way to solve this better
+
         op = self.fix_op_layout(op, X, W, Bias, Y)
         epilogue_template: Optional[str] = None
         should_swap_xw: bool = False
@@ -1075,6 +1102,28 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             ).render(**options)
             res += "\n\n" + test_runner_code
         return res
+
+    def update_output_node_given_epilogue(self, epilogue_nodes, template_buffer_node):
+        assert (
+            template_buffer_node is not None
+        ), "If epilogue nodes are passed, template_buffer_node is required"
+        # We need to match dimensions of the target buffer to the output of the matmul
+        if epilogue_nodes is None or len(epilogue_nodes) == 0:
+            self.output_node = template_buffer_node
+            return
+        result_strides, result_sizes = extract_epilogue_storage_layout(
+            epilogue_nodes[-1], template_buffer_node
+        )
+        outbuf = cast(Buffer, epilogue_nodes[-1])
+        outbuf.freeze_layout()
+        out_layout = FixedLayout(
+            outbuf.layout.device,
+            outbuf.layout.dtype,
+            result_sizes,  #
+            result_strides,
+            outbuf.layout.offset,
+        )
+        self.output_node = ir.ReinterpretView(data=outbuf, layout=out_layout)
 
     def determine_additional_inputs(
         self,

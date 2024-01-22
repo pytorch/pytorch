@@ -382,7 +382,7 @@ class TuningProcessPool:
 tuning_pool = TuningProcessPool()
 
 
-LayoutOrBuffer = Union[ir.Layout, ir.Buffer]
+LayoutViewOrBuffer = Union[ir.Layout, ir.Buffer, ir.ReinterpretView]
 
 
 @dataclasses.dataclass
@@ -396,7 +396,7 @@ class TensorMeta:
 
     @classmethod
     def from_irnodes(
-        cls, irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]]
+        cls, irnodes: Union[LayoutViewOrBuffer, Sequence[LayoutViewOrBuffer]]
     ) -> Union[TensorMeta, List[TensorMeta]]:
         if isinstance(irnodes, Sequence):
             result: List[Any] = [cls.from_irnodes(x) for x in irnodes]
