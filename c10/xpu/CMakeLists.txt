@@ -21,7 +21,7 @@ if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
 endif()
 
 # ---[ Dependency of c10_xpu
-target_link_libraries(c10_xpu PUBLIC c10 torch::xpurt)
+target_link_libraries(c10_xpu PUBLIC c10 torch::syclrt)
 target_include_directories(
     c10_xpu PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>
