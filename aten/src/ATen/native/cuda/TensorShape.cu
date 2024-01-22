@@ -8,10 +8,30 @@
 
 namespace at::native {
 
+namespace detail {
+
+// NOTE [CUDA fast path for split_with_sizes_copy.out]
+// split_with_sizes_copy.out for contiguous operands has the following
+// properties:
+// - Each src split consists of multiple chunks that are separated by a fixed
+// stride. The number of chunks and the strides are the same across all src
+// splits.
+// - Each dst split is the concatenation of the chunks in its corresponding src
+// splits.
+// - The sizes chunks vary across splits.
+// - The alignment varies across chunks. A (src, dst) chunk pair is not
+// guaranteed to have the same alignment.
+//
+// The following strategies are employed to optimize for this workload:
+// - The entire workload is fused into a single kernel to maximize I/O
+// throughput and minimize wave quantization.
+// - To account for both small and large chunk sizes, a "jagged grid" is used.
+// Each chunk is processed by one or more blocks depending on its size.
+// - Within each chunk, the region in which writes can be vectorized is
+// identified. Within this region, writes are always vectorized and reads are
+// oppurtunistically vectorized.
 static constexpr int64_t BLOCK_SIZE = 128;
 static constexpr int64_t BYTES_PER_THREAD = 16;
-
-namespace detail {
 
 static __host__ __device__ inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;
@@ -52,7 +72,7 @@ static __device__ inline bool is_aligned(const void* addr) {
 
 template <typename T>
 static __device__ inline void load128(uint4& val, const char* addr) {
-  for (size_t i = 0; i < BYTES_PER_THREAD / sizeof(T); ++i) {
+  for (size_t i = 0; i < detail::BYTES_PER_THREAD / sizeof(T); ++i) {
     reinterpret_cast<T*>(&val)[i] = reinterpret_cast<const T*>(addr)[i];
   }
 }
@@ -101,11 +121,11 @@ static __device__ __inline__ void copy_chunk(
   // Identify the region in which writes are guaranteed to be 128-bit aligned
   int64_t align_off, aligned_size;
   get_aligned_region(
-      dst, chunk_size, BYTES_PER_THREAD, align_off, aligned_size);
+      dst, chunk_size, detail::BYTES_PER_THREAD, align_off, aligned_size);
 
-  for (int64_t off = align_off + thread_idx * BYTES_PER_THREAD;
+  for (int64_t off = align_off + thread_idx * detail::BYTES_PER_THREAD;
        off < align_off + aligned_size;
-       off += num_threads * BYTES_PER_THREAD) {
+       off += num_threads * detail::BYTES_PER_THREAD) {
     uint4 val;
     // Oppurtunistically vectorize reads
     load128(val, &src[off]);
@@ -161,6 +181,7 @@ static inline std::vector<int64_t> get_split_base_addrs(
   const auto element_sz = tensor.element_size();
   int64_t off = 0;
   std::vector<int64_t> split_base_addrs;
+  split_base_addrs.reserve(split_sizes.size());
   for (const auto& split_size : split_sizes) {
     split_base_addrs.push_back(reinterpret_cast<int64_t>(data_ptr + off));
     off += split_size * strides[dim] * element_sz;
@@ -170,6 +191,7 @@ static inline std::vector<int64_t> get_split_base_addrs(
 
 static inline std::vector<int64_t> get_dst_addrs(at::TensorList out) {
   std::vector<int64_t> addrs;
+  addrs.reserve(out.size());
   for (const auto& tensor : out) {
     addrs.push_back(reinterpret_cast<int64_t>(tensor.data_ptr()));
   }
@@ -184,6 +206,7 @@ static inline std::vector<int64_t> get_split_chunk_sizes(
   const auto stride = tensor.stride(dim);
   const auto element_sz = tensor.element_size();
   std::vector<int64_t> split_chunk_sizes;
+  split_chunk_sizes.reserve(split_sizes.size());
   for (const auto& split_size : split_sizes) {
     split_chunk_sizes.push_back(split_size * stride * element_sz);
   }
@@ -230,55 +253,23 @@ std::pair<at::Tensor, std::vector<int64_t*>> pack_vecs(
   packed = packed.to(device, /*non_blocking=*/true);
 
   std::vector<int64_t*> ptrs;
+  ptrs.reserve(vecs.size());
   offset = 0;
   for (const auto* vec : vecs) {
     ptrs.push_back(packed.data_ptr<int64_t>() + offset);
     offset += vec->size();
   }
-  return std::make_pair(packed, ptrs);
+  return std::make_pair(std::move(packed), std::move(ptrs));
 }
 
 } // namespace detail
 
-// A fast path for contiguous operands requiring no cast.
-//
-// Since the operands are contiguous, each src split consists of a fixed number
-// of contiguous chunks (depending on the split dim), separated by a fixed
-// stride. Each dst split consists of the same number of contiguous chunks,
-// with no gaps in-between. This function calculates the base addresses, chunk
-// sizes, and stride for both src and dst splits, and copies every chunk pair
-// with an efficient copy kernel.
+// See [CUDA fast path for split_with_sizes_copy.out]
 void split_with_sizes_copy_out_cuda_contiguous_no_cast(
     const at::Tensor& self,
     at::IntArrayRef split_sizes,
     int64_t dim,
     at::TensorList out) {
-  TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor")
-  const int64_t dim_size = self.size(dim);
-  int64_t split_sizes_sum = 0;
-  auto sizes = self.sizes().vec();
-  for (const auto i : c10::irange(split_sizes.size())) {
-    TORCH_CHECK(
-        split_sizes[i] >= 0,
-        "split_with_sizes expects split_sizes have only non-negative ",
-        "entries, but got split_sizes=",
-        split_sizes[i]);
-    split_sizes_sum += split_sizes[i];
-    sizes[dim] = split_sizes[i];
-    TORCH_CHECK(
-        ArrayRef(sizes) == out[i].sizes(),
-        "shape mismatch between the splits and the outputs");
-  }
-  TORCH_CHECK(
-      split_sizes_sum == dim_size,
-      "split_with_sizes expects split_sizes to sum exactly to ",
-      dim_size,
-      " (input tensor's size at dimension ",
-      dim,
-      "), ",
-      "but got split_sizes=",
-      split_sizes);
-
   const auto device = self.device();
   const auto src_base_addrs =
       detail::get_split_base_addrs(self, split_sizes, dim);
@@ -292,8 +283,8 @@ void split_with_sizes_copy_out_cuda_contiguous_no_cast(
   // splits, assuming each thread only processes BYTES_PER_THREAD bytes.
   int64_t num_blocks = 0;
   for (const auto& split_chunk_size : split_chunk_sizes) {
-    num_blocks +=
-        detail::div_up(split_chunk_size, BLOCK_SIZE * BYTES_PER_THREAD);
+    num_blocks += detail::div_up(
+        split_chunk_size, detail::BLOCK_SIZE * detail::BYTES_PER_THREAD);
   }
 
   // Calculate the maximum number of blocks to launch. Only consider
@@ -304,7 +295,8 @@ void split_with_sizes_copy_out_cuda_contiguous_no_cast(
       at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   const auto max_threads_per_sm =
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor;
-  const int64_t max_blocks = num_sms * max_threads_per_sm / BLOCK_SIZE * 2.0;
+  const int64_t max_blocks =
+      num_sms * max_threads_per_sm / detail::BLOCK_SIZE * 2.0;
 
   // Make each thread process BYTES_PER_THREAD * iter_factor bytes to regulate
   // block size. Spread iter_factor evenly between chunks_per_block and
@@ -325,14 +317,14 @@ void split_with_sizes_copy_out_cuda_contiguous_no_cast(
   for (size_t split_idx = 0; split_idx < split_sizes.size(); ++split_idx) {
     const auto blocks = detail::div_up(
         split_chunk_sizes[split_idx],
-        BLOCK_SIZE * BYTES_PER_THREAD * iters_per_chunk);
+        detail::BLOCK_SIZE * detail::BYTES_PER_THREAD * iters_per_chunk);
     block_idx_to_split_idx.insert(
         block_idx_to_split_idx.end(), blocks, split_idx);
     blocks_cumsums.push_back(blocks_cumsums.back() + blocks);
   }
 
   dim3 blocks(blocks_cumsums.back(), num_chunks / chunks_per_block, 1);
-  dim3 threads(BLOCK_SIZE, 1, 1);
+  dim3 threads(detail::BLOCK_SIZE, 1, 1);
 
   auto [_, ptrs] = detail::pack_vecs(
       {&dst_base_addrs,
@@ -355,10 +347,6 @@ void split_with_sizes_copy_out_cuda_contiguous_no_cast(
       src_stride,
       num_chunks);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-  for (const auto& t : out) {
-    t.unsafeGetTensorImpl()->bump_version();
-  }
 }
 
 void split_with_sizes_copy_out_cuda(
@@ -372,9 +360,35 @@ void split_with_sizes_copy_out_cuda(
     contiguous_no_cast &= (t.dtype() == self.dtype());
   }
   if (contiguous_no_cast) {
+    // Perform equivalent checks performed by the composite impl
+    if (dim < 0) {
+      dim = at::maybe_wrap_dim(dim, self.dim());
+    }
+    TORCH_CHECK(
+        self.dim() != 0, "split expects at least a 1-dimensional tensor")
+    const int64_t dim_size = self.size(dim);
+    int64_t split_sizes_sum = 0;
+    for (const auto i : c10::irange(split_sizes.size())) {
+      TORCH_CHECK(
+          split_sizes[i] >= 0,
+          "split_with_sizes expects split_sizes have only non-negative ",
+          "entries, but got split_sizes=",
+          split_sizes[i]);
+      split_sizes_sum += split_sizes[i];
+    }
+    TORCH_CHECK(
+        split_sizes_sum == dim_size,
+        "split_with_sizes expects split_sizes to sum exactly to ",
+        dim_size,
+        " (input tensor's size at dimension ",
+        dim,
+        "), ",
+        "but got split_sizes=",
+        split_sizes);
     split_with_sizes_copy_out_cuda_contiguous_no_cast(
         self, split_sizes, dim, out);
   } else {
+    // Fallback to the composite impl
     auto tmp = self.split_with_sizes(split_sizes, dim);
     for (const auto i : c10::irange(out.size())) {
       out[i].copy_(tmp[i]);
