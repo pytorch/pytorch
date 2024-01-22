@@ -206,8 +206,12 @@ class NestedTensor(torch.Tensor):
             # during construction.
             #
             # In the case of torch compile, a symbolic version of the
-            # singleton int is created in a different way, and it does not yet
-            # have the metadata set. We set the metadata here.
+            # singleton int does not yet have the metadata set, and so we set it
+            # here.
+            #
+            # The invariant today is that we must guarantee that singleton ints
+            # acquire its metadata by the time it finds its way onto some
+            # NestedTensor.
             ragged_size.node._singleton_vec = offsets
             ragged_size.node._singleton_sum_vec = values.shape[0]
             _tensor_symint_registry[ragged_source] = ragged_size
