@@ -1244,7 +1244,7 @@ def parse_args():
         help="exclude tests that are run for a specific jit config",
     )
     parser.add_argument(
-        "--exclude-torch-export",
+        "--exclude-torch-export-tests",
         action="store_true",
         help="exclude torch export tests",
     )
@@ -1383,7 +1383,7 @@ def get_selected_tests(options) -> List[str]:
     if options.exclude_inductor_tests:
         options.exclude.extend(INDUCTOR_TESTS)
 
-    if options.exclude_torch_export:
+    if options.exclude_torch_export_tests:
         options.exclude.extend(TORCH_EXPORT_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
