@@ -3,10 +3,12 @@
 
 namespace torch::inductor {
 
+// NOTICE: Following APIs are subject to change due to active development
+// We provide NO BC guarantee for these APIs
 AOTIModelContainerRunnerCpu::AOTIModelContainerRunnerCpu(
     const std::string& model_so_path,
     size_t num_models)
-    : AOTIModelContainerRunner(model_so_path, num_models, true, "") {}
+    : AOTIModelContainerRunner(model_so_path, num_models, "cpu", "") {}
 
 AOTIModelContainerRunnerCpu::~AOTIModelContainerRunnerCpu() {}
 

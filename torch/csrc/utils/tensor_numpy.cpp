@@ -237,30 +237,27 @@ at::Tensor tensor_from_numpy(
   // NumPy strides use bytes. Torch strides use element counts.
   auto element_size_in_bytes = PyArray_ITEMSIZE(array);
   for (auto& stride : strides) {
-    if (stride % element_size_in_bytes != 0) {
-      throw ValueError(
-          "given numpy array strides not a multiple of the element byte size. "
-          "Copy the numpy array to reallocate the memory.");
-    }
+    TORCH_CHECK_VALUE(
+        stride % element_size_in_bytes == 0,
+        "given numpy array strides not a multiple of the element byte size. "
+        "Copy the numpy array to reallocate the memory.");
     stride /= element_size_in_bytes;
   }
 
   for (const auto i : c10::irange(ndim)) {
-    if (strides[i] < 0) {
-      throw ValueError(
-          "At least one stride in the given numpy array is negative, "
-          "and tensors with negative strides are not currently supported. "
-          "(You can probably work around this by making a copy of your array "
-          " with array.copy().) ");
-    }
+    TORCH_CHECK_VALUE(
+        strides[i] >= 0,
+        "At least one stride in the given numpy array is negative, "
+        "and tensors with negative strides are not currently supported. "
+        "(You can probably work around this by making a copy of your array "
+        " with array.copy().) ");
   }
 
   void* data_ptr = PyArray_DATA(array);
-  if (!PyArray_EquivByteorders(PyArray_DESCR(array)->byteorder, NPY_NATIVE)) {
-    throw ValueError(
-        "given numpy array has byte order different from the native byte order. "
-        "Conversion between byte orders is currently not supported.");
-  }
+  TORCH_CHECK_VALUE(
+      PyArray_EquivByteorders(PyArray_DESCR(array)->byteorder, NPY_NATIVE),
+      "given numpy array has byte order different from the native byte order. "
+      "Conversion between byte orders is currently not supported.");
   Py_INCREF(obj);
   return at::lift_fresh(at::from_blob(
       data_ptr,
@@ -411,9 +408,8 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
     }
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyArray_Descr* descr;
-    if (!PyArray_DescrConverter(py_typestr, &descr)) {
-      throw ValueError("cannot parse `typestr`");
-    }
+    TORCH_CHECK_VALUE(
+        PyArray_DescrConverter(py_typestr, &descr), "cannot parse `typestr`");
     dtype = numpy_dtype_to_aten(descr->type_num);
     dtype_size_in_bytes = descr->elsize;
     TORCH_INTERNAL_ASSERT(dtype_size_in_bytes > 0);
@@ -459,11 +455,10 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
       // __cuda_array_interface__ strides use bytes. Torch strides use element
       // counts.
       for (auto& stride : strides) {
-        if (stride % dtype_size_in_bytes != 0) {
-          throw ValueError(
-              "given array strides not a multiple of the element byte size. "
-              "Make a copy of the array to reallocate the memory.");
-        }
+        TORCH_CHECK_VALUE(
+            stride % dtype_size_in_bytes == 0,
+            "given array strides not a multiple of the element byte size. "
+            "Make a copy of the array to reallocate the memory.");
         stride /= dtype_size_in_bytes;
       }
     } else {

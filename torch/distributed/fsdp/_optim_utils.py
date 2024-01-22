@@ -405,8 +405,8 @@ def _shard_orig_param_state(
             and fsdp_state.sharding_strategy != ShardingStrategy.NO_SHARD
         ):
             value = value.flatten()[
-                intra_param_start_idx : intra_param_end_idx + 1
-            ].clone()  # type: ignore[operator]
+                intra_param_start_idx : intra_param_end_idx + 1  # type: ignore[operator]
+            ].clone()
         new_optim_state[state_name] = value
     del optim_state
     return new_optim_state
@@ -523,12 +523,12 @@ def _flatten_optim_state_dict(
                     "use_orig_params=True."
                 )
 
-            for t in flat_state.items():
+            for t in flat_state.values():
                 if torch.is_tensor(t):
                     curr_numel += t.numel()
             # Call synchronize() to ensure the some temporary tensors being recycled.
             if curr_numel > sync_threshold:
-                torch.cuda.Synchronize()
+                torch.cuda.synchronize()
                 curr_numel = 0
 
         else:  # do not flatten non-FSDP parameters' states
@@ -1524,7 +1524,7 @@ def _allgather_orig_param_states(
     """
     fsdp_state = fsdp_param_info.state
     if fsdp_state.rank == 0:
-        logger.warning(
+        logger.debug(
             "CUDA Memory Summary before calling to _allgather_orig_param_states %s",
             torch.cuda.memory_summary(),
         )
