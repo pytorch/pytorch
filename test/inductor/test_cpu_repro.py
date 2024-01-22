@@ -576,6 +576,21 @@ class CPUReproTests(TestCase):
                 (value, mask),
             )
 
+    def test_relu_with_inf_value(self):
+        # https://github.com/pytorch/pytorch/issues/117544.
+
+        def fn(out):
+            out = torch.sinh(input=out)
+            out = torch.relu(input=out)
+            return out
+
+        x = torch.Tensor([-572373.5000, 755109.1250, 330995.5625])
+        with torch.no_grad():
+            self.common(
+                fn,
+                (x,),
+            )
+
     @config.patch(implicit_fallbacks=True)
     def test_repeat_interleave(self):
         def fn(y):
@@ -2311,25 +2326,27 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
         assert metrics.generated_cpp_vec_kernel_count == 2
 
-    def test_transpose_mxn_16_16_bf16(self):
+    def test_transpose_mxn_16_16_bf16_fp16(self):
         def fn(a, b):
             c = a * b
             return c.sum(dim=1)
 
-        metrics.reset()
-        x = torch.randn(100, 50, 50).to(torch.bfloat16)
-        y = torch.randn(100, 50, 50).to(torch.bfloat16).transpose(1, 2)
-        self.common(fn, (x, y))
-        assert metrics.generated_cpp_vec_kernel_count == 2
+        for dtype in [torch.bfloat16, torch.float16]:
+            metrics.reset()
+            x = torch.randn(100, 50, 50).to(dtype)
+            y = torch.randn(100, 50, 50).to(dtype).transpose(1, 2)
+            self.common(fn, (x, y))
+            assert metrics.generated_cpp_vec_kernel_count == 2
 
-    def test_transpose_mxn_32_32_bf16(self):
+    def test_transpose_mxn_32_32_bf16_fp16(self):
         def fn(a):
             return a.permute(0, 2, 1).contiguous()
 
-        metrics.reset()
-        x = torch.randn(2, 9216, 9216).to(torch.bfloat16)
-        self.common(fn, (x,))
-        assert metrics.generated_cpp_vec_kernel_count == 2
+        for dtype in [torch.bfloat16, torch.float16]:
+            metrics.reset()
+            x = torch.randn(2, 9216, 9216).to(dtype)
+            self.common(fn, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 2
 
     def test_transpose_sum2d_cpu_only(self):
         def fn(a, b):
