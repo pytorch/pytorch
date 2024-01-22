@@ -375,7 +375,7 @@ std::future<bool> launchAsyncGilCheck() {
 // heuristic is the correct assignment of ranks to GPUs that Python
 // layers use, but in practice it tends to be.  Fortunately we don't
 // rely on this for correctness of any tensor operations, just for
-// ancillary uses like barriers.
+// ancillary uses like health checks and barriers.
 at::Device ProcessGroupNCCL::guessDeviceForRank() const {
   TORCH_CHECK_WITH(ValueError, rank_ >= 0, "Invalid rank ", rank_);
   if (getBoundDeviceId()) {
@@ -702,6 +702,38 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   ncclCommDevIdxMapMutex.unlock();
 }
 
+ProcessGroupNCCL::CoalescedWorkNCCL::CoalescedWorkNCCL(
+    std::vector<ProcessGroupNCCL::WorkNCCL> works,
+    int rank,
+    OpType opType)
+    : Work(rank, opType, nullptr), works_(std::move(works)) {}
+
+ProcessGroupNCCL::CoalescedWorkNCCL::~CoalescedWorkNCCL() = default;
+
+c10::intrusive_ptr<ProcessGroupNCCL::CoalescedWorkNCCL> ProcessGroupNCCL::
+    initCoalescedWork(
+        const std::vector<c10::intrusive_ptr<Work>>& works,
+        int rank,
+        OpType opType) {
+  std::vector<ProcessGroupNCCL::WorkNCCL> ncclWorks;
+  ncclWorks.reserve(works.size());
+  for (auto& work : works) {
+    ncclWorks.push_back(*static_cast<ProcessGroupNCCL::WorkNCCL*>(work.get()));
+  }
+  return c10::make_intrusive<ProcessGroupNCCL::CoalescedWorkNCCL>(
+      ncclWorks, rank, opType);
+}
+
+// Same as calling synchronize().
+bool ProcessGroupNCCL::CoalescedWorkNCCL::wait(
+    std::chrono::milliseconds timeout) {
+  for (auto& w : works_) {
+    w.wait(timeout);
+  }
+  // Always return true, because abort API is not implemented.
+  return true;
+}
+
 static std::atomic<size_t> process_group_id = 0;
 
 ProcessGroupNCCL::ProcessGroupNCCL(
@@ -784,6 +816,15 @@ ProcessGroupNCCL::ProcessGroupNCCL(
           << "Enabling TORCH_NCCL_ASYNC_ERROR_HANDLING.";
       asyncErrorHandling_ = SkipCleanUp;
     }
+  }
+
+  if (getCvarBool(TORCH_ENABLE_NCCL_HEALTH_CHECK, false)) {
+    // Perform health check by initializing dummy communicators and destroying
+    // them. This will help indicate any NCCL-related issues prior to the first
+    // collective.
+    // Run it in a separate thread and wait on CV to handle timeouts, since
+    // majority of getNCCLComm failures are hangs.
+    runHealthCheck();
   }
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -913,6 +954,65 @@ c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
   return intra_node_comm::IntraNodeComm::rendezvous(
       store_, std::to_string(uid_), rank_, size_);
+}
+
+void ProcessGroupNCCL::runHealthCheck() {
+  // Run health check in a separate thread and wait on CV to handle timeouts,
+  // since majority of getNCCLComm failures are hangs.
+
+  struct HealthCheckData {
+    std::mutex healthCheckMutex;
+    std::condition_variable healthCheckCv;
+    bool healthCheckSuccess = false;
+    std::exception_ptr healthCheckException;
+  };
+
+  HealthCheckData healthCheckData;
+  auto t = std::thread([&healthCheckData, this]() {
+    try {
+      std::vector<at::Device> rankDevice = {guessDeviceForRank()};
+
+      const auto key = getKeyFromDevices(rankDevice);
+      // OpType does not matter, only need to set to not go through send/recv
+      // path.
+      getNCCLComm(key, rankDevice, OpType::ALLREDUCE);
+      // Now destroy the communicators and remove them from cache so we don't
+      // use destroyed communicators.
+      destroyNCCLComms(key);
+      // Notify main thread the health check is complete.
+      {
+        std::lock_guard<std::mutex> lk(healthCheckData.healthCheckMutex);
+        healthCheckData.healthCheckSuccess = true;
+      }
+      healthCheckData.healthCheckCv.notify_one();
+    } catch (const std::exception& e) {
+      // Populate exception ptr.
+      healthCheckData.healthCheckException = std::current_exception();
+      // Unblock waiting main thread which will report exception.
+      healthCheckData.healthCheckCv.notify_one();
+    } // Unknown exceptions will just cause the program to terminate.
+  });
+  // We don't need to join the thread, just need to verify health check via the
+  // CV. Hence we detach the thread here.
+  t.detach(); // NOLINT
+  LOG(INFO) << logPrefix() << "will wait up to " << options_->timeout.count()
+            << " msec for NCCL health check to complete.";
+  std::unique_lock<std::mutex> lock(healthCheckData.healthCheckMutex);
+  healthCheckData.healthCheckCv.wait_for(
+      lock, options_->timeout, [&healthCheckData]() {
+        return healthCheckData.healthCheckSuccess;
+      });
+
+  if (healthCheckData.healthCheckException) {
+    std::rethrow_exception(healthCheckData.healthCheckException);
+  }
+  // If there is no exception, the likely culprit is a timeout/hang which is how
+  // most communicator init issues manifest themselves.
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      healthCheckData.healthCheckSuccess,
+      "ProcessGroupNCCL: Health check failure: Failed to initialize NCCL communicator on rank ",
+      rank_);
 }
 
 void ProcessGroupNCCL::setSequenceNumberForGroup() {
@@ -1166,103 +1266,38 @@ void ProcessGroupNCCL::terminateProcess(std::string errMsg) {
   LOG(FATAL) << logPrefix() << errMsg;
 }
 
-int computeDeltaMS(
-    std::chrono::time_point<std::chrono::steady_clock> start,
-    std::chrono::time_point<std::chrono::steady_clock> end) {
-  return std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
-      .count();
-}
-
 void ProcessGroupNCCL::heartbeatMonitor() {
   uint64_t heartBeatCounter = 0ULL;
-  std::string errorMsg;
-  std::string exitMsg;
-  bool checkTimeoutSignal = (dumpOnTimeout_ && uid_ == 0);
-  int monitorPollInterval = checkTimeoutSignal ? coordCheckIntervalMilSec_
-                                               : heartbeatTimeoutInSec_ * 1000;
-  auto lastTimePollStore = std::chrono::steady_clock::now();
-  auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
-  std::future<bool> asyncDebugDump;
   while (true) {
     // This won't have any lock since this lock is only used here.
     // Please be aware that mutex `monitorMutex_` should not be used
     // somewhere else to avoid the deadlock.
     std::unique_lock<std::mutex> lock(monitorMutex_);
     if (monitorWakeUpCV_.wait_for(
-            lock, std::chrono::milliseconds(monitorPollInterval), [&] {
+            lock, std::chrono::seconds(heartbeatTimeoutInSec_), [&] {
               return terminateHeartbeatMonitorThread_.load();
             })) {
       // For the normal complete or user interception, monitorWakeUpCV_
       // will get notified, we early return and exit heartbeatMonitor.
       return;
     }
-    auto currentTime = std::chrono::steady_clock::now();
 
-    // We put extra functionality in the thread for the default PG (aka, uid_=0)
-    // because the signal is same across different PGs. We only need to run
-    // once per process to avoid duplicate things performed in too many separate
-    // threads. For example, we check a global flag on the TCPStore periodically
-    // to see if any PG on any rank observed a timeout and signaled peers to
-    // dump debugging info, and we avoid hammering the TCPStore from all PGs on
-    // the same rank.
-    if (checkTimeoutSignal) {
-      // We poll store to see if some ranks have flagged a timeout when
-      // we haven't polled for `heartbeat_timeout` seconds and there haven't
-      // any work added or removed for `watchdog_timeout` seconds.
-      if (computeDeltaMS(lastWorkListUpdateTime_, currentTime) >=
-              kWatchdogThreadSleepMillis &&
-          computeDeltaMS(lastTimePollStore, currentTime) >=
-              coordCheckIntervalMilSec_) {
-        lastTimePollStore = currentTime;
-        if (globalStore_->check({std::string(TIMEOUT_DUMP)})) {
-          errorMsg = c10::str(
-              logPrefix(),
-              "Received a global timeout from another rank and will ",
-              "start to dump the debug info.");
-          exitMsg = c10::str(
-              "ProcessGroupNCCL's watchdog detected a collective timeout and notified current rank. ",
-              "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
-              "sizes used across ranks, the order of collectives is not same for all ranks ",
-              "or the scheduled collective, for some reason, didn't run. Additionally, ",
-              "this can be caused by GIL deadlock or other reasons such as network errors or ",
-              "bugs in the communications library (e.g. NCCL), etc. We tried our best to ",
-              "dump the debug info into the storage to help you debug the issue.");
-          break;
-        }
-      }
-    }
-
-    if (computeDeltaMS(lastTimeHeartBeatCheck, currentTime) >=
-        heartbeatTimeoutInSec_ * 1000) {
-      // Check the heart beat of watchdog thread.
-      lastTimeHeartBeatCheck = currentTime;
-      auto heartbeat = heartbeat_.load();
-      if (heartbeat != heartBeatCounter) {
-        heartBeatCounter = heartbeat;
-      } else {
-        // No heartbeat increase detected and timeout.
-        errorMsg = c10::str(
-            logPrefix(),
-            "Heartbeat monitor timed out! Process will be terminated after dumping debug info.",
-            " workMetaList_.size()=",
-            workMetaList_.size());
-        exitMsg = c10::str(
-            "ProcessGroupNCCL's watchdog got stuck for ",
-            heartbeatTimeoutInSec_,
-            " seconds without making progress in monitoring enqueued collectives. ",
-            "This typically indicates a NCCL/CUDA API hang blocking the watchdog, ",
-            "and could be triggered by another thread holding the GIL inside a ",
-            "CUDA api, or other deadlock-prone behaviors.",
-            "If you suspect the watchdog is not actually stuck and a longer timeout would help, ",
-            "you can either increase the timeout (TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC) to a larger value "
-            "or disable the heartbeat monitor (TORCH_NCCL_ENABLE_MONITORING=0)."
-            "If either of aforementioned helps, feel free to file an issue to PyTorch about the short timeout "
-            "or false positive abort; otherwise, please attempt to debug the hang.");
-        break;
-      }
+    // Check the heart beat of watchdog thread.
+    auto heartbeat = heartbeat_.load();
+    if (heartbeat != heartBeatCounter) {
+      heartBeatCounter = heartbeat;
+    } else {
+      // No heartbeat increase detected and timeout.
+      break;
     }
   }
-  LOG(ERROR) << errorMsg;
+
+  const auto logMsg = c10::str(
+      logPrefix(),
+      "Heartbeat monitor timed out! Process will be terminated after dumping debug info.",
+      " workMetaList_.size()=",
+      workMetaList_.size());
+  LOG(ERROR) << logMsg;
 
   auto& cpp_dumper = get_cpp_trace_dumper();
   if (cpp_dumper.has_value()) {
@@ -1272,7 +1307,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)
-  asyncDebugDump = launchAsyncDebugDump();
+  std::future<bool> asyncDebugDump = launchAsyncDebugDump();
 
   if (get_gil_checker() != nullptr) {
     auto fut = launchAsyncGilCheck();
@@ -1322,8 +1357,20 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // we throw exception and make the whole process to be killed.
     // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
     // url here.
-    const auto finalExitMsg = c10::str(logPrefix(), exitMsg);
-    terminateProcess(finalExitMsg);
+    const auto exitMsg = c10::str(
+        logPrefix(),
+        "ProcessGroupNCCL's watchdog got stuck for ",
+        heartbeatTimeoutInSec_,
+        "seconds without making progress in monitoring enqueued collectives. ",
+        "This typically indicates a NCCL/CUDA API hang blocking the watchdog, ",
+        "and could be triggered by another thread holding the GIL inside a ",
+        "CUDA api, or other deadlock-prone behaviors.",
+        "If you suspect the watchdog is not actually stuck and a longer timeout would help, ",
+        "you can either increase the timeout (TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC) to a larger value "
+        "or disable the heartbeat monitor (TORCH_NCCL_ENABLE_MONITORING=0)."
+        "If either of aforementioned helps, feel free to file an issue to PyTorch about the short timeout "
+        "or false positive abort; otherwise, please attempt to debug the hang.");
+    terminateProcess(exitMsg);
   }
 }
 
@@ -1465,6 +1512,7 @@ const int& ProcessGroupNCCL::globalRank() const {
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
+  auto lastTimePollStore = std::chrono::steady_clock::now();
   c10::optional<std::future<bool>> optAsyncDebugDump;
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
@@ -1486,6 +1534,38 @@ void ProcessGroupNCCL::watchdogHandler() {
         [&]() -> bool { return terminateProcessGroup_.load(); });
     // Bump up heart beat by one.
     heartbeat_++;
+
+    // Assuming that we always init a process group containing all ranks,
+    // we only use the watchdog thread to listen for the global signal to dump
+    // and abort. We poll store to see if some ranks have flagged a timeout when
+    // we haven't polled for `heartbeat_timeout` seconds and there haven't
+    // any work added or removed for `watchdog_timeout` seconds.
+    if (dumpOnTimeout_ && uid_ == 0) {
+      auto currentTime = std::chrono::steady_clock::now();
+      auto timeSinceLastWorkListUpdate =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              (currentTime - lastWorkListUpdateTime_))
+              .count();
+      auto timeSinceLastPollStore =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              (currentTime - lastTimePollStore))
+              .count();
+      if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
+          timeSinceLastPollStore >= coordCheckIntervalMilSec_) {
+        lastTimePollStore = currentTime;
+        if (globalStore_->check({std::string(TIMEOUT_DUMP)}) &&
+            !optAsyncDebugDump) {
+          auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
+          optAsyncDebugDump = launchAsyncDebugDump();
+          waitForDumpOrTimeout(*optAsyncDebugDump, wakeUpTime);
+          const auto exitMsg = c10::str(
+              logPrefix(),
+              "Another rank reported a timeout and signaled a global abort.");
+          LOG(ERROR) << exitMsg;
+          C10_THROW_ERROR(DistBackendError, exitMsg);
+        }
+      }
+    }
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
@@ -2293,22 +2373,24 @@ void ProcessGroupNCCL::startCoalescing() {
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
-  if (coalescedComms_.size() == 0) {
-    // There is no actual work being coalesced, return here
+  if (!nccl_use_nonblocking() ||
+      coalescedComms_.size() == 0) { // There is no actual work being coalesced
     groupEnd();
+  } else {
+    // `coalescedComms_` should have same set of comms across collectives
+    auto comms = coalescedComms_[0];
+    groupEndNonblocking(comms);
+  }
+
+  coalescing_state_ = 0;
+
+  if (coalescedDevices_.size() == 0) {
+    // There is no actual work being coalesced
     return nullptr;
   }
 
-  // `coalescedComms_` should have same set of comms across collectives
-  auto comms = coalescedComms_[0];
   // `coalescedDevices_` should have same set of devices across collectives
   auto devices = coalescedDevices_[0];
-
-  if (nccl_use_nonblocking()) {
-    groupEndNonblocking(comms);
-  } else {
-    groupEnd();
-  }
 
   // Create Work object
   auto work = initWork(devices, rank_, OpType::COALESCED, "nccl:coalesced");
@@ -2321,7 +2403,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   for (const auto i : c10::irange(devices.size())) {
     auto& devEvent = (*work->ncclEndEvents_)[i];
     devEvent.record(ncclStreams[i]);
-    work->ncclComms_[i] = comms[i];
   }
 
   // Set appropriate work parameters.
@@ -2337,20 +2418,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
 
-  // Notify graphs before we check the capture status preemptively
-  at::cuda::CUDAGraph::inc_pending_event_queries();
-
   if ((coalescing_state_ & CoalColl) &&
       capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
     // TODO: it seems we never enqueue work for single send/recv or batch P2P,
     // see the `pointToPoint` function. This should be fixed. Otherwise, we risk
     // not being able to abort hanged P2P ops.
-  } else {
-    at::cuda::CUDAGraph::dec_pending_event_queries();
   }
-
-  coalescing_state_ = 0;
 
   return work;
 }

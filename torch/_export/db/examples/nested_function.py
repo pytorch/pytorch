@@ -7,21 +7,17 @@ from torch._export.db.case import export_case
     example_inputs=(torch.ones(3, 2), torch.ones(2)),
     tags={"python.closure"},
 )
-class NestedFunction(torch.nn.Module):
+def nested_function(a, b):
     """
     Nested functions are traced through. Side effects on global captures
     are not supported though.
     """
-    def __init__(self):
-        super().__init__()
+    x = a + b
+    z = a - b
 
-    def forward(self, a, b):
-        x = a + b
-        z = a - b
+    def closure(y):
+        nonlocal x
+        x += 1
+        return x * y + z
 
-        def closure(y):
-            nonlocal x
-            x += 1
-            return x * y + z
-
-        return closure(x)
+    return closure(x)

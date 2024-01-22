@@ -11,7 +11,7 @@ from functorch.experimental.control_flow import cond
         "torch.dynamic-shape",
     },
 )
-class CondPredicate(torch.nn.Module):
+def cond_predicate(x):
     """
     The conditional statement (aka predicate) passed to cond() must be one of the following:
       - torch.Tensor with a single element
@@ -20,10 +20,6 @@ class CondPredicate(torch.nn.Module):
     NOTE: If the `pred` is test on a dim with batch size < 2, it will be specialized.
     """
 
-    def __init__(self):
-        super().__init__()
+    pred = x.dim() > 2 and x.shape[2] > 10
 
-    def forward(self, x):
-        pred = x.dim() > 2 and x.shape[2] > 10
-
-        return cond(pred, lambda x: x.cos(), lambda y: y.sin(), [x])
+    return cond(pred, lambda x: x.cos(), lambda y: y.sin(), [x])

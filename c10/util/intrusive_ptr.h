@@ -317,7 +317,7 @@ class intrusive_ptr final {
       // this on x86_64 and ARM64, but TSAN does not approve.)
       uint64_t refcount_and_weakcount =
           reinterpret_cast<const std::atomic<uint64_t>*>(&target_->refcount_)
-              ->load(std::memory_order_relaxed);
+              ->load(std::memory_order_acquire);
       if (refcount_and_weakcount == 0x0000000100000001) {
         delete target_;
         return;

@@ -6,13 +6,8 @@ namespace torch::inductor {
 AOTIModelContainerRunnerCuda::AOTIModelContainerRunnerCuda(
     const std::string& model_so_path,
     size_t num_models,
-    const std::string& device_str,
     const std::string& cubin_dir)
-    : AOTIModelContainerRunner(
-          model_so_path,
-          num_models,
-          device_str,
-          cubin_dir) {}
+    : AOTIModelContainerRunner(model_so_path, num_models, false, cubin_dir) {}
 
 AOTIModelContainerRunnerCuda::~AOTIModelContainerRunnerCuda() {}
 
