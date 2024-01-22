@@ -2332,7 +2332,7 @@ class GraphModule(torch.nn.Module):
         self.assertExpectedInline(
             graph.code.strip(),
             """\
-def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytree_in_1_0_0_0_ : torch.Tensor, L_pytree_in_2_ : torch.Tensor, L_pytree_in_3_0_ : torch.Tensor, L_pytree_in_3_1_0_ : torch.Tensor, L_pytree_in_3_2_ : torch.Tensor, L_pytree_in_4_g_ : torch.Tensor):
+def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytree_in_1_0_0_0_ : torch.Tensor, L_pytree_in_2_ : torch.Tensor, L_pytree_in_3_0_ : torch.Tensor, L_pytree_in_3_1_0_ : torch.Tensor, L_pytree_in_3_2_ : torch.Tensor, L_pytree_in_4_dict_keys_getitem_L_pytree_in_4_0_ : torch.Tensor):
     l_pred_ = L_pred_
     l_pytree_in_0_ = L_pytree_in_0_
     l_pytree_in_1_0_0_0_ = L_pytree_in_1_0_0_0_
@@ -2340,10 +2340,10 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
     l_pytree_in_3_0_ = L_pytree_in_3_0_
     l_pytree_in_3_1_0_ = L_pytree_in_3_1_0_
     l_pytree_in_3_2_ = L_pytree_in_3_2_
-    l_pytree_in_4_g_ = L_pytree_in_4_g_
+    l_pytree_in_4_dict_keys_getitem_l_pytree_in_4_0_ = L_pytree_in_4_dict_keys_getitem_L_pytree_in_4_0_
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_pytree_in_0_, l_pytree_in_1_0_0_0_, l_pytree_in_2_, l_pytree_in_3_0_, l_pytree_in_3_1_0_, l_pytree_in_3_2_, l_pytree_in_4_g_]);  l_pred_ = cond_true_0 = cond_false_0 = l_pytree_in_0_ = l_pytree_in_1_0_0_0_ = l_pytree_in_2_ = l_pytree_in_3_0_ = l_pytree_in_3_1_0_ = l_pytree_in_3_2_ = l_pytree_in_4_g_ = None
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_pytree_in_0_, l_pytree_in_1_0_0_0_, l_pytree_in_2_, l_pytree_in_3_0_, l_pytree_in_3_1_0_, l_pytree_in_3_2_, l_pytree_in_4_dict_keys_getitem_l_pytree_in_4_0_]);  l_pred_ = cond_true_0 = cond_false_0 = l_pytree_in_0_ = l_pytree_in_1_0_0_0_ = l_pytree_in_2_ = l_pytree_in_3_0_ = l_pytree_in_3_1_0_ = l_pytree_in_3_2_ = l_pytree_in_4_dict_keys_getitem_l_pytree_in_4_0_ = None
     getitem = cond[0];  cond = None
     return (getitem,)""",  # noqa: B950
         )
