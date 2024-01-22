@@ -170,13 +170,6 @@ class ConstDictVariable(VariableTracker):
         else:
             return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
-    @staticmethod
-    def _wrap_const_keys(d):
-        """Wrap the keys of a dictionary with python objs as keys into Hashable objects"""
-        assert all(ConstantVariable.is_literal(k) for k in d.keys())
-        Hashable = ConstDictVariable._HashableTracker
-        return {Hashable(ConstantVariable.create(k)): v for k, v in d.items()}
-
     def getitem_const(self, arg: VariableTracker):
         key = ConstDictVariable._HashableTracker(arg)
         return self.items[key]
@@ -254,8 +247,10 @@ class ConstDictVariable(VariableTracker):
             else:
                 dict_vt = BuiltinVariable.call_custom_dict(tx, dict, args[0])
             self.items.update(dict_vt.items)
-            # all keys in kwargs are valid (`str`s)
-            kwargs = ConstDictVariable._wrap_const_keys(kwargs)
+            # Wrap strings
+            kwargs = {
+                Hashable(ConstantVariable.create(k)): v for k, v in kwargs.items()
+            }
             self.items.update(kwargs)
             return ConstantVariable.create(None)
         elif name in ("get", "__getattr__") and args[0] in self:

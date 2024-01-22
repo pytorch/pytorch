@@ -484,6 +484,19 @@ class BuiltinVariable(VariableTracker):
             for i in itertools.chain(args, kwargs.values())
         )
 
+    def python_and_tensor_constant_only(self, *args, **kwargs):
+        tensor_args = []
+        non_tensor_args = []
+        for i in itertools.chain(args, kwargs.values()):
+            if isinstance(i, variables.TensorVariable):
+                tensor_args.append(i)
+            else:
+                non_tensor_args.append(i)
+        return all(
+            is_constant_source(t.source) if t.source is not None else False
+            for t in tensor_args
+        ) and self.constant_args(*non_tensor_args)
+
     def unspec_python_args(self, *args, **kwargs):
         return check_unspec_python_args(args, kwargs)
 
@@ -493,6 +506,13 @@ class BuiltinVariable(VariableTracker):
             k: v.as_python_constant() for k, v in kwargs.items()
         }
 
+    def has_constant_handler(self, args, kwargs):
+        constant_args = check_constant_args(args, kwargs)
+        unspec_python_args = self.unspec_python_args(*args, **kwargs)
+        return self.can_constant_fold_through() and (
+            constant_args or unspec_python_args
+        )
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -501,14 +521,9 @@ class BuiltinVariable(VariableTracker):
 
         args = [v.realize() for v in args]
         kwargs = {k: v.realize() for k, v in kwargs.items()}
-        constant_args = check_constant_args(args, kwargs)
-        tensor_args = self.tensor_args(*args, **kwargs)
-        unspec_python_args = self.unspec_python_args(*args, **kwargs)
-        has_constant_handler = self.can_constant_fold_through() and (
-            constant_args or unspec_python_args
-        )
         assert isinstance(args, (list, tuple))
         assert isinstance(kwargs, dict)
+        tensor_args = self.tensor_args(*args, **kwargs)
 
         # args[0] is list and args[1] is unspec
         if self.fn is operator.getitem and not isinstance(
@@ -527,6 +542,17 @@ class BuiltinVariable(VariableTracker):
         ):
             try:
                 fn = self.fn
+
+                # Constant fold for constant tensor and python constants
+                if tensor_args and self.python_and_tensor_constant_only(
+                    *args, **kwargs
+                ):
+                    from ..bytecode_transformation import unique_id
+                    from .functions import invoke_and_store_as_constant
+
+                    return invoke_and_store_as_constant(
+                        tx, fn, unique_id(fn.__name__), args, kwargs
+                    )
 
                 if self.fn in IN_PLACE_DESUGARING_MAP and isinstance(
                     args[0], variables.ConstantVariable
@@ -646,6 +672,7 @@ class BuiltinVariable(VariableTracker):
             try:
                 inspect.signature(handler).bind(tx, *args, **kwargs)
             except TypeError as exc:
+                has_constant_handler = self.has_constant_handler(args, kwargs)
                 if not has_constant_handler:
                     log.warning(
                         "incorrect arg count %s %s and no constant handler",
@@ -660,11 +687,17 @@ class BuiltinVariable(VariableTracker):
                 if result is not None:
                     return result
             except Unsupported as exc:
+                has_constant_handler = self.has_constant_handler(args, kwargs)
                 if not has_constant_handler:
                     raise
                 # Actually, we will handle this just fine
                 exc.remove_from_stats()
 
+        # NB: call to has_constant_handler is deliberately delayed post generic
+        # handler because has_constant_handler calls as_python_constant
+        # internally which realizes LazyVariableTracker for ConstantVariables,
+        # unnecessarily putting guards on objects which might not actually be used.
+        has_constant_handler = self.has_constant_handler(args, kwargs)
         if has_constant_handler:
             # constant fold
             return variables.ConstantVariable.create(
