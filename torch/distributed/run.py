@@ -566,9 +566,9 @@ def get_args_parser() -> ArgumentParser:
         default="127.0.0.1",
         type=str,
         action=env,
-        help="Address of the master node (rank 0) that only used for static rendezvous. It should "
-        "be either the IP address or the hostname of rank 0. For single node multi-proc training "
-        "the --master-addr can simply be 127.0.0.1; IPv6 should have the pattern "
+        help="Address of the master node (rank 0) that's only used for static rendezvous. It "
+        "should be either the IP address or the hostname of rank 0. For single node multi-proc "
+        "training the --master-addr can simply be 127.0.0.1; IPv6 should have the pattern "
         "`[0:0:0:0:0:0:0:1]`.",
     )
     parser.add_argument(
