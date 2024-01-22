@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 
-import unittest
 import sys
+import unittest
 
 import torch
 from torch._export import capture_pre_autograd_graph
@@ -62,7 +62,9 @@ def _extract_conv2d_pattern_debug_handle_map(model):
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
-@unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestGenerateNumericDebugHandle(TestCase):
     def test_simple(self):
         m = TestHelperModules.Conv2dThenConv1d()

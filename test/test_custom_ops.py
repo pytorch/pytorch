@@ -6,8 +6,8 @@ import collections
 
 import itertools
 import os
-import sys
 import re
+import sys
 import typing
 
 import torch._custom_ops as custom_ops
@@ -56,7 +56,9 @@ class CustomOpTestCaseBase(TestCase):
 
 
 @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-@unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestCustomOpTesting(CustomOpTestCaseBase):
     @parametrize("check_gradients", (False, "auto"))
     @parametrize("dynamic", (True, False))
@@ -1478,7 +1480,9 @@ def forward(self, x_1):
         )
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
-    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     def test_data_dependent_compile(self):
         import torch._dynamo.testing
         from torch._dynamo.utils import counters
