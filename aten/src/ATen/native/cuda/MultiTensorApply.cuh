@@ -142,7 +142,7 @@ void multi_tensor_apply(
       tensor_lists[0].cbegin(),
       tensor_lists[0].cend(),
       [](const auto& t) -> bool {
-        return t.numel() > std::numeric_limits<int32_t>::max();
+        return t.numel() > std::numeric_limits<uint32_t>::max();
       });
 
   int loc_block_info = 0;
@@ -188,7 +188,7 @@ void multi_tensor_apply(
             kBlockSize,
             0,
             at::cuda::getCurrentCUDAStream()>>>(
-            needs_64bits_for_indexing ? static_cast<int64_t>(kChunkSize)
+            needs_64bits_for_indexing ? static_cast<uint64_t>(kChunkSize)
                                       : kChunkSize,
             tensorListMeta,
             callable,
@@ -224,7 +224,7 @@ void multi_tensor_apply(
         kBlockSize,
         0,
         at::cuda::getCurrentCUDAStream()>>>(
-        needs_64bits_for_indexing ? static_cast<int64_t>(kChunkSize)
+        needs_64bits_for_indexing ? static_cast<uint64_t>(kChunkSize)
                                   : kChunkSize,
         tensorListMeta,
         callable,
@@ -249,7 +249,7 @@ void multi_tensor_apply(
       tensor_lists[0].cbegin(),
       tensor_lists[0].cend(),
       [](const auto& t) -> bool {
-        return t.numel() > std::numeric_limits<int32_t>::max();
+        return t.numel() > std::numeric_limits<uint32_t>::max();
       });
 
   int loc_block_info = 0;
@@ -287,7 +287,7 @@ void multi_tensor_apply(
             kBlockSize,
             0,
             at::cuda::getCurrentCUDAStream()>>>(
-            needs_64bits_for_indexing ? static_cast<int64_t>(kChunkSize)
+            needs_64bits_for_indexing ? static_cast<uint64_t>(kChunkSize)
                                       : kChunkSize,
             tensorListMeta,
             callable,
@@ -320,7 +320,7 @@ void multi_tensor_apply(
         kBlockSize,
         0,
         at::cuda::getCurrentCUDAStream()>>>(
-        needs_64bits_for_indexing ? static_cast<int64_t>(kChunkSize)
+        needs_64bits_for_indexing ? static_cast<uint64_t>(kChunkSize)
                                   : kChunkSize,
         tensorListMeta,
         callable,
@@ -345,7 +345,7 @@ void multi_tensor_apply_for_fused_optimizer(
       tensor_lists[0].cbegin(),
       tensor_lists[0].cend(),
       [](const auto& t) -> bool {
-        return t.numel() > std::numeric_limits<int32_t>::max();
+        return t.numel() > std::numeric_limits<uint32_t>::max();
       });
 
   int loc_block_info = 0;
@@ -385,7 +385,7 @@ void multi_tensor_apply_for_fused_optimizer(
             kBlockSize,
             0,
             at::cuda::getCurrentCUDAStream()>>>(
-            needs_64bits_for_indexing ? static_cast<int64_t>(kChunkSize)
+            needs_64bits_for_indexing ? static_cast<uint64_t>(kChunkSize)
                                       : kChunkSize,
             tensorListMeta,
             callable,
@@ -418,7 +418,7 @@ void multi_tensor_apply_for_fused_optimizer(
         kBlockSize,
         0,
         at::cuda::getCurrentCUDAStream()>>>(
-        needs_64bits_for_indexing ? static_cast<int64_t>(kChunkSize)
+        needs_64bits_for_indexing ? static_cast<uint64_t>(kChunkSize)
                                   : kChunkSize,
         tensorListMeta,
         callable,
