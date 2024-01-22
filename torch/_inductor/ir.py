@@ -1614,6 +1614,11 @@ class Scan(Loops):
             rindex,
         )
 
+    def inner_fn_free_unbacked_symbols(self):
+        index = self._index(self.ranges)
+        rindex = self._index(self.scan_ranges, "r")
+        return extract_free_unbacked_symbols(self.inner_fn, index, rindex)
+
     @classmethod
     def create(
         cls,

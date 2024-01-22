@@ -474,8 +474,8 @@ class FreeUnbackedSymbolsOpsHandler:
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[None, tuple[None, ...]],
-    ) -> Union[None, tuple[None, ...]]:
+        value: Union[None, Tuple[None, ...]],
+    ) -> Union[None, Tuple[None, ...]]:
         num_values = reduction_num_outputs(reduction_type)
         return (None,) * num_values if num_values > 1 else None
 
