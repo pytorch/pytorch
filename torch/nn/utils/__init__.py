@@ -8,7 +8,7 @@ from .memory_format import convert_conv2d_weight_memory_format, convert_conv3d_w
 from . import parametrizations
 from .init import skip_init
 from . import stateless
-from ._swap import get_swap_module_params_on_conversion, set_swap_module_params_on_conversion
+from .swap import get_swap_module_params_on_conversion, set_swap_module_params_on_conversion
 
 __all__ = [
     "clip_grad_norm",
