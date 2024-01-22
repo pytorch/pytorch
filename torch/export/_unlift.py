@@ -224,7 +224,6 @@ def _construct_inp_pos_to_param_buffer_name(
                 setattr(new_gm, name.replace(".", "_"), value)
                 constant_name_to_corrected_name[name] = name.replace(".", "_")
 
-
     count = 0
     inp_pos_to_param_buffer_name = {}
     for node in new_gm.graph.nodes:
