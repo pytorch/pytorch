@@ -127,6 +127,7 @@ class C10_API intrusive_ptr_target {
         // use). We choose our reference count such that the count
         // will not dip below kImpracticallyHugeReferenceCount regardless.
         refcount_.load() == 0 ||
+            (refcount_.load() == 1 && weakcount_.load() == 1) ||
             refcount_.load() >= detail::kImpracticallyHugeReferenceCount,
         "Tried to destruct an intrusive_ptr_target that still has intrusive_ptr to it; refcount was ",
         refcount_.load());
@@ -277,27 +278,62 @@ class intrusive_ptr final {
     }
   }
 
+  C10_NOINLINE void reset_zero_refcount_slow_path() noexcept {
+    reset_zero_refcount();
+  }
+
+  void reset_zero_refcount() noexcept {
+    // See comment above about weakcount. As long as refcount>0,
+    // weakcount is one larger than the actual number of weak references.
+    // So we need to decrement it here.
+    bool should_delete =
+        target_->weakcount_.load(std::memory_order_acquire) == 1;
+    if (!should_delete) {
+      // justification for const_cast: release_resources is basically a
+      // destructor and a destructor always mutates the object, even for const
+      // objects. NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      const_cast<std::remove_const_t<TTarget>*>(target_)->release_resources();
+      should_delete =
+          detail::atomic_weakcount_decrement(target_->weakcount_) == 0;
+    }
+    if (should_delete) {
+      delete target_;
+    }
+  }
+
+  #pragma GCC diagnostic push
+  #pragma GCC diagnostic ignored "-Wstrict-aliasing"
   void reset_() noexcept {
-    if (target_ != NullType::singleton() &&
-        detail::atomic_refcount_decrement(target_->refcount_) == 0) {
-      // See comment above about weakcount. As long as refcount>0,
-      // weakcount is one larger than the actual number of weak references.
-      // So we need to decrement it here.
-      bool should_delete =
-          target_->weakcount_.load(std::memory_order_acquire) == 1;
-      if (!should_delete) {
-        // justification for const_cast: release_resources is basically a
-        // destructor and a destructor always mutates the object, even for const
-        // objects. NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-        const_cast<std::remove_const_t<TTarget>*>(target_)->release_resources();
-        should_delete =
-            detail::atomic_weakcount_decrement(target_->weakcount_) == 0;
-      }
-      if (should_delete) {
+    if (target_ == NullType::singleton()) {
+      return;
+    }
+    if constexpr (
+        std::atomic<uint64_t>::is_always_lock_free &&
+        sizeof(void*) == sizeof(uint64_t)) {
+      // UB, but without atomic_ref we have no other way of making
+      // this work and passing TSAN. Note that this is how
+      // folly/synchronization/AtomicRef.h works. (std::memcpy should
+      // work fine since regular old loads are sufficient to implement
+      // this on x86_64 and ARM64, but TSAN does not approve.)
+      uint64_t refcount_and_weakcount =
+          reinterpret_cast<const std::atomic<uint64_t>*>(&target_->refcount_)
+              ->load(std::memory_order_relaxed);
+      if (refcount_and_weakcount == 0x0000000100000001) {
         delete target_;
+        return;
+      }
+      if (C10_UNLIKELY(
+              detail::atomic_refcount_decrement(target_->refcount_) == 0)) {
+        reset_zero_refcount_slow_path();
+      }
+    } else {
+      if (C10_UNLIKELY(
+              detail::atomic_refcount_decrement(target_->refcount_) == 0)) {
+        reset_zero_refcount();
       }
     }
   }
+  #pragma GCC diagnostic pop
 
   // raw pointer constructors are not public because we shouldn't make
   // intrusive_ptr out of raw pointers except from inside the make_intrusive(),
