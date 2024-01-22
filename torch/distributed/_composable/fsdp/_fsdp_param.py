@@ -56,11 +56,17 @@ class ShardedState(Enum):
     """
     - ``SHARDED``: The sharded parameter is registered to the module. It is the
       only contributor to parameter memory.
+    - ``SHARDED_POST_FORWARD``: The unsharded parameter is resharded to a
+      smaller world size. Since this data should not be used for computation,
+      we do not register it to the module. Users should reshard the module
+      before any in-place modifications. Both it and the sharded parameter
+      contribute to parameter memory.
     - ``UNSHARDED``: The unsharded parameter is registered to the module. Both
       it and the sharded parameter contribute to parameter memory.
     """
 
     SHARDED = auto()
+    SHARDED_POST_FORWARD = auto()
     UNSHARDED = auto()
 
 
@@ -74,6 +80,7 @@ class FSDPParam:
     _orig_size: torch.Size  # ND
     sharded_size: torch.Size  # ND
     _sharded_param_data: torch.Tensor  # 1D
+    _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
     sharded_param: nn.Parameter  # ND
     _unsharded_param: nn.Parameter  # ND
     # For splitting autograd-computed gradient
@@ -96,10 +103,12 @@ class FSDPParam:
         param: nn.Parameter,
         module_info: ParamModuleInfo,
         mesh_info: FSDPMeshInfo,
+        post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
     ):
         self._module_info: ParamModuleInfo = module_info
         self.mesh_info = mesh_info
+        self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self._init_dtype_attrs(param)
         self._init_sharded_param(param, device)
@@ -259,20 +268,49 @@ class FSDPParam:
         self.free_all_gather_output()
         self.sharded_state = ShardedState.SHARDED
 
+    def to_sharded_post_forward(self) -> None:
+        self._assert_in_states(ShardedState.UNSHARDED)
+        assert self.post_forward_mesh_info is not None  # mypy
+        shard_world_size = self.post_forward_mesh_info.shard_mesh_size
+        shard_rank = self.post_forward_mesh_info.shard_mesh_rank
+        if self.all_gather_output.numel() % shard_world_size != 0:
+            _raise_assert_with_print(
+                f"All-gather output size ({self.all_gather_output.numel()}) must "
+                f"be divisible by the shard world size ({shard_world_size})"
+            )
+        chunks = torch.chunk(self.all_gather_output, shard_world_size, dim=0)
+        # NOTE: This constructs a new Tensor object.
+        self._sharded_post_forward_param_data = chunks[shard_rank].clone()
+        self._setattr_on_modules(self._sharded_post_forward_param_data, as_param=False)
+        # Do not strip padding here since this resharded parameter should never
+        # be used in any ops and is only meant as a temporary storage
+        self.free_all_gather_output()
+        self.sharded_state = ShardedState.SHARDED_POST_FORWARD
+
     def to_unsharded(self) -> None:
         # Assume that the data has been allocated and all-gathered
         set_requires_grad_if_needed(self.sharded_param, self._unsharded_param)
         self._setattr_on_modules(self._unsharded_param)
+        if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
+            # This data is allocated in the default stream via the post-forward
+            # reshard and needs to be kept alive until afer the next all-gather
+            # copy-in. Since this method is only called in the copy-out after
+            # waiting for the all-gather to finish, this data's lifetime is
+            # ensured without further synchronization.
+            self._sharded_post_forward_param_data = None  # free
         self.sharded_state = ShardedState.UNSHARDED
 
-    def _setattr_on_modules(self, tensor: torch.Tensor) -> None:
-        unsafe_setattr_param(
-            self._module_info.module, self._module_info.param_name, tensor
+    def _setattr_on_modules(self, tensor: torch.Tensor, as_param: bool = True) -> None:
+        setter = unsafe_setattr_param if as_param else unsafe_setattr_tensor
+        setter(
+            self._module_info.module,
+            self._module_info.param_name,
+            tensor,
         )
         for shared_module, shared_param_name in zip(
             self._module_info.shared_modules, self._module_info.shared_param_names
         ):
-            unsafe_setattr_param(shared_module, shared_param_name, tensor)
+            setter(shared_module, shared_param_name, tensor)
 
     def to_sharded_dtensor(self, tensor: torch.Tensor) -> DTensor:
         """
@@ -304,9 +342,11 @@ class FSDPParam:
 
     @property
     def all_gather_input(self) -> torch.Tensor:  # 1D
-        self._assert_in_states(ShardedState.SHARDED)
+        self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
             return self._sharded_param_data
+        elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
+            return cast(torch.Tensor, self._sharded_post_forward_param_data)
         return torch.empty(0)  # mypy
 
     @property
@@ -357,6 +397,15 @@ def unsafe_setattr_param(
     # This bypasses any overrides in case `module` is an instance of an
     # `nn.Module` subclass
     super(nn.Module, module).__setattr__(param_name, param)
+
+
+def unsafe_setattr_tensor(
+    module: nn.Module, param_name: str, tensor: torch.Tensor
+) -> None:
+    module._parameters.pop(param_name, None)
+    # This bypasses any overrides in case `module` is an instance of an
+    # `nn.Module` subclass
+    super(nn.Module, module).__setattr__(param_name, tensor)
 
 
 def set_requires_grad_if_needed(

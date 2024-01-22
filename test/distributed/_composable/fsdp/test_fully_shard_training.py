@@ -3,14 +3,14 @@
 import copy
 import functools
 import unittest
-from typing import List, Tuple
+from typing import Iterable, List, Tuple, Union
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from _test_fully_shard_common import MLP, patch_all_gather, patch_reduce_scatter
 from torch.distributed._composable import replicate
-from torch.distributed._composable.fsdp import fully_shard
+from torch.distributed._composable.fsdp import FSDP, fully_shard
 from torch.distributed._tensor import DTensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -54,52 +54,82 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
 class TestFullyShardRegisteredParams(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
-        return 2
+        return 4
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    def test_sharded_params_registered_after_forward(self):
-        """Tests that the sharded parameters are registered after forward."""
+    def test_param_registration_after_forward(self):
+        """Tests the parameter registration after forward."""
         device = torch.device("cuda", 0)
+        fully_shard_fn = functools.partial(fully_shard, device=device)
         # Single FSDP group
-        model = MLP(8, device)
-        fully_shard(model, device=device)
-        inp = torch.randn((2, 8), device="cuda")
-        self._assert_dtensor_params(model)
-        model(inp)
-        self._assert_dtensor_params(model)
+        for reshard_after_forward in (True, False, 2):
+            model = MLP(8, device)
+            fully_shard_fn(
+                model, reshard_after_forward=reshard_after_forward
+            )  # root only
+            inp = torch.randn((2, 8), device="cuda")
+            self._assert_dtensor_params(model.parameters())
+            model(inp)  # root does not reshard after forward
+            self._assert_tensor_params(model.parameters())
+            model.reshard()  # however, we can manually reshard
+            self._assert_dtensor_params(model.parameters())
 
         # Multiple FSDP groups
-        model = MLP(8, device)
-        fully_shard(model.in_proj, device=device)
-        fully_shard(model.out_proj, device=device)
-        fully_shard(model, device=device)
-        self._assert_dtensor_params(model)
-        model(inp)
-        self._assert_dtensor_params(model)
+        for reshard_after_forward in (True, False, 2):
+            model = MLP(8, device)
+            fully_shard_fn(model.in_proj, reshard_after_forward=reshard_after_forward)
+            fully_shard_fn(model.out_proj, reshard_after_forward=reshard_after_forward)
+            fully_shard_fn(model, reshard_after_forward=reshard_after_forward)
+
+            self._assert_dtensor_params(model.parameters())
+            model(inp)
+            non_root_params = list(model.in_proj.parameters()) + list(
+                model.out_proj.parameters()
+            )
+            root_params = list(model.parameters(recurse=False))
+            if reshard_after_forward is True:
+                self._assert_dtensor_params(non_root_params)
+            else:
+                self._assert_tensor_params(non_root_params)
+            self._assert_tensor_params(root_params)
+            for module in model.modules():
+                if isinstance(module, FSDP):
+                    module.reshard()  # however, we can manually reshard
+            self._assert_dtensor_params(model.parameters())
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    def test_sharded_params_registered_after_backward(self):
-        """Tests that the sharded parameters are registered after forward."""
+    def test_param_registration_after_backward(self):
+        """Tests the parameter registration after backward."""
         device = torch.device("cuda", 0)
+        fully_shard_fn = functools.partial(fully_shard, device=device)
         # Single FSDP group
-        model = MLP(8, device)
-        fully_shard(model, device=device)
-        inp = torch.randn((2, 8), device="cuda")
-        self._assert_dtensor_params(model)
-        model(inp).sum().backward()
-        self._assert_dtensor_params(model)
+        for reshard_after_forward in (True, False, 2):
+            model = MLP(8, device)
+            fully_shard_fn(
+                model, reshard_after_forward=reshard_after_forward
+            )  # root only
+            inp = torch.randn((2, 8), device="cuda")
+            self._assert_dtensor_params(model.parameters())
+            model(inp).sum().backward()
+            self._assert_dtensor_params(model.parameters())
 
         # Multiple FSDP groups
-        model = MLP(8, device)
-        fully_shard(model.in_proj, device=device)
-        fully_shard(model.out_proj, device=device)
-        fully_shard(model, device=device)
-        self._assert_dtensor_params(model)
-        model(inp).sum().backward()
-        self._assert_dtensor_params(model)
+        for reshard_after_forward in (True, False, 2):
+            model = MLP(8, device)
+            fully_shard_fn(model.in_proj, reshard_after_forward=reshard_after_forward)
+            fully_shard_fn(model.out_proj, reshard_after_forward=reshard_after_forward)
+            fully_shard_fn(model, reshard_after_forward=reshard_after_forward)
+            self._assert_dtensor_params(model.parameters())
+            model(inp).sum().backward()
+            self._assert_dtensor_params(model.parameters())
 
-    def _assert_dtensor_params(self, module: nn.Module):
-        for param in module.parameters():
+    def _assert_tensor_params(self, params: Iterable[nn.Parameter]):
+        for param in params:
+            self.assertNotIsInstance(param, DTensor)
+            self.assertIsInstance(param, torch.Tensor)
+
+    def _assert_dtensor_params(self, params: Iterable[nn.Parameter]):
+        for param in params:
             self.assertIsInstance(param, DTensor)
 
 
@@ -148,6 +178,7 @@ class TestFullyShardTrainingCoreParity(FSDPTest):
         """
         self.run_subtests(
             {
+                "reshard_after_forward": [True, False, 2],
                 "device": ["cuda"],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
@@ -159,6 +190,7 @@ class TestFullyShardTrainingCoreParity(FSDPTest):
 
     def _test_train_parity_multi_group(
         self,
+        reshard_after_forward: Union[bool, int],
         device: str,
         delay_after_forward: bool,
         delay_before_all_gather: bool,
@@ -174,6 +206,8 @@ class TestFullyShardTrainingCoreParity(FSDPTest):
             in (2, 3)
         ):
             return
+        if self.rank == 0:
+            print(f"reshard_after_forward: {reshard_after_forward}")
         torch.manual_seed(42)
         lin_dim = 32
         model = nn.Sequential(*[MLP(lin_dim, torch.device("cpu")) for _ in range(3)])
@@ -187,6 +221,7 @@ class TestFullyShardTrainingCoreParity(FSDPTest):
         fully_shard_fn = functools.partial(
             fully_shard,
             device=device,
+            reshard_after_forward=reshard_after_forward,
         )
         for mlp in model:
             fully_shard_fn(mlp)

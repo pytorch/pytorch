@@ -1,5 +1,5 @@
 import itertools
-from typing import List, Set, Tuple
+from typing import List, Optional, Set, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -11,6 +11,62 @@ from torch.distributed._tensor import DeviceMesh, DTensor, init_device_mesh
 
 from ._fsdp_common import _is_composable_with_fsdp, FSDPMeshInfo
 from ._fsdp_state import _get_module_fsdp_state
+
+
+def _get_post_forward_mesh_info(
+    reshard_after_forward: Union[bool, int], mesh_info: FSDPMeshInfo
+) -> Optional[FSDPMeshInfo]:
+    shard_mesh_size = mesh_info.shard_mesh_size
+    if not isinstance(reshard_after_forward, (bool, int)):
+        raise ValueError(
+            "reshard_after_forward should be a bool or an int representing the "
+            f"group size to reshard to, not {reshard_after_forward}"
+        )
+    # NOTE: `isinstance(False, int)` returns `True`.
+    if not isinstance(reshard_after_forward, bool) and isinstance(
+        reshard_after_forward, int
+    ):
+        if (
+            reshard_after_forward < 1
+            or reshard_after_forward > shard_mesh_size
+            or shard_mesh_size % reshard_after_forward != 0
+        ):
+            raise ValueError(
+                "If passing reshard_after_forward as an int, it should be a "
+                f"factor of {shard_mesh_size}, not {reshard_after_forward}"
+            )
+        elif reshard_after_forward == 1:
+            reshard_after_forward = False
+        elif reshard_after_forward == shard_mesh_size:
+            reshard_after_forward = True
+    if reshard_after_forward is True:
+        post_forward_mesh_info = mesh_info
+    elif reshard_after_forward is False:
+        post_forward_mesh_info = None
+    else:
+        post_forward_shard_mesh_size = reshard_after_forward
+        num_post_forward_meshes = (
+            mesh_info.shard_mesh_size // post_forward_shard_mesh_size
+        )
+        shard_pg = mesh_info.mesh.get_group(mesh_info.shard_mesh_dim)
+        assert isinstance(shard_pg, dist.ProcessGroup)  # mypy
+        mesh_shard_ranks = sorted(
+            dist.distributed_c10d.get_process_group_ranks(shard_pg)
+        )
+        for i in range(num_post_forward_meshes):
+            # E.g., ranks (i, i+1, ..., i+7) for 1D FSDP or ranks
+            # (i, i+8, ..., i+56) for 2D intra-node TP + inter-node FSDP
+            post_forward_shard_mesh_ranks = mesh_shard_ranks[
+                i
+                * post_forward_shard_mesh_size : (i + 1)
+                * post_forward_shard_mesh_size
+            ]
+            post_forward_mesh = DeviceMesh("cuda", post_forward_shard_mesh_ranks)
+            if i == mesh_info.shard_mesh_rank // post_forward_shard_mesh_size:
+                post_forward_mesh_info = FSDPMeshInfo(
+                    post_forward_mesh, shard_mesh_dim=0
+                )
+    return post_forward_mesh_info
 
 
 def _normalize_device(device: DeviceLikeType) -> torch.device:

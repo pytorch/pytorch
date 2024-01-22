@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, cast, Dict, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
@@ -27,15 +27,17 @@ class FSDPParamGroup:
         params: List[nn.Parameter],
         module: nn.Module,
         mesh_info: FSDPMeshInfo,
+        post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
     ):
         self.module = module  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, module)
         self.fsdp_params = [
-            FSDPParam(param, module_info, mesh_info, device)
+            FSDPParam(param, module_info, mesh_info, post_forward_mesh_info, device)
             for param, module_info in zip(params, param_module_infos)
         ]
         self.mesh_info = mesh_info
+        self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self._training_state = TrainingState.IDLE
         # Group's sharded state always matches its parameters' sharded states
@@ -59,6 +61,9 @@ class FSDPParamGroup:
         # the group's post-backward (e.g. reduce-scatter and div), which should
         # be waited on at the end of backward
         self._reduce_scatter_view_out_event: Optional[torch.cuda.Event] = None
+        # Holds the reshard-after-forward CUDA event when resharding to a
+        # different world size, which should be waited on in the next unshard
+        self._reshard_after_forward_event: Optional[torch.cuda.Event] = None
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
@@ -98,6 +103,11 @@ class FSDPParamGroup:
             return
         if self._sharded_state == ShardedState.UNSHARDED:
             return  # no-op
+        if self._reshard_after_forward_event is not None:
+            # Resharded parameter data is allocated in the default stream and
+            # used in the all-gather streams
+            self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
+            self._reshard_after_forward_event = None
         self._all_gather_result = foreach_all_gather(
             self.fsdp_params,
             self._all_gather_process_group,
@@ -144,6 +154,14 @@ class FSDPParamGroup:
         self.all_gather_stream.wait_event(event)
 
     def reshard(self):
+        if self._training_state == TrainingState.FORWARD:
+            if not self._reshard_after_forward:
+                return
+            if self._use_post_forward_mesh:
+                self._to_sharded_post_forward()
+                self._reshard_after_forward_event = torch.cuda.Event()
+                self._reshard_after_forward_event.record()
+                return
         self._to_sharded()
 
     def pre_forward(
@@ -213,6 +231,12 @@ class FSDPParamGroup:
                 fsdp_param.to_sharded()
             self._sharded_state = ShardedState.SHARDED
 
+    def _to_sharded_post_forward(self):
+        if self._sharded_state != ShardedState.SHARDED_POST_FORWARD:
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.to_sharded_post_forward()
+            self._sharded_state = ShardedState.SHARDED_POST_FORWARD
+
     def _to_unsharded(self):
         if self._sharded_state != ShardedState.UNSHARDED:
             for fsdp_param in self.fsdp_params:
@@ -248,8 +272,23 @@ class FSDPParamGroup:
 
     # Properties #
     @property
+    def _reshard_after_forward(self) -> bool:
+        return self.post_forward_mesh_info is not None
+
+    @property
+    def _use_post_forward_mesh(self) -> bool:
+        return (
+            self._reshard_after_forward
+            and self.mesh_info != self.post_forward_mesh_info
+        )
+
+    @property
     def _all_gather_process_group(self) -> dist.ProcessGroup:
-        mesh_info = self.mesh_info
+        mesh_info = (
+            cast(FSDPMeshInfo, self.post_forward_mesh_info)
+            if self._sharded_state == ShardedState.SHARDED_POST_FORWARD
+            else self.mesh_info
+        )
         assert isinstance(mesh_info, FSDPMeshInfo)
         return mesh_info.shard_process_group
 

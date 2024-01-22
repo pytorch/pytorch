@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, cast, Optional, Union
 
 import typing_extensions
 
@@ -13,12 +13,13 @@ from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
     _get_managed_modules,
     _get_managed_states,
+    _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
     _move_states_to_device,
     _normalize_device,
 )
 from ._fsdp_param_group import FSDPParamGroup
-from ._fsdp_state import FSDPState
+from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
 @contract(state_cls=FSDPState)
@@ -27,6 +28,7 @@ def fully_shard(
     *,
     mesh: Optional[DeviceMesh] = None,
     device: DeviceLikeType = "cuda",
+    reshard_after_forward: Union[bool, int] = True,
 ):
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
@@ -45,6 +47,9 @@ def fully_shard(
             f"device and mesh must be of the same type but got {device.type} "
             f"for device and {mesh.device_type} for mesh"
         )
+    post_forward_mesh_info = _get_post_forward_mesh_info(
+        reshard_after_forward, mesh_info
+    )
 
     state = fully_shard.state(module)
     _insert_module_state(module, state)
@@ -61,7 +66,9 @@ def fully_shard(
     params, buffers = _get_managed_states(managed_modules)
     _move_states_to_device(params, buffers, device, mesh_info)
     if params:
-        state._fsdp_param_group = FSDPParamGroup(params, module, mesh_info, device)
+        state._fsdp_param_group = FSDPParamGroup(
+            params, module, mesh_info, post_forward_mesh_info, device
+        )
 
     # Place FSDP leftmost for highest priority in the method resolution order
     cls = module.__class__
@@ -89,3 +96,14 @@ class FSDP:
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
         self.__init__(*args, **kwargs)
         return self
+
+    def reshard(self) -> None:
+        """
+        Reshards the module's parameters by freeing unsharded parameters if
+        needed. This method is *not* recursive.
+        """
+        if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None or (
+            (fsdp_param_group := state._fsdp_param_group) is None
+        ):
+            return  # no-op
+        fsdp_param_group.reshard()
