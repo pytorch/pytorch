@@ -157,7 +157,7 @@ class FSDPState(_State):
         if self._training_state == TrainingState.PRE_BACKWARD:
             return args, kwargs
         self._training_state = TrainingState.FORWARD
-        self._root_pre_forward(module, args, kwargs)
+        args, kwargs = self._root_pre_forward(module, args, kwargs)
         if self._mp_policy.cast_forward_inputs and self._mp_policy.param_dtype:
             with torch.profiler.record_function("FSDP::cast_forward_inputs"):
                 cast_fn = functools.partial(
