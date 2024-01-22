@@ -2765,6 +2765,16 @@ class CPUReproTests(TestCase):
                 "Vectorized<float>::loadu(tmpbuf.data())", 0, exactly=True
             ).run(code)
 
+    @config.patch({"cpp.dynamic_threads": True})
+    def test_reduction_with_dynamic_threads(self):
+        def fn(a):
+            return a.sum()
+
+        self.common(
+            fn,
+            (torch.randn(1000),),
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -270,7 +270,9 @@ index_value_name_counter = 1
 
 def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     global index_value_name_counter
-    num_threads = parallel_num_threads()
+    num_threads = (
+        "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
+    )
     struct_name = f"IndexValue_{index_value_name_counter}"
     index_value_name_counter += 1
 
@@ -1467,18 +1469,40 @@ class CppKernel(Kernel):
         self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
 
     def _gen_parallel_reduction_buffers(
-        self, acc, acc_type, reduction_type, dtype, value, gen_store=True, is_vec=False
+        self,
+        acc,
+        acc_type,
+        reduction_type,
+        dtype,
+        value,
+        gen_store=True,
+        gen_max_threads=True,
+        is_vec=False,
     ):
+        if gen_max_threads:
+            self.parallel_reduction_prefix.writeline(
+                "int max_threads = omp_get_max_threads();"
+            )
         reduction_combine_fn = reduction_combine_vec if is_vec else reduction_combine
         reduction_init_fn = reduction_init_vec if is_vec else reduction_init
         acc_local = f"{acc}_local"
-        num_threads = parallel_num_threads()
+        num_threads = (
+            "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
+        )
         acc_per_thread = f"{acc}_arr[{num_threads}]"
         acc_local_in_array = acc_per_thread.replace(f"[{num_threads}]", "[tid]")
         self.local_reduction_init.writeline(
             f"{acc_type} {acc_local} = {reduction_init_fn(reduction_type, dtype)};"
         )
         self.parallel_reduction_prefix.writeline(f"{acc_type} {acc_per_thread};")
+        self.parallel_reduction_prefix.writelines(
+            [
+                f"for (int tid = 0; tid < {num_threads}; tid++)",
+                "{",
+                f"    {acc_local_in_array} = {reduction_init_fn(reduction_type, dtype)};"
+                "}",
+            ],
+        )
         if gen_store:
             reduction_store_line = (
                 f"{acc} = {reduction_combine_fn(reduction_type, acc, value)};"
@@ -2149,7 +2173,14 @@ class CppVecKernel(CppKernel):
             f"{acc_vec} = {reduction_combine_vec(reduction_type, acc_vec, value)};"
         )
         self._gen_parallel_reduction_buffers(
-            acc, acc_type, reduction_type, dtype, value, gen_store=False, is_vec=False
+            acc,
+            acc_type,
+            reduction_type,
+            dtype,
+            value,
+            gen_store=False,
+            gen_max_threads=True,
+            is_vec=False,
         )
         self._gen_parallel_reduction_buffers(
             acc_vec,
@@ -2158,6 +2189,7 @@ class CppVecKernel(CppKernel):
             dtype,
             value,
             gen_store=True,
+            gen_max_threads=False,
             is_vec=True,
         )
         tmpvar: Union[str, CSEVariable]
