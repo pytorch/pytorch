@@ -1,15 +1,16 @@
 _swap_module_params_on_conversion: bool = False
 
 
-def set_swap_module_params_on_conversion(value: bool):
+def set_swap_module_params_on_conversion(value: bool) -> None:
     """
     Sets whether to use :func:`~torch.utils.swap_tensors` instead of setting ``.data`` to
-    change the existing parameters in-place when converting an ``nn.Module`` using
+    change the existing parameters in-place when converting an ``nn.Module``.
 
-    1. ``module.{device}()`` (e.g. ``module.cuda()``) for moving module between devices
-    2. ``module.{dtype}()`` (e.g. ``module.float()``) for converting module to a different dtype
-        (for converting module to a different dtype)
-    3. ``module.to()``
+    When enabled, the following methods will swap the existing parameters in-place:
+    #. ``module.{device}()`` (e.g. ``module.cuda()``) for moving module between devices
+    #. ``module.{dtype}()`` (e.g. ``module.float()``) for converting module to a different dtype
+       (for converting module to a different dtype)
+    #. ``module.to()``
     """
     global _swap_module_params_on_conversion
     _swap_module_params_on_conversion = value
