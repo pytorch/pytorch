@@ -2,6 +2,8 @@
 
 #include <exception>
 #include <memory>
+#include <mutex>
+#include <queue>
 #include <string>
 #include <system_error>
 
@@ -143,7 +145,7 @@ extern PyObject *THPException_FatalError, *THPException_LinAlgError,
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
 struct python_error : public std::exception {
-  python_error() = default;
+  python_error() : type(nullptr), value(nullptr), traceback(nullptr) {}
 
   python_error(const python_error& other)
       : type(other.type),
@@ -242,9 +244,9 @@ struct python_error : public std::exception {
     PyErr_Restore(type, value, traceback);
   }
 
-  PyObject* type{nullptr};
-  PyObject* value{nullptr};
-  PyObject* traceback{nullptr};
+  PyObject* type;
+  PyObject* value;
+  PyObject* traceback;
 
   // Message to return to the user when 'what()' is invoked.
   std::string message;
@@ -279,6 +281,15 @@ struct PyTorchError : public std::exception {
 #define TORCH_FORMAT_FUNC(FORMAT_INDEX, VA_ARGS_INDEX)
 #endif
 
+// Translates to Python IndexError
+struct IndexError : public PyTorchError {
+  using PyTorchError::PyTorchError;
+  IndexError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
+  PyObject* python_type() override {
+    return PyExc_IndexError;
+  }
+};
+
 // Translates to Python TypeError
 struct TypeError : public PyTorchError {
   using PyTorchError::PyTorchError;
@@ -288,11 +299,37 @@ struct TypeError : public PyTorchError {
   }
 };
 
+// Translates to Python ValueError
+struct ValueError : public PyTorchError {
+  using PyTorchError::PyTorchError;
+  TORCH_PYTHON_API ValueError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
+  PyObject* python_type() override {
+    return PyExc_ValueError;
+  }
+};
+
+// Translates to Python NotImplementedError
+struct NotImplementedError : public PyTorchError {
+  NotImplementedError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
+  NotImplementedError() = default;
+  PyObject* python_type() override {
+    return PyExc_NotImplementedError;
+  }
+};
+
 // Translates to Python AttributeError
 struct AttributeError : public PyTorchError {
   AttributeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
   PyObject* python_type() override {
     return PyExc_AttributeError;
+  }
+};
+
+// Translates to Python LinAlgError
+struct LinAlgError : public PyTorchError {
+  LinAlgError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
+  PyObject* python_type() override {
+    return THPException_LinAlgError;
   }
 };
 
@@ -336,14 +373,15 @@ using Arg = typename invoke_traits<Func>::template arg<i>::type;
 
 template <typename Func, size_t... Is>
 auto wrap_pybind_function_impl_(
-    // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
     Func&& f,
     std::index_sequence<Is...>,
     bool release_gil) {
+  using result_type = typename invoke_traits<Func>::result_type;
   namespace py = pybind11;
 
   // f=f is needed to handle function references on older compilers
-  return [f = std::forward<Func>(f), release_gil](Arg<Func, Is>... args) {
+  return [f = std::forward<Func>(f),
+          release_gil](Arg<Func, Is>... args) -> result_type {
     HANDLE_TH_ERRORS
     if (release_gil) {
       py::gil_scoped_release no_gil;

@@ -61,7 +61,6 @@ install_ubuntu() {
     ${maybe_libiomp_dev} \
     libyaml-dev \
     libz-dev \
-    libjemalloc2 \
     libjpeg-dev \
     libasound2-dev \
     libsndfile-dev \

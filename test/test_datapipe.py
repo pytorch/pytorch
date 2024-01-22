@@ -229,7 +229,7 @@ class TestStreamWrapper(TestCase):
         for api in ['open', 'read', 'close']:
             self.assertTrue(api in s)
 
-    @skipIfTorchDynamo()
+    @skipIfTorchDynamo
     def test_api(self):
         fd = TestStreamWrapper._FakeFD("")
         wrap_fd = StreamWrapper(fd)
@@ -1408,7 +1408,7 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(lambda data: (data[0] + 1, data[1], data[2]), Add1Callable(), 0)
 
     @suppress_warnings  # Suppress warning for lambda fn
-    @skipIfTorchDynamo()
+    @skipIfTorchDynamo
     def test_map_dict_with_col_iterdatapipe(self):
         def fn_11(d):
             return -d

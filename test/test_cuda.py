@@ -28,7 +28,7 @@ from torch.utils.checkpoint import checkpoint_sequential
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_CUDA, TEST_CUDA_GRAPH, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX, IS_ARM64
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX
 from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, \
     _create_scaling_case, _create_scaling_models_optimizers, _get_torch_cuda_version
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
@@ -1098,6 +1098,28 @@ torch.cuda.synchronize()
                 self.assertTrue(r != 0)
 
 
+    def test_grad_scaling_update_scale(self, device="cuda", dtype=torch.float):
+        growth = 2.0
+        backoff = 0.25
+        growth_interval = 2
+        scale = torch.full((1,), 4.0, dtype=dtype, device=device)
+        growth_tracker = torch.full((1,), 0.0, dtype=torch.int32, device=device)
+        found_inf = torch.full((1,), 0.0, dtype=torch.float, device="cuda:0")
+
+        # Simulates 2 consecutive unskipped iterations
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 1)
+        self.assertEqual(scale, 4.0)
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 0)
+        self.assertEqual(scale, 8.0)
+
+        # Simulates a skipped iteration
+        found_inf.fill_(1.0)
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 0)
+        self.assertEqual(scale, 2.0)
+
     def test_grad_scaling_unscale_sparse(self, device="cuda", dtype=torch.float):
         scaler = torch.cuda.amp.GradScaler()
 
@@ -1261,27 +1283,17 @@ torch.cuda.synchronize()
             self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
 
     def test_grad_scaling_autocast_fused(self):
-        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
+        for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
             self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
 
     # Compare non-fused optimizer vs fused one as the fused one unscales gradients
     # inside its cuda kernel unlike the other.
     def test_grad_scaling_autocast_fused_optimizers(self):
-        for optimizer_ctor, optimizer_kwargs, separate_unscale in list(product(
+        for optimizer_ctor, optimizer_kwargs, separate_unscale in product(
             (torch.optim.Adam, torch.optim.AdamW),
             ({"fused": True, "amsgrad": False}, {"fused": True, "amsgrad": True}),
             (False, True),
-        )) + list(product(
-            (torch.optim.SGD,),
-            [
-                {"momentum": 0.0, "dampening": d, "weight_decay": w, "nesterov": n, "fused": True}
-                for d, w, n in product((0.0, 0.5), (0.0, 0.5), (False,))
-            ] + [
-                {"momentum": 0.5, "dampening": d, "weight_decay": w, "nesterov": n, "fused": True}
-                for d, w, n in product((0.0,), (0.0, 0.5), (True, False))
-            ],
-            (False, True),
-        )):
+        ):
             with self.subTest(optim=optimizer_ctor, kwargs=optimizer_kwargs, separate_unscale=separate_unscale):
                 self._grad_scaling_autocast_fused_optimizers(
                     optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs, separate_unscale=separate_unscale)
@@ -1825,7 +1837,8 @@ torch.cuda.synchronize()
                     ('TORCH_CUDNN_V8_API_DISABLED' in os.environ and
                      int(os.environ['TORCH_CUDNN_V8_API_DISABLED']) or
                      torch.cuda.get_device_capability() < (8, 0))
-                should_error_from_not_implemented = should_error_from_cudnn
+                should_error_from_not_implemented = should_error_from_cudnn or 'thnn' in op \
+                    or 'fused' in op or 'gru' in op or op == '_thnn_fused_lstm_cell' or op == 'lstm_cell'
                 if not skip_test:
                     if should_error_from_not_implemented:
                         with self.assertRaises(RuntimeError, msg=str(op) + ' should not be supported for bfloat16!'):
@@ -2874,10 +2887,6 @@ exit(2)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_grad_scaling(self):
-        for foreach, fused in ((False, False), (True, False), (False, True)):
-            self._test_graph_grad_scaling(foreach, fused)
-
-    def _test_graph_grad_scaling(self, foreach, fused):
         torch.cuda.empty_cache()
 
         scaler = torch.cuda.amp.GradScaler(init_scale=4.)
@@ -2885,7 +2894,7 @@ exit(2)
         s = torch.cuda.Stream()
 
         weight = torch.ones((100,), device="cuda", requires_grad=True)
-        opt = torch.optim.SGD([weight], lr=0.1, foreach=foreach, fused=fused)
+        opt = torch.optim.SGD([weight], lr=0.1)
         static_input = torch.ones_like(weight)
         static_grad = torch.ones_like(weight)
 
@@ -3112,8 +3121,10 @@ exit(2)
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
             for optimizer_ctor, amsgrad in product((torch.optim.Adam, torch.optim.AdamW), (False, True))
         ] + [
-            (optimizer_ctor, {"lr": 0.1, "foreach": True, "maximize": maximize, "weight_decay": weight_decay})
-            for optimizer_ctor, maximize, weight_decay in product((torch.optim.Adamax, torch.optim.ASGD), (False, True), (0, 0.1))]
+            (torch.optim.ASGD, {"lr": 0.1, "foreach": True, "maximize": maximize, "weight_decay": weight_decay})
+            for maximize, weight_decay in product((False, True), (0.0, 0.1))
+        ]
+
 
         for optimizer_ctor, kwargs in cases:
             with self.subTest(optimizer_ctor=optimizer_ctor, kwargs=kwargs):
@@ -3170,23 +3181,13 @@ exit(2)
         cases = [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
             for optimizer_ctor, amsgrad in product((torch.optim.Adam, torch.optim.AdamW), (False, True))
-        ] + list(product(
-            (torch.optim.SGD,),
-            [
-                {"lr": 0.1, "momentum": 0.0, "dampening": d, "weight_decay": w, "nesterov": n, "fused": True}
-                for d, w, n in product((0.0, 0.5), (0.0, 0.5), (False,))
-            ] + [
-                {"lr": 0.1, "momentum": 0.5, "dampening": d, "weight_decay": w, "nesterov": n, "fused": True}
-                for d, w, n in product((0.0,), (0.0, 0.5), (True, False))
-            ],
-        ))
+        ]
 
         steps_warmup = 3
         steps_train = 2
 
         for OptClass, kwargs in cases:
-            has_capturable_arg = OptClass in (torch.optim.Adam, torch.optim.AdamW)
-            for actually_do_graphs in (True, False) if has_capturable_arg else (True,):
+            for actually_do_graphs in (True, False):
                 params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
                 params_control = [p.clone().requires_grad_() for p in params]
                 params_graphed = [p.clone().requires_grad_() for p in params]
@@ -3208,9 +3209,8 @@ exit(2)
                     scaler_for_graphed._lazy_init_scale_growth_tracker(torch.device("cuda"))
 
                 # Control (capturable=False)
-                if has_capturable_arg:
-                    kwargs["capturable"] = False
-                opt = OptClass(params_control, **kwargs)
+
+                opt = OptClass(params_control, capturable=False, **kwargs)
 
                 for i in range(steps_warmup + steps_train):
                     for j, p in enumerate(params_control):
@@ -3219,9 +3219,8 @@ exit(2)
                     scaler_for_control.update()
 
                 # capturable=True
-                if has_capturable_arg:
-                    kwargs["capturable"] = True
-                opt = OptClass(params_graphed, **kwargs)
+
+                opt = OptClass(params_graphed, capturable=True, **kwargs)
 
                 for i in range(steps_warmup):
                     for j, p in enumerate(params_graphed):
@@ -3420,23 +3419,11 @@ exit(2)
     @unittest.skipIf(TEST_MULTIGPU, "Testing on one GPU is sufficient")
     def test_lazy_init(self):
         """ Validate that no CUDA calls are made during `import torch` call"""
-        def check_output(script: str) -> str:
-            return subprocess.check_output([sys.executable, "-c", script]).decode("ascii").strip()
-
+        from subprocess import check_output
         VISIBLE_DEVICES = "HIP_VISIBLE_DEVICES" if TEST_WITH_ROCM else "CUDA_VISIBLE_DEVICES"
         test_script = f"import os; import torch;os.environ['{VISIBLE_DEVICES}']='32';print(torch.cuda.device_count())"
-        rc = check_output(test_script)
+        rc = check_output([sys.executable, '-c', test_script]).decode("ascii").strip()
         self.assertEqual(rc, "0")
-        if not TEST_WITH_ROCM:
-            # Check that `cuInit` was not called during the import
-            # By using ctypes and calling cuDeviceCountGet() and expect CUDA_ERROR_NOT_INITIALIZED == 3
-            # See https://github.com/pytorch/pytorch/issues/116276 for more details
-            libcuda_name = "libcuda.so.1" if not IS_WINDOWS else "nvcuda.dll"
-            cuda_driver_api_call = f"ctypes.CDLL('{libcuda_name}').cuDeviceGetCount(ctypes.byref(x))"
-            rc = check_output(f"import torch; import ctypes;x=ctypes.c_int(-1);print({cuda_driver_api_call})")
-            self.assertEqual(rc, "3")
-
-
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -3488,7 +3475,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
+    @unittest.skipIf(not IS_LINUX, "linux only cpp unwinding")
     def test_direct_traceback(self):
         from torch._C._profiler import gather_traceback, symbolize_tracebacks
         c = gather_traceback(True, True, True)
@@ -3498,7 +3485,7 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue("unwind" in r)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_memory_snapshot_with_cpp(self):
         try:
             torch.cuda.memory.empty_cache()
@@ -3534,7 +3521,7 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue('category' in plot)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_cycles(self):
         fired = False
 
@@ -3571,7 +3558,7 @@ class TestCudaMallocAsync(TestCase):
             disarm()
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_memory_plots(self):
         for context, stacks in (("all", "all" if IS_LINUX else "python"), ("all", "python"), (None, "python")):
             try:
@@ -3599,7 +3586,7 @@ class TestCudaMallocAsync(TestCase):
                 torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_memory_plots_free_stack(self):
         for context in ["alloc", "all", "state"]:
             try:
@@ -3750,16 +3737,7 @@ class TestCudaMallocAsync(TestCase):
             torch.cuda.memory._set_allocator_settings("pinned_num_register_threads:1024")
 
 
-    @parametrize(
-        "max_split_size_mb_setting", [False, True]
-    )
-    def test_raises_oom(self, max_split_size_mb_setting):
-        if max_split_size_mb_setting:
-            # CudaCachingAllocator does early return when searching available blocks
-            # if max_split_size_mb is not set
-            # Setting this triggers more parts of the code
-            torch.cuda.memory._set_allocator_settings("max_split_size_mb:1024")
-            torch.cuda.memory.empty_cache()
+    def test_raises_oom(self):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
 
@@ -4277,7 +4255,6 @@ class TestBlockStateAbsorption(TestCase):
 
 
 instantiate_parametrized_tests(TestCuda)
-instantiate_parametrized_tests(TestCudaMallocAsync)
 
 if __name__ == '__main__':
     run_tests()

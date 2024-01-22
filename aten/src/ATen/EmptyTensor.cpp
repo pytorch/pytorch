@@ -1,8 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/EmptyTensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/Context.h>
-#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/safe_numerics.h>
 
@@ -12,16 +10,7 @@ namespace at::detail {
 namespace {
 c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
   if (pin_memory) {
-    // NB: This is not quite right, if you somehow had both CUDA and PrivateUse1 initialized
-    // in the same PyTorch build, you would ONLY ever get the CUDA pinned memory allocator.
-    // To properly support this, see https://github.com/pytorch/pytorch/issues/14560
-    if (at::globalContext().hasCUDA()) {
-      return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
-    } else if(at::isPrivateUse1HooksRegistered()) {
-      return at::GetPrivateUse1HooksInterface()->getPinnedMemoryAllocator();
-    } else {
-      TORCH_CHECK(false, "Need to provide pin_memory allocator to use pin memory.")
-    }
+    return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
   }
   return c10::GetCPUAllocator();
 }
@@ -322,7 +311,6 @@ struct MetaAllocator final : public at::Allocator {
   DeleterFnPtr raw_deleter() const override {
     return deleter;
   }
-  void copy_data(void* dest, const void* src, std::size_t count) const final {}
 };
 
 static MetaAllocator g_meta_alloc;

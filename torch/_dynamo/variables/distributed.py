@@ -10,24 +10,10 @@ from .constant import ConstantVariable
 
 
 class DistributedVariable(VariableTracker):
-    """
-    The base distributed variable that encapsulates common methods
-    for the distributed objects (i.e. ProcessGroup, DeviceMesh, etc.).
-    Concrete distributed objects could inherit this class and add object
-    specific logic.
-
-    i.e. It provides the check on the distributed package existance
-    and hold the tracking value for the corresponding distributed object.
-    """
-
-    def __init__(self, value, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
         if not DistributedVariable.is_available():
             unimplemented("torch.distributed package is not available!")
-        self.value = value
-
-    def python_type(self):
-        return type(self.value)
 
     @staticmethod
     def is_available():
@@ -61,6 +47,10 @@ def is_constant_pg_functions(value):
 
 
 class PlacementClassVariable(DistributedVariable):
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
     @staticmethod
     def is_placement_type(value):
         # we can't rely on importing/accessing torch distributed, it is not always built.
@@ -90,6 +80,10 @@ class PlacementClassVariable(DistributedVariable):
 
 
 class PlacementVariable(DistributedVariable):
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
     @staticmethod
     def is_placement(value):
         # we can't rely on importing/accessing torch distributed, it is not always built.
@@ -136,6 +130,10 @@ class PlacementVariable(DistributedVariable):
 
 
 class DeviceMeshVariable(DistributedVariable):
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
     @staticmethod
     def is_device_mesh(value):
         # we can't rely on importing/accessing torch distributed, it is not always built.
@@ -174,8 +172,15 @@ class ProcessGroupVariable(DistributedVariable):
           or just graph-break whenever one of our special cases is not hit?
     """
 
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
     def as_python_constant(self):
         return self.value
+
+    def python_type(self):
+        return type(self.value)
 
     def call_method(
         self,

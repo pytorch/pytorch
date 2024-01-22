@@ -11,27 +11,14 @@ import torch
 
 import torch._inductor
 
-# The rest of the optimizers not yet imported: LBFGS, RAdam, SparseAdam
-from torch.optim import (
-    Adadelta,
-    Adagrad,
-    Adam,
-    Adamax,
-    AdamW,
-    ASGD,
-    NAdam,
-    RMSprop,
-    Rprop,
-    SGD,
-)
+# The rest of the optimizers not yet imported: Adamax, LBFGS, RAdam, SGD, SparseAdam
+from torch.optim import Adadelta, Adagrad, Adam, AdamW, ASGD, NAdam, RMSprop, Rprop
 
 from torch.testing._internal.common_optimizers import optim_db
 
 from torch.testing._internal.common_utils import TestCase
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
-
-from torch.testing._internal.triton_utils import requires_cuda
 
 
 class KernelCounts(NamedTuple):
@@ -52,10 +39,6 @@ KERNEL_COUNT_OVERRIDES = {
     "test_adadelta_foreach_weight_decay_maximize_cpu": 12,
     "test_adadelta_foreach_rho_weight_decay_cpu": 12,
     "test_adadelta_foreach_weight_decay_cpu": 12,
-    "test_sgd_foreach_momentum_weight_decay_cpu": 16,
-    "test_sgd_foreach_momentum_nesterov_weight_decay_cpu": 16,
-    "test_sgd_foreach_momentum_dampening_cuda": 5,
-    "test_sgd_foreach_momentum_cuda": 5,
 }
 
 # also tracks currently supported optimizers
@@ -68,10 +51,6 @@ KERNEL_COUNTS = {
     Adadelta: KernelCounts(multitensor=1, singletensor=4),
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=12),
-    SGD: KernelCounts(multitensor=2, singletensor=8),
-    Adamax: KernelCounts(
-        multitensor=2, singletensor=None
-    ),  # Single tensor eager needs to be refactored to enable tracing
 }
 
 
@@ -115,9 +94,6 @@ def build_compiled_opt_kwarg_db():
                             else KERNEL_COUNTS[optim_info.optim_cls].singletensor
                         )
 
-                    if kwargs["kernel_count"] is None:
-                        continue
-
                     # Note on tolerances:
                     # test_adadelta_foreach_rho_weight_decay_cuda
                     # Mismatched elements: 1 / 100 (1.0%)
@@ -139,9 +115,9 @@ aten = torch.ops.aten
 
 try:
     try:
-        from .test_torchinductor import check_model, check_model_cuda
+        from .test_torchinductor import check_model, check_model_cuda, requires_cuda
     except ImportError:
-        from test_torchinductor import check_model, check_model_cuda
+        from test_torchinductor import check_model, check_model_cuda, requires_cuda
 except (unittest.SkipTest, ImportError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
@@ -255,8 +231,9 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
         # check no recompile here
         with torch.set_grad_enabled(False):
-            for _ in range(4):
-                compiled_step()
+            compiled_step()
+
+            compiled_step()
 
             # perturb state to force recompile
             # Adagrad doesn't reinitialize state on each step
@@ -268,20 +245,12 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
             compiled_step()
 
         if self.check_kernel_count:
-            if optim_cls is SGD:
-                # SGD triggers an additional recompile
-                # because of momentum buffer list mutation in step()
-                multiplier = 3
-            else:
-                # currently, we compile the step and the rest of the computation
-                # separately because the step is a single element tensor
-                # hence, the usual kernel count is 2
-                # multiply by 2 to account for the recompile
-                multiplier = 2
-
+            # currently, we compile the step and the rest of the computation
+            # separately because the step is a single element tensor
+            # hence, the usual kernel count is 2
+            # multiply by 2 to account for the recompile
             self.assertEqual(
-                torch._inductor.metrics.generated_kernel_count,
-                multiplier * kernel_count,
+                torch._inductor.metrics.generated_kernel_count, 2 * kernel_count
             )
 
     return test_fn
@@ -300,6 +269,8 @@ class CompiledOptimizerTests(TestCase):
         super().tearDown()
         torch._inductor.metrics.reset()
 
+    # test_sgd = make_test(SGD, kernel_count=1, lr=0.01)
+
     test_adam_recompile = make_recompile_test(Adam, lr=0.01)
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
     # Need an impl which does not use python scalars
@@ -316,12 +287,7 @@ class CompiledOptimizerTests(TestCase):
     test_asgd_recompile_foreach = make_recompile_test(
         ASGD, kernel_count=2, lr=0.01, foreach=True
     )
-    test_sgd_recompile_single = make_recompile_test(
-        SGD, kernel_count=4, lr=0.01, foreach=False
-    )
-    test_sgd_recompile_foreach = make_recompile_test(
-        SGD, kernel_count=1, lr=0.01, foreach=True
-    )
+    # test_sgd_recompile = make_recompile_test(SGD, kernel_count=1, lr=0.01)
 
     @requires_cuda()
     def test_static_address_finalizer(self):

@@ -113,9 +113,7 @@ class OnnxFunctionDispatcher:
         self,
         node: torch.fx.Node,
         onnx_args: Sequence[
-            Optional[
-                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
-            ]
+            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
         ],
         onnx_kwargs: Dict[str, fx_type_utils.Argument],
         diagnostic_context: diagnostics.DiagnosticContext,
@@ -154,10 +152,13 @@ class OnnxFunctionDispatcher:
         default_and_custom_functions: List[registration.ONNXFunction],
         diagnostic_context: diagnostics.DiagnosticContext,
     ) -> List[registration.ONNXFunction]:
-        """Filter the complex functions if the input has complex dtype."""
-
-        args_with_complex_dtype = [_is_arg_with_complex_dtype(arg) for arg in node.args]
-        if any(args_with_complex_dtype):
+        if any(
+            torch.is_complex(arg.meta["val"])
+            for arg in node.args
+            if isinstance(arg, torch.fx.Node)
+            and "val" in arg.meta
+            and isinstance(arg.meta["val"], torch.Tensor)
+        ):
             default_and_custom_functions = [
                 func for func in default_and_custom_functions if func.is_complex
             ]
@@ -205,9 +206,7 @@ class OnnxFunctionDispatcher:
         node: torch.fx.Node,  # this is used in diagnostic_message_formatter
         default_and_custom_functions: List[registration.ONNXFunction],
         onnx_args: Sequence[
-            Optional[
-                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
-            ]
+            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
         ],
         onnx_kwargs: Dict[str, fx_type_utils.Argument],
         diagnostic_context: diagnostics.DiagnosticContext,
@@ -559,9 +558,7 @@ class _OnnxSchemaChecker:
         self,
         diagnostic: diagnostics.Diagnostic,
         args: Sequence[
-            Optional[
-                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
-            ]
+            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
         ],
         kwargs: Dict[str, fx_type_utils.Argument],
     ) -> bool:
@@ -719,9 +716,7 @@ class _OnnxSchemaChecker:
     def _record_matching_score(
         self,
         inputs: Sequence[
-            Optional[
-                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
-            ]
+            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
         ],
         attributes: Dict[str, fx_type_utils.Argument],
     ):
@@ -775,9 +770,7 @@ class _OnnxSchemaChecker:
         self,
         param_schemas: Sequence["onnxscript.values.ParamSchema"],
         args: Sequence[
-            Optional[
-                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
-            ]
+            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
         ],
         kwargs: Dict[str, fx_type_utils.Argument],
         fill_defaults: bool = True,
@@ -856,25 +849,9 @@ class _OnnxSchemaChecker:
 
 
 @_beartype.beartype
-def _is_arg_with_complex_dtype(arg: fx_type_utils.Argument) -> bool:
-    """Check if the node has complex dtype recursively."""
-    if (
-        isinstance(arg, torch.fx.Node)
-        and "val" in arg.meta
-        and isinstance(arg.meta["val"], torch.Tensor)
-        and torch.is_complex(arg.meta["val"])
-    ):
-        return True
-    elif isinstance(arg, list):
-        for item in arg:
-            return _is_arg_with_complex_dtype(item)
-    return False
-
-
-@_beartype.beartype
 def _find_onnx_data_type(
     torch_input: Optional[
-        Union[fx_type_utils.TensorLike, str, int, float, bool, list, tuple, complex]
+        Union[fx_type_utils.TensorLike, str, int, float, bool, list, tuple]
     ]
 ) -> Set[str]:
     """Convert inputs data type from torch acceptable dtype to the compatible onnx dtype string."""
@@ -883,7 +860,7 @@ def _find_onnx_data_type(
         and torch_input.dtype is not None
     ):
         return fx_type_utils.from_torch_dtype_to_onnx_dtype_str(torch_input.dtype)
-    if isinstance(torch_input, (int, float, bool, str, complex)):
+    if isinstance(torch_input, (int, float, bool, str)):
         return fx_type_utils.from_torch_dtype_to_onnx_dtype_str(type(torch_input))
     if isinstance(torch_input, (list, tuple)) and torch_input:  # [Tensor, Tensor]
         set_dtype = _find_onnx_data_type(torch_input[0])

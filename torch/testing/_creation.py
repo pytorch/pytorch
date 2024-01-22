@@ -9,16 +9,7 @@ from typing import cast, List, Optional, Tuple, Union
 
 import torch
 
-_INTEGRAL_TYPES = [
-    torch.uint8,
-    torch.int8,
-    torch.int16,
-    torch.int32,
-    torch.int64,
-    torch.uint16,
-    torch.uint32,
-    torch.uint64,
-]
+_INTEGRAL_TYPES = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
 _FLOATING_TYPES = [torch.float16, torch.bfloat16, torch.float32, torch.float64]
 _FLOATING_8BIT_TYPES = [torch.float8_e4m3fn, torch.float8_e5m2]
 _COMPLEX_TYPES = [torch.complex32, torch.complex64, torch.complex128]

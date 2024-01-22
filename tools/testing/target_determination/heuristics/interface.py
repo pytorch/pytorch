@@ -63,7 +63,7 @@ class TestPrioritizations:
     Describes the results of whether heuristics consider a test relevant or not.
 
     All the different ranks of tests are disjoint, meaning a test can only be in one category, and they are only
-    declared at initialization time.
+    declared at initization time.
 
     A list can be empty if a heuristic doesn't consider any tests to be in that category.
 
@@ -246,30 +246,18 @@ class TestPrioritizations:
     def get_none_relevance_tests(self) -> TestRuns:
         return tuple(test for test in self._test_priorities[Relevance.NONE.value])
 
-    def get_info_str(self) -> str:
-        info = ""
-
-        def _test_info(label: str, tests: List[TestRun]) -> str:
+    def print_info(self) -> None:
+        def _print_tests(label: str, tests: List[TestRun]) -> None:
             if not tests:
-                return ""
+                return
 
-            s = f"{label} tests ({len(tests)}):\n"
+            print(f"{label} tests ({len(tests)}):")
             for test in tests:
                 if test in tests:
-                    s += f"  {test}\n"
-            return s
+                    print(f"  {test}")
 
         for relevance_group, tests in self._traverse_priorities():
-            if relevance_group == Relevance.UNRANKED:
-                continue
-            info += _test_info(
-                f"{Relevance(relevance_group).name.title()} Relevance", tests
-            )
-
-        return info.strip()
-
-    def print_info(self) -> None:
-        print(self.get_info_str())
+            _print_tests(f"{Relevance(relevance_group).name.title()} Relevance", tests)
 
     def _get_test_relevance_group(self, test_run: TestRun) -> Relevance:
         """

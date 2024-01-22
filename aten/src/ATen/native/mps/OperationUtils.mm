@@ -1,6 +1,5 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
@@ -361,16 +360,18 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
   // if buffer size is zero in here, it's not a user error. It could be a missing check for
   // tensor.numel() == 0 in our internal implementations of ops.
   TORCH_INTERNAL_ASSERT([srcBuf length] > 0, "Placeholder tensor is empty!");
-  if (dataType == MPSDataTypeInvalid) {
-    const auto scalar_type = _tensor.scalar_type();
-    dataType = _tensor.dim() == 0 ? getMPSScalarType(scalar_type) : getMPSDataType(scalar_type);
-  }
+  const MPSDataType mpsDataType = dataType != MPSDataTypeInvalid ? dataType
+      : _tensor.dim() == 0                                       ? getMPSScalarType(_tensor.scalar_type())
+                                                                 : getMPSDataType(_tensor.scalar_type());
+
   if (src.is_contiguous() && src.storage_offset() && sliceViewTensor) {
-    _value = getMPSGraphTensorDataForView(src, mpsShape, dataType);
+    _value = getMPSGraphTensorDataForView(src, mpsShape, mpsDataType);
   } else {
-    _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
-                                                      shape:mpsShape ? mpsShape : getMPSShape(_tensor)
-                                                   dataType:dataType] autorelease];
+    if (!mpsShape) {
+      mpsShape = getMPSShape(_tensor);
+    }
+
+    _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf shape:mpsShape dataType:mpsDataType] autorelease];
   }
 
   TORCH_INTERNAL_ASSERT(_value);
@@ -391,7 +392,7 @@ MPSGraphTensorData* getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStre
     MPSNDArray* emptyArray = [[[MPSNDArray alloc] initWithDevice:mpsStream->device() descriptor:desc] autorelease];
     result = [[[MPSGraphTensorData alloc] initWithMPSNDArray:emptyArray] autorelease];
   }
-  TORCH_INTERNAL_ASSERT(result);
+  assert(result);
   return result;
 }
 
@@ -453,7 +454,7 @@ Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device) {
   } else if (scalar.isComplex()) {
     tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kComplexDouble));
   } else {
-    TORCH_INTERNAL_ASSERT(scalar.isIntegral(false));
+    AT_ASSERT(scalar.isIntegral(false));
     tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kLong));
   }
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
@@ -516,7 +517,7 @@ string get_mem_format_string(c10::MemoryFormat memory_format) {
       mem_format_key = "ChannelsLast";
       break;
     default:
-      TORCH_CHECK(false, "Invalid memory format", memory_format);
+      assert(0 && "Invalid memory format\n");
   }
 
   return mem_format_key;
@@ -546,43 +547,5 @@ class MPSGraphCacheCallback : public IMpsAllocatorCallback {
 };
 
 REGISTER_MPS_ALLOCATOR_CALLBACK("mps_graph_cache_callback", MPSGraphCacheCallback);
-
-id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder,
-                                        const TensorIteratorBase& iter,
-                                        bool use_64bit_index) {
-  constexpr uint32_t nOffsets = 3;
-  uint32_t numThreads = iter.numel();
-  const uint32_t nDim = iter.ndim();
-  const IntArrayRef& iterShape = iter.shape();
-  std::vector<uint32_t> iterShapeData(iterShape.size());
-  std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
-  TORCH_INTERNAL_ASSERT(iter.ntensors() >= nOffsets);
-  TORCH_CHECK(use_64bit_index || iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
-
-  for (const auto i : c10::irange(iterShape.size())) {
-    iterShapeData[i] = static_cast<uint32_t>(iterShape[i]);
-  }
-
-  for (const auto i : c10::irange(nDim)) {
-    for (const auto offset : c10::irange(nOffsets)) {
-      strides[i][offset] = static_cast<uint32_t>(iter.strides(offset)[i]);
-    }
-  }
-
-  id<MTLComputePipelineState> kernelDataOffsetsPSO = MPSDevice::getInstance()->metalIndexingPSO(
-      use_64bit_index ? "kernel_index_offsets_64" : "kernel_index_offsets_32");
-  const auto elementSize = use_64bit_index ? sizeof(simd_ulong3) : sizeof(simd_uint3);
-  id<MTLBuffer> kernelDataOffsets = (id<MTLBuffer>)getIMPSAllocator()->allocate(numThreads * elementSize).get();
-
-  [commandEncoder setComputePipelineState:kernelDataOffsetsPSO];
-  [commandEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
-  [commandEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
-  [commandEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
-  [commandEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
-
-  mtl_dispatch1DJob(commandEncoder, kernelDataOffsetsPSO, numThreads);
-
-  return kernelDataOffsets;
-}
 
 } // namespace at::native::mps

@@ -26,6 +26,7 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
     requires_nccl,
+    skip_if_lt_x_gpu,
     TEST_SKIPS,
 )
 
@@ -426,11 +427,6 @@ BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
 WORLD_SIZE = 2
 
 
-def exit_if_lt_x_gpu(x):
-    if torch.cuda.device_count() < x:
-        sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
-
-
 def with_comms(func=None):
     if func is None:
         return partial(
@@ -484,11 +480,10 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         dist.barrier()
         dist.destroy_process_group()
 
+    @skip_if_lt_x_gpu(WORLD_SIZE)
     @requires_nccl()
     @with_comms()
     def test_all_gather_into_tensor_coalesced(self):
-        exit_if_lt_x_gpu(self.world_size)
-
         tensors = [
             torch.ones([4], device=f"cuda:{self.rank}"),
             torch.ones([4], device=f"cuda:{self.rank}") + 1,
@@ -587,6 +582,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         self.assertEqual(y, expected)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(WORLD_SIZE)
     @requires_nccl()
     @with_comms()
     def test_tracing(self):
@@ -598,8 +594,6 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_tracing_with_fakepg(self):
-        exit_if_lt_x_gpu(self.world_size)
-
         def allreduce(t, pg):
             return ft_c.all_reduce(t, "sum", pg)
 
@@ -619,11 +613,10 @@ class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):
     def world_size(self):
         return 4
 
+    @skip_if_lt_x_gpu(4)
     @requires_nccl()
     @with_comms()
     def test_permute_tensor_with_sub_group(self):
-        exit_if_lt_x_gpu(self.world_size)
-
         device = "cuda"
         mesh_dim_names = ["dp", "tp"]
 

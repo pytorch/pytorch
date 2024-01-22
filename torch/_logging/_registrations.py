@@ -18,12 +18,9 @@ register_log("distributed", DISTRIBUTED)
 register_log(
     "dist_c10d", ["torch.distributed.distributed_c10d", "torch.distributed.rendezvous"]
 )
-register_log(
-    "dist_ddp", ["torch.nn.parallel.distributed", "torch._dynamo.backends.distributed"]
-)
+register_log("dist_ddp", ["torch.nn.parallel.distributed"])
 register_log("dist_fsdp", ["torch.distributed.fsdp"])
 register_log("onnx", "torch.onnx")
-register_log("export", ["torch._dynamo", "torch.export", *DYNAMIC])
 
 register_artifact(
     "guards",

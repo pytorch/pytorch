@@ -2,11 +2,11 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,pass,6
+torchrec_dlrm,pass,7
 
 
 
-BERT_pytorch,pass,6
+BERT_pytorch,pass,7
 
 
 
@@ -18,7 +18,7 @@ DALLE2_pytorch,eager_fail_to_run,0
 
 
 
-LearningToPaint,pass,6
+LearningToPaint,pass,7
 
 
 
@@ -26,7 +26,7 @@ Super_SloMo,pass,6
 
 
 
-alexnet,pass,6
+alexnet,pass,7
 
 
 
@@ -50,15 +50,15 @@ cm3leon_generate,eager_fail_to_run,0
 
 
 
-dcgan,pass,6
+dcgan,pass,7
 
 
 
-demucs,pass,9
+demucs,pass,10
 
 
 
-densenet121,pass,6
+densenet121,pass,7
 
 
 
@@ -70,7 +70,7 @@ detectron2_maskrcnn_r_50_c4,eager_fail_to_run,0
 
 
 
-dlrm,pass,6
+dlrm,pass,7
 
 
 
@@ -86,7 +86,7 @@ drq,pass,5
 
 
 
-fastNLP_Bert,pass,10
+fastNLP_Bert,pass,11
 
 
 
@@ -126,7 +126,7 @@ hf_Reformer,pass,25
 
 
 
-hf_T5_base,eager_2nd_run_OOM,0
+hf_T5_base,pass,6
 
 
 
@@ -146,10 +146,6 @@ hf_clip,eager_fail_to_run,0
 
 
 
-hf_distil_whisper,model_fail_to_load,0
-
-
-
 lennard_jones,pass,6
 
 
@@ -162,7 +158,7 @@ mnasnet1_0,pass,6
 
 
 
-mobilenet_v2,pass,6
+mobilenet_v2,pass,7
 
 
 
@@ -174,7 +170,7 @@ mobilenet_v3_large,pass,6
 
 
 
-moco,pass,17
+moco,pass,18
 
 
 
@@ -190,19 +186,19 @@ opacus_cifar10,eager_fail_to_run,0
 
 
 
-phlippe_densenet,pass,6
+phlippe_densenet,pass,7
 
 
 
-phlippe_resnet,pass,6
+phlippe_resnet,pass,7
 
 
 
-pytorch_CycleGAN_and_pix2pix,pass,6
+pytorch_CycleGAN_and_pix2pix,pass,7
 
 
 
-pytorch_stargan,pass,6
+pytorch_stargan,pass,7
 
 
 
@@ -214,11 +210,11 @@ resnet152,pass,6
 
 
 
-resnet18,pass,6
+resnet18,pass,7
 
 
 
-resnet50,pass,6
+resnet50,pass,7
 
 
 
@@ -234,7 +230,7 @@ sam,eager_fail_to_run,0
 
 
 
-shufflenet_v2_x1_0,pass,6
+shufflenet_v2_x1_0,pass,7
 
 
 
@@ -242,15 +238,15 @@ soft_actor_critic,pass,5
 
 
 
-speech_transformer,pass,16
+speech_transformer,pass,17
 
 
 
-squeezenet1_1,pass,6
+squeezenet1_1,pass,7
 
 
 
-stable_diffusion_text_encoder,pass,5
+stable_diffusion_text_encoder,pass,6
 
 
 
@@ -262,7 +258,7 @@ timm_efficientnet,pass,6
 
 
 
-timm_regnet,pass,6
+timm_regnet,pass,7
 
 
 
@@ -270,7 +266,7 @@ timm_resnest,pass,6
 
 
 
-timm_vision_transformer,pass,6
+timm_vision_transformer,pass,7
 
 
 
@@ -278,7 +274,7 @@ timm_vision_transformer_large,pass_due_to_skip,0
 
 
 
-timm_vovnet,pass,6
+timm_vovnet,pass,7
 
 
 
@@ -290,11 +286,11 @@ tts_angular,pass,8
 
 
 
-vgg16,pass,6
+vgg16,pass,7
 
 
 
-vision_maskrcnn,pass,33
+vision_maskrcnn,pass,35
 
 
 

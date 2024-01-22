@@ -10,8 +10,6 @@ logger = logging.getLogger(__name__)
 
 class PostLocalSGDState:
     r"""
-    Store state for all-reducing gradients globally until given step, then locally after.
-
     Stores the state for all-reducing gradients globally using ``process_group`` until step ``start_localSGD_iter``,
     and all-reducing gradients locally using ``subgroup`` afterwards.
 
@@ -37,7 +35,6 @@ class PostLocalSGDState:
         start_localSGD_iter,
         post_local_gradient_allreduce=True,
     ):
-        """Initialize state object with given parameters and log when localSGD start."""
         logger.info(
             "Local SGD will be started after %s iterations", start_localSGD_iter
         )
@@ -54,7 +51,6 @@ class PostLocalSGDState:
         self.iter = 0
 
     def maybe_increase_iter(self, bucket):
-        """Track iterations and trigger log message at start of local SGD."""
         # Since bucket 0 is the last bucket to allreduce in an iteration.
         # Only increase `iter` when bucket 0 is processed.
         if bucket.is_last():
@@ -65,12 +61,11 @@ class PostLocalSGDState:
                 "Start to apply local SGD after %s iterations.", self.iter
             )
 
+
 def post_localSGD_hook(
     state: PostLocalSGDState, bucket: dist.GradBucket
 ) -> torch.futures.Future[torch.Tensor]:
     """
-    Run post-localSGD algorithm.
-
     This DDP communication hook is used for running post-localSGD algorithm,
     by combining with a model averaging component (e.g.,
     :class:`~torch.distributed.algorithms.model_averaging.averagers.PeriodicModelAverager`)

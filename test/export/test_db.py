@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: export"]
+# Owner(s): ["module: dynamo"]
 
 import copy
 import unittest

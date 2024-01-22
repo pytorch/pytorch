@@ -3,7 +3,6 @@ from typing import Any, Callable, DefaultDict, Dict, Optional, Tuple, Type
 
 import torch
 import torch.fx
-from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
 from .virtualized import V
@@ -79,9 +78,6 @@ class FakeTensorUpdater:
         for node in self.graph.nodes:
             existing_storages[get_node_storage(node)] += 1
 
-        def is_intlist_same(new, old):
-            return statically_known_true(sym_eq(new, old))
-
         def is_fake_tensor_same(new, old):
             if type(new) != type(old):
                 return False
@@ -92,16 +88,10 @@ class FakeTensorUpdater:
                     is_fake_tensor_same(new_i, old_i) for new_i, old_i in zip(new, old)
                 )
             assert isinstance(new, torch.Tensor)
-            if not is_intlist_same(new.shape, old.shape) or new.layout != old.layout:
+            if new.shape != old.shape or new.layout != old.layout:
                 return False
-            if new.layout == torch.strided and (
-                not is_intlist_same(new.stride(), old.stride())
-                or not statically_known_true(
-                    new.storage_offset() == old.storage_offset()
-                )
-            ):
+            if new.layout == torch.strided and new.stride() != old.stride():
                 return False
-
             if get_storage(new) == get_storage(old):
                 return True
 

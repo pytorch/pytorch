@@ -1,4 +1,3 @@
-#if !defined(C10_MOBILE) && !defined(ANDROID)
 #pragma once
 
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
@@ -8,12 +7,12 @@ class TORCH_API AOTIModelContainerRunnerCpu : public AOTIModelContainerRunner {
  public:
   AOTIModelContainerRunnerCpu(
       const std::string& model_so_path,
-      size_t num_models = 1);
+      size_t num_models = 1)
+      : AOTIModelContainerRunner(model_so_path, num_models, true, "") {}
 
-  ~AOTIModelContainerRunnerCpu();
-
-  std::vector<at::Tensor> run(std::vector<at::Tensor>& inputs);
+  std::vector<at::Tensor> run(std::vector<at::Tensor>& inputs) {
+    return AOTIModelContainerRunner::run(inputs);
+  }
 };
 
 } // namespace torch::inductor
-#endif

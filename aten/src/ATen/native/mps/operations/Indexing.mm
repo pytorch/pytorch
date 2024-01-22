@@ -55,8 +55,7 @@ static std::string getBitSizeString(ScalarType scalar_type) {
 static std::string getIndexFunctionName(ScalarType scalar_type,
                                         bool index_select,
                                         bool accumulate,
-                                        bool serial,
-                                        bool use_64bit_indexing) {
+                                        bool serial = false) {
   std::string indexFunction = index_select     ? "index_select_"
       : (accumulate && (scalar_type != kBool)) ? "index_put_accumulate_"
                                                : (serial ? "index_put_serial_" : "index_put_");
@@ -69,10 +68,8 @@ static std::string getIndexFunctionName(ScalarType scalar_type,
     string dtypeString = (scalar_type == ScalarType::Float) ? "_float" : "_int";
     indexFunction += dtypeString;
   }
-  indexFunction += use_64bit_indexing ? "_idx64" : "_idx32";
   return indexFunction;
 }
-
 static bool dispatchIndexKernel(TensorIteratorBase& iter,
                                 IntArrayRef index_size,
                                 IntArrayRef index_stride,
@@ -90,19 +87,47 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+  dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
       NSError* error = nil;
+      constexpr uint32_t nOffsets = 3;
       const int64_t num_indices = index_size.size();
       const uint32_t numIters = serial_index_put ? iter.numel() : 1;
       uint32_t numThreads = iter.numel();
+      const uint32_t nDim = iter.ndim();
+      const IntArrayRef& iterShape = iter.shape();
+      std::vector<uint32_t> iterShapeData(iterShape.size());
+      std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
 
+      for (const auto i : c10::irange(iterShape.size())) {
+        TORCH_CHECK(i <= UINT32_MAX);
+        iterShapeData[i] = (uint32_t)(iterShape[i]);
+      }
+
+      for (const auto i : c10::irange(nDim)) {
+        for (const auto offset : c10::irange(nOffsets)) {
+          strides[i][offset] = iter.strides(offset)[i];
+        }
+      }
+
+      MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      const bool use_64bit_indexing = !iter.can_use_32bit_indexing();
-      auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter, use_64bit_indexing);
+      id<MTLComputePipelineState> kernelDataOffsetsPSO =
+          MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offsets");
+      id<MTLBuffer> kernelDataOffsets =
+          (id<MTLBuffer>)getIMPSAllocator()->allocate(numThreads * sizeof(simd_uint3)).get();
 
-      auto indexFunction = getIndexFunctionName(
-          inputTensor.scalar_type(), index_select, accumulate, serial_index_put, use_64bit_indexing);
+      [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
+      [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
+      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
+      [computeEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
+      [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
+      [computeEncoder setBytes:&nOffsets length:sizeof(uint32_t) atIndex:4];
+
+      mtl_dispatch1DJob(computeEncoder, kernelDataOffsetsPSO, numThreads);
+
+      std::string indexFunction =
+          getIndexFunctionName(inputTensor.scalar_type(), index_select, accumulate, serial_index_put);
       id<MTLComputePipelineState> indexSelectPSO = nil;
       id<MTLBuffer> indexAB = nil;
 #if defined(__MAC_13_0)
@@ -154,11 +179,12 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       mtl_setBuffer(computeEncoder, inputTensor, 4);
       mtl_setBuffer(computeEncoder, outputTensor, 5);
       [computeEncoder setBytes:&num_indices length:sizeof(uint32_t) atIndex:6];
-      MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       if (serial_index_put) {
         [computeEncoder setBytes:&numIters length:sizeof(numIters) atIndex:7];
         gridSize = MTLSizeMake(1, 1, 1);
         numThreads = 1;
+      } else {
+        gridSize = MTLSizeMake(numThreads, 1, 1);
       }
 
       NSUInteger tgSize = indexSelectPSO.maxTotalThreadsPerThreadgroup;
@@ -625,7 +651,6 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
               " and ",
               output.size(dim),
               ".");
-  TORCH_CHECK(!self.is_complex(), "index_select(): Yet not supported for complex");
 
   for (const auto i : irange(self.dim())) {
     if (i == dim)
@@ -963,7 +988,7 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Te
 
   auto inputType = getMPSDataType(self);
   auto sourceType = getMPSDataType(source);
-  if (inputType == MPSDataTypeUInt8 || inputType == MPSDataTypeBool) {
+  if (inputType == MPSDataTypeUInt8 || (!is_macos_13_or_newer() && inputType == MPSDataTypeBool)) {
     inputType = MPSDataTypeInt8;
   }
 

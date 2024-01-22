@@ -332,7 +332,6 @@ c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
     } else if (device.type() == at::DeviceType::Meta) {
       allocator = c10::GetAllocator(device.type());
     } else if (device.type() == at::DeviceType::PrivateUse1) {
-      at::globalContext().lazyInitPrivateUse1();
       allocator = c10::GetAllocator(device.type());
     } else {
       // NOLINTEND(bugprone-branch-clone)
@@ -459,13 +458,12 @@ static PyObject* THPStorage_pynew(
         }
       }
     } catch (const std::exception& e) {
-      TORCH_CHECK(
-          THPStorageStr "(): tried to construct a storage from a sequence (",
+      THPUtils_setError(
+          THPStorageStr
+          "(): tried to construct a storage from a sequence (%s), "
+          "but one of the items was of type %s instead of int",
           THPUtils_typename(sequence),
-          "), ",
-          "but one of the items was of type ",
-          THPUtils_typename(item.get()),
-          " instead of int");
+          THPUtils_typename(item.get()));
       return nullptr;
     }
   }
@@ -509,11 +507,10 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
     }
     slicelength = PySlice_AdjustIndices(len, &start, &stop, step);
     if (step != 1) {
-      TORCH_CHECK(
-          "Trying to slice with a step of ",
-          step,
-          ", but only a step of "
-          "1 is supported");
+      THPUtils_setError(
+          "Trying to slice with a step of %lld, but only a step of "
+          "1 is supported",
+          (long long)step);
       return nullptr;
     }
 
@@ -558,10 +555,10 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   if (!THPByteUtils_checkReal(value)) {
-    TORCH_CHECK(
-        "can only set storage content with a int types, but got ",
-        THPUtils_typename(value),
-        " instead");
+    THPUtils_setError(
+        "can only set storage content with a int types, but got "
+        "%s instead",
+        THPUtils_typename(value));
     return -1;
   }
 
@@ -580,11 +577,10 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
     }
     PySlice_AdjustIndices(len, &start, &stop, step);
     if (step != 1) {
-      TORCH_CHECK(
-          "Trying to slice with a step of ",
-          step,
-          ", but only a step of "
-          "1 is supported");
+      THPUtils_setError(
+          "Trying to slice with a step of %lld, but only a step of "
+          "1 is supported",
+          (long long)step);
       return 0;
     }
     // TODO: check the bounds only once
@@ -593,8 +589,8 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
       storage_set(storage, start, rvalue);
     return 0;
   }
-  TORCH_CHECK(
-      "can't index a " THPStorageStr " with ", THPUtils_typename(index));
+  THPUtils_setError(
+      "can't index a " THPStorageStr " with %s", THPUtils_typename(index));
   return -1;
   END_HANDLE_TH_ERRORS_RET(-1)
 }

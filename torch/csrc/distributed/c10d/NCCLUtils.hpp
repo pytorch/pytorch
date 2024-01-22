@@ -339,9 +339,6 @@ class NCCLComm {
     // Set true failure reason if provided by ProcessGroupNCCL (e.g. work
     // timeout)
     commFailureReason_ = commFailureReason;
-    LOG(INFO) << "Aborting ncclComm_ with reason: "
-              << (commFailureReason ? *commFailureReason
-                                    : "No abort reason provided.");
 #ifndef NCCL_HAS_COMM_NONBLOCKING
     C10D_NCCL_CHECK(::ncclCommAbort(ncclComm_), commFailureReason_);
 #else

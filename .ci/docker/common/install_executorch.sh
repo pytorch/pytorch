@@ -48,6 +48,7 @@ setup_executorch() {
 
   install_flatc_from_source
   pip_install .
+  build_executorch_runner "cmake"
 
   # Make sure that all the newly generate files are owned by Jenkins
   chown -R jenkins .
