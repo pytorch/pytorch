@@ -171,6 +171,7 @@ def _upcast_int_indices(index):
 class _Unspecified:
     pass
 
+
 _Unspecified.unspecified = _Unspecified()
 
 ###############################################################
@@ -290,11 +291,13 @@ class ndarray:
         self.tensor.imag = asarray(value).tensor
 
     # ctors
-    def astype(self, dtype, order='K', casting='unsafe', subok=True, copy=True):
-        if order != 'K':
+    def astype(self, dtype, order="K", casting="unsafe", subok=True, copy=True):
+        if order != "K":
             raise NotImplementedError(f"astype(..., order={order} is not implemented.")
-        if casting != 'unsafe':
-            raise NotImplementedError(f"astype(..., casting={casting} is not implemented.")
+        if casting != "unsafe":
+            raise NotImplementedError(
+                f"astype(..., casting={casting} is not implemented."
+            )
         if not subok:
             raise NotImplementedError(f"astype(..., subok={subok} is not implemented.")
         if not copy:
@@ -343,9 +346,7 @@ class ndarray:
         if dtype is _Unspecified.unspecified:
             dtype = self.dtype
         if type is not _Unspecified.unspecified:
-            raise NotImplementedError(
-                f"view(..., type={type} is not implemented."
-            )
+            raise NotImplementedError(f"view(..., type={type} is not implemented.")
         torch_dtype = _dtypes.dtype(dtype).torch_dtype
         tview = self.tensor.view(torch_dtype)
         return ndarray(tview)

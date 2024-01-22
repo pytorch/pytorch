@@ -39,7 +39,7 @@ from ..utils import (
     sympy_symbol,
     unique,
 )
-from ..virtualized import ops, OpsValue, V
+from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 if TYPE_CHECKING:
     from ..ir import TensorBox
@@ -498,8 +498,6 @@ class OpOverrides:
     def bitwise_left_shift(x, y):
         return f"{ExprPrinter.paren(x)} << {ExprPrinter.paren(y)}"
 
-    # TODO(fdrocha): this is currently not being used anywhere,
-    # pending on moving triton pin past 972b761
     @staticmethod
     def bitwise_right_shift(x, y):
         return f"{ExprPrinter.paren(x)} >> {ExprPrinter.paren(y)}"
@@ -512,6 +510,11 @@ class OpOverrides:
     @staticmethod
     def load_seed(name, offset):
         return ops.load(name, sympy.Integer(offset))
+
+
+# Use mypy to check protocol implemented correctly
+def _typecheck_OpOverrides(h: OpOverrides) -> OpsHandler[str]:
+    return h
 
 
 class DeviceOpOverrides:
@@ -1000,7 +1003,11 @@ class Kernel(CodeGen):
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
         # Upper bounds for indirect_indexing and their str representation
-        self.indirect_max_sizes: Dict[Tuple[str, str], Tuple[sympy.Expr, str]] = {}
+        # NB: None, None is never stored in map, but it is the assumed
+        # "not set" value for the dict
+        self.indirect_max_sizes: Dict[
+            Tuple[CSEVariable, str], Union[Tuple[sympy.Expr, str], Tuple[None, None]]
+        ] = {}
 
         self.removed_buffers = set()
         self.inplaced_to_remove = set()
@@ -1011,6 +1018,7 @@ class Kernel(CodeGen):
         self.inplace_update_buffers = dict()
         # Set minimum number of elements processed per thread.
         self.min_elem_per_thread = 1
+        self.kernel_name = None
 
     @contextlib.contextmanager
     def set_current_node(self, node):
@@ -1042,7 +1050,7 @@ class Kernel(CodeGen):
             self.stores = stores
             self.cse = cse
 
-    def load(self, name: str, index: sympy.Expr):
+    def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         raise NotImplementedError()
 
     def indirect_load(self, name: str, index: sympy.Expr):
@@ -1055,26 +1063,40 @@ class Kernel(CodeGen):
         finally:
             self.loads = prior
 
-    def store_reduction(self, name, index, value):
+    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
         raise NotImplementedError()
 
-    def store(self, name, index, value, mode=None):
+    def store(
+        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+    ) -> None:
         raise NotImplementedError()
 
-    def reduction(self, dtype, src_dtype, reduction_type, value):
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[CSEVariable, Tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
         raise NotImplementedError()
 
-    def scan(self, dtype, combine_fn, value, init):
+    def scan(
+        self,
+        dtype: torch.dtype,
+        combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
+        value: CSEVariable,
+        init: int,
+    ) -> CSEVariable:
         raise NotImplementedError()
 
     def bucketize(
         self,
-        values,
+        values: CSEVariable,
         offsets_name: str,
         offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
-    ):
+    ) -> CSEVariable:
         """
         See [Note: Inductor bucketize op]
         """
@@ -1088,6 +1110,7 @@ class Kernel(CodeGen):
         raise NotImplementedError()
 
     def __enter__(self):
+        # TODO: hoist this to top level
         class CSEProxy:
             self.name = "CSEProxy"
 
@@ -1114,7 +1137,9 @@ class Kernel(CodeGen):
                 return inner
 
             @staticmethod
-            def indirect_indexing(var, size, check=True):
+            def indirect_indexing(
+                var: CSEVariable, size: sympy.Expr, check: bool = True
+            ):
                 # Skip CSE since this doesn't return an expression
 
                 if var.bounds.lower < 0:
@@ -1171,7 +1196,7 @@ class Kernel(CodeGen):
                 return sympy_symbol(str(var))
 
             @staticmethod
-            def load(name: str, index: sympy.Expr):
+            def load(name: str, index: sympy.Expr) -> CSEVariable:
                 if name in self.cse.invalidated_stores:
                     # A load from an invalidated store requires us to
                     # keep the actual buffer around
@@ -1184,7 +1209,9 @@ class Kernel(CodeGen):
                 return self.load(name, index)
 
             @staticmethod
-            def store(name, index, value, mode=None):
+            def store(
+                name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+            ) -> None:
                 self.store_buffer_names.add(name)
                 if mode is None:
                     self.cse.store_cache[name] = value
@@ -1193,9 +1220,11 @@ class Kernel(CodeGen):
                             self.cse.store_cache[other_name] = value
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
+                else:
+                    return None  # type: ignore[return-value]
 
             @staticmethod
-            def store_reduction(name, index, value):
+            def store_reduction(name: str, index: sympy.Expr, value: CSEVariable):
                 self.store_buffer_names.add(name)
                 self.cse.store_cache[name] = value
                 if self.current_node:
@@ -1206,21 +1235,31 @@ class Kernel(CodeGen):
                     return self.store_reduction(name, index, value)
 
             @staticmethod
-            def reduction(dtype, src_dtype, reduction_type, value):
+            def reduction(
+                dtype: torch.dtype,
+                src_dtype: torch.dtype,
+                reduction_type: ReductionType,
+                value: Union[CSEVariable, Tuple[CSEVariable, ...]],
+            ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
                 return self.reduction(dtype, src_dtype, reduction_type, value)
 
             @staticmethod
-            def scan(dtype, combine_fn, value, init):
+            def scan(
+                dtype: torch.dtype,
+                combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
+                value: CSEVariable,
+                init: int,
+            ) -> CSEVariable:
                 return self.scan(dtype, combine_fn, value, init)
 
             @staticmethod
             def bucketize(
-                values,
+                values: CSEVariable,
                 offsets_name: str,
                 offsets_size: sympy.Expr,
                 indexing_dtype: torch.dtype,
                 right: bool,
-            ):
+            ) -> CSEVariable:
                 """
                 [Note: Inductor bucketize op]
 
@@ -1238,6 +1277,10 @@ class Kernel(CodeGen):
                 return self.bucketize(
                     values, offsets_name, offsets_size, indexing_dtype, right
                 )
+
+        # Use mypy to check protocol implemented correctly
+        def _typecheck_CSEProxy(h: CSEProxy) -> OpsHandler[CSEVariable]:
+            return h
 
         super().__enter__()
         assert self.overrides
@@ -1258,7 +1301,7 @@ class Kernel(CodeGen):
     def generate_assert(self, check):
         return (check or config.debug_index_asserts) and config.assert_indirect_indexing
 
-    def load_mask(self, var):
+    def load_mask(self, var) -> str:
         # only the triton kernel requires mask
         return ""
 
