@@ -8,6 +8,7 @@ import torch.nn as nn
 from torch.distributed._composable_state import _get_module_state, _State
 from torch.distributed.utils import _to_kwargs
 from torch.utils.hooks import RemovableHandle
+from ._fsdp_collectives import AllGatherStateHolder
 from ._fsdp_common import TrainingState
 from ._fsdp_param import FSDPParam
 
@@ -17,6 +18,11 @@ from ._fsdp_param_group import FSDPParamGroup
 class FSDPState(_State):
     _module: nn.Module  # permit ref cycle since module and state lifetimes are 1:1
     _device: torch.device
+    _default_stream: torch.cuda.Stream
+    _all_gather_copy_in_stream: torch.cuda.Stream
+    _all_gather_stream: torch.cuda.Stream
+    # For overlapping current copy-out and next all-gather in forward
+    _all_gather_state: AllGatherStateHolder
 
     def __init__(self):
         super().__init__()
@@ -55,6 +61,27 @@ class FSDPState(_State):
                     state._is_root = False
                 self._all_state_refs.append(weakref.ref(state))
         self._init_fqns()
+        self._init_shared_state()
+
+    def _init_shared_state(self) -> None:
+        # Setting the all-gather/reduce-scatter streams to be higher priority
+        # can help avoid some issues where their copies in/out are delayed and
+        # block computation
+        high_priority = -1
+        self._default_stream = torch.cuda.current_stream()
+        self._all_gather_copy_in_stream = torch.cuda.Stream(priority=high_priority)
+        self._all_gather_stream = torch.cuda.Stream(priority=high_priority)
+        self._all_gather_state = AllGatherStateHolder()
+        for state_ref in self._all_state_refs:
+            state = state_ref()
+            assert state is not None, "FSDPState deallocated"
+            if fsdp_param_group := state._fsdp_param_group:
+                fsdp_param_group.default_stream = self._default_stream
+                fsdp_param_group.all_gather_copy_in_stream = (
+                    self._all_gather_copy_in_stream
+                )
+                fsdp_param_group.all_gather_stream = self._all_gather_stream
+                fsdp_param_group.all_gather_state = self._all_gather_state
 
     def _init_fqns(self) -> None:
         """Sets module and parameter FQN attributes for debugging."""
@@ -81,7 +108,14 @@ class FSDPState(_State):
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         self._training_state = TrainingState.FORWARD
         args, kwargs = self._root_pre_forward(module, args, kwargs)
+        if self._fsdp_param_group:
+            args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
         return args, kwargs
+
+    def _post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
+        if self._fsdp_param_group:
+            output = self._fsdp_param_group.post_forward(module, input, output)
+        self._training_state = TrainingState.IDLE
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[FSDPState]:

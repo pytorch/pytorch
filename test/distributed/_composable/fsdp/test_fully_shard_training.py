@@ -1,13 +1,16 @@
 # Owner(s): ["oncall: distributed"]
 
+import copy
 import unittest
-from typing import Tuple
+from typing import List, Tuple
 
 import torch
 import torch.nn as nn
+from torch.distributed._composable import replicate
 from torch.distributed._composable.fsdp import fully_shard
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_fsdp import FSDPTestMultiThread
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import FSDPTest, FSDPTestMultiThread
 from torch.testing._internal.common_utils import run_tests
 
 
@@ -42,6 +45,42 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         self.assertEqual(ys[0].device, torch.device("cpu"))
         self.assertEqual(ys[1].device, torch.device("cpu"))
         model(x, ys)
+
+
+class TestFullyShardTrainingCore(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(8, torch.cuda.device_count())
+
+    @skip_if_lt_x_gpu(2)
+    def test_train_parity_single_group(self):
+        self.run_subtests(
+            {
+                "lin_shapes": [[(16, 15), (15, 8)], [(7, 15), (15, 3)]],
+            },
+            self._test_train_parity_single_group,
+        )
+
+    def _test_train_parity_single_group(self, lin_shapes: List[Tuple[int, int]]):
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(*lin_shapes[0], bias=True),
+            nn.ReLU(),
+            nn.Linear(*lin_shapes[1], bias=True),
+        )
+        ref_model = copy.deepcopy(model).cuda()
+        replicate(ref_model, device_ids=[self.rank])
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        fully_shard(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        torch.manual_seed(42 + self.rank + 1)
+        inp = (torch.randn((4, lin_shapes[0][0]), device="cuda"),)
+        for iter_idx in range(10):
+            losses: List[torch.Tensor] = []
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                # TODO: Test forward only for now
+                losses.append(_model(*inp).sum())
+            self.assertEqual(losses[0], losses[1])
 
 
 if __name__ == "__main__":

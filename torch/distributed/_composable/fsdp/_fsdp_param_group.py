@@ -1,11 +1,24 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
+from ._fsdp_collectives import (
+    AllGatherResult,
+    AllGatherState,
+    AllGatherStateHolder,
+    foreach_all_gather,
+    foreach_all_gather_copy_out,
+)
 
-from ._fsdp_common import FSDPMeshInfo, ParamModuleInfo, TrainingState
+from ._fsdp_common import (
+    _raise_assert_with_print,
+    FSDPMeshInfo,
+    ParamModuleInfo,
+    TrainingState,
+)
 from ._fsdp_param import FSDPParam, ShardedState
 
 
@@ -29,7 +42,142 @@ class FSDPParamGroup:
         self.device = device
         self._training_state = TrainingState.IDLE
         self._sharded_state = ShardedState.SHARDED
+        self._init_mp_dtypes()
         self._module_fqn: Optional[str] = None  # prefixed from root module
+
+        # Communication and communication/computation overlap
+        default_stream = torch.cuda.current_stream()
+        self.default_stream: torch.cuda.Stream = default_stream
+        self.all_gather_copy_in_stream: torch.cuda.Stream = default_stream
+        self.all_gather_stream: torch.cuda.Stream = default_stream
+        self.all_gather_state = AllGatherStateHolder()
+
+        # - CUDA events for stream synchronization
+        # Holds the all-gather output buffer, sync objects, and metadata
+        self._all_gather_result: Optional[AllGatherResult] = None
+
+    # Initialization #
+    def _init_mp_dtypes(self) -> None:
+        orig_dtypes = {fsdp_param.orig_dtype for fsdp_param in self.fsdp_params}
+        if len(orig_dtypes) != 1:
+            # This can be relaxed if we copy-out for the reduce-scatter
+            raise AssertionError(
+                f"FSDP expects uniform original parameter dtype but got {orig_dtypes}"
+            )
+        self._orig_dtype = next(iter(orig_dtypes))
+        self._param_dtype = self._orig_dtype
+
+    # Runtime #
+    def unshard(self, async_op: bool = False):
+        if self._all_gather_result is not None:  # already called, pending wait
+            return
+        if self._sharded_state == ShardedState.UNSHARDED:
+            return  # no-op
+        self._all_gather_result = foreach_all_gather(
+            self.fsdp_params,
+            self._all_gather_process_group,
+            async_op,
+            self._all_gather_copy_in_stream_for_unshard,
+            self._all_gather_stream_for_unshard,
+            self.device,
+            self._param_dtype,
+        )
+
+    def wait_for_unshard(self):
+        """
+        1. In forward with implict prefetching, to overlap the current copy-out
+        with the next all-gather, we save a reference to the current all-gather
+        result to free after the next copy-out.
+        2. Otherwise (explicit prefetching or in backward), we free the
+        all-gather result immediately after the current copy-out since we can
+        already overlap the current copy-out with the previous reduce-scatter.
+        """
+        if not self._all_gather_result:
+            return  # no preceding unshard
+        if self._training_state == TrainingState.FORWARD:  # implicit prefetch
+            if prev_all_gather_state := self.all_gather_state.pop():
+                self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
+                del prev_all_gather_state  # free
+        foreach_all_gather_copy_out(
+            self._all_gather_result, self.fsdp_params, self._all_gather_process_group
+        )
+        for fsdp_param in self.fsdp_params:
+            fsdp_param.init_unsharded_param()  # no-op after 1st call
+        self._to_unsharded()
+        all_gather_copy_out_event = torch.cuda.Event()
+        all_gather_copy_out_event.record()
+        if self._training_state == TrainingState.FORWARD:
+            self.all_gather_state.put(
+                AllGatherState(self._all_gather_result, all_gather_copy_out_event)
+            )
+        else:
+            self._wait_all_gather_streams_on_event(all_gather_copy_out_event)
+        self._all_gather_result = None  # free unless saved in `all_gather_state`
+
+    def _wait_all_gather_streams_on_event(self, event: torch.cuda.Event):
+        self.all_gather_copy_in_stream.wait_event(event)
+        self.all_gather_stream.wait_event(event)
+
+    def reshard(self):
+        self._to_sharded()
+
+    def pre_forward(
+        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        with torch.profiler.record_function("FSDP::pre_forward"):
+            self._training_state = TrainingState.FORWARD
+            self.unshard()
+            self.wait_for_unshard()
+            return args, kwargs
+
+    def post_forward(self, module: nn.Module, input: Any, output: Any):
+        with torch.profiler.record_function("FSDP::post_forward"):
+            self.reshard()
+            self._training_state = TrainingState.IDLE
+            return output
+
+    # Utilities #
+    def _to_sharded(self):
+        if self._sharded_state != ShardedState.SHARDED:
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.to_sharded()
+            self._sharded_state = ShardedState.SHARDED
+
+    def _to_unsharded(self):
+        if self._sharded_state != ShardedState.UNSHARDED:
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.to_unsharded()
+            self._sharded_state = ShardedState.UNSHARDED
+
+    # Properties #
+    @property
+    def _all_gather_process_group(self) -> dist.ProcessGroup:
+        mesh_info = self.mesh_info
+        group = mesh_info.shard_process_group
+        if group is None:
+            _raise_assert_with_print(
+                f"Mesh without a shard mesh dim does not need all-gather: {mesh_info.mesh}"
+            )
+        return group
+
+    @property
+    def _use_all_gather_stream(self) -> bool:
+        return self._training_state in (
+            TrainingState.FORWARD,
+            TrainingState.PRE_BACKWARD,
+        )
+
+    @property
+    def _all_gather_copy_in_stream_for_unshard(self) -> torch.cuda.Stream:
+        if self._use_all_gather_stream:
+            return self.all_gather_copy_in_stream
+        return self.default_stream
+
+    @property
+    def _all_gather_stream_for_unshard(self) -> torch.cuda.Stream:
+        if self._use_all_gather_stream:
+            return self.all_gather_stream
+        return self.default_stream
 
 
 def _get_param_module_infos(

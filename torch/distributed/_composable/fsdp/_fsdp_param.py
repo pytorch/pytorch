@@ -69,6 +69,7 @@ class FSDPParam:
     implementing dim-0 per-parameter sharding.
     """
 
+    orig_dtype: torch.dtype
     _orig_size: torch.Size  # ND
     sharded_size: torch.Size  # ND
     _sharded_param_data: torch.Tensor  # 1D
@@ -92,9 +93,13 @@ class FSDPParam:
         self._module_info: ParamModuleInfo = module_info
         self.mesh_info = mesh_info
         self.device = device
+        self._init_dtype_attrs(param)
         self._init_sharded_param(param, device)
         self.all_gather_output = torch.empty(0)
         self._param_fqn: Optional[str] = None  # prefixed from root module
+
+    def _init_dtype_attrs(self, param: nn.Parameter):
+        self.orig_dtype = param.dtype
 
     @torch.no_grad()
     def _init_sharded_param(self, param: nn.Parameter, device: torch.device):
