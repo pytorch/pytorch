@@ -64,6 +64,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 # It must be executed after update_list_args, as we first need to
                 # place the guards on the args / kwargs and then on the param_groups
                 from .builder import VariableBuilder
+
                 VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
                     self.value.param_groups
                 ).recursive_realize()
@@ -113,8 +114,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
         return new_args, new_kwargs
 
     def map_sources_and_install_guards(self, tx):
-        from .builder import VariableBuilder
-
         self.grad_to_source = {}
         self.tensor_to_source = {}
 
