@@ -4571,7 +4571,7 @@ def _make_scan_inner(x, *, axis, dtype):
     if dtype is not None:
         x = to_dtype(x, dtype)
     size = x.get_size()
-    axis = _validate_reduction_axis(x, axis)[0]
+    axis = _validate_dim(x, axis)
 
     return dict(
         device=x.get_device(),
@@ -4952,6 +4952,11 @@ def cumsum(x, axis=None, dtype=None):
     ) and dtype is None:
         dtype = torch.int64
 
+    if len(x.get_size()) == 0:
+        assert axis in [0, -1]
+        dtype = dtype or x.get_dtype()
+        return to_dtype(x, dtype, copy=True)
+
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     result = ir.Scan.create(**kwargs, combine_fn=ops.add, init=0)
     if result is None:
@@ -4965,6 +4970,11 @@ def cumprod(x, axis=None, dtype=None):
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
         dtype = torch.int64
+
+    if len(x.get_size()) == 0:
+        assert axis in [0, -1]
+        dtype = dtype or x.get_dtype()
+        return to_dtype(x, dtype, copy=True)
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     result = ir.Scan.create(**kwargs, combine_fn=ops.mul, init=1)

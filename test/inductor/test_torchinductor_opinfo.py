@@ -376,6 +376,8 @@ if not TEST_WITH_ROCM:
 # Always test with all sample for following ops
 inductor_all_samples = {
     "arange",
+    "cumsum",
+    "cumprod",
     "diagonal",
     "diagonal_copy",
     "diagonal_scatter",
