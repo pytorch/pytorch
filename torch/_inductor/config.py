@@ -22,7 +22,9 @@ disable_progress = True
 verbose_progress = False
 
 # use fx aot graph codegen cache
-fx_graph_cache = True
+fx_graph_cache = (
+    os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE", "0" if is_fbcode() else "1") == "1"
+)
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"

@@ -745,6 +745,12 @@ class FxGraphCache:
         Load a compiled graph from the cache. If a cached entry does not exist,
         compile the graph and save it to the cache.
         """
+        if FxGraphCache._get_shape_env() is None:
+            # Cache operation requires that we have a shape env.
+            log.debug("fx graph cache no shape env")
+            counters["inductor"]["fxgraph_cache_miss"] += 1
+            return compile_fx_fn(gm, example_inputs, **fx_kwargs)
+
         from filelock import FileLock
 
         key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
