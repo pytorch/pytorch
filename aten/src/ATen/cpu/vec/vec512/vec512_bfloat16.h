@@ -937,41 +937,36 @@ Vectorized<BFloat16> inline fmadd(const Vectorized<BFloat16>& a,
 }
 
 static inline void core_transpose_16x16_block(__m512i r[], __m512i u[]) {
-  // a0a1 b0b1 a2a3 b2b3 a8a9 b8b9 a10a11 b10b11   e0e1 f0f1 e2e3 f2f3 e8e9 f8f9
-  // e10e11 f10f11
-  u[0] = _mm512_unpacklo_epi32(r[0], r[1]);
-  // a4a5 b4b5 a6a7 b6b7 a12a13 b12b13 a14a15 b14b15   e4e5 f4f5 e6e7 f6f7
-  // e12e13 f12f13 e14e15 f14f15
-  u[1] = _mm512_unpackhi_epi32(r[0], r[1]);
-  // c0c1 d0d1 c2c3 d2d3 c8c9 d8d9 c10c11 d10d11   g0g1 h0h1 g2g3 h2h3 g8g9 h8h9
-  // g10g11 h10h11
-  u[2] = _mm512_unpacklo_epi32(r[2], r[3]);
-  // c4c5 d4b5 c6c7 d6b7 c12c13 d12d13 c14c15 d14d15   g4g5 h4h5 g6g7 h6h7
-  // g12g13 h12h13 g14g15 h14h15
-  u[3] = _mm512_unpackhi_epi32(r[2], r[3]);
+  // u0: a0a1 b0b1 a2a3 b2b3 a8a9 b8b9 a10a11 b10b11   e0e1 f0f1 e2e3 f2f3 e8e9 f8f9 e10e11 f10f11
+  // u1: a4a5 b4b5 a6a7 b6b7 a12a13 b12b13 a14a15 b14b15   e4e5 f4f5 e6e7 f6f7 e12e13 f12f13 e14e15 f14f15
+  // u2: c0c1 d0d1 c2c3 d2d3 c8c9 d8d9 c10c11 d10d11   g0g1 h0h1 g2g3 h2h3 g8g9 h8h9 g10g11 h10h11
+  // u3: c4c5 d4b5 c6c7 d6b7 c12c13 d12d13 c14c15 d14d15   g4g5 h4h5 g6g7 h6h7 g12g13 h12h13 g14g15 h14h15
   // i j  m n
+  // k l  o p
+  u[0] = _mm512_unpacklo_epi32(r[0], r[1]);
+  u[1] = _mm512_unpackhi_epi32(r[0], r[1]);
+  u[2] = _mm512_unpacklo_epi32(r[2], r[3]);
+  u[3] = _mm512_unpackhi_epi32(r[2], r[3]);
   u[4] = _mm512_unpacklo_epi32(r[4], r[5]);
   u[5] = _mm512_unpackhi_epi32(r[4], r[5]);
-  // k l  o p
   u[6] = _mm512_unpacklo_epi32(r[6], r[7]);
   u[7] = _mm512_unpackhi_epi32(r[6], r[7]);
 
-  // a0a1 b0b1 c0c1 d0d1 a8a9 b8b9 c8c9 d8d9  e0e1 f0f1 g0g1 h0h1 e8e9 f8f9 g8g9
-  // h8h9
+  // r0: a0a1 b0b1 c0c1 d0d1 a8a9 b8b9 c8c9 d8d9  e0e1 f0f1 g0g1 h0h1 e8e9 f8f9 g8g9 h8h9
+  // r1: a2a3 b2b3 c2c3 d2d3 a10a11 b10b11 c10c11 d10d11  e2e3 f2f3 g2g3 h2h3 e10e11 f10f11 g10g11 h10h11
+  // r2: a4a5 b4b5 c4c5 d4b5 a12a13 b12b13 c12c13 d12d13
+  // r3: a6a7 b6b7 c6c7 d6b7 a14a15 b14b15 c14c15 d14d15
+  // r4: i j k l m n o p
   r[0] = _mm512_unpacklo_epi64(u[0], u[2]);
-  // a2a3 b2b3 c2c3 d2d3 a10a11 b10b11 c10c11 d10d11  e2e3 f2f3 g2g3 h2h3 e10e11
-  // f10f11 g10g11 h10h11
   r[1] = _mm512_unpackhi_epi64(u[0], u[2]);
-  // a4a5 b4b5 c4c5 d4b5 a12a13 b12b13 c12c13 d12d13
   r[2] = _mm512_unpacklo_epi64(u[1], u[3]);
-  // a6a7 b6b7 c6c7 d6b7 a14a15 b14b15 c14c15 d14d15
   r[3] = _mm512_unpackhi_epi64(u[1], u[3]);
-  // i j k l m n o p
   r[4] = _mm512_unpacklo_epi64(u[4], u[6]);
   r[5] = _mm512_unpackhi_epi64(u[4], u[6]);
   r[6] = _mm512_unpacklo_epi64(u[5], u[7]);
   r[7] = _mm512_unpackhi_epi64(u[5], u[7]);
 
+  // merge values from two regs
   __m512i const1 = _mm512_set_epi32(
       0x00370035,
       0x00330031,
@@ -1006,8 +1001,6 @@ static inline void core_transpose_16x16_block(__m512i r[], __m512i u[]) {
       0x001a0018,
       0x000e000c,
       0x000a0008);
-
-  // merge values from two regs
   u[0] = _mm512_permutex2var_epi16(r[0], const1, r[4]); // 0-- 1--
   u[4] = _mm512_permutex2var_epi16(r[0], const2, r[4]); // 8-- 9--
   u[2] = _mm512_permutex2var_epi16(r[2], const1, r[6]); // 4-- 5--
@@ -1077,7 +1070,6 @@ inline void transpose_mxn<BFloat16, 16, 16>(
         reinterpret_cast<__m256i*>(dst + (i * 2 + 1) * ld_dst),
         _mm512_extracti32x8_epi32(u[i], 0x01));
   }
-
 }
 
 // Code referred to FBGEMM:
@@ -1289,7 +1281,6 @@ inline void transpose_mxn<BFloat16, 32, 32>(
   for (int i = 0; i < 32; ++i) {
     _mm512_storeu_si512(dst + i* ld_dst, d[i]);
   }
-
 }
 
 template <>
