@@ -1382,8 +1382,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def install_global_once(self, name, value) -> str:
         """
-        Install a global once per frame being compiled. A frame graph breaking
-        into e.g. 2 graphs counts as two for the purposes of this function.
+        Install a global once per output_graph.
 
         Returns the name of the newly installed global.
         """
