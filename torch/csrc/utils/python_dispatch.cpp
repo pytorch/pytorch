@@ -195,18 +195,20 @@ class PythonKernelHolder : public c10::OperatorKernel {
 
 struct TensorMetaInfo {
   c10::ScalarType dtype;
+  c10::Device device;
   c10::IntArrayRef sizes;
   c10::IntArrayRef strides;
 
   TensorMetaInfo(
       c10::ScalarType dtype,
+      c10::Device device,
       c10::IntArrayRef sizes,
       c10::IntArrayRef strides)
-      : dtype(dtype), sizes(sizes), strides(strides) {}
+      : dtype(dtype), device(device), sizes(sizes), strides(strides) {}
 
   bool operator==(const TensorMetaInfo& other) const {
-    return dtype == other.dtype && sizes == other.sizes &&
-        strides == other.strides;
+    return dtype == other.dtype && device == other.device &&
+        sizes == other.sizes && strides == other.strides;
   }
 };
 
@@ -214,6 +216,8 @@ struct TensorMetaInfoHash {
   size_t operator()(
       const torch::impl::dispatch::TensorMetaInfo& tensor_meta_info) const {
     auto hash = std::hash<c10::ScalarType>()(tensor_meta_info.dtype);
+    hash = c10::hash_combine(
+        hash, std::hash<c10::Device>()(tensor_meta_info.device));
     for (auto& e : tensor_meta_info.sizes) {
       hash = c10::hash_combine(hash, std::hash<int64_t>()(e));
     }
@@ -241,6 +245,7 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
   PythonKernelHolder python_kernel_holder_;
   c10::DispatchKey dispatch_key_;
   c10::string_view op_name_;
+  c10::optional<c10::Device> device_opt_;
 
   using _AOTIModelContainerRunner = torch::inductor::AOTIModelContainerRunner;
   std::unordered_map<
@@ -256,9 +261,16 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
       c10::string_view op_name)
       : python_kernel_holder_(std::move(func), dispatch_key),
         dispatch_key_(dispatch_key),
-        op_name_(op_name) {
+        op_name_(op_name),
+        device_opt_(c10::nullopt) {
     // TODO: Load all aten kernel according to op_name and dispatch key
-    (void)dispatch_key_; // Suppress unused variable warning
+    if (dispatch_key_ == c10::DispatchKey::CUDA) {
+      device_opt_ = c10::Device(c10::DeviceType::CUDA, 0);
+    } else if (dispatch_key_ == c10::DispatchKey::XPU) {
+      device_opt_ = c10::Device(c10::DeviceType::XPU, 0);
+    } else {
+      device_opt_ = c10::Device(c10::DeviceType::CPU);
+    }
   }
 
   void operator()(
@@ -304,6 +316,12 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
           }
           inputs.push_back(item.toTensor());
         }
+      } else if (ivalue.isScalar()) {
+        inputs.push_back(at::scalar_tensor(
+            ivalue.toScalar(),
+            c10::TensorOptions()
+                .device(device_opt_.value())
+                .dtype(ivalue.toScalar().type())));
       } else {
         // TODO(EIKAN): Support non-tensor parameter
         return false;
@@ -316,8 +334,8 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
   AOTIKernelMetaInfo getInputsMetaInfo(const std::vector<at::Tensor>& inputs) {
     AOTIKernelMetaInfo inputs_meta_info;
     for (const auto& input : inputs) {
-      inputs_meta_info.push_back(
-          TensorMetaInfo(input.scalar_type(), input.sizes(), input.strides()));
+      inputs_meta_info.push_back(TensorMetaInfo(
+          input.scalar_type(), input.device(), input.sizes(), input.strides()));
     }
     return inputs_meta_info;
   }
