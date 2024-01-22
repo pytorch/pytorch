@@ -601,6 +601,23 @@ def optim_error_inputs_func_nadam(device, dtype):
 def optim_inputs_func_radam(device=None):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "capturable": True,
+                "weight_decay": 0.9,
+            },
+            desc="capturable",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "capturable": True,
+                "weight_decay": 0.9,
+                "decoupled_weight_decay": True,
+            },
+            desc="capturable",
+        ),
     ]
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
