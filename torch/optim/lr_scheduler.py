@@ -1702,12 +1702,8 @@ class OneCycleLR(LRScheduler):
             raise ValueError(f"Expected float between 0 and 1 pct_start, but got {pct_start}")
 
         # Validate anneal_strategy
-        if anneal_strategy not in ['cos', 'linear']:
-            raise ValueError(f"anneal_strategy must by one of 'cos' or 'linear', instead got {anneal_strategy}")
-        elif anneal_strategy == 'cos':
-            self.anneal_func = self._annealing_cos
-        elif anneal_strategy == 'linear':
-            self.anneal_func = self._annealing_linear
+        self.anneal_strategy = anneal_strategy
+        self._init_anneal_func()
 
         # Initialize learning rate variables
         max_lrs = self._format_param('max_lr', self.optimizer, max_lr)
@@ -1744,6 +1740,15 @@ class OneCycleLR(LRScheduler):
             return param
         else:
             return [param] * len(optimizer.param_groups)
+
+    def _init_anneal_func(self):
+        if self.anneal_strategy not in ['cos', 'linear']:
+            raise ValueError(
+                "anneal_strategy must by one of 'cos' or 'linear', instead got {}".format(self.anneal_strategy))
+        elif self.anneal_strategy == 'cos':
+            self.anneal_func = self._annealing_cos
+        elif self.anneal_strategy == 'linear':
+            self.anneal_func = self._annealing_linear
 
     @staticmethod
     def _annealing_cos(start, end, pct):
@@ -1788,3 +1793,13 @@ class OneCycleLR(LRScheduler):
                     group['momentum'] = computed_momentum
 
         return lrs
+
+    def state_dict(self):
+        state = super().state_dict()
+        # We are dropping the `anneal_func` attribute because it can't be pickled
+        state.pop("anneal_func")
+        return state
+
+    def load_state_dict(self, state_dict):
+        super().load_state_dict(state_dict)
+        self._init_anneal_func()
