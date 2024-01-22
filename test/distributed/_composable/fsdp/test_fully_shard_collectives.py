@@ -28,12 +28,49 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 128
 
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda:0")
+
+    def _get_param_sizes(self) -> List[torch.Size]:
+        # For world size 128, the all-gather testing requires <0.22 GB
+        return [
+            torch.Size([17, 257]),
+            torch.Size([17]),
+            torch.Size([64, 312]),
+            torch.Size([64]),
+            torch.Size([64, 64]),
+            torch.Size([512, 64]),
+            torch.Size([256]),
+            torch.Size([64, 297]),
+        ]
+
+    def _init_params(self, param_sizes: List[torch.Size]) -> List[nn.Parameter]:
+        torch.manual_seed(42)
+        orig_params = [
+            nn.Parameter(torch.randn(size, device=self.device)) for size in param_sizes
+        ]
+        # Since seed is per process, not per thread, we broadcast to ensure the
+        # same original parameters across ranks
+        for orig_param in orig_params:
+            dist.broadcast(orig_param, src=0)
+        return orig_params
+
+    def _init_fsdp_param_group(self, params: List[nn.Parameter]):
+        module = nn.ParameterList([param.detach().clone() for param in params])
+        mesh_info = FSDPMeshInfo(
+            _init_default_fully_shard_mesh(self.device.type), shard_mesh_dim=0
+        )
+        fsdp_param_group = FSDPParamGroup(
+            list(module.parameters()), module, mesh_info, self.device
+        )
+        return fsdp_param_group
+
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_all_gather_fp32(self):
         param_sizes = self._get_param_sizes()
         default_stream = torch.cuda.current_stream()
         stream1, stream2 = torch.cuda.Stream(), torch.cuda.Stream()
-
         for async_op, all_gather_copy_in_stream, all_gather_stream in itertools.product(
             (False, True),
             (default_stream, stream1),
@@ -56,19 +93,6 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
                 all_gather_dtype=torch.float32,
             )
 
-    def _get_param_sizes(self) -> List[torch.Size]:
-        # For world size 128, the all-gather testing requires <0.22 GB
-        return [
-            torch.Size([17, 257]),
-            torch.Size([17]),
-            torch.Size([64, 312]),
-            torch.Size([64]),
-            torch.Size([64, 64]),
-            torch.Size([512, 64]),
-            torch.Size([256]),
-            torch.Size([64, 297]),
-        ]
-
     def _test_all_gather(
         self,
         param_sizes: List[torch.Size],
@@ -77,26 +101,11 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
         all_gather_stream: torch.cuda.Stream,
         all_gather_dtype: torch.dtype,
     ):
-        # - Set up the reference parameters
-        torch.manual_seed(42)
-        orig_params = [
-            nn.Parameter(torch.randn(size, device="cuda")) for size in param_sizes
-        ]
-        # Since seed is per process, not per thread, we broadcast to ensure the
-        # same original parameters across ranks
-        for orig_param in orig_params:
-            dist.broadcast(orig_param, src=0)
-        module = nn.ParameterList([param.detach().clone() for param in orig_params])
-
-        # - Construct the FSDP parameter group (which shards parameters)
-        device = torch.device("cuda:0")
-        mesh_info = FSDPMeshInfo(
-            _init_default_fully_shard_mesh(device.type), shard_mesh_dim=0
-        )
-        fsdp_param_group = FSDPParamGroup(
-            list(module.parameters()), module, mesh_info, device
-        )
+        # - Set up the reference parameters and construct the FSDP group
+        orig_params = self._init_params(param_sizes)
+        fsdp_param_group = self._init_fsdp_param_group(orig_params)
         fsdp_params = fsdp_param_group.fsdp_params
+        module = fsdp_param_group.module
 
         # - Sanity check that the parameter sharding is as expected
         for orig_param, param in zip(orig_params, module.parameters()):
@@ -116,7 +125,7 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
             async_op=async_op,
             all_gather_copy_in_stream=all_gather_copy_in_stream,
             all_gather_stream=all_gather_stream,
-            device=device,
+            device=self.device,
             dtype=torch.float32,
         )
         foreach_all_gather_copy_out(
