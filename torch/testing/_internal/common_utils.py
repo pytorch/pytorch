@@ -1651,6 +1651,19 @@ class CudaSyncGuard:
     def __exit__(self, exception_type, exception_value, traceback):
         torch.cuda.set_sync_debug_mode(self.debug_mode_restore)
 
+# Context manager for setting torch.nn.utils.set_swap_module_params_on_conversion
+# and automatically resetting it to its original value
+class SwapTensorsGuard:
+    def __init__(self, use_swap_tensors):
+        self.use_swap_tensors = use_swap_tensors
+
+    def __enter__(self):
+        self.swap_tensors_restore = torch.nn.utils.get_swap_module_params_on_conversion()
+        torch.nn.utils.set_swap_module_params_on_conversion(self.use_swap_tensors)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        torch.nn.utils.set_swap_module_params_on_conversion(self.swap_tensors_restore)
+
 # This decorator can be used for API tests that call
 # torch.use_deterministic_algorithms().  When the test is finished, it will
 # restore the previous deterministic flag setting.
@@ -1707,6 +1720,19 @@ def wrapDeterministicFlagAPITest(fn):
                             os.environ[self.cublas_var_name] = self.cublas_config_restore
             with CuBLASConfigGuard():
                 fn(*args, **kwargs)
+    return wrapper
+
+# This decorator can be used for API tests that call
+# torch.nn.utils.set_swap_module_params_on_conversion.  When the test is
+# finished, it will restore the previous swap flag setting.
+def wrapSwapTensorsTest(fn, swap=None):
+    if swap is None:
+        swap = torch.nn.utils.get_swap_module_params_on_conversion()
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        with SwapTensorsGuard(swap):
+            fn(*args, **kwargs)
     return wrapper
 
 def skipIfCompiledWithoutNumpy(fn):
