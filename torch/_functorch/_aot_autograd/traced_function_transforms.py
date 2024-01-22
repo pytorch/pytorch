@@ -588,10 +588,12 @@ def aot_dispatch_subclass(
 
 class PropagateUnbackedSymInts(torch.fx.Interpreter):
     def run_node(self, n: torch.fx.Node):
+        import sympy
+
         result = super().run_node(n)
         # TODO: handle Tensor returns
         if "example_value" in n.meta:
-            if isinstance(result, torch.SymInt):
+            if isinstance(result, torch.SymInt) and isinstance(result.node.expr, sympy.Symbol):
                 torch._check(result == n.meta["example_value"])
 
         return result
