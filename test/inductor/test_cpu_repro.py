@@ -2779,14 +2779,9 @@ class CPUReproTests(TestCase):
             y1 = x.to(dtype=torch.float8_e5m2).to(dtype)
             return y0, y1
 
-        compiled_fp8_cast = torch.compile(fp8_cast, backend="inductor", dynamic=True)
-
         shape = [int(dim) for dim in shape.split(",")]
         x = torch.rand(*shape, device="cpu", dtype=dtype)
-        y0_fp8, y1_fp8 = compiled_fp8_cast(x)
-
-        torch.testing.assert_close(y0_fp8, x, rtol=5e-1, atol=5e-1)
-        torch.testing.assert_close(y1_fp8, x, rtol=5e-1, atol=5e-1)
+        self.common(fp8_cast, (x,), atol=5e-1, rtol=5e-1)
 
 
 if __name__ == "__main__":
