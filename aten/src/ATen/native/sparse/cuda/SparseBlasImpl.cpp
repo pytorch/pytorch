@@ -23,7 +23,11 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/MaybeOwned.h>
 
-namespace at::native::sparse::impl::cuda {
+namespace at {
+namespace native {
+namespace sparse {
+namespace impl {
+namespace cuda {
 
 namespace {
 
@@ -1511,4 +1515,8 @@ void sampled_addmm_out_sparse_csr(
 #endif
 }
 
-} // namespace at::native::sparse::impl::cuda
+} // namespace cuda
+} // namespace impl
+} // namespace sparse
+} // namespace native
+} // namespace at

@@ -2,6 +2,7 @@
 
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
+#include <c10/util/math_compat.h>
 
 namespace c10 {
 

@@ -6,7 +6,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_symnode.h>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 struct UnpackedSlice {
   c10::SymInt start;
@@ -99,4 +100,5 @@ Variable valueToTensor(
     PyObject* value,
     const at::Device& device);
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

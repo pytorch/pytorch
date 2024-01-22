@@ -19,7 +19,11 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace torch::autograd {
+#include <cstdint>
+#include <utility>
+
+namespace torch {
+namespace autograd {
 
 using SymIntSmallVec = c10::SmallVector<c10::SymInt, c10::kDimVectorStaticSize>;
 using MetadataShape = std::variant<SymIntSmallVec, at::Tensor>;
@@ -105,4 +109,5 @@ struct TORCH_API InputMetadata {
   bool is_nested_ = false;
   bool was_default_constructed_ = true;
 };
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

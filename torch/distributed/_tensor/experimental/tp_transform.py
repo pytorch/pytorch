@@ -47,8 +47,7 @@ def tensor_parallel_transformation(
     .. warning::
         This API is experimental and subject to change.
     """
-    # TODO Migrate this to plain function call.
-    return exported_program._transform_do_not_use(
+    return exported_program._transform(
         TensorParallelTransformPass(
             rank,
             world_size,

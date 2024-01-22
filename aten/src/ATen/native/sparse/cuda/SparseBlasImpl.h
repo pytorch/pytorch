@@ -4,7 +4,11 @@
 #include <ATen/Tensor.h>
 #include <ATen/core/Scalar.h>
 
-namespace at::native::sparse::impl::cuda {
+namespace at {
+namespace native {
+namespace sparse {
+namespace impl {
+namespace cuda {
 
 void addmm_out_sparse_csr(
     const Tensor& input,
@@ -43,4 +47,8 @@ void sampled_addmm_out_sparse_csr(
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& result);
 
-} // namespace at::native::sparse::impl::cuda
+} // namespace cuda
+} // namespace impl
+} // namespace sparse
+} // namespace native
+} // namespace at

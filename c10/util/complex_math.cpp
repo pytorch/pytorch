@@ -1,4 +1,5 @@
 #include <c10/util/complex.h>
+#include <c10/util/math_compat.h>
 
 #include <cmath>
 

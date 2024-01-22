@@ -5,7 +5,9 @@
 #include <ATen/Tensor.h>
 #include <ATen/core/Scalar.h>
 
-namespace at::native::sparse {
+namespace at {
+namespace native {
+namespace sparse {
 
 TORCH_API void sparse_sampled_addmm_check_inputs(
     const Tensor& self,
@@ -15,4 +17,6 @@ TORCH_API void sparse_sampled_addmm_check_inputs(
     const Scalar& alpha,
     const Tensor& result);
 
-} // namespace at::native::sparse
+} // namespace sparse
+} // namespace native
+} // namespace at

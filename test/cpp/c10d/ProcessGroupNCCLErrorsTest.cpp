@@ -452,9 +452,6 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
 class ProcessGroupNCCLWatchdogTimeoutTest : public ProcessGroupNCCLErrorsTest {
  protected:
   void SetUp() override {
-    // TODO (kwen2501)
-    GTEST_SKIP() << "Skipping tests under ProcessGroupNCCLWatchdogTimeoutTest; "
-                 << "will rewrite them after refactoring Work queues.";
     ProcessGroupNCCLErrorsTest::SetUp();
     std::string timeInterval = std::to_string(heartBeatIntervalInSec);
     ASSERT_TRUE(setenv(c10d::TORCH_NCCL_BLOCKING_WAIT[0].c_str(), "1", 1) == 0);

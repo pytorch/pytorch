@@ -98,7 +98,6 @@ class C10_API FatalSignalHandler {
     struct sigaction previous;
   };
 
-  // NOLINTNEXTLINE(*c-arrays*)
   static signal_handler kSignalHandlers[];
 };
 

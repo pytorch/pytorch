@@ -40,10 +40,10 @@ void topk_impl_loop(
         reinterpret_cast<scalar_t*>(data[2] + i * strides[2]),
         &dim_size, &tmp_values_stride);
 
-    auto n_2 = dim_size;
-    auto use_partial_sort = k * 64 <= n_2;
+    auto n = dim_size;
+    auto use_partial_sort = k * 64 <= n;
 
-    for (const auto j : c10::irange(n_2)) {
+    for (const auto j : c10::irange(n)) {
       queue[j].first = tmp_values[j];
       queue[j].second = j;
     }

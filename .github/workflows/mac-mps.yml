@@ -10,8 +10,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
-permissions: read-all
-
 jobs:
   macos-12-py3-arm64-build:
     name: macos-12-py3-arm64
@@ -30,7 +28,8 @@ jobs:
       test-matrix: |
         { include: [
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-12" },
-          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-14" },
+          # TODO: Revert me when those runners are back online
+          # { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-13" },
         ]}
 
   macos-12-py3-arm64-mps-test:

@@ -383,11 +383,11 @@ void record_op(
       0u,
       api::utils::make_ivec3(v_input.extents()),
       0u,
-      utils::make_ivec4(overlay_region, /*reverse=*/true),
-      utils::make_ivec2({kernel_size[3], kernel_size[2]}),
-      utils::make_ivec2(stride, /*reverse=*/true),
-      utils::make_ivec2(padding, /*reverse=*/true),
-      utils::make_ivec2(dilation, /*reverse=*/true),
+      api::utils::make_ivec4(overlay_region, /*reverse=*/true),
+      api::utils::make_ivec2({kernel_size[3], kernel_size[2]}),
+      api::utils::make_ivec2(stride, /*reverse=*/true),
+      api::utils::make_ivec2(padding, /*reverse=*/true),
+      api::utils::make_ivec2(dilation, /*reverse=*/true),
       {output_min, output_max},
   };
   api::UniformParamsBuffer params(context, block);
@@ -468,11 +468,11 @@ void record_quantized_op(
       0u,
       api::utils::make_ivec3(v_input.extents()),
       0u,
-      utils::make_ivec4(overlay_region, /*reverse=*/true),
-      utils::make_ivec2({kernel_size[3], kernel_size[2]}),
-      utils::make_ivec2(stride, /*reverse=*/true),
-      utils::make_ivec2(padding, /*reverse=*/true),
-      utils::make_ivec2(dilation, /*reverse=*/true),
+      api::utils::make_ivec4(overlay_region, /*reverse=*/true),
+      api::utils::make_ivec2({kernel_size[3], kernel_size[2]}),
+      api::utils::make_ivec2(stride, /*reverse=*/true),
+      api::utils::make_ivec2(padding, /*reverse=*/true),
+      api::utils::make_ivec2(dilation, /*reverse=*/true),
       {output_min, output_max},
   };
   api::UniformParamsBuffer params(context, block);
@@ -530,8 +530,8 @@ vTensor pack_weights(
 
   vTensor v_weight{
       api::context(),
-      weight_rearranged.sizes().vec(),
-      convert_dtype(weight_rearranged.scalar_type()),
+      weight_rearranged.sizes(),
+      weight_arg.scalar_type(),
       api::StorageType::TEXTURE_2D,
   };
 
@@ -555,8 +555,8 @@ vTensor pack_biases(
 
   vTensor v_bias{
       api::context(),
-      bias_rearranged.sizes().vec(),
-      convert_dtype(bias_rearranged.scalar_type()),
+      bias_rearranged.sizes(),
+      bias_rearranged.scalar_type(),
       api::StorageType::TEXTURE_2D,
   };
 
@@ -848,7 +848,7 @@ namespace conv1d {
 // There are multiple perf improvement opportunities: e.g. width-packing
 // input and weight tensors, batch reading when groups is low.
 
-Tensor run_conv1d_context_impl(
+Tensor conv1d(
     const Tensor& input_arg,
     const Tensor& weight_arg,
     const c10::optional<Tensor>& bias_arg_opt,
@@ -881,7 +881,7 @@ Tensor run_conv1d_context_impl(
   TORCH_CHECK(input.dim() == 3, "input must be a 3-dim tensor");
   TORCH_CHECK(weight.dim() == 3, "weight must be a 3-dim tensor");
   TORCH_CHECK(stride == IntArrayRef(1), "stride must be 1");
-  TORCH_CHECK(padding == IntArrayRef(0), "padding must be 0");
+  TORCH_CHECK(padding == IntArrayRef(0), "padding must be 1");
   TORCH_CHECK(dilation == IntArrayRef(1), "dilation must be 1");
 
   TORCH_CHECK(input_sizes[0] == 1, "Only support single batch");
@@ -903,7 +903,7 @@ Tensor run_conv1d_context_impl(
           weight_out_channels,
           v_input_sizes[2] - kernel_size + 1,
       },
-      v_input.dtype(),
+      input_arg.scalar_type(),
   };
 
   const struct Block final {
@@ -1186,7 +1186,7 @@ Tensor run_conv2d_context_impl(
   vTensor v_output{
       context,
       output_size,
-      v_input.dtype(),
+      input_arg.scalar_type(),
   };
 
   if (quantized) {
@@ -1356,93 +1356,9 @@ Tensor conv2d_clamp_run(
   return context->run(input);
 }
 
-Conv1dPackedContext::Conv1dPackedContext(
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias,
-    const IntArrayRef stride_arg,
-    const IntArrayRef padding_arg,
-    const IntArrayRef dilation_arg,
-    const int64_t groups)
-    : unpacked_{c10::AnyType::get()} {
-  packed_.reserve(Packed::NumArgs);
-  packed_.emplace_back(weight.vulkan());
-  packed_.emplace_back(bias->vulkan());
-  packed_.emplace_back(stride_arg);
-  packed_.emplace_back(padding_arg);
-  packed_.emplace_back(dilation_arg);
-  packed_.emplace_back(safe_downcast<int32_t>(groups));
-
-  compute_shader_ = VK_KERNEL(conv1d);
-
-  if (!at::globalContext().releaseWeightsWhenPrepacking()) {
-    unpacked_.reserve(Unpacked::NumArgs);
-    unpacked_.emplace_back(weight);
-    unpacked_.emplace_back(bias);
-    unpacked_.emplace_back(stride_arg.vec());
-    unpacked_.emplace_back(padding_arg.vec());
-    unpacked_.emplace_back(dilation_arg.vec());
-    unpacked_.emplace_back(safe_downcast<int32_t>(groups));
-  }
-}
-
-Conv1dPackedContext Conv1dPackedContext::pack(c10::impl::GenericList unpacked) {
-  return Conv1dPackedContext(
-      unpacked.get(Unpacked::Weight).toTensor(),
-      get_optional_tensor(unpacked, Unpacked::Bias),
-      unpacked.get(Unpacked::Stride).toIntVector(),
-      unpacked.get(Unpacked::Padding).toIntVector(),
-      unpacked.get(Unpacked::Dilation).toIntVector(),
-      unpacked.get(Unpacked::Groups).toInt());
-}
-
-c10::intrusive_ptr<Conv1dPackedContext> create_conv1d_context(
-    Tensor&& weight,
-    c10::optional<Tensor>&& bias,
-    std::vector<int64_t>&& stride,
-    std::vector<int64_t>&& padding,
-    std::vector<int64_t>&& dilation,
-    const int64_t groups) {
-  return c10::make_intrusive<Conv1dPackedContext>(
-      Conv1dPackedContext(weight, bias, stride, padding, dilation, groups));
-}
-
-Tensor convolution1d(
-    const Tensor& input,
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias,
-    const IntArrayRef stride,
-    const IntArrayRef padding,
-    const IntArrayRef dilation,
-    const int64_t groups) {
-  Conv1dPackedContext conv1d_context =
-      Conv1dPackedContext(weight, bias, stride, padding, dilation, groups);
-
-  return run_conv1d_context(
-      input, c10::make_intrusive<Conv1dPackedContext>(conv1d_context));
-}
-
-Tensor run_conv1d_context(
-    const Tensor& input,
-    const c10::intrusive_ptr<Conv1dPackedContext>& context) {
-  const Tensor weight =
-      context->get_val(Conv1dPackedContext::Packed::Weight).toTensor();
-  const c10::optional<Tensor>& bias_opt =
-      context->get_val(Conv1dPackedContext::Packed::Bias).toTensor();
-  const auto stride =
-      context->get_val(Conv1dPackedContext::Packed::Stride).toIntVector();
-  const auto padding =
-      context->get_val(Conv1dPackedContext::Packed::Padding).toIntVector();
-  const auto dilation =
-      context->get_val(Conv1dPackedContext::Packed::Dilation).toIntVector();
-  const auto groups =
-      context->get_val(Conv1dPackedContext::Packed::Groups).toInt();
-  return conv1d::run_conv1d_context_impl(
-      input, weight, bias_opt, stride, padding, dilation, groups);
-}
-
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("convolution_overrideable", convolution);
-  m.impl(TORCH_SELECTIVE_NAME("aten::conv1d"), TORCH_FN(convolution1d));
+  m.impl(TORCH_SELECTIVE_NAME("aten::conv1d"), TORCH_FN(conv1d::conv1d));
 }
 
 } // namespace ops

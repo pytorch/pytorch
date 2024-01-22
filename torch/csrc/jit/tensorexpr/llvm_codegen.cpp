@@ -2754,11 +2754,7 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   // options.
   llvm::PassBuilder PB(&TM);
 
-#if LLVM_VERSION_MAJOR >= 18
-  TM.registerPassBuilderCallbacks(PB, false /* PopulateClassToPassNames */);
-#else
   TM.registerPassBuilderCallbacks(PB);
-#endif
 
   // Register all the basic analyses with the managers.
   PB.registerModuleAnalyses(MAM);

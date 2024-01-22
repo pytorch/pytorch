@@ -670,6 +670,7 @@ inline std::ostream& operator<<(
   }
 
 CAFFE_DECLARE_KNOWN_TYPE(std::string, std_string)
+CAFFE_DECLARE_KNOWN_TYPE(uint16_t, uint16_t)
 CAFFE_DECLARE_KNOWN_TYPE(char, char)
 CAFFE_DECLARE_KNOWN_TYPE(std::unique_ptr<std::mutex>, std_unique_ptr_std_mutex)
 CAFFE_DECLARE_KNOWN_TYPE(

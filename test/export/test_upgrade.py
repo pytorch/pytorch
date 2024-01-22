@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: export"]
+# Owner(s): ["module: dynamo"]
 import unittest
 from unittest.mock import patch
 
@@ -96,18 +96,15 @@ def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Opti
         self.assertEqual(len(upgrader.upgrader_passes), 1)
 
     def test_div_upgrader_replaces_op_with_old_version(self):
-        class Foo(torch.nn.Module):
-            def forward(self, a: torch.Tensor, b):
-                return torch.ops.aten.div.Scalar_mode(a, b, rounding_mode='trunc')
-
-        fn = Foo()
+        def fn(a: torch.Tensor, b):
+            return torch.ops.aten.div.Scalar_mode(a, b, rounding_mode='trunc')
 
         inputs = (torch.ones([2, 3]) * 4, 2.)
         ep = export(fn, inputs, [])
         compiler_opset_version = {"aten": 4}
         model_opset_version = {"aten": 3}
         upgrader = GraphModuleOpUpgrader(compiler_opset_version, model_opset_version, TEST_UPGRADERS)
-        upgraded = ep._transform_do_not_use(*upgrader.upgrader_passes)
+        upgraded = ep._transform(*upgrader.upgrader_passes)
         upgraded.graph_module.print_readable()
 
         count = count_op(upgraded.graph, "aten::div.Scalar_mode")
@@ -116,11 +113,8 @@ def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Opti
         self.assertEqual(custom_op_count, 1)
 
     def test_div_upgrader_pass_return_new_op_after_retrace(self):
-        class Foo(torch.nn.Module):
-            def forward(self, a: torch.Tensor, b):
-                return torch.ops.aten.div.Scalar_mode(a, b, rounding_mode='trunc')
-
-        fn = Foo()
+        def fn(a: torch.Tensor, b):
+            return torch.ops.aten.div.Scalar_mode(a, b, rounding_mode='trunc')
 
         inputs = (torch.ones([2, 3]) * 4, 2.)
         ep = export(fn, inputs)

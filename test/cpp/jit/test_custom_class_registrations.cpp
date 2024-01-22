@@ -46,9 +46,6 @@ struct Foo : torch::CustomClassHolder {
   int64_t add(int64_t z) {
     return (x + y) * z;
   }
-  at::Tensor add_tensor(at::Tensor z) {
-    return (x + y) * z;
-  }
   void increment(int64_t z) {
     this->x += z;
     this->y += z;
@@ -320,18 +317,8 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("info", &Foo::info)
       .def("increment", &Foo::increment)
       .def("add", &Foo::add)
-      .def("add_tensor", &Foo::add_tensor)
       .def("__eq__", &Foo::eq)
-      .def("combine", &Foo::combine)
-      .def_pickle(
-          [](c10::intrusive_ptr<Foo> self) { // __getstate__
-            return std::vector<int64_t>{self->x, self->y};
-          },
-          [](std::vector<int64_t> state) { // __setstate__
-            return c10::make_intrusive<Foo>(state[0], state[1]);
-          });
-  m.def(
-      "takes_foo(__torch__.torch.classes._TorchScriptTesting._Foo foo, Tensor x) -> Tensor");
+      .def("combine", &Foo::combine);
 
   m.class_<FooGetterSetter>("_FooGetterSetter")
       .def(torch::init<int64_t, int64_t>())
@@ -447,17 +434,6 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
           [](ElementwiseInterpreter::SerializationType state) {
             return ElementwiseInterpreter::__setstate__(std::move(state));
           });
-}
-
-at::Tensor takes_foo(c10::intrusive_ptr<Foo> foo, at::Tensor x) {
-  return foo->add_tensor(x);
-}
-
-TORCH_LIBRARY_IMPL(_TorchScriptTesting, CPU, m) {
-  m.impl("takes_foo", takes_foo);
-}
-TORCH_LIBRARY_IMPL(_TorchScriptTesting, Meta, m) {
-  m.impl("takes_foo", &takes_foo);
 }
 
 } // namespace

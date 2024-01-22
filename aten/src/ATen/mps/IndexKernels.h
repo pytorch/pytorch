@@ -20,7 +20,7 @@ struct IndexAB {
 
 #endif
 
-template<typename T, typename OffsetsT>
+template<typename T>
 kernel void index_select(
 #if __METAL_VERSION__ >= 300
     constant IndexAB  * indexAB           [[buffer(0)]],
@@ -29,7 +29,7 @@ kernel void index_select(
 #endif
     constant void     * indexSizes        [[buffer(1)]],
     constant void     * indexStrides      [[buffer(2)]],
-    constant OffsetsT * offsets           [[buffer(3)]],
+    constant uint3    * offsets           [[buffer(3)]],
     constant void     * inputData         [[buffer(4)]],
     device   void     * outputData        [[buffer(5)]],
     constant uint32_t & num_indices       [[buffer(6)]],
@@ -54,7 +54,7 @@ kernel void index_select(
     *out = *in;
 }
 
-template<typename T, typename OffsetsT>
+template<typename T>
 void index_put_impl(
 #if __METAL_VERSION__ >= 300
     constant IndexAB  * indexAB,
@@ -63,11 +63,12 @@ void index_put_impl(
 #endif
     constant int64_t  * index_sizes,
     constant int64_t  * index_strides,
-    constant OffsetsT * offsets,
+    constant uint3    * offsets,
     constant void     * inputData,
     device   void     * outputData,
     constant uint32_t & num_indices,
-    uint thread_index) {
+    uint thread_index
+){
     int64_t offset = 0;
     for (uint32_t i = 0; i < num_indices; i++) {
 #if __METAL_VERSION__ >= 300
@@ -87,7 +88,7 @@ void index_put_impl(
     *out = *in;
 }
 
-template<typename T, typename OffsetsT>
+template<typename T>
 kernel void index_put_serial(
 #if __METAL_VERSION__ >= 300
     constant IndexAB  * indexAB           [[buffer(0)]],
@@ -96,7 +97,7 @@ kernel void index_put_serial(
 #endif
     constant void     * indexSizes        [[buffer(1)]],
     constant void     * indexStrides      [[buffer(2)]],
-    constant OffsetsT * offsets           [[buffer(3)]],
+    constant uint3    * offsets           [[buffer(3)]],
     constant void     * inputData         [[buffer(4)]],
     device   void     * outputData        [[buffer(5)]],
     constant uint32_t & num_indices       [[buffer(6)]],
@@ -111,7 +112,7 @@ kernel void index_put_serial(
     }
 }
 
-template<typename T, typename OffsetsT>
+template<typename T>
 kernel void index_put(
 #if __METAL_VERSION__ >= 300
     constant IndexAB  * indexAB           [[buffer(0)]],
@@ -120,7 +121,7 @@ kernel void index_put(
 #endif
     constant void     * indexSizes        [[buffer(1)]],
     constant void     * indexStrides      [[buffer(2)]],
-    constant OffsetsT * offsets           [[buffer(3)]],
+    constant uint3    * offsets           [[buffer(3)]],
     constant void     * inputData         [[buffer(4)]],
     device   void     * outputData        [[buffer(5)]],
     constant uint32_t & num_indices       [[buffer(6)]],
@@ -132,135 +133,125 @@ kernel void index_put(
 }
 
 #if __METAL_VERSION__ < 300
-#define REGISTER_INDEX_OP(DTYPE_SIZE, IDX_SIZE, DTYPE, INDEX_OP_TYPE, IDX_DTYPE)   \
-template                                                                           \
-[[host_name("index_" #INDEX_OP_TYPE "_" #DTYPE_SIZE "_" #IDX_SIZE)]]               \
-kernel void index_ ## INDEX_OP_TYPE<DTYPE, IDX_DTYPE>(                             \
-    constant IndexAB & indexAB           [[buffer(0)]],                            \
-    constant void    * indexSizes        [[buffer(1)]],                            \
-    constant void    * indexStrides      [[buffer(2)]],                            \
-    constant IDX_DTYPE   * offsets           [[buffer(3)]],                        \
-    constant void    * inputData         [[buffer(4)]],                            \
-    device   void    * outputData        [[buffer(5)]],                            \
-    constant uint32_t & num_indices      [[buffer(6)]],                            \
+#define REGISTER_INDEX_OP(DTYPE_SIZE, DTYPE, INDEX_OP_TYPE)     \
+template                                                        \
+[[host_name("index_" #INDEX_OP_TYPE "_" #DTYPE_SIZE)]]          \
+kernel void index_ ## INDEX_OP_TYPE<DTYPE>(                     \
+    constant IndexAB & indexAB           [[buffer(0)]],         \
+    constant void    * indexSizes        [[buffer(1)]],         \
+    constant void    * indexStrides      [[buffer(2)]],         \
+    constant uint3   * offsets           [[buffer(3)]],         \
+    constant void    * inputData         [[buffer(4)]],         \
+    device   void    * outputData        [[buffer(5)]],         \
+    constant uint32_t & num_indices      [[buffer(6)]],         \
     uint thread_index [[thread_position_in_grid]]);
 #else
-#define REGISTER_INDEX_OP(DTYPE_SIZE, IDX_SIZE, DTYPE, INDEX_OP_TYPE, IDX_DTYPE)   \
-template                                                                           \
-[[host_name("index_" #INDEX_OP_TYPE "_" #DTYPE_SIZE "_" #IDX_SIZE)]]               \
-kernel void index_ ## INDEX_OP_TYPE<DTYPE, IDX_DTYPE>(                             \
-    constant IndexAB * indexAB           [[buffer(0)]],                            \
-    constant void    * indexSizes        [[buffer(1)]],                            \
-    constant void    * indexStrides      [[buffer(2)]],                            \
-    constant IDX_DTYPE   * offsets           [[buffer(3)]],                        \
-    constant void    * inputData         [[buffer(4)]],                            \
-    device   void    * outputData        [[buffer(5)]],                            \
-    constant uint32_t & num_indices      [[buffer(6)]],                            \
+#define REGISTER_INDEX_OP(DTYPE_SIZE, DTYPE, INDEX_OP_TYPE)     \
+template                                                        \
+[[host_name("index_" #INDEX_OP_TYPE "_" #DTYPE_SIZE)]]          \
+kernel void index_ ## INDEX_OP_TYPE<DTYPE>(                     \
+    constant IndexAB * indexAB           [[buffer(0)]],         \
+    constant void    * indexSizes        [[buffer(1)]],         \
+    constant void    * indexStrides      [[buffer(2)]],         \
+    constant uint3   * offsets           [[buffer(3)]],         \
+    constant void    * inputData         [[buffer(4)]],         \
+    device   void    * outputData        [[buffer(5)]],         \
+    constant uint32_t & num_indices      [[buffer(6)]],         \
     uint thread_index [[thread_position_in_grid]]);
 #endif
 
 #define REGISTER_INDEX_OP_ALL_DTYPES(INDEX_OP_TYPE)     \
-    REGISTER_INDEX_OP(8bit,  idx32, char,  INDEX_OP_TYPE, uint3);     \
-    REGISTER_INDEX_OP(8bit,  idx64, char,  INDEX_OP_TYPE, ulong3);    \
-    REGISTER_INDEX_OP(16bit, idx32, short, INDEX_OP_TYPE, uint3);     \
-    REGISTER_INDEX_OP(16bit, idx64, short, INDEX_OP_TYPE, ulong3);    \
-    REGISTER_INDEX_OP(32bit, idx32, int,   INDEX_OP_TYPE, uint3);     \
-    REGISTER_INDEX_OP(32bit, idx64, int,   INDEX_OP_TYPE, ulong3);    \
-    REGISTER_INDEX_OP(64bit, idx32, long,  INDEX_OP_TYPE, uint3);     \
-    REGISTER_INDEX_OP(64bit, idx64, long,  INDEX_OP_TYPE, ulong3);
+    REGISTER_INDEX_OP(8bit,  char,  INDEX_OP_TYPE);     \
+    REGISTER_INDEX_OP(16bit, short, INDEX_OP_TYPE);     \
+    REGISTER_INDEX_OP(32bit, int,   INDEX_OP_TYPE);     \
+    REGISTER_INDEX_OP(64bit, long,  INDEX_OP_TYPE);
 
 REGISTER_INDEX_OP_ALL_DTYPES(select);
 REGISTER_INDEX_OP_ALL_DTYPES(put);
 
 #if __METAL_VERSION__ < 300
-#define REGISTER_SINGLE_THREADED_INDEX_OP(DTYPE_SIZE, IDX_SIZE, DTYPE, INDEX_OP_TYPE, IDX_DTYPE)   \
-template                                                                                           \
-[[host_name("index_" #INDEX_OP_TYPE "_" #DTYPE_SIZE "_" #IDX_SIZE)]]                               \
-kernel void index_ ## INDEX_OP_TYPE<DTYPE, IDX_DTYPE>(                                             \
-    constant IndexAB   & indexAB           [[buffer(0)]],                                          \
-    constant void      * indexSizes        [[buffer(1)]],                                          \
-    constant void      * indexStrides      [[buffer(2)]],                                          \
-    constant IDX_DTYPE * offsets           [[buffer(3)]],                                          \
-    constant void      * inputData         [[buffer(4)]],                                          \
-    device   void      * outputData        [[buffer(5)]],                                          \
-    constant uint32_t  & num_indices       [[buffer(6)]],                                          \
-    constant uint      * numIters          [[buffer(7)]],                                          \
+#define REGISTER_SINGLE_THREADED_INDEX_OP(DTYPE_SIZE, DTYPE, INDEX_OP_TYPE)     \
+template                                                        \
+[[host_name("index_" #INDEX_OP_TYPE "_" #DTYPE_SIZE)]]          \
+kernel void index_ ## INDEX_OP_TYPE<DTYPE>(                     \
+    constant IndexAB & indexAB           [[buffer(0)]],         \
+    constant void    * indexSizes        [[buffer(1)]],         \
+    constant void    * indexStrides      [[buffer(2)]],         \
+    constant uint3   * offsets           [[buffer(3)]],         \
+    constant void    * inputData         [[buffer(4)]],         \
+    device   void    * outputData        [[buffer(5)]],         \
+    constant uint32_t & num_indices       [[buffer(6)]],        \
+    constant uint    * numIters          [[buffer(7)]],         \
     uint thread_index [[thread_position_in_grid]]);
 #else
-#define REGISTER_SINGLE_THREADED_INDEX_OP(DTYPE_SIZE, IDX_SIZE, DTYPE, INDEX_OP_TYPE, IDX_DTYPE)   \
-template                                                                                           \
-[[host_name("index_" #INDEX_OP_TYPE "_" #DTYPE_SIZE "_" #IDX_SIZE)]]                               \
-kernel void index_ ## INDEX_OP_TYPE<DTYPE, IDX_DTYPE>(                                             \
-    constant IndexAB   * indexAB           [[buffer(0)]],                                          \
-    constant void      * indexSizes        [[buffer(1)]],                                          \
-    constant void      * indexStrides      [[buffer(2)]],                                          \
-    constant IDX_DTYPE * offsets           [[buffer(3)]],                                          \
-    constant void      * inputData         [[buffer(4)]],                                          \
-    device   void      * outputData        [[buffer(5)]],                                          \
-    constant uint32_t  & num_indices       [[buffer(6)]],                                          \
-    constant uint      * numIters          [[buffer(7)]],                                          \
+#define REGISTER_SINGLE_THREADED_INDEX_OP(DTYPE_SIZE, DTYPE, INDEX_OP_TYPE)     \
+template                                                        \
+[[host_name("index_" #INDEX_OP_TYPE "_" #DTYPE_SIZE)]]          \
+kernel void index_ ## INDEX_OP_TYPE<DTYPE>(                     \
+    constant IndexAB * indexAB           [[buffer(0)]],         \
+    constant void    * indexSizes        [[buffer(1)]],         \
+    constant void    * indexStrides      [[buffer(2)]],         \
+    constant uint3   * offsets           [[buffer(3)]],         \
+    constant void    * inputData         [[buffer(4)]],         \
+    device   void    * outputData        [[buffer(5)]],         \
+    constant uint32_t & num_indices       [[buffer(6)]],        \
+    constant uint    * numIters          [[buffer(7)]],         \
     uint thread_index [[thread_position_in_grid]]);
 #endif
 
-#define REGISTER_SINGLE_THREADED_INDEX_OP_ALL_DTYPES(INDEX_OP_TYPE)                   \
-    REGISTER_SINGLE_THREADED_INDEX_OP(8bit,  idx32, char,  INDEX_OP_TYPE, uint3);     \
-    REGISTER_SINGLE_THREADED_INDEX_OP(8bit,  idx64, char,  INDEX_OP_TYPE, ulong3);    \
-    REGISTER_SINGLE_THREADED_INDEX_OP(16bit, idx32, short, INDEX_OP_TYPE, uint3);     \
-    REGISTER_SINGLE_THREADED_INDEX_OP(16bit, idx64, short, INDEX_OP_TYPE, ulong3);    \
-    REGISTER_SINGLE_THREADED_INDEX_OP(32bit, idx32, int,   INDEX_OP_TYPE, uint3);     \
-    REGISTER_SINGLE_THREADED_INDEX_OP(32bit, idx64, int,   INDEX_OP_TYPE, ulong3);    \
-    REGISTER_SINGLE_THREADED_INDEX_OP(64bit, idx32, long,  INDEX_OP_TYPE, uint3);     \
-    REGISTER_SINGLE_THREADED_INDEX_OP(64bit, idx64, long,  INDEX_OP_TYPE, ulong3);
+#define REGISTER_SINGLE_THREADED_INDEX_OP_ALL_DTYPES(INDEX_OP_TYPE)     \
+    REGISTER_SINGLE_THREADED_INDEX_OP(8bit,  char,  INDEX_OP_TYPE);     \
+    REGISTER_SINGLE_THREADED_INDEX_OP(16bit, short, INDEX_OP_TYPE);     \
+    REGISTER_SINGLE_THREADED_INDEX_OP(32bit, int,   INDEX_OP_TYPE);     \
+    REGISTER_SINGLE_THREADED_INDEX_OP(64bit, long,  INDEX_OP_TYPE);
 
 REGISTER_SINGLE_THREADED_INDEX_OP_ALL_DTYPES(put_serial);
 
-template<typename StridesT, typename DataT>
-kernel void kernel_index_offsets(constant StridesT * strides         [[buffer(0)]],
-                                device DataT      * data_offsets    [[buffer(1)]],
-                                constant uint     * iter_shape      [[buffer(2)]],
-                                constant uint     & num_dimensions  [[buffer(3)]],
-                                uint thread_index [[thread_position_in_grid]]) {
+kernel void kernel_index_offsets(constant packed_uint3 * strides         [[buffer(0)]],
+                                 device uint3          * data_offsets    [[buffer(1)]],
+                                 constant uint         * iter_shape      [[buffer(2)]],
+                                 constant uint         & num_dimensions  [[buffer(3)]],
+                                 constant uint         & num_offsets     [[buffer(4)]],
+                                 uint thread_index [[thread_position_in_grid]]) {
     data_offsets[thread_index] = 0;
     uint32_t idx = thread_index;
     for (uint32_t dim = 0; dim < num_dimensions; dim++) {
         uint32_t remainder = idx % iter_shape[dim];
         idx /= iter_shape[dim];
 
-        data_offsets[thread_index] += remainder * DataT(strides[dim]);
+        data_offsets[thread_index] += remainder * strides[dim];
     }
 }
 
-template
-[[host_name("kernel_index_offsets_32")]]
-kernel void kernel_index_offsets<packed_uint3, uint3>(
-                constant packed_uint3 * strides         [[buffer(0)]],
-                device uint3          * data_offsets    [[buffer(1)]],
-                constant uint         * iter_shape      [[buffer(2)]],
-                constant uint         & num_dimensions  [[buffer(3)]],
-                uint thread_index [[thread_position_in_grid]]);
+kernel void kernel_index_offset(constant uint         * strides         [[buffer(0)]],
+                                device uint           * data_offsets    [[buffer(1)]],
+                                constant uint         * iter_shape      [[buffer(2)]],
+                                constant uint         & num_dimensions  [[buffer(3)]],
+                                uint thread_index [[thread_position_in_grid]]) {
+    data_offsets[thread_index] = 0;
+    uint32_t idx = thread_index;
+    for (uint32_t dim = 0; dim < num_dimensions; dim++) {
+        uint32_t reversed_dim = num_dimensions - dim -1;
+        uint32_t remainder = idx % iter_shape[reversed_dim];
+        idx /= iter_shape[reversed_dim];
 
-template
-[[host_name("kernel_index_offsets_64")]]
-kernel void kernel_index_offsets<packed_uint3, ulong3>(
-                constant packed_uint3 * strides         [[buffer(0)]],
-                device ulong3          * data_offsets    [[buffer(1)]],
-                constant uint         * iter_shape      [[buffer(2)]],
-                constant uint         & num_dimensions  [[buffer(3)]],
-                uint thread_index [[thread_position_in_grid]]);
+        data_offsets[thread_index] += remainder * strides[reversed_dim];
+    }
+}
 
-template<typename T, typename E, typename OffsetsT>
+template<typename T, typename E>
 kernel void index_put_accumulate_native_dtypes(
 #if __METAL_VERSION__ >= 300
     constant IndexAB  * indexAB     [[buffer(0)]],
 #else
     constant IndexAB  & indexAB     [[buffer(0)]],
 #endif
-    constant void     * indexSizes   [[buffer(1)]],
-    constant void     * indexStrides [[buffer(2)]],
-    constant OffsetsT * offsets      [[buffer(3)]],
-    constant void     * inputData    [[buffer(4)]],
-    device void       * outputData   [[buffer(5)]],
-    constant uint32_t & num_indices  [[buffer(6)]],
+    constant void    * indexSizes   [[buffer(1)]],
+    constant void    * indexStrides [[buffer(2)]],
+    constant uint3   * offsets      [[buffer(3)]],
+    constant void    * inputData    [[buffer(4)]],
+    device void      * outputData   [[buffer(5)]],
+    constant uint32_t& num_indices  [[buffer(6)]],
     uint thread_index [[thread_position_in_grid]]) {
     constant int64_t * index_sizes   = (constant int64_t *)indexSizes;
     constant int64_t * index_strides = (constant int64_t *)indexStrides;
@@ -292,19 +283,19 @@ __attribute__((__always_inline__)) void atomic_fetch_add_relaxed(device void * a
     }
 }
 
-template<typename T, typename OffsetsT>
+template<typename T>
 kernel void atomic_index_put_accumulate(
 #if __METAL_VERSION__ >= 300
-    constant IndexAB  * indexAB           [[buffer(0)]],
+    constant IndexAB * indexAB           [[buffer(0)]],
 #else
-    constant IndexAB  & indexAB           [[buffer(0)]],
+    constant IndexAB & indexAB           [[buffer(0)]],
 #endif
-    constant void     * indexSizes        [[buffer(1)]],
-    constant void     * indexStrides      [[buffer(2)]],
-    constant OffsetsT * offsets           [[buffer(3)]],
-    constant void     * inputData         [[buffer(4)]],
-    device   void     * outputData        [[buffer(5)]],
-    constant uint32_t & num_indices       [[buffer(6)]],
+    constant void    * indexSizes        [[buffer(1)]],
+    constant void    * indexStrides      [[buffer(2)]],
+    constant uint3   * offsets           [[buffer(3)]],
+    constant void    * inputData         [[buffer(4)]],
+    device   void    * outputData        [[buffer(5)]],
+    constant uint32_t& num_indices       [[buffer(6)]],
     uint thread_index [[thread_position_in_grid]]) {
     constant int64_t * index_sizes   = (constant int64_t *)indexSizes;
     constant int64_t * index_strides = (constant int64_t *)indexStrides;
@@ -327,67 +318,35 @@ kernel void atomic_index_put_accumulate(
 }
 
 template
-[[host_name("index_put_accumulate_32bit_float_idx32")]]
-kernel void atomic_index_put_accumulate<float, uint3>(
+[[host_name("index_put_accumulate_32bit_float")]]
+kernel void atomic_index_put_accumulate<float>(
 #if __METAL_VERSION__ >= 300
     constant IndexAB  * indexAB     [[buffer(0)]],
 #else
     constant IndexAB  & indexAB     [[buffer(0)]],
 #endif
-    constant void     * indexSizes   [[buffer(1)]],
-    constant void     * indexStrides [[buffer(2)]],
-    constant uint3    * offsets      [[buffer(3)]],
-    constant void     * inputData    [[buffer(4)]],
-    device   void     * outputData   [[buffer(5)]],
-    constant uint32_t & num_indices  [[buffer(6)]],
+    constant void    * indexSizes   [[buffer(1)]],
+    constant void    * indexStrides [[buffer(2)]],
+    constant uint3   * offsets      [[buffer(3)]],
+    constant void    * inputData    [[buffer(4)]],
+    device   void    * outputData   [[buffer(5)]],
+    constant uint32_t& num_indices  [[buffer(6)]],
     uint thread_index [[thread_position_in_grid]]);
 
 template
-[[host_name("index_put_accumulate_32bit_float_idx64")]]
-kernel void atomic_index_put_accumulate<float, ulong3>(
+[[host_name("index_put_accumulate_32bit_int")]]
+kernel void index_put_accumulate_native_dtypes<atomic_int, int>(
 #if __METAL_VERSION__ >= 300
     constant IndexAB  * indexAB     [[buffer(0)]],
 #else
     constant IndexAB  & indexAB     [[buffer(0)]],
 #endif
-    constant void     * indexSizes   [[buffer(1)]],
-    constant void     * indexStrides [[buffer(2)]],
-    constant ulong3   * offsets      [[buffer(3)]],
-    constant void     * inputData    [[buffer(4)]],
-    device   void     * outputData   [[buffer(5)]],
-    constant uint32_t & num_indices  [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
-
-template
-[[host_name("index_put_accumulate_32bit_int_idx32")]]
-kernel void index_put_accumulate_native_dtypes<atomic_int, int, uint3>(
-#if __METAL_VERSION__ >= 300
-    constant IndexAB  * indexAB     [[buffer(0)]],
-#else
-    constant IndexAB  & indexAB     [[buffer(0)]],
-#endif
-    constant void     * indexSizes   [[buffer(1)]],
-    constant void     * indexStrides [[buffer(2)]],
-    constant uint3    * offsets      [[buffer(3)]],
-    constant void     * inputData    [[buffer(4)]],
-    device   void     * outputData   [[buffer(5)]],
-    constant uint32_t & num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
-
-template
-[[host_name("index_put_accumulate_32bit_int_idx64")]]
-kernel void index_put_accumulate_native_dtypes<atomic_int, int, ulong3>(
-#if __METAL_VERSION__ >= 300
-    constant IndexAB  * indexAB     [[buffer(0)]],
-#else
-    constant IndexAB  & indexAB     [[buffer(0)]],
-#endif
-    constant void     * indexSizes   [[buffer(1)]],
-    constant void     * indexStrides [[buffer(2)]],
-    constant ulong3   * offsets      [[buffer(3)]],
-    constant void     * inputData    [[buffer(4)]],
-    device   void     * outputData   [[buffer(5)]],
-    constant uint32_t & num_indices [[buffer(6)]],
+    constant void    * indexSizes   [[buffer(1)]],
+    constant void    * indexStrides [[buffer(2)]],
+    constant uint3   * offsets      [[buffer(3)]],
+    constant void    * inputData    [[buffer(4)]],
+    device   void    * outputData   [[buffer(5)]],
+    constant uint32_t& num_indices [[buffer(6)]],
     uint thread_index [[thread_position_in_grid]]);
 )INDEX_METAL";
 

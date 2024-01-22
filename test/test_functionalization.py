@@ -1779,15 +1779,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # Make a non-leaf
         x = torch.randn(2, requires_grad=True) + 1
         fx_g = make_fx(f_functionalized)(x)
-        # NB: view_1 below is expected (though unused) due to view replay. AOTAutograd runs a
-        # DCE pass that will remove nodes like this later on.
         self.assertExpectedInline(fx_g.code.strip(), """\
 def forward(self, x_1):
     view = torch.ops.aten.view.default(x_1, [-1])
     mul = torch.ops.aten.mul.Tensor(x_1, 2);  x_1 = None
-    view_1 = torch.ops.aten.view.default(mul, [-1])
-    view_2 = torch.ops.aten.view.default(mul, [-1]);  mul = None
-    add = torch.ops.aten.add.Tensor(view_2, 1);  view_2 = None
+    view_1 = torch.ops.aten.view.default(mul, [-1]);  mul = None
+    add = torch.ops.aten.add.Tensor(view_1, 1);  view_1 = None
     return add""")
 
     def test_python_functionalization_zero_tensor(self):

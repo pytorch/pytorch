@@ -2,7 +2,8 @@
 
 #include <ATen/core/Tensor.h>
 
-namespace torch::autograd {
+namespace torch {
+namespace autograd {
 
 struct TORCH_API SavedVariableHooks {
   virtual void call_pack_hook(const at::Tensor& tensor) = 0;
@@ -10,4 +11,5 @@ struct TORCH_API SavedVariableHooks {
   virtual ~SavedVariableHooks() = default;
 };
 
-} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

@@ -11,7 +11,7 @@ from functorch.experimental.control_flow import cond
         "torch.dynamic-shape",
     },
 )
-class CondBranchNestedFunction(torch.nn.Module):
+def cond_branch_nested_function(x):
     """
     The branch functions (`true_fn` and `false_fn`) passed to cond() must follow these rules:
       - both branches must take the same args, which must also match the branch args passed to cond.
@@ -25,20 +25,17 @@ class CondBranchNestedFunction(torch.nn.Module):
 
     NOTE: If the `pred` is test on a dim with batch size < 2, it will be specialized.
     """
-    def __init__(self):
-        super().__init__()
 
-    def forward(self, x):
-        def true_fn(x):
-            def inner_true_fn(y):
-                return x + y
+    def true_fn(x):
+        def inner_true_fn(y):
+            return x + y
 
-            return inner_true_fn(x)
+        return inner_true_fn(x)
 
-        def false_fn(x):
-            def inner_false_fn(y):
-                return x - y
+    def false_fn(x):
+        def inner_false_fn(y):
+            return x - y
 
-            return inner_false_fn(x)
+        return inner_false_fn(x)
 
-        return cond(x.shape[0] < 10, true_fn, false_fn, [x])
+    return cond(x.shape[0] < 10, true_fn, false_fn, [x])

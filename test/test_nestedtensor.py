@@ -3078,6 +3078,7 @@ class TestNestedTensorSubclass(TestCase):
 
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
 
+    @xfailIfTorchDynamo
     def test_split(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -3099,6 +3100,7 @@ class TestNestedTensorSubclass(TestCase):
         ):
             torch.split(nt, 2, 1)
 
+    @xfailIfTorchDynamo
     def test_split_with_sizes(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -3138,41 +3140,22 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt.shape[:2], view.shape[:2])
 
     @xfailIfTorchDynamo
-    @parametrize("requires_grad", [False, True])
-    def test_reshape_decomp(self, device, requires_grad):
+    def test_reshape_decomp(self, device):
         # contiguous NT should result in view
         nt = random_nt_from_dims(
-            [3, None, 10],
-            device=device,
-            dtype=torch.float32,
-            layout=torch.jagged,
-            requires_grad=requires_grad
-        )
+            [3, None, 10], device=device, dtype=torch.float32, layout=torch.jagged)
         view = nt.reshape(-1, -1, 5, 2)
         self.assertEqual(view.shape[:2], nt.shape[:2])
         self.assertTrue(view._is_view() and view._base is nt)
-        # make sure gradients flow back
-        if requires_grad:
-            view.backward(torch.ones_like(view))
-            self.assertEqual(nt.grad, torch.ones_like(nt))
 
         # non-contiguous NT should result in contiguous copy
         nt = random_nt_from_dims(
-            [3, None, 5, 2],
-            device=device,
-            dtype=torch.float32,
-            layout=torch.jagged,
-            requires_grad=requires_grad
-        )
+            [3, None, 5, 2], device=device, dtype=torch.float32, layout=torch.jagged)
         nt_noncontig = nt.transpose(-1, -2)
         self.assertFalse(nt_noncontig.is_contiguous())
         copy = nt_noncontig.reshape(-1, -1, 10)
         self.assertTrue(copy.is_contiguous())
         self.assertEqual(copy.shape[:2], nt.shape[:2])
-        # make sure gradients flow back
-        if requires_grad:
-            copy.backward(torch.ones_like(copy))
-            self.assertEqual(nt.grad, torch.ones_like(nt))
 
     def test_flatten_decomp(self, device):
         nt = random_nt_from_dims(
@@ -3185,6 +3168,7 @@ class TestNestedTensorSubclass(TestCase):
         flattened = nt.flatten(-3, -2)
         self.assertEqual(flattened.shape, nt.view(3, -1, 10, 6).shape)
 
+    @xfailIfTorchDynamo
     def test_chunk(self, device):
         # normal case
         D = 30
@@ -3205,39 +3189,6 @@ class TestNestedTensorSubclass(TestCase):
         with self.assertRaisesRegex(
                 RuntimeError, "chunk.* not supported for NestedTensor on dim=0 or dim=1"):
             nt.chunk(2, dim=1)
-
-    def test_squeeze(self, device):
-        B = 4
-        D = 6
-        # squeeze middle dim
-        nt = random_nt_from_dims(
-            [B, None, 1, D], device=device, dtype=torch.float32, layout=torch.jagged)
-        j0 = nt.shape[1]
-
-        for dim_arg in [-2, 2]:
-            out = nt.squeeze(dim_arg)
-            self.assertEqual(out.shape, (B, j0, D))
-            self.assertEqual(out.unsqueeze(-2), nt)
-
-        # squeeze last dim
-        nt = random_nt_from_dims(
-            [B, None, 1], device=device, dtype=torch.float32, layout=torch.jagged)
-        j1 = nt.shape[1]
-
-        for dim_arg in [-1, 2]:
-            out = nt.squeeze(dim_arg)
-            self.assertEqual(out.shape, (B, j1))
-            self.assertEqual(out.unsqueeze(-1), nt)
-
-        # squeeze on batch dim not supported
-        with self.assertRaisesRegex(
-                RuntimeError, "squeeze.* not supported for NestedTensor on dim=0 or dim=1"):
-            nt.squeeze(0)
-
-        # squeeze on ragged dim not supported
-        with self.assertRaisesRegex(
-                RuntimeError, "squeeze.* not supported for NestedTensor on dim=0 or dim=1"):
-            nt.squeeze(1)
 
     def test_binary_pointwise_broadcasting(self, device):
         # (B, j0, 3, 4)
@@ -3559,18 +3510,20 @@ class TestNestedTensorSubclass(TestCase):
         with self.assertRaisesRegex(ValueError, "expected .* to be a contiguous jagged layout"):
             clone = transposed.clone()
 
-    # Note 1: Math fallback doesn't work with bfloat16 on CUDA
-    # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
+    # Note 1: CPU Fused kernels do not support nested, Math is missing ops to work with NT jagged
+    # Note 2: Unless running on newer GPUs, only mem-effn or math are available, and mem-effn
+    # will fail with gradients and math has ops that aren't implemented. Therefore, in
+    # order to get some kernel to work with most GPUs, we have to disable gradients in
+    # this more general test
+    # Note 3: ROCm only supports the math kernel, which doesn't work with jagged NTs
     @xfailIfTorchDynamo
-    @unittest.skipIf(
-        TEST_WITH_ROCM,
-        "ROCm doesn't support flash attention or mem_efficient attention for NT",
-    )
+    @onlyCUDA
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
                  SM80OrLater else [torch.float16, torch.float32])
     def test_sdpa(self, device, dtype):
         batch_size = 1
-        emb_dims = 128
+        emb_dims = 64
         n_heads = 8
         head_dims = emb_dims // n_heads
 
@@ -3669,15 +3622,14 @@ class TestNestedTensorSubclass(TestCase):
         check_forward_backward()
 
         # Test dispatcher works by calling only mem-effn and math (as they are safe for all devices)
-        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=True, enable_math=True):
+        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=True, enable_math=False):
             check_forward_backward()
 
-        # Test math fallback
+        # Will fail bc unsupported ops
+        # TODO: Add remaining ops, or implement a different math dispatch for jagged
         with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=True):
-            # Math fallback doesn't work with bfloat16 on CUDA because
-            # "group_gemm_dispatch" not implemented for 'BFloat16'
-            if not (str(device).startswith("cuda") and dtype == torch.bfloat16):
-                check_forward_backward()
+            with self.assertRaises(RuntimeError):
+                attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt_t, k_nt_t, v_nt_t).transpose(1, 2)
 
 
     # This requires NT -> NT views to work in inductor, which is a TODO

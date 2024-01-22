@@ -496,19 +496,6 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res_act = fn_opt(wrapped)
         self.assertEqual(res_exp, res_act)
 
-    def test_torch_function_wrapper_class_with_kwargs(self):
-        x = torch.ones(2, 2)
-        wrapped = WrapperSubclass(x)
-
-        def fn(w):
-            return torch.add(w, 1.0, alpha=2.0)
-
-        fn_opt = compile_full_eager(fn)
-
-        res_exp = fn(wrapped)
-        res_act = fn_opt(wrapped)
-        self.assertEqual(res_exp, res_act)
-
     def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])
 

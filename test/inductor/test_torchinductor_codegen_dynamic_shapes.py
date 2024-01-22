@@ -15,9 +15,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
-    GPU_TYPE,
     HAS_CPU,
-    HAS_GPU,
+    HAS_CUDA,
 )
 
 if IS_WINDOWS and IS_CI:
@@ -56,14 +55,14 @@ def check_codegen(
 
     if is_cpp_code is False:
         if hasattr(model, "to"):
-            model = model.to(device=GPU_TYPE)
+            model = model.to("cuda")
 
         def copy_fn(x):
             # preserve strides of the input on the device
             if not isinstance(x, torch.Tensor):
                 return x
             return torch.empty_strided(
-                x.size(), x.stride(), device=GPU_TYPE, dtype=x.dtype
+                x.size(), x.stride(), device="cuda", dtype=x.dtype
             ).copy_(x)
 
         example_inputs = tuple(copy_fn(x) for x in example_inputs)
@@ -198,9 +197,6 @@ test_failures = {
         ("cpu", "cuda")
     ),
     "test_zero_element_mutation_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
-        ("cpu", "cuda")
-    ),
     "test_cat_uint8_dynamic_shapes": TestFailure(
         ("cpu",)
     ),  # cat on uint8 input is using aten fallback on cpu
@@ -324,11 +320,11 @@ if HAS_CPU:
     )
 
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_CUDA and not TEST_WITH_ASAN:
 
-    class DynamicShapesCodegenGPUTests(TestCase):
+    class DynamicShapesCodegenCudaTests(TestCase):
         maxDiff = None
-        device = GPU_TYPE
+        device = "cuda"
 
         def common(self: TestCase, model, example_inputs, kwargs=None, **_rest):
             return check_codegen(
@@ -341,8 +337,8 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
     copy_tests(
         DynamicShapesCodegenCommonTemplate,
-        DynamicShapesCodegenGPUTests,
-        GPU_TYPE,
+        DynamicShapesCodegenCudaTests,
+        "cuda",
         test_failures,
     )
 
@@ -350,5 +346,5 @@ if HAS_GPU and not TEST_WITH_ASAN:
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")

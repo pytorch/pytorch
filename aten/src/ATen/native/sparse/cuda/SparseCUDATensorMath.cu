@@ -51,7 +51,7 @@
 #define I_INFO(tensor) cuda::detail::getTensorInfo<int64_t, uint64_t>(tensor)
 #define V_INFO(tensor) cuda::detail::getTensorInfo<scalar_t, uint64_t>(tensor)
 
-namespace at::native {
+namespace at { namespace native {
 
 using namespace at::sparse;
 using at::cuda::detail::TensorInfo;
@@ -961,4 +961,4 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
   return result;
 }
 
-} // namespace at::native
+}} // namespace at::native
