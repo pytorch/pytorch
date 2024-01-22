@@ -165,7 +165,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # each time the compiled artifact is run and outputs a wrapped tensor.
         if self.global_mangled_class_name() not in tx.output.global_scope:
             tx.output.install_global_unsafe(
-                self.global_mangled_class_name(), self.class_type, per_frame=False
+                self.global_mangled_class_name(), self.class_type
             )
 
     def python_type(self):
