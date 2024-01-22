@@ -36,7 +36,7 @@ class FSDPState(_State):
             return args, kwargs
         with torch.profiler.record_function("FSDP::root_pre_forward"):
             if self._device.type == "cuda":
-                with torch.profiler.record_function("FSDP::inputs_to_gpu"):
+                with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
                         args, kwargs, self._device, False
                     )  # same as DDP
