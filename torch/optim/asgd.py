@@ -280,10 +280,25 @@ def _single_tensor_asgd(
         else:
             ax.copy_(param)
 
-        new_eta = _to_tensor(lr / ((1 + lambd * lr * step) ** alpha))
-        eta.copy_(new_eta)
-        new_mu = _to_tensor(1 / max(1, step - t0))
-        mu.copy_(new_mu)
+        if capturable:
+            new_mu = torch.Tensor.sub_(step, t0)
+            new_mu.clamp_(min=1.0)
+            torch.Tensor.reciprocal_(new_mu)
+            mu.copy_(new_mu)
+            del new_mu
+
+            new_eta = torch.Tensor.mul_(step, lambd)
+            torch.Tensor.mul_(new_eta, lr)
+            torch.Tensor.add_(new_eta, 1)
+            torch.Tensor.pow_(new_eta, alpha)
+            torch.Tensor.reciprocal_(new_eta)
+            torch.Tensor.mul_(new_eta, lr)
+            eta.copy_(new_eta)
+        else:
+            new_eta = _to_tensor(lr / ((1 + lambd * lr * step) ** alpha))
+            eta.copy_(new_eta)
+            new_mu = _to_tensor(1 / max(1, step - t0))
+            mu.copy_(new_mu)
 
 
 def _multi_tensor_asgd(
