@@ -11,6 +11,8 @@
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <ATen/native/Math.h>
 
+#include <c10/util/Float8_e4m3fn.h>
+#include <c10/util/Float8_e5m2.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/generic_math.h>
@@ -30,6 +32,9 @@
 
 typedef at::Half half;
 typedef at::BFloat16 bfloat16;
+
+typedef at::Float8_e4m3fn float8_e4m3fn;
+typedef at::Float8_e5m2 float8_e5m2;
 
 template <typename T>
 struct Welford {
