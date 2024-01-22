@@ -27,13 +27,13 @@ IGNORED_REASONS = {
     # We don't run ModuleInfo tests under Dynamo
     "Policy: we don't run ModuleInfo tests w/ Dynamo",
     # We don't run CUDA tests in CI (yet)
-    'Excluded from CUDA tests',
+    "Excluded from CUDA tests",
     # We don't run CUDA tests in CI (yet)
     "CUDA not found",
     # We don't run CUDA tests in CI (yet)
     "Only runs on cuda",
     # We don't run slow tests in CI
-    'test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test',
+    "test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test",
 }
 
 
