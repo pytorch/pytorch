@@ -37,7 +37,7 @@ class TestCustomOperators(TestCase):
         def f(x):
             return torch.ops.custom.asin(x)
 
-        with self.assertRaisesRegex(RuntimeError, "unsupported operator: .* \(you may need to `import nonexistent`"):
+        with self.assertRaisesRegex(RuntimeError, r'unsupported operator: .* \(you may need to `import nonexistent`'):
             f(x)
 
     def test_abstract_impl_pystub_faketensor(self):
