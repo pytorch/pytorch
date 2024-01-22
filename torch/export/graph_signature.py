@@ -277,6 +277,16 @@ class ExportGraphSignature:
             if isinstance(s.target, str)
         ]
 
+    @property
+    def lifted_custom_objs(self) -> Collection[str]:
+        # TODO Make this tuple.
+        return [
+            s.target
+            for s in self.input_specs
+            if s.kind == InputKind.CUSTOM_OBJ
+            if isinstance(s.target, str)
+        ]
+
     # Graph node names of pytree-flattened inputs of original program
     @property
     def user_inputs(self) -> Collection[str]:
@@ -349,6 +359,16 @@ class ExportGraphSignature:
             for s in self.input_specs
             if s.kind == InputKind.CONSTANT_TENSOR
             and isinstance(s.arg, TensorArgument)
+            and isinstance(s.target, str)
+        }
+
+    @property
+    def inputs_to_lifted_custom_objs(self) -> Mapping[str, str]:
+        return {
+            s.arg.name: s.target
+            for s in self.input_specs
+            if s.kind == InputKind.CUSTOM_OBJ
+            and isinstance(s.arg, CustomObjArgument)
             and isinstance(s.target, str)
         }
 
