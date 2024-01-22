@@ -353,10 +353,6 @@ def merge_splits(
     dim: int,
 ):
     node = match.output_node()
-    # it is possible that the split has no users,
-    # we check the corner case and skip the pattern
-    if len(node.users.keys()) == 0:
-        return
     graph = match.graph
     first_split = node.args[0].args[0]
     next_split_index = node.args[0].args[1]

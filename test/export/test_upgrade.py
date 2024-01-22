@@ -96,11 +96,8 @@ def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Opti
         self.assertEqual(len(upgrader.upgrader_passes), 1)
 
     def test_div_upgrader_replaces_op_with_old_version(self):
-        class Foo(torch.nn.Module):
-            def forward(self, a: torch.Tensor, b):
-                return torch.ops.aten.div.Scalar_mode(a, b, rounding_mode='trunc')
-
-        fn = Foo()
+        def fn(a: torch.Tensor, b):
+            return torch.ops.aten.div.Scalar_mode(a, b, rounding_mode='trunc')
 
         inputs = (torch.ones([2, 3]) * 4, 2.)
         ep = export(fn, inputs, [])
@@ -116,11 +113,8 @@ def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Opti
         self.assertEqual(custom_op_count, 1)
 
     def test_div_upgrader_pass_return_new_op_after_retrace(self):
-        class Foo(torch.nn.Module):
-            def forward(self, a: torch.Tensor, b):
-                return torch.ops.aten.div.Scalar_mode(a, b, rounding_mode='trunc')
-
-        fn = Foo()
+        def fn(a: torch.Tensor, b):
+            return torch.ops.aten.div.Scalar_mode(a, b, rounding_mode='trunc')
 
         inputs = (torch.ones([2, 3]) * 4, 2.)
         ep = export(fn, inputs)

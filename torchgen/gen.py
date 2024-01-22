@@ -274,7 +274,6 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
             "inplace_view" in f.tags
             and str(f.func.name) != "resize_"
             and str(f.func.name) != "resize_as_"
-            and str(f.func.name.name) != "set_"
         ):
             base_name = f.func.name.name
             overload_name = f.func.name.overload_name

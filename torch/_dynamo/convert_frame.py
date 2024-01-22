@@ -330,8 +330,7 @@ def convert_frame_assert(
 
         if is_generator(code):
             unimplemented("generator")
-        exceeded, limit_type = exceeds_cache_size_limit(cache_size)
-        if exceeded:
+        if exceeds_cache_size_limit(cache_size):
 
             def format_func_info(code):
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
@@ -341,18 +340,17 @@ def convert_frame_assert(
                 return recompile_reasons[-1]
 
             log.warning(
-                "torch._dynamo hit config.%s (%s)\n"
+                "torch._dynamo hit config.cache_size_limit (%s)\n"
                 "   function: %s\n"
                 "   last reason: %s\n"
                 'To log all recompilation reasons, use TORCH_LOGS="recompiles".\n'
                 "To diagnose recompilation issues, see %s.",
-                limit_type,
-                getattr(config, limit_type),
+                config.cache_size_limit,
                 format_func_info(code),
                 format_guard_failures(),
                 troubleshooting_url,
             )
-            unimplemented(f"{limit_type} reached")
+            unimplemented("cache_size_limit reached")
 
         if not has_tensor_in_frame(frame):
             return None
