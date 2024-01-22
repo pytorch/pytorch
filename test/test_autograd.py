@@ -19,7 +19,6 @@ from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
 from operator import mul
-from typing import List, Tuple
 from functools import reduce, partial
 import torch
 
@@ -47,7 +46,6 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils.hooks import RemovableHandle
 import weakref
 import collections
 import pickle
@@ -8552,7 +8550,7 @@ for shape in [(1,), ()]:
             memory_with_hooks = torch.cuda.memory_allocated()
             self.assertEqual(memory_with_hooks, memory_without_grad)
 
-    def test_multi_grad_all_hooks(self):
+    def test_multi_grad_hooks(self):
         t1 = torch.rand(2, requires_grad=True)
         t2 = torch.rand(2, requires_grad=True)
         t3 = torch.rand(2, requires_grad=True)
@@ -8598,67 +8596,6 @@ for shape in [(1,), ()]:
         handle.remove()
         out.sum().backward(inputs=(t1, t3), retain_graph=True)
         self.assertEqual(count[0], 2)
-
-    def test_multi_grad_any_hooks(self):
-        hook_id = 0
-        any_hook_handles: List[RemovableHandle] = []
-
-        class MultiOutputModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.lin = nn.Linear(3, 3)
-
-            def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-                z = self.lin(x)
-                out = torch.sin(z), torch.cos(z)
-                nonlocal hook_id
-                z.register_hook(partial(hook, hook_id))
-                hook_id += 1
-                any_hook_handles.append(
-                    torch.autograd.graph.register_multi_grad_hook(
-                        out, partial(hook, hook_id), mode="any"
-                    )
-                )
-                hook_id += 1
-                return out[0] + out[1]
-
-        hook_order: List[int] = []
-        hook_count = 0
-
-        def hook(hook_id: int, *unused):
-            nonlocal hook_count
-            nonlocal hook_order
-            hook_count += 1
-            hook_order.append(hook_id)
-
-        # Any hooks: IDs 1 and 3; regular hooks: IDs 0 and 2
-        model = nn.Sequential(MultiOutputModule(), MultiOutputModule())
-        inp = torch.randn((2, 3))
-        out = model(inp)
-        (out[0] + out[1]).sum().backward()
-        # Check that the any-hook runs only once and before the regular hook
-        # for each module
-        self.assertEqual(len(any_hook_handles), 2)
-        self.assertEqual(hook_order, [3, 2, 1, 0])
-
-        hook_id = 0
-        hook_order.clear()
-        any_hook_handles.clear()
-        out = model(inp)
-        for handle in any_hook_handles:
-            handle.remove()
-        (out[0] + out[1]).sum().backward()
-        # Check that the any-hook does not run if removed
-        self.assertEqual(hook_order, [2, 0])
-
-    def test_multi_grad_hooks_invalid_mode(self):
-        t1 = torch.rand(2, requires_grad=True)
-        t2 = torch.rand(2, requires_grad=True)
-        regex = r"Expects mode to be one of \('all', 'any'\) but got foo"
-        with self.assertRaisesRegex(ValueError, regex):
-            torch.autograd.graph.register_multi_grad_hook(
-                (t1, t2), lambda _: None, mode="foo"
-            )
 
     def test_pynode_destruction_deadlock(self):
         script = """
@@ -11206,7 +11143,7 @@ class TestMultithreadAutograd(TestCase):
         # be accumulate to the same place and should be the same
         self._run_py_multithread_fn(train_fn_grad, (x,))
 
-    def test_multi_grad_all_hooks(self):
+    def test_multi_grad_hooks(self):
         # Multihooks should behave independently per execution of backward
         # Test that the hook fired the number of times we ran backward
         # even if those executions occur concurrently on different threads
@@ -11271,73 +11208,6 @@ class TestMultithreadAutograd(TestCase):
         self.assertEqual(count[0], 4)
         self.assertEqual(err_count[0], 1)
         self.assertEqual(res, [False, True, True, False])
-
-    def test_multi_grad_any_hooks(self):
-        # Multihooks should behave independently per execution of backward
-        # Test that the hook fired the number of times we ran backward
-        # even if those executions occur concurrently on different threads
-        t1 = torch.rand(2, requires_grad=True)
-        t2 = torch.rand(2, requires_grad=True)
-        t3 = torch.rand(2, requires_grad=True)
-        t4 = torch.rand(2, requires_grad=True)
-
-        res = None
-        count = [0]
-
-        def hook(grads):
-            nonlocal res
-            count[0] += 1
-            grad_is_none = [g is not None for g in grads]
-            if res is None:
-                res = grad_is_none
-            else:
-                self.assertEqual(res, grad_is_none)
-
-        torch.autograd.graph.register_multi_grad_hook((t1, t2, t3, t4), hook, mode="any")
-
-        out = (t2 * t3).sum()
-
-        def backward_retain_graph(out, t2, t3):
-            out.backward(inputs=(t2, t3), retain_graph=True)
-
-        self._run_py_multithread_fn(backward_retain_graph, (out, t2, t3), num_threads=5)
-        self.assertEqual(count[0], 5)
-        self.assertEqual(res, [True, True])
-
-        # Raise an error in on thread's backward
-        res = None
-        count = [0]
-        err_count = [0]
-        bw_count = [0]
-
-        class Func(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                return x
-
-            @staticmethod
-            def backward(ctx, gO):
-                bw_count[0] += 1
-                if bw_count[0] == 1:
-                    raise RuntimeError("error message")
-                else:
-                    return gO
-
-        out = (Func.apply(t2) * t3).sum()
-
-        def backward_retain_graph(out, t2, t3):
-            try:
-                out.backward(inputs=(t2, t3), retain_graph=True)
-            except RuntimeError:
-                err_count[0] += 1
-
-        self._run_py_multithread_fn(backward_retain_graph, (out, t2, t3), num_threads=5)
-
-        # Expect all 5 threads to increment count since the hook runs before
-        # the custom backward
-        self.assertEqual(count[0], 5)
-        self.assertEqual(err_count[0], 1)
-        self.assertEqual(res, [True, True])
 
 
     def test_dataparallel_saved_tensors_hooks(self):
