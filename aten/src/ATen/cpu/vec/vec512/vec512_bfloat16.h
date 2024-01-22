@@ -937,6 +937,7 @@ Vectorized<BFloat16> inline fmadd(const Vectorized<BFloat16>& a,
 }
 
 static inline void _transpose_mxn_half_16_16(__m256i t[], __m512i u[]) {
+  __m512i r[8];
   // a0a1 a2a3 a4a5 a6a7 a8a9 a10a11 a12a13 a14a15   e0e1 e2e3 e4e5 e6e7 e8e9 e10e11 e12e13 e14e15
   // b0-b15  f0-f15
   // c0-c15  g0-g15
@@ -945,10 +946,8 @@ static inline void _transpose_mxn_half_16_16(__m256i t[], __m512i u[]) {
   // j0-j15  n0-n15
   // k0-k15  o0-o15
   // l0-l15  p0-p15
-  __m512i r[8];
-
 #pragma unroll(4)
-  for (int i = 0; i < 4; i++) { 
+  for (int i = 0; i < 4; i++) {
     r[i] = _mm512_inserti64x4(_mm512_castsi256_si512(t[i]), t[i + 4], 0x01);
     r[i + 4] = _mm512_inserti64x4(_mm512_castsi256_si512(t[i + 8]), t[i + 12], 0x01);
   }
@@ -1014,7 +1013,6 @@ static inline void _transpose_mxn_half_16_16(__m256i t[], __m512i u[]) {
       0x001a0018,
       0x000e000c,
       0x000a0008);
-
   // 0-- 1--
   // 8-- 9--
   // 2-- 3--
@@ -1039,6 +1037,7 @@ inline void transpose_mxn<BFloat16, 16, 16>(
     int64_t ld_src,
     BFloat16* dst,
     int64_t ld_dst) {
+  __m256i t[16];
   // load from src to registers
   // a: a0  a1  a2  a3  a4  a5  a6  a7  a8  a9  a10 a11 a12 a13 a14 a15
   // b: b0  b1  b2  b3  b4  b5  b6  b7  b8  b9  b10 b11 b12 b13 b14 b15
@@ -1056,8 +1055,6 @@ inline void transpose_mxn<BFloat16, 16, 16>(
   // n: n0  n1  n2  n3  n4  n5  n6  n7  n8  n9  n10 n11 n12 n13 n14 n15
   // o: o0  o1  o2  o3  o4  o5  o6  o7  o8  o9  o10 o11 o12 o13 o14 o15
   // p: p0  p1  p2  p3  p4  p5  p6  p7  p8  p9  p10 p11 p12 p13 p14 p15
-  __m256i t[16];
-
 #pragma unroll(16)
   for (int i = 0; i < 16; i++) {
     t[i] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i * ld_src));
@@ -1085,6 +1082,7 @@ inline void transpose_mxn<Half, 16, 16>(
     int64_t ld_src,
     Half* dst,
     int64_t ld_dst) {
+  __m256i t[16];
   // load from src to registers
   // a: a0  a1  a2  a3  a4  a5  a6  a7  a8  a9  a10 a11 a12 a13 a14 a15
   // b: b0  b1  b2  b3  b4  b5  b6  b7  b8  b9  b10 b11 b12 b13 b14 b15
@@ -1102,8 +1100,6 @@ inline void transpose_mxn<Half, 16, 16>(
   // n: n0  n1  n2  n3  n4  n5  n6  n7  n8  n9  n10 n11 n12 n13 n14 n15
   // o: o0  o1  o2  o3  o4  o5  o6  o7  o8  o9  o10 o11 o12 o13 o14 o15
   // p: p0  p1  p2  p3  p4  p5  p6  p7  p8  p9  p10 p11 p12 p13 p14 p15
-  __m256i t[16];
-
 #pragma unroll(16)
   for (int i = 0; i < 16; i++) {
     t[i] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i * ld_src));
@@ -1328,8 +1324,8 @@ inline void transpose_mxn<Half, 32, 32>(
     Half* dst,
     int64_t ld_dst) {
   // Load from memory
-#pragma unroll(32)
   __m512i r[32];
+#pragma unroll(32)
   for (int i = 0; i < 32; ++i) {
     r[i] = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + i* ld_src));
   }
