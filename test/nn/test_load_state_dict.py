@@ -6,9 +6,9 @@ import unittest
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import TestCase, wrapSwapTensorsTest, \
+from torch.testing._internal.common_utils import TestCase, \
     TEST_NUMPY, IS_WINDOWS, skipIfTorchDynamo, instantiate_parametrized_tests, \
-    run_tests
+    run_tests, wrapSwapTensorsTest
 
 if TEST_NUMPY:
     import numpy as np
@@ -17,11 +17,6 @@ if TEST_NUMPY:
 class TestLoadStateDict(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
-
-    def test_buffer_not_persistent_load(self):
-        m = nn.Module()
-        m.register_buffer('buf', torch.rand(5), persistent=False)
-        m.load_state_dict({})
 
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     def test_load_state_dict_invalid(self):
@@ -241,64 +236,6 @@ class TestLoadStateDict(NNTestCase):
         self.assertEqual(mm[0].param[0].item(), 10)
         self.assertEqual(mm[0].sub.weight[0, 0].item(), 555)
 
-    def test_extra_state(self):
-
-        class SubModule(torch.nn.Module):
-            def __init__(self, foo):
-                super().__init__()
-                self.foo = foo
-
-            def get_extra_state(self):
-                return {
-                    'foo': self.foo
-                }
-
-            def set_extra_state(self, state):
-                self.foo = state['foo']
-
-        class MyModule(torch.nn.Module):
-            def __init__(self, foo, bar):
-                super().__init__()
-                self.sub = SubModule(foo)
-                self.bar = bar
-
-            def get_extra_state(self):
-                return {
-                    'bar': self.bar
-                }
-
-            def set_extra_state(self, state):
-                self.bar = state['bar']
-
-        # Ensure state_dict contains the extra state by loading it into another module.
-        m = MyModule(3, 'something')
-        m2 = MyModule(5, 'something else')
-        m2.load_state_dict(m.state_dict())
-        self.assertEqual(m.state_dict(), m2.state_dict())
-        self.assertEqual(m2.bar, m.bar)
-        self.assertEqual(m2.sub.foo, m.sub.foo)
-
-    def test_extra_state_non_dict(self):
-
-        class MyModule(torch.nn.Module):
-            def __init__(self, foo):
-                super().__init__()
-                self.foo = foo
-
-            def get_extra_state(self):
-                return self.foo
-
-            def set_extra_state(self, state):
-                self.foo = state
-
-        # Test various types of extra state.
-        for state in ('something', 5, MyModule(3)):
-            m = MyModule(state)
-            m2 = MyModule('something else')
-            m2.load_state_dict(m.state_dict())
-            self.assertEqual(m.state_dict(), m2.state_dict())
-            self.assertEqual(m.foo, m2.foo)
-
     def test_load_state_dict_assign_meta(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -423,28 +360,6 @@ class TestLoadStateDict(NNTestCase):
         state_dict['weight'] = torch.empty_like(state_dict['weight'], device='cpu')
         with self.assertWarnsRegex(UserWarning, "for weight: copying from a non-meta parameter in the checkpoint to a meta"):
             m.load_state_dict(state_dict)
-
-    def test_extra_state_missing_set_extra_state(self):
-
-        class MyModule(torch.nn.Module):
-            def get_extra_state(self):
-                return {
-                    'foo': 5
-                }
-
-        m = MyModule()
-        with self.assertRaisesRegex(RuntimeError, 'Unexpected key'):
-            m.load_state_dict(m.state_dict())
-
-    def test_extra_state_missing_get_extra_state(self):
-
-        class MyModule(torch.nn.Module):
-            def set_extra_state(self):
-                pass
-
-        m = MyModule()
-        with self.assertRaisesRegex(RuntimeError, 'Missing key'):
-            m.load_state_dict(m.state_dict())
 
 
 def instantiate_parametrize_with_swap(cls):
