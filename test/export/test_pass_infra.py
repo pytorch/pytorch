@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import unittest
+from typing import List
 
 import torch
 from functorch.experimental import control_flow
@@ -12,12 +13,9 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestPassInfra(TestCase):
     def test_export_pass_base(self) -> None:
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                y = torch.cat([x, x])
-                return torch.ops.aten.tensor_split.sections(y, 2)
-
-        f = Foo()
+        def f(x: torch.Tensor) -> List[torch.Tensor]:
+            y = torch.cat([x, x])
+            return torch.ops.aten.tensor_split.sections(y, 2)
 
         class NullPass(_ExportPassBaseDeprecatedDoNotUse):
             pass

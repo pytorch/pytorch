@@ -9,12 +9,12 @@ namespace torch::inductor {
 AOTIModelContainerRunner::AOTIModelContainerRunner(
     const std::string& model_so_path,
     size_t num_models,
-    const std::string& device_str,
+    bool is_cpu,
     const std::string& cubin_dir) {
   model_so_ = std::make_unique<at::DynamicLibrary>(model_so_path.c_str());
   TORCH_CHECK(model_so_, "Failed to load model: ", model_so_path);
   create_func_ = reinterpret_cast<decltype(create_func_)>(
-      model_so_->sym("AOTInductorModelContainerCreateWithDevice"));
+      model_so_->sym("AOTInductorModelContainerCreate"));
   delete_func_ = reinterpret_cast<decltype(delete_func_)>(
       model_so_->sym("AOTInductorModelContainerDelete"));
   get_num_outputs_func_ = reinterpret_cast<decltype(get_num_outputs_func_)>(
@@ -47,7 +47,7 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
   AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
       &container_handle_,
       num_models,
-      device_str.c_str(),
+      is_cpu,
       cubin_dir.empty() ? nullptr : cubin_dir.c_str()));
 }
 

@@ -1323,10 +1323,6 @@ def disableMkldnn(fn):
     return disable_mkldnn
 
 
-def expectedFailureCPU(fn):
-    return expectedFailure('cpu')(fn)
-
-
 def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
 

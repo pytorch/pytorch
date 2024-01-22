@@ -120,9 +120,10 @@ def to_snake_case(name):
 
 
 def _make_export_case(m, name, configs):
-    if not issubclass(m, torch.nn.Module):
-        raise TypeError("Export case class should be a torch.nn.Module.")
-    m = m()
+    if inspect.isclass(m):
+        if not issubclass(m, torch.nn.Module):
+            raise TypeError("Export case class should be a torch.nn.Module.")
+        m = m()
 
     if "description" not in configs:
         # Fallback to docstring if description is missing.

@@ -15,10 +15,7 @@ from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 
-from .functional_utils import (
-    assert_functional_graph,
-    propagate_input_mutation_stacktraces,
-)
+from .functional_utils import assert_functional_graph
 from .schemas import AOTConfig, SubclassMeta, ViewAndMutationMeta
 from .traced_function_transforms import (
     aot_dispatch_subclass,
@@ -99,7 +96,6 @@ def aot_dispatch_base_graph(
     fw_module.recompile()
 
     copy_count2 = assert_functional_graph(fw_module.graph)
-    propagate_input_mutation_stacktraces(fw_module.graph)
 
     assert copy_count == copy_count2
 

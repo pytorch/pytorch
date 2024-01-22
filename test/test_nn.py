@@ -10189,29 +10189,6 @@ class TestNNDeviceType(NNTestCase):
                     exact_dtype=True
                 )
 
-    @dtypes(torch.bfloat16, torch.half)
-    @precisionOverride({torch.bfloat16: 2e-2, torch.half: 3e-3})
-    def test_masked_softmax_lowp(self, dtype):
-        sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
-        for (B, num_heads, L) in sizes:
-            for dim in [0, 3]:
-                input_lowp = torch.randn((B, num_heads, L, L), dtype=dtype).requires_grad_()
-                input_ref = input_lowp.float().detach().requires_grad_()
-                mask = torch.randint(0, 2, (B, L))
-                mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
-
-                for mask_type in [1, 2]:
-                    res_ref = torch._masked_softmax(input_ref, mask, dim, mask_type)
-                    res = torch._masked_softmax(input_lowp, mask, dim, mask_type)
-                    self.assertEqual(res_ref.to(dtype), res)
-
-                    grad_lowp = torch.randn_like(res_ref).to(dtype=dtype)
-                    grad_ref = grad_lowp.float()
-
-                    res_ref.backward(grad_ref)
-                    res.backward(grad_lowp)
-                    self.assertEqual(input_ref.grad.to(dtype), input_lowp.grad)
-
     def _test_masked_softmax_helper(self, input, dim, mask, mask_type):
         input_ref = input.detach().clone().requires_grad_()
         result = torch._masked_softmax(input, mask, dim, mask_type)

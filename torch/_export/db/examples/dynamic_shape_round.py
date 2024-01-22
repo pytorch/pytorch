@@ -12,13 +12,8 @@ dim0_x = Dim("dim0_x")
     support_level=SupportLevel.NOT_SUPPORTED_YET,
     dynamic_shapes={"x": {0: dim0_x}},
 )
-class DynamicShapeRound(torch.nn.Module):
+def dynamic_shape_round(x):
     """
     Calling round on dynamic shapes is not supported.
     """
-
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        return x[: round(x.shape[0] / 2)]
+    return x[: round(x.shape[0] / 2)]

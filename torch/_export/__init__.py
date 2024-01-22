@@ -55,7 +55,6 @@ from torch.export.graph_signature import (
 )
 from torch.export.dynamic_shapes import (
     Constraint,
-    dims,
     dynamic_dim,
     _process_constraints,
     _process_dynamic_shapes,

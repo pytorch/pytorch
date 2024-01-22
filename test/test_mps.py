@@ -11231,9 +11231,6 @@ class TestConsistency(TestCaseMPS):
         'nextafter',
         'native_layer_norm',
         'nn.functional.layer_norm',
-        'nn.functional.interpolate',
-        'nn.functional.upsample_bilinear',
-        'nn.functional.upsample_nearest',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
