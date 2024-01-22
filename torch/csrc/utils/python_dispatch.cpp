@@ -241,11 +241,99 @@ struct AOTIKernelMetaInfoHash {
   }
 };
 
+enum class IValueType : uint8_t {
+  Tensor,
+  TensorList,
+  OptionalTensorList,
+  Scalar,
+  Invalid,
+};
+
+class UnpackTensorHandler {
+  using HandlerFunc = std::function<
+      bool(const IValue&, std::vector<at::Tensor>&, c10::Device&)>;
+
+ private:
+  std::unordered_map<IValueType, HandlerFunc> handlers_;
+
+ public:
+  UnpackTensorHandler() {
+    handlers_[IValueType::Tensor] = &UnpackTensorHandler::HandleTensor;
+    handlers_[IValueType::TensorList] = &UnpackTensorHandler::HandleTensorList;
+    handlers_[IValueType::OptionalTensorList] =
+        &UnpackTensorHandler::HandleOptionalTensorList;
+    handlers_[IValueType::Scalar] = &UnpackTensorHandler::HandleScalar;
+  }
+
+  bool HandleIValue(
+      const IValue& ivalue,
+      std::vector<at::Tensor>& inputs,
+      c10::Device& device) {
+    IValueType ivalue_type = IValueType::Invalid;
+    if (ivalue.isTensor()) {
+      ivalue_type = IValueType::Tensor;
+    } else if (ivalue.isTensorList()) {
+      ivalue_type = IValueType::TensorList;
+    } else if (ivalue.isOptionalTensorList()) {
+      ivalue_type = IValueType::OptionalTensorList;
+    } else if (ivalue.isScalar()) {
+      ivalue_type = IValueType::Scalar;
+    }
+
+    auto it = handlers_.find(ivalue_type);
+    if (it != handlers_.end()) {
+      return it->second(ivalue, inputs, device);
+    }
+    // Handle unsupported types or add a default handler
+    return false;
+  }
+
+  static bool HandleTensor(
+      const IValue& ivalue,
+      std::vector<at::Tensor>& inputs,
+      c10::Device& device) {
+    inputs.push_back(ivalue.toTensor());
+    return true;
+  }
+
+  static bool HandleTensorList(
+      const IValue& ivalue,
+      std::vector<at::Tensor>& inputs,
+      c10::Device& device) {
+    for (const auto& item : ivalue.toListRef()) {
+      if (!item.isNone()) {
+        inputs.push_back(item.toTensor());
+      }
+    }
+    return true;
+  }
+
+  static bool HandleOptionalTensorList(
+      const IValue& ivalue,
+      std::vector<at::Tensor>& inputs,
+      c10::Device& device) {
+    return HandleTensorList(ivalue, inputs, device);
+  }
+
+  static bool HandleScalar(
+      const IValue& ivalue,
+      std::vector<at::Tensor>& inputs,
+      c10::Device& device) {
+    inputs.push_back(at::scalar_tensor(
+        ivalue.toScalar(),
+        c10::TensorOptions().device(device).dtype(ivalue.toScalar().type())));
+    return true;
+  }
+
+  // Add more static handler functions as needed
+};
+
 class AOTIPythonKernelHolder : public c10::OperatorKernel {
   PythonKernelHolder python_kernel_holder_;
   c10::DispatchKey dispatch_key_;
   c10::string_view op_name_;
   c10::optional<c10::Device> device_opt_;
+  UnpackTensorHandler unpack_tensor_handler_;
 
   using _AOTIModelContainerRunner = torch::inductor::AOTIModelContainerRunner;
   std::unordered_map<
@@ -262,7 +350,8 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
       : python_kernel_holder_(std::move(func), dispatch_key),
         dispatch_key_(dispatch_key),
         op_name_(op_name),
-        device_opt_(c10::nullopt) {
+        device_opt_(c10::nullopt),
+        unpack_tensor_handler_() {
     // TODO: Load all aten kernel according to op_name and dispatch key
     if (dispatch_key_ == c10::DispatchKey::CUDA) {
       device_opt_ = c10::Device(c10::DeviceType::CUDA, 0);
@@ -304,30 +393,13 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
   bool unpackTensors(
       const torch::jit::Stack& stack,
       std::vector<at::Tensor>& inputs) {
-    for (auto& ivalue : stack) {
-      if (ivalue.isTensor()) {
-        inputs.push_back(ivalue.toTensor());
-      } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
-        // NB: use toListRef as it doesn't induce refcount bumps
-        // (toTensorListRef is not a thing)
-        for (const auto& item : ivalue.toListRef()) {
-          if (item.isNone()) {
-            continue;
-          }
-          inputs.push_back(item.toTensor());
-        }
-      } else if (ivalue.isScalar()) {
-        inputs.push_back(at::scalar_tensor(
-            ivalue.toScalar(),
-            c10::TensorOptions()
-                .device(device_opt_.value())
-                .dtype(ivalue.toScalar().type())));
-      } else {
-        // TODO(EIKAN): Support non-tensor parameter
+    for (const auto& ivalue : stack) {
+      if (!unpack_tensor_handler_.HandleIValue(
+              ivalue, inputs, device_opt_.value())) {
+        // TODO: Handle non-tensor parameter
         return false;
       }
     }
-
     return true;
   }
 
