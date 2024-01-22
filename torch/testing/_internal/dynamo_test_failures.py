@@ -3161,7 +3161,6 @@ dynamo_expected_failures = {
     "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_inf_mode_functional_op",  # test_autograd
     "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_normal_mode_functional_op",  # test_autograd
     "TestAutogradInferenceMode.test_inference_mode_inf_tensor_in_inf_mode_inplace_op",  # test_autograd
-    "TestMultithreadAutograd.test_set_multithreading_enabled_as_context_manager_and_function",  # test_autograd
     "TestAutogradDeviceTypeCPU.test_scatter_index_reduce_prod_gradgrad_error_cpu",  # test_autograd
     "TestAutograd.test_current_graph_task_execution_order",  # test_autograd
     "TestAutograd.test_nested_anomaly_detect_nan",  # test_autograd
@@ -3614,7 +3613,6 @@ dynamo_expected_failures = {
     "TestCustomOp.test_impl_meta",  # test_custom_ops
     "TestCustomOp.test_impl_invalid_devices",  # test_custom_ops
     "TestCustomOp.test_new_data_dependent_symint",  # test_custom_ops
-    "TestCustomOpTestingCPU.test_missing_abstract_impl_cpu",  # test_custom_ops
     "TestCustomOp.test_define_with_tags_list",  # test_custom_ops
     "TestCustomOp.test_backward_tensorlist_input_requires_list_grads",  # test_custom_ops
     "TestCustomOp.test_not_implemented_error",  # test_custom_ops
