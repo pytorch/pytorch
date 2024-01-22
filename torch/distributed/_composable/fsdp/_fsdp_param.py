@@ -75,6 +75,13 @@ class FSDPParam:
     _sharded_param_data: torch.Tensor  # 1D
     sharded_param: nn.Parameter  # ND
     _unsharded_param: nn.Parameter  # ND
+    # For splitting autograd-computed gradient
+    unsharded_chunk_numels: List[int]
+    # For splitting reduce-scatter input: the next two lists have N elements
+    # for world size N, where each inner list has 1 element if pure or no
+    # padding or 2 elements if partial padding
+    padded_unsharded_chunk_numels: List[List[int]]
+    is_padding_mask: List[List[bool]]
     _global_placements: Tuple[Placement, ...]
     _global_size: torch.Size
     _global_stride: Tuple[int, ...]
@@ -215,6 +222,36 @@ class FSDPParam:
             )
         self._unsharded_param = nn.Parameter(unsharded_param)
         self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
+        # Compute some additional metadata to use `torch.split` in the
+        # reduce-scatter copy-in
+        self.padded_unsharded_chunk_numels: List[List[int]] = []
+        self.is_padding_mask: List[List[bool]] = []
+        self.unsharded_chunk_numels = []
+        unsharded_param_tensor = (
+            cast(DTensor, unsharded_param)._local_tensor
+            if self.is_dtensor
+            else unsharded_param
+        )
+        chunks = _chunk_with_empty(unsharded_param_tensor, world_size, dim=0)
+        padded_chunks = torch.chunk(padded_unsharded_param, world_size, dim=0)
+        padded_chunk_numel = padded_chunks[0].numel()
+        for chunk_idx, chunk in enumerate(chunks):
+            chunk_numel = chunk.numel()
+            self.unsharded_chunk_numels.append(chunk_numel)
+            if chunk_numel != padded_chunk_numel:
+                if chunk_numel == 0:  # pure padding
+                    self.padded_unsharded_chunk_numels.append([padded_chunk_numel])
+                    self.is_padding_mask.append([True])
+                else:  # partial padding
+                    padding_numel = (
+                        padded_chunks[0].size(0) - chunk.size(0)
+                    ) * padded_chunks[0][0].numel()
+                    numels = [chunk_numel, padding_numel]
+                    self.padded_unsharded_chunk_numels.append(numels)
+                    self.is_padding_mask.append([False, True])
+            else:  # no padding
+                self.padded_unsharded_chunk_numels.append([chunk_numel])
+                self.is_padding_mask.append([False])
 
     def to_sharded(self) -> None:
         self._setattr_on_modules(self.sharded_param)

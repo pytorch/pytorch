@@ -1,8 +1,13 @@
-from typing import List, NamedTuple, Optional
+from typing import List, NamedTuple, Optional, Tuple
 
 import torch
 import torch.distributed as dist
 from torch.utils._contextlib import _DecoratorContextManager
+from ._fsdp_common import (
+    _get_dim0_padded_size,
+    _raise_assert_with_print,
+    _to_dtype_if_needed,
+)
 
 from ._fsdp_param import FSDPParam
 
@@ -103,6 +108,129 @@ def foreach_all_gather_copy_out(
     splits = torch.split(all_gather_output, all_gather_input_numels, dim=1)
     with _unsafe_preserve_version_counters(out):
         torch._foreach_copy_(out, splits)  # one `copy_` per parameter
+
+
+@torch.no_grad()
+def foreach_reduce_scatter(
+    fsdp_params: List[FSDPParam],
+    unsharded_grads: List[torch.Tensor],
+    group: dist.ProcessGroup,
+    reduce_scatter_stream: torch.cuda.Stream,
+    orig_dtype: torch.dtype,
+    reduce_dtype: Optional[torch.dtype],
+    device: torch.device,
+    predivide_factor: float,
+    postdivide_factor: float,
+) -> torch.cuda.Event:
+    """
+    Args:
+        unsharded_grads (List[torch.Tensor]): This list owns the references to
+            the unsharded gradients computed by autograd, so clearing this list
+            frees the gradients.
+    """
+    grad_dtypes = {grad.dtype for grad in unsharded_grads}
+    if len(grad_dtypes) != 1:
+        # Check this at runtime since it could be a real runtime error if e.g.
+        # fp8 weights do not produce the correct higher precision gradients
+        _raise_assert_with_print(
+            f"FSDP reduce-scatter expects uniform gradient dtype but got {grad_dtypes}"
+        )
+    grad_dtype = unsharded_grads[0].dtype
+    reduce_dtype = reduce_dtype or grad_dtype
+    world_size = group.size()
+    padded_unsharded_sizes = tuple(
+        _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
+    )
+    reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
+    reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
+    current_stream = torch.cuda.current_stream()
+    reduce_scatter_stream.wait_stream(current_stream)
+    with torch.cuda.stream(reduce_scatter_stream):
+        reduce_scatter_input = torch.empty(
+            (reduce_scatter_input_numel,), dtype=reduce_dtype, device=device
+        )
+        foreach_reduce_scatter_copy_in(
+            fsdp_params, unsharded_grads, reduce_scatter_input, world_size
+        )
+        _div_if_needed(reduce_scatter_input, predivide_factor)
+        # Record to mark the end of the reduce-scatter copy-in in the RS stream
+        copy_in_event = torch.cuda.Event()
+        copy_in_event.record()
+        reduce_scatter_output = torch.empty(
+            (reduce_scatter_output_numel,), dtype=reduce_dtype, device=device
+        )
+        dist.reduce_scatter_tensor(
+            output=reduce_scatter_output, input=reduce_scatter_input, group=group
+        )
+        _div_if_needed(reduce_scatter_output, postdivide_factor)
+        reduce_scatter_output = _to_dtype_if_needed(reduce_scatter_output, orig_dtype)
+        # - View out and accumulate
+        flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
+        for padded_unsharded_size, fsdp_param in zip(
+            padded_unsharded_sizes, fsdp_params
+        ):
+            padded_sharded_numel = padded_unsharded_size.numel() // world_size
+            sharded_numel = fsdp_param.sharded_size.numel()
+            new_sharded_grad = reduce_scatter_output[
+                flat_grad_offset : flat_grad_offset + sharded_numel
+            ].view(fsdp_param.sharded_size)
+            to_accumulate_grad = fsdp_param.sharded_param.grad is not None
+            new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(new_sharded_grad)
+            if to_accumulate_grad:
+                fsdp_param.sharded_param.grad += new_sharded_dtensor_grad
+            elif new_sharded_dtensor_grad._local_tensor.numel() > 0:
+                fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
+            flat_grad_offset += padded_sharded_numel
+        reduce_scatter_view_out_event = torch.cuda.Event()
+        reduce_scatter_view_out_event.record()
+    # Only after the copy-in finishes can we free the gradients, which were
+    # computed in the default stream
+    current_stream.wait_event(copy_in_event)
+    unsharded_grads.clear()
+    # The RS output is allocated in the RS stream and used in the default
+    # stream (for optimizer). To ensure its memory is not reused for later
+    # RSs, we do not need extra synchronization since the sharded parameters
+    # hold refs through the end of backward.
+    return reduce_scatter_view_out_event
+
+
+def foreach_reduce_scatter_copy_in(
+    fsdp_params: List[FSDPParam],
+    unsharded_grads: List[torch.Tensor],
+    reduce_scatter_input: torch.Tensor,
+    world_size: int,
+) -> None:
+    # Use `torch.split` to reduce CPU overhead since it pushes for loops of
+    # slices into C++ only
+    copy_dests: List[torch.Tensor] = []  # 1D
+    copy_srcs: List[torch.Tensor] = []  # 1D
+    split_sizes: List[int] = []
+    is_padding_mask: List[bool] = []
+    for rank in range(world_size):
+        for fsdp_param in fsdp_params:
+            split_sizes.extend(fsdp_param.padded_unsharded_chunk_numels[rank])
+            is_padding_mask.extend(fsdp_param.is_padding_mask[rank])
+    splits = torch.split(reduce_scatter_input, split_sizes, dim=0)
+    all_flat_grad_splits: List[Tuple[torch.Tensor, ...]] = []
+    for fsdp_param, grad in zip(fsdp_params, unsharded_grads):
+        # Flatten once per gradient to reduce number of `view` calls
+        flat_grad_splits = torch.split(grad.view(-1), fsdp_param.unsharded_chunk_numels)
+        all_flat_grad_splits.append(flat_grad_splits)
+    for rank in range(world_size):
+        for fsdp_param_idx in range(len(fsdp_params)):
+            if (split := all_flat_grad_splits[fsdp_param_idx][rank]).numel() > 0:
+                copy_srcs.append(split)
+            # Else pure padding
+    for is_padding, split in zip(is_padding_mask, splits):
+        if is_padding:
+            continue
+        copy_dests.append(split)
+    torch._foreach_copy_(copy_dests, copy_srcs)
+
+
+def _div_if_needed(tensor: torch.Tensor, div_factor: float) -> None:
+    if div_factor > 1:
+        tensor.div_(div_factor)
 
 
 class _unsafe_preserve_version_counters(_DecoratorContextManager):

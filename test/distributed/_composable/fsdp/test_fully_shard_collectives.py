@@ -10,6 +10,7 @@ import torch.nn as nn
 from torch.distributed._composable.fsdp._fsdp_collectives import (
     foreach_all_gather,
     foreach_all_gather_copy_out,
+    foreach_reduce_scatter,
 )
 from torch.distributed._composable.fsdp._fsdp_common import (
     _chunk_with_empty,
@@ -33,7 +34,8 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
         return torch.device("cuda:0")
 
     def _get_param_sizes(self) -> List[torch.Size]:
-        # For world size 128, the all-gather testing requires <0.22 GB
+        # For world size 128, the fp32 all-gather and reduce-scatter testing
+        # requires ~0.22 GB
         return [
             torch.Size([17, 257]),
             torch.Size([17]),
@@ -143,6 +145,68 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
             self.assertTrue(isinstance(param, torch.Tensor))
             self.assertTrue(isinstance(param, nn.Parameter))
             self.assertEqual(param, orig_param.to(param.dtype))
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_reduce_scatter_fp32(self):
+        param_sizes = self._get_param_sizes()
+        default_stream = torch.cuda.current_stream()
+        stream = torch.cuda.Stream()
+        for reduce_scatter_stream in (default_stream, stream):
+            self._test_reduce_scatter(
+                param_sizes,
+                reduce_scatter_stream=reduce_scatter_stream,
+                reduce_scatter_dtype=torch.float32,
+            )
+
+    def _test_reduce_scatter(
+        self,
+        param_sizes: List[torch.Size],
+        reduce_scatter_stream: torch.cuda.Stream,
+        reduce_scatter_dtype: torch.dtype,
+    ):
+        # - Set up the reference parameters and construct the FSDP group
+        orig_params = self._init_params(param_sizes)
+        fsdp_param_group = self._init_fsdp_param_group(orig_params)
+        fsdp_params = fsdp_param_group.fsdp_params
+
+        # - Run one unshard to initialize metadata
+        fsdp_param_group.unshard()
+        fsdp_param_group.wait_for_unshard()
+        fsdp_param_group.reshard()
+
+        # - Run the foreach reduce-scatter (including copy-in and view-out)
+        torch.manual_seed(42)
+        unsharded_grads = [torch.ones_like(param) * self.rank for param in orig_params]
+        group = fsdp_param_group.mesh_info.shard_process_group
+        self.assertEqual(group.size(), self.world_size)
+        view_out_event = foreach_reduce_scatter(
+            fsdp_params,
+            unsharded_grads,
+            group,
+            reduce_scatter_stream,
+            orig_dtype=orig_params[0].dtype,
+            reduce_dtype=reduce_scatter_dtype,
+            device=self.device,
+            predivide_factor=fsdp_param_group._grad_predivide_factor,
+            postdivide_factor=fsdp_param_group._grad_postdivide_factor,
+        )
+        torch.cuda.current_stream().wait_event(view_out_event)
+
+        # - Check reduce-scatter correctness
+        reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
+        for grad in reduced_grads:
+            dist.all_reduce(grad, group=group)
+            grad /= self.world_size
+        for fsdp_param, reduced_grad in zip(fsdp_params, reduced_grads):
+            sharded_grad = fsdp_param.sharded_param.grad
+            reduced_grad_chunk = _chunk_with_empty(
+                reduced_grad, self.world_size, dim=0
+            )[self.rank]
+            if reduced_grad_chunk.numel() > 0:
+                self.assertIsInstance(sharded_grad, DTensor)
+                self.assertEqual(sharded_grad._local_tensor, reduced_grad_chunk)
+            else:  # pure padding
+                self.assertIsNone(sharded_grad)
 
 
 if __name__ == "__main__":
