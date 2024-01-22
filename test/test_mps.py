@@ -3986,6 +3986,50 @@ class TestMPS(TestCaseMPS):
         helper(torch.randint(2, (2, 1)), 1, True, True)
         helper(torch.randint(2, (2, 0)), 1, True, True)
 
+    def test_unique_dim(self):
+        def helper(x, dim, sorted, return_inverse, return_counts):
+            cpu_x = x
+            x = cpu_x.detach().clone().to("mps")
+
+            result_cpu = torch.unique(
+                cpu_x, dim=dim, sorted=sorted, return_inverse=return_inverse, return_counts=return_counts
+            )
+            result = torch.unique(x, dim=dim, sorted=sorted, return_inverse=return_inverse, return_counts=return_counts)
+
+            try:
+                self.assertEqual(result, result_cpu)
+            except AssertionError:
+                print("x:\n", cpu_x)
+                print("result:\n", result)
+                print("result_cpu:\n", result_cpu)
+                raise
+
+        dtype = torch.float32
+
+        x = torch.tensor(
+            [
+                [
+                    [1.0, 1.0],
+                    [0.0, 1.0],
+                    [2.0, 1.0],
+                    [0.0, 1.0]
+                ],
+                [
+                    [1.0, 1.0],
+                    [0.0, 1.0],
+                    [2.0, 1.0],
+                    [0.0, 1.0]
+                ]
+            ],
+            dtype=dtype,
+        )
+
+        x_empty = torch.empty(5, 0, dtype=dtype)
+        helper(x_empty, 1, True, True, True)
+        helper(x, 0, True, True, True)
+        helper(x, 1, True, True, True)
+        helper(x, 2, True, True, True)
+
     # See https://github.com/pytorch/pytorch/issues/85675
     def test_cat_non_contiguous(self):
         def rotate_subset(data, dim):

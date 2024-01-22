@@ -6193,6 +6193,7 @@
   dispatch:
     CPU: unique_dim_cpu
     CUDA: unique_dim_cuda
+    MPS: unique_dim_mps
   tags: dynamic_output_shape
   autogen: unique_dim.out
 
