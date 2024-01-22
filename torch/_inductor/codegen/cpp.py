@@ -1467,6 +1467,7 @@ class CppKernel(Kernel):
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
         self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
+        self.max_threads = None
 
     def _gen_parallel_reduction_buffers(
         self,
@@ -1476,18 +1477,18 @@ class CppKernel(Kernel):
         dtype,
         value,
         gen_store=True,
-        gen_max_threads=True,
         is_vec=False,
     ):
-        if gen_max_threads:
+        if not self.max_threads:
             self.parallel_reduction_prefix.writeline(
                 "int max_threads = omp_get_max_threads();"
             )
+            self.max_threads = "max_threads"
         reduction_combine_fn = reduction_combine_vec if is_vec else reduction_combine
         reduction_init_fn = reduction_init_vec if is_vec else reduction_init
         acc_local = f"{acc}_local"
         num_threads = (
-            "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
+            self.max_threads if config.cpp.dynamic_threads else parallel_num_threads()
         )
         acc_per_thread = f"{acc}_arr[{num_threads}]"
         acc_local_in_array = acc_per_thread.replace(f"[{num_threads}]", "[tid]")
@@ -2179,7 +2180,6 @@ class CppVecKernel(CppKernel):
             dtype,
             value,
             gen_store=False,
-            gen_max_threads=True,
             is_vec=False,
         )
         self._gen_parallel_reduction_buffers(
@@ -2189,7 +2189,6 @@ class CppVecKernel(CppKernel):
             dtype,
             value,
             gen_store=True,
-            gen_max_threads=False,
             is_vec=True,
         )
         tmpvar: Union[str, CSEVariable]
