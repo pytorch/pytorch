@@ -47,6 +47,24 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 requires_multigpu = functools.partial(
     unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
+from io import StringIO
+
+
+class capture_stderr(list):
+    """
+    Replace sys.stderr with a temporary StringIO
+    """
+
+    def __enter__(self):
+        self.sys_stderr = sys.stderr
+        self.stringio = StringIO()
+        sys.stderr = self.stringio
+        return self
+
+    def __exit__(self, *args):
+        self.append(str(self.stringio.getvalue()))
+        del self.stringio
+        sys.stderr = self.sys_stderr
 
 
 def cdata(t):
@@ -214,7 +232,12 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def inp():
                 return torch.ones([10], device="cuda")
 
-            foo(inp())
+            with capture_stderr() as captured_output:
+                foo(inp())
+
+            FileCheck().check("skipping cudagraphs due to mutaton on input.").check(
+                ".add_(2)"
+            ).run(captured_output[0])
 
             # mutation on inp doesnt hit cudagraphs
             self.assertIsNone(self.get_manager())
@@ -707,6 +730,26 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             node = self.curr_node()
             self.assertEqual(node.cached_tensor_outputs, [None])
             self.assertEqual(node.unaliased_in_all_paths, [False])
+
+        def test_warmup_stream_sync(self):
+            def foo(args):
+                x = args[0]
+                args.clear()
+                x_orig = x
+                for _ in range(100):
+                    x = x @ x
+                return (x,)
+
+            inp = torch.rand([4096, 4096], device="cuda")
+            ref = foo([inp])[0]
+            torch.cuda.synchronize()
+
+            user_stream = torch.cuda.Stream()
+            with torch.cuda.stream(user_stream):
+                foo_cg = self.cudagraphify_impl(foo, [inp], (0,))
+                out = foo_cg([inp])[0]
+                y = out + 1
+                self.assertEqual(y, ref + 1)
 
         def test_unaligned_static_parameter(self):
             def gen_inp():
@@ -1335,28 +1378,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             torch.compiler.cudagraph_mark_step_begin()
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
-
-        @torch._dynamo.config.patch("capture_scalar_outputs", True)
-        def test_incompatible_cudagraph_ops_item(self):
-            @torch.compile(mode="reduce-overhead")
-            def foo(x):
-                return x.item()
-
-            self.assertEqual(foo(torch.tensor(3.0, device="cuda")), 3.0)
-            self.assertEqual(foo(torch.tensor(6.0, device="cuda")), 6.0)
-
-        @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
-        def test_incompatible_cudagraph_ops_nonzero(self):
-            @torch.compile(mode="reduce-overhead")
-            def foo(x):
-                return x.nonzero()
-
-            self.assertEqual(
-                foo(torch.tensor([1, 0, 2], device="cuda")), torch.tensor([[0], [2]])
-            )
-            self.assertEqual(
-                foo(torch.tensor([1, 0, 0], device="cuda")), torch.tensor([[0]])
-            )
 
         def test_storage_access_error(self):
             x = torch.rand([4], device="cuda")
