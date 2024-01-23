@@ -98,17 +98,6 @@ def uninteresting_files():
 CLOSURE_VARS = {
     "___check_type_id": check_type_id,
     "___check_obj_id": check_obj_id,
-    "___current_backend": (
-        lambda: torch._dynamo.eval_frame.guarded_backend_cache.current_backend
-    ),
-    "___lookup_backend": (
-        lambda backend_obj_id: torch._dynamo.eval_frame.cached_backends.get(
-            backend_obj_id, None
-        )
-    ),
-    "___skip_backend_check": (
-        lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
-    ),
     "___odict_getitem": collections.OrderedDict.__getitem__,
     "___key_to_id": key_to_id,
     "___dict_version": dict_version,
@@ -597,12 +586,13 @@ class GuardBuilder(GuardBuilderBase):
     def BACKEND_MATCH(self, guard: Guard):
         """Guard on backend matching based on id of current_backend"""
         assert guard.source is GuardSource.GLOBAL
+        assert (
+            torch._dynamo.eval_frame.guarded_backend_cache.current_backend is not None
+        )
         backend_id = (
             f"{id(torch._dynamo.eval_frame.guarded_backend_cache.current_backend)}"
         )
-        code = [
-            f"(___skip_backend_check() or ___current_backend() == ___lookup_backend({backend_id}))"
-        ]
+        code = [f"___check_current_backend({backend_id})"]
         self._produce_guard_code(guard, code)
 
     def SHAPE_ENV(self, guard: Guard):
@@ -1162,6 +1152,7 @@ class CheckFunctionManager:
             "___check_tensors": check_tensors_fn,
             "___check_tensors_verbose": check_tensors_verbose_fn,
             "___check_global_state": global_state.check,
+            "___check_current_backend": torch._dynamo.eval_frame.check_current_backend,
             "tensor_check_names": tensor_check_names,
             **SYMPY_INTERP,
             **CLOSURE_VARS,
