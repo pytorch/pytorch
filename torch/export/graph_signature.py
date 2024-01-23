@@ -5,6 +5,7 @@ from typing import Collection, Dict, List, Mapping, Optional, Set, Tuple, Union
 
 __all__ = [
     "ConstantArgument",
+    "CustomObjArgument",
     "ExportBackwardSignature",
     "ExportGraphSignature",
     "InputKind",
@@ -28,13 +29,13 @@ class SymIntArgument:
 
 
 @dataclasses.dataclass
-class ConstantArgument:
-    value: Union[int, float, bool, None]
+class CustomObjArgument:
+    name: str
 
 
 @dataclasses.dataclass
-class CustomObjArgument:
-    name: str
+class ConstantArgument:
+    value: Union[int, float, bool, None]
 
 
 ArgumentSpec = Union[
@@ -276,6 +277,16 @@ class ExportGraphSignature:
             if isinstance(s.target, str)
         ]
 
+    @property
+    def lifted_custom_objs(self) -> Collection[str]:
+        # TODO Make this tuple.
+        return [
+            s.target
+            for s in self.input_specs
+            if s.kind == InputKind.CUSTOM_OBJ
+            if isinstance(s.target, str)
+        ]
+
     # Graph node names of pytree-flattened inputs of original program
     @property
     def user_inputs(self) -> Collection[str]:
@@ -348,6 +359,16 @@ class ExportGraphSignature:
             for s in self.input_specs
             if s.kind == InputKind.CONSTANT_TENSOR
             and isinstance(s.arg, TensorArgument)
+            and isinstance(s.target, str)
+        }
+
+    @property
+    def inputs_to_lifted_custom_objs(self) -> Mapping[str, str]:
+        return {
+            s.arg.name: s.target
+            for s in self.input_specs
+            if s.kind == InputKind.CUSTOM_OBJ
+            and isinstance(s.arg, CustomObjArgument)
             and isinstance(s.target, str)
         }
 

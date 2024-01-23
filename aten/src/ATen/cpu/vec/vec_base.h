@@ -31,7 +31,6 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/copysign.h>
-#include <c10/util/math_compat.h>
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
