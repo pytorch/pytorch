@@ -1849,7 +1849,6 @@ dynamo_expected_failures = {
     "TestSubclass.test_param_invariants_non_wrapper_tensor_tensor_requires_grad_True",  # test_subclass
     "TestSubclass.test_parametrization_non_wrapper_tensor_leave_parametrized_False",  # test_subclass
     "TestSubclass.test_type_propagation_non_wrapper_tensor_as_param_False",  # test_subclass
-    "TestSubclass.test_module_optimization_diag_tensor_below",  # test_subclass
     "TestSubclass.test_parametrization_base_tensor_leave_parametrized_True",  # test_subclass
     "TestSubclass.test_type_propagation_non_wrapper_tensor_as_param_True",  # test_subclass
     "TestSubclass.test_parametrization_base_tensor_leave_parametrized_False",  # test_subclass
