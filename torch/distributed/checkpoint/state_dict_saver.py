@@ -126,6 +126,8 @@ def save(
                     "`checkpoint_id` must be specificed if storage_writer is None."
                 )
             # TODO: automatically decide whether to use FSSpecFileSystem
+            # https://github.com/pytorch/pytorch/issues/118033 and
+            # https://github.com/pytorch/pytorch/issues/118036
             storage_writer = FileSystemWriter(checkpoint_id)
 
         if not checkpoint_id:
