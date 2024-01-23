@@ -59,10 +59,10 @@ inline void tinygemm_kernel(
   };
   compile_time_for<ROWS * COLS>::op(loadc);
 
-  auto compute = [&, COLS](auto i, int k) {
+  auto compute = [&](auto i, int k) {
     constexpr int row = i / COLS;
     constexpr int col = i % COLS;
-  
+
     if constexpr (col == 0) {
       __m256i a16 = _mm256_load_si256((__m256i*)(A + row * lda + k));
       if (k + PREFETCH_SIZE_K < K) {
@@ -89,7 +89,7 @@ inline void tinygemm_kernel(
     compile_time_for<ROWS * COLS>::op(compute, k);
   }
 
-  auto storec = [&, ROWS, COLS](auto i) {
+  auto storec = [&](auto i) {
     constexpr int row = i / COLS;
     constexpr int col = i % COLS;
     C[row * ldc + col] = static_cast<BFloat16>(_mm512_reduce_add_ps(vc[i]));
