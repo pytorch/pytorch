@@ -97,9 +97,9 @@ class GuardManager:
     def __init__(self):
         self.root = RootGuardManager()
 
-    def pretty_print_leaf_guard_str(self, prefix, s, guard_type="Guard"):
+    def pretty_print_leaf_guard_str(self, prefix, s):
         guards = s.split("\n")
-        guards = [prefix + guard_type + ": " + s for s in guards]
+        guards = [prefix + s for s in guards]
         return "\n".join(guards) + "\n"
 
     def _debug_print(self, node, prefix):
@@ -118,7 +118,7 @@ class GuardManager:
         epilogue_guards = ""
         for guard in self.root.get_epilogue_lambda_guards():
             epilogue_guards += self.pretty_print_leaf_guard_str(
-                "|  ", guard.repr(), "EpilogueGuard"
+                "|  ", guard.repr()
             )
         return first_line + subtree + epilogue_guards
 
@@ -343,6 +343,8 @@ class GuardBuilder(GuardBuilderBase):
                 return root_guard_mananger.globals_dict_manager(
                     self.scope["G"]
                 ).dict_get_item_manager(source.global_name)
+            elif isinstance(source, TypeSource):
+                return build(source.base).type_manager()
             elif isinstance(source, NNModuleSource):
                 return build(source.base)
             elif isinstance(source, AttrSource):
@@ -387,6 +389,7 @@ class GuardBuilder(GuardBuilderBase):
         obj_id = self.id_ref(t)
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._produce_guard_code(guard, [code])
+        self.get_guard_manager(guard).add_type_match_guard(obj_id, self.get_guard_str(guard, [code]))
 
     def DICT_VERSION(self, guard: Guard):
         # ___check_dict_version is same as `dict_version(x) == y`
@@ -614,10 +617,14 @@ class GuardBuilder(GuardBuilderBase):
         t = type(value)
 
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+        self.TYPE_MATCH(guard)
         code.append(f"len({ref}) == {len(value)}")
 
         self._produce_guard_code(guard, code)
+
+        self.get_guard_manager(guard).add_length_check_guard(
+            len(value), self.get_guard_str(guard, code)
+        )
 
     def TUPLE_ITERATOR_LEN(self, guard):
         ref = self.arg_ref(guard)
@@ -1139,6 +1146,7 @@ class CheckFunctionManager:
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
         # Check that the check_fn is True for this frame
         assert self.check_fn(output_graph.local_scope)
+        # breakpoint()
         print(self.guard_manager)
         debug_guard_check = self.guard_manager.root.check_verbose(
             output_graph.local_scope
