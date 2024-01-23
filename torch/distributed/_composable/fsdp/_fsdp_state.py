@@ -85,9 +85,7 @@ class FSDPState(_State):
         self._all_gather_copy_in_stream = torch.cuda.Stream(priority=high_priority)
         self._all_gather_stream = torch.cuda.Stream(priority=high_priority)
         self._all_gather_state = AllGatherStateHolder()
-        for state_ref in self._all_state_refs:
-            state = state_ref()
-            assert state is not None, "FSDPState deallocated"
+        for state in self._all_states:
             if fsdp_param_group := state._fsdp_param_group:
                 fsdp_param_group.default_stream = self._default_stream
                 fsdp_param_group.all_gather_copy_in_stream = (
