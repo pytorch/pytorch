@@ -1582,6 +1582,9 @@ void ProcessGroupNCCL::watchdogHandler() {
         // completed.
         ++it;
       }
+      // Increment heartbeat after each work processed,
+      // in case processing is slowed down (but not hung) by cuda api contention
+      heartbeat_++;
     }
     // process a request to dump the trace. only PG uid 0 will respond to dump
     // requests, but this is fine since all PG's feed into the same flight
