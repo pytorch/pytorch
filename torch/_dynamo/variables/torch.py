@@ -118,7 +118,7 @@ def should_decompose_torch_op(fn):
     )
 
 
-def decompose_and_inline_torch_op(tx, op, args, kwargs):
+def decompose_and_inline_function_with_makefx(tx, op, args, kwargs):
     import inspect
 
     from functorch import make_fx
@@ -158,18 +158,26 @@ def decompose_and_inline_torch_op(tx, op, args, kwargs):
             # no signature found, just return an empty dict
             return args
 
+        keys = signature.parameters.keys()
+        # function takes `args` and `kwargs`, below method won't be able to
+        # tell if it has any default arguments. Return args directly.
+        if len(keys) == 2 and "args" in keys and "kwargs" in keys:
+            return args
+
         current_i = 0
         res = []
         for _, v in signature.parameters.items():
-            if v.default is inspect.Parameter.empty:
-                # this arg does not have default value, expect user pass
-                # it in as an arg
+            if v.default is inspect.Parameter.empty or current_i < len(args):
+                # this arg does not have default value or caller provided the args.
                 assert current_i < len(args)
                 res.append(args[current_i])
                 current_i += 1
             else:
                 # use default value
                 res.append(v.default)
+
+        # All args should be used at this point.
+        assert current_i == len(args)
         return res
 
     # make_fx requires caller to pass into all args including
@@ -698,7 +706,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             from .builder import SourcelessBuilder
 
             if should_decompose_torch_op(fn_):
-                tensor_variable = decompose_and_inline_torch_op(tx, fn_, args, kwargs)
+                tensor_variable = decompose_and_inline_function_with_makefx(
+                    tx, fn_, args, kwargs
+                )
             else:
                 tensor_variable = wrap_fx_proxy(
                     tx=tx,
@@ -959,7 +969,7 @@ class TorchVariable(BaseTorchVariable):
         # We need to decompose and inline the cross_entropy_loss so intermediate tensor
         # saved can be captured by dynamo.
         def fake_cross_entropy_loss_decompose(input, target):
-            return decompose_and_inline_torch_op(
+            return decompose_and_inline_function_with_makefx(
                 tx,
                 torch.nn.functional.cross_entropy,
                 [

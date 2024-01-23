@@ -382,18 +382,12 @@ class NNModuleVariable(VariableTracker):
             return self.call_function(tx, args, kwargs)
         elif name == "forward":
             if config.use_single_step_graph:
-                from functorch import make_fx
-
                 import torch.utils._pytree as pytree
-                from torch._dispatch.python import enable_python_dispatcher
                 from torch._functorch._aot_autograd.traced_function_transforms import (
                     create_functional_call,
                 )
-                from ..utils import get_fake_value
-                from .builder import SourcelessBuilder
                 from .builtin import BuiltinVariable
-                from .inline_helper import dummy_user_function_to_inline_gm
-                from .lists import BaseListVariable
+                from .torch import decompose_and_inline_function_with_makefx
 
                 # For single step graph we want to use make_fx to extract the fx graph
                 # representing the fwd and inline that fx graph.
@@ -426,46 +420,10 @@ class NNModuleVariable(VariableTracker):
                         )
                     )
 
-                # Convert args to FakeTensors for make_fx.
-                fake_value_args = []
-                for arg in args:
-                    if type(arg.as_proxy()) is torch.fx.proxy.Proxy:
-                        fake_value_args.append(get_fake_value(arg.as_proxy().node, tx))
-                    else:
-                        # mostly handle tuple and scalar
-                        fake_value_args.append(arg.as_proxy())
-
-                # Convert parameters to FakeTensors for make_fx.
-                fake_value_params = []
-                for arg in self_params_as_vt:
-                    if type(arg.as_proxy()) is torch.fx.proxy.Proxy:
-                        fake_value_params.append(
-                            get_fake_value(arg.as_proxy().node, tx)
-                        )
-                    else:
-                        # mostly handle tuple and scalar
-                        fake_value_params.append(arg.as_proxy())
-
-                # TODO(JackCaoG): Handle kwargs.
-                complete_fake_value_args = fake_value_params + fake_value_args
-                with enable_python_dispatcher():
-                    fx_g = make_fx(functional_call, pre_dispatch=True)(
-                        *complete_fake_value_args
-                    )
-
-                # Inline the FX above.
+                # stich the args togther and pass it to decompose_and_inline_function_with_makefx
                 complete_tensor_variable_args = self_params_as_vt + args
-                user_fn_variable = SourcelessBuilder()(
-                    tx, dummy_user_function_to_inline_gm
-                )
-                gm_variable = SourcelessBuilder()(tx, fx_g)
-                cls = BaseListVariable.cls_for(list)
-                input_list_variable = cls(
-                    complete_tensor_variable_args,
-                    mutable_local=MutableLocal(),
-                )
-                res = tx.inline_user_function_return(
-                    user_fn_variable, (gm_variable, input_list_variable), {}
+                res = decompose_and_inline_function_with_makefx(
+                    tx, functional_call, complete_tensor_variable_args, kwargs
                 )
 
                 return res
