@@ -85,7 +85,7 @@ class _Checkpointer:
         """
         return saver._async_save(
             state_dict,
-            self.storage_writer,
+            storage_writer=self.storage_writer,
             process_group=self.process_group,
             coordinator_rank=self.coordinator_rank,
             no_dist=self.no_dist,
