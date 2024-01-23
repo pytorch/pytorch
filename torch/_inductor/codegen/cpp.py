@@ -66,6 +66,8 @@ DTYPE_TO_CPP = {
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
     torch.complex64: "complex64",
+    torch.float8_e4m3fn: "float8_e4m3fn",
+    torch.float8_e5m2: "float8_e5m2",
 }
 
 DTYPE_TO_ATEN = {
@@ -857,7 +859,7 @@ class CppOverrides(OpOverrides):
         elif bug == "accuracy":
             return f"{x} + decltype({x})(1)"
         elif bug is None:
-            return f"{x} * ({x}>0)"
+            return f"std::max({x}, decltype({x})(0))"
         else:
             raise AssertionError(
                 f"unrecognized config cpp.inject_relu_bug_TESTING_ONLY = {bug!r}"
