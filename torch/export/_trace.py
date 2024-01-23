@@ -28,7 +28,6 @@ from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
-    free_unbacked_symbols,
     GuardOnDataDependentSymNode,
     ShapeEnv,
 )
@@ -803,7 +802,7 @@ def _export(
     gm.meta["inline_constraints"] = {
         k: v
         for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
-        if free_unbacked_symbols(k)
+        if re.match(r"^[if]\d+$", str(k))
     }
 
     num_lifted = next(
