@@ -8,6 +8,7 @@ import io
 import itertools
 import warnings
 import pickle
+import re
 from copy import deepcopy
 from itertools import product
 from functools import partial
@@ -35,7 +36,8 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, IS_WINDOWS, gcIfJetson, set_default_dtype
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION, \
+    PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
@@ -51,7 +53,7 @@ from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, g
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
-
+from torch.testing._internal.common_mkldnn import bf32_on_and_off
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
@@ -3717,6 +3719,19 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         rnn.cuda(device)
         hx = torch.randn(2, 4, 20).cuda(device)
         output = rnn(input, hx)
+
+    def test_cudnn_forward_exception(self):
+        rnns = [
+            (nn.LSTM(10, 20, batch_first=True), (torch.zeros(1, 2, 19), torch.zeros(1, 2, 19))),
+            (nn.LSTM(10, 20, batch_first=True, proj_size=10), (torch.zeros(1, 2, 19), torch.zeros(1, 2, 19))),
+            (nn.GRU(10, 20, batch_first=True), torch.zeros(1, 2, 19)),
+            (nn.RNN(10, 20, batch_first=True), torch.zeros(1, 2, 19)),
+        ]
+        x_wrong = torch.randn(2, 3, 3)
+        x_right = torch.randn(2, 3, 10)
+        for rnn, hidden in rnns:
+            self.assertRaisesRegex(RuntimeError, "Expected hidden.*size.*got", rnn, x_right, hidden)
+            self.assertRaisesRegex(RuntimeError, re.escape("input.size(-1) must be equal to input_size"), rnn, x_wrong)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @skipIfRocm
@@ -8162,6 +8177,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @tf32_on_and_off()
+    @bf32_on_and_off()
     def test_affine_2d_rotate0(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8201,6 +8217,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @tf32_on_and_off(0.001)
+    @bf32_on_and_off(0.001)
     def test_affine_2d_rotate90(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8249,6 +8266,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_affine_2d_rotate45(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8304,6 +8322,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_affine_2d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8355,6 +8374,7 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_affine_3d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -10004,31 +10024,41 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(expected_out, t_out)
 
     @parametrize_test("align_corners", [True, False])
-    def test_upsamplingTrilinear3d(self, device, align_corners):
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last_3d])
+    def test_upsamplingTrilinear3d(self, device, align_corners, memory_format):
         kwargs = dict(mode='trilinear', align_corners=align_corners)
 
-        for memory_format in [torch.contiguous_format, torch.channels_last_3d]:
-            # test float scale factor up & downsampling
-            for scale_factor in [0.5, 1.5, 2]:
-                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
-                in_t = torch.ones(1, 2, 2, 2, 2, device=device, dtype=torch.double)
-                in_t = in_t.contiguous(memory_format=memory_format).requires_grad_()
-                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                with warnings.catch_warnings(record=True) as w:
-                    out_t = m(in_t)
-                expected_out = torch.ones(1, 2, out_size, out_size, out_size, device=device, dtype=torch.double)
-                self.assertEqual(expected_out, out_t)
-                # Assert that memory format is carried through to the output
-                self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
-                out_t.backward(torch.randn_like(out_t))
-                self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
+        # test float scale factor up & downsampling
+        for scale_factor in [0.5, 1.5, 2]:
+            m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+            in_t = torch.ones(1, 2, 4, 4, 4, device=device, dtype=torch.double)
+            in_t = in_t.contiguous(memory_format=memory_format).requires_grad_()
+            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+            with warnings.catch_warnings(record=True) as w:
+                out_t = m(in_t)
+            expected_out = torch.ones(1, 2, out_size, out_size, out_size, device=device, dtype=torch.double)
+            self.assertEqual(expected_out, out_t)
+            # Assert that memory format is carried through to the output
+            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
-                input = torch.randn(1, 2, 2, 2, 2, requires_grad=True, dtype=torch.double)
-                self.assertEqual(
-                    F.interpolate(input, (out_size, out_size, out_size), **kwargs),
-                    F.interpolate(input, scale_factor=scale_factor, **kwargs))
-                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
-                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+            grad_out = torch.randn_like(out_t).contiguous(memory_format=memory_format)
+            in_t.grad = None
+            out_t.backward(grad_out)
+            grad_in = in_t.grad
+            self.assertTrue(grad_in.is_contiguous(memory_format=memory_format))
+
+            if memory_format == torch.channels_last_3d:
+                # check if grad inputs CF and CL match
+                in_t.grad = None
+                out_t.backward(grad_out.contiguous())
+                self.assertEqual(in_t.grad, grad_in)
+
+            input = torch.randn(1, 2, 4, 4, 4, requires_grad=True, dtype=torch.double)
+            self.assertEqual(
+                F.interpolate(input, (out_size, out_size, out_size), **kwargs),
+                F.interpolate(input, scale_factor=scale_factor, **kwargs))
+            gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+            gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     @onlyCUDA
     @dtypes(torch.half)
@@ -10175,6 +10205,29 @@ class TestNNDeviceType(NNTestCase):
                     native_res.masked_fill(mask_out, 0),
                     exact_dtype=True
                 )
+
+    @dtypes(torch.bfloat16, torch.half)
+    @precisionOverride({torch.bfloat16: 2e-2, torch.half: 3e-3})
+    def test_masked_softmax_lowp(self, dtype):
+        sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
+        for (B, num_heads, L) in sizes:
+            for dim in [0, 3]:
+                input_lowp = torch.randn((B, num_heads, L, L), dtype=dtype).requires_grad_()
+                input_ref = input_lowp.float().detach().requires_grad_()
+                mask = torch.randint(0, 2, (B, L))
+                mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
+
+                for mask_type in [1, 2]:
+                    res_ref = torch._masked_softmax(input_ref, mask, dim, mask_type)
+                    res = torch._masked_softmax(input_lowp, mask, dim, mask_type)
+                    self.assertEqual(res_ref.to(dtype), res)
+
+                    grad_lowp = torch.randn_like(res_ref).to(dtype=dtype)
+                    grad_ref = grad_lowp.float()
+
+                    res_ref.backward(grad_ref)
+                    res.backward(grad_lowp)
+                    self.assertEqual(input_ref.grad.to(dtype), input_lowp.grad)
 
     def _test_masked_softmax_helper(self, input, dim, mask, mask_type):
         input_ref = input.detach().clone().requires_grad_()
@@ -12412,6 +12465,8 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.double, torch.float, torch.half)
     def test_transformerencoderlayer(self, device, dtype):
+        if TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION and dtype == torch.half:
+            self.skipTest("Skip on ROCM due to Flash Attention tolerances")
         # this is a deterministic test for TransformerEncoderLayer
         d_model = 4
         nhead = 2
@@ -12625,6 +12680,8 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.half, torch.float)
     def test_transformerencoderlayer_gelu(self, device, dtype):
+        if TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION and dtype == torch.half:
+            self.skipTest("Skip on ROCM due to Flash Attention tolerances")
         # this is a deterministic test for TransformerEncoderLayer with gelu activation
         d_model = 4
         nhead = 2
