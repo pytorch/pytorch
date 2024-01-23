@@ -18,7 +18,7 @@ import textwrap
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
 
@@ -31,6 +31,7 @@ import torch
 import torch.utils._device
 from torch._dynamo.source import (
     is_from_local_source,
+    ConstDictKeySource,
     TensorProperty,
     TensorPropertySource,
 )
@@ -41,6 +42,7 @@ from torch._guards import (
     GuardBuilderBase,
     GuardEnvExpr,
     GuardSource,
+    GuardsSet,
     Source,
 )
 from torch.fx.experimental.symbolic_shapes import (
@@ -992,6 +994,7 @@ class CheckFunctionManager:
 
         # Break retain cycle. See test_release_input_memory
         w_builder = weakref.ref(builder, cleanup_builder)
+        guards = self.fuse_dict_guards(builder, guards)
 
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
@@ -1017,6 +1020,32 @@ class CheckFunctionManager:
         # queryable data structure such that this information is already present
         # in some form.
         self.check_fn.id_matched_objs = builder.id_matched_objs
+
+    @staticmethod
+    def fuse_dict_guards(builder, guards):
+        # Rather than creating n contant guards, each of them costing O(n)
+        # (ConstDictKeySource.reconstruct is O(n), we just place a guard
+        # on all the keys and their types
+        dicts: Dict[Source, Tuple[Guard, int, Set[Guard]]] = {}
+        for guard in sorted(guards or [], key=Guard.sort_key):
+            if guard.create_fn == GuardBuilder.LIST_LENGTH and isinstance(d := builder.get(guard.name), dict):
+                dicts[guard.originating_source] = (guard, len(d), set())
+            elif isinstance(guard.originating_source, ConstDictKeySource) and guard.create_fn ==  GuardBuilder.CONSTANT_MATCH:
+                # TODO CONSTANT_MATCH can be relaxed
+                dict_source = guard.originating_source.base
+                assert dict_source in dicts
+                dicts[dict_source][2].add(guard)
+        remove_guards = set()
+        add_guards = set()
+        for (guard, l, elem_guards) in dicts.values():
+            # TODO This condition can be relaxed generalizing DICT_KEYS
+            if len(elem_guards) == l:
+                add_guards.add(guard.originating_source.make_guard(GuardBuilder.DICT_KEYS))
+                remove_guards.update(elem_guards)
+                remove_guards.add(guard)
+        ret = GuardsSet(guards.inner - remove_guards)
+        ret.update(add_guards)
+        return ret
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
