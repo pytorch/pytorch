@@ -77,7 +77,11 @@ from torch.nn import (
     ParameterList,
     Sequential,
 )
-from .dynamo_test_failures import dynamo_expected_failures, dynamo_skips, FIXME_default_non_strict
+from .dynamo_test_failures import (
+    dynamo_expected_failures,
+    dynamo_skips,
+    FIXME_inductor_non_strict,
+)
 from torch.onnx import (
     register_custom_op_symbolic,
     unregister_custom_op_symbolic,
@@ -803,7 +807,7 @@ TEST_IN_SUBPROCESS = args.subprocess
 TEST_SAVE_XML = args.save_xml
 REPEAT_COUNT = args.repeat
 SEED = args.seed
-if not expecttest.ACCEPT:
+if not getattr(expecttest, "ACCEPT", False):
     expecttest.ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
@@ -825,7 +829,7 @@ def wait_for_process(p, timeout=None):
         else:
             p.kill()
             raise
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as timeout_exception:
         # send SIGINT to give pytest a chance to make xml
         p.send_signal(signal.SIGINT)
         exit_status = None
@@ -839,7 +843,9 @@ def wait_for_process(p, timeout=None):
             return exit_status
         else:
             p.kill()
-        raise
+        # Provide more info about the timeout (specifically that it timed out
+        # after the keyboard interrupt as well)
+        raise RuntimeError(f"Subprocess failed to exit smoothly after timeout {timeout} expired") from timeout_exception
     except:  # noqa: B001,E722, copied from python core library
         p.kill()
         raise
@@ -1342,6 +1348,14 @@ def xfailIfTorchDynamo(func):
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
+    """
+    Usage:
+    @skipIfTorchDynamo(msg)
+    def test_blah(self):
+        ...
+    """
+    assert isinstance(msg, str), "Are you using skipIfTorchDynamo correctly?"
+
     def decorator(fn):
         if not isinstance(fn, type):
             @wraps(fn)
@@ -1358,7 +1372,6 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
             fn.__unittest_skip_why__ = msg
 
         return fn
-
 
     return decorator
 
@@ -1386,7 +1399,6 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
 
 def unMarkDynamoStrictTest(cls=None):
     def decorator(cls):
-        assert inspect.isclass(cls)
         cls.dynamo_strict = False
         return cls
 
@@ -1485,6 +1497,9 @@ IS_TBB = "tbb" in os.getenv("BUILD_ENVIRONMENT", "")
 numpy_to_torch_dtype_dict = {
     np.bool_      : torch.bool,
     np.uint8      : torch.uint8,
+    np.uint16     : torch.uint16,
+    np.uint32     : torch.uint32,
+    np.uint64     : torch.uint64,
     np.int8       : torch.int8,
     np.int16      : torch.int16,
     np.int32      : torch.int32,
@@ -1659,7 +1674,8 @@ class SwapTensorsGuard:
 
     def __enter__(self):
         self.swap_tensors_restore = torch.nn.utils.get_swap_module_params_on_conversion()
-        torch.nn.utils.set_swap_module_params_on_conversion(self.use_swap_tensors)
+        if self.use_swap_tensors is not None:
+            torch.nn.utils.set_swap_module_params_on_conversion(self.use_swap_tensors)
 
     def __exit__(self, exception_type, exception_value, traceback):
         torch.nn.utils.set_swap_module_params_on_conversion(self.swap_tensors_restore)
@@ -1722,18 +1738,19 @@ def wrapDeterministicFlagAPITest(fn):
                 fn(*args, **kwargs)
     return wrapper
 
-# This decorator can be used for API tests that call
-# torch.nn.utils.set_swap_module_params_on_conversion.  When the test is
-# finished, it will restore the previous swap flag setting.
-def wrapSwapTensorsTest(fn, swap=None):
-    if swap is None:
-        swap = torch.nn.utils.get_swap_module_params_on_conversion()
-
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        with SwapTensorsGuard(swap):
-            fn(*args, **kwargs)
-    return wrapper
+# This decorator can be used for API tests that want to safely call
+# torch.nn.utils.set_swap_module_params_on_conversion.  `swap` can be set to
+# True, False or None where None indicates that the context manager does not
+# set the flag. When the test is finished, it will restore the previous swap
+# flag setting.
+def wrapSwapTensorsTest(swap=None):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            with SwapTensorsGuard(swap):
+                fn(*args, **kwargs)
+        return wrapper
+    return dec_fn
 
 def skipIfCompiledWithoutNumpy(fn):
     # Even if the numpy module is present, if `USE_NUMPY=0` is used during the
@@ -2720,7 +2737,10 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 match = re.match(r".*/test/(.*).py", full_path)
                 if match is not None:
                     filename = match.group(1)
-                    strict_default = filename not in FIXME_default_non_strict
+                    if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
+                        strict_default = filename not in FIXME_inductor_non_strict
+                    else:
+                        strict_default = True
             # inspect.getfile can fail with these
             except (OSError, TypeError):
                 pass
@@ -2728,7 +2748,15 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 if os.environ["STRICT_DEFAULT"] == "1":
                     strict_default = True
 
-        strict_mode = getattr(test_cls, "dynamo_strict", strict_default) and compiled
+        strict_mode = False
+        if compiled:
+            test_method = getattr(self, self._testMethodName)
+            if hasattr(test_method, "dynamo_strict"):
+                strict_mode = test_method.dynamo_strict
+            elif hasattr(test_cls, "dynamo_strict"):
+                strict_mode = test_cls.dynamo_strict
+            else:
+                strict_mode = strict_default
         nopython = getattr(test_cls, "dynamo_strict_nopython", False) and compiled
 
         if strict_mode:
@@ -2750,12 +2778,34 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 # TorchDynamo optimize annotation
                 super_run = torch._dynamo.optimize("eager", nopython=nopython)(super_run)
                 key = f"{self.__class__.__name__}.{self._testMethodName}"
+
+                def expect_failure(f):
+                    @wraps(f)
+                    def wrapper(*args, **kwargs):
+                        try:
+                            f(*args, **kwargs)
+                        except BaseException as e:
+                            self.skipTest(e)
+                        raise RuntimeError("Unexpected success, please remove test from dynamo_test_failures.py")
+                    return wrapper
+
                 if key in dynamo_expected_failures:
                     method = getattr(self, self._testMethodName)
-                    unittest.expectedFailure(self)
+                    setattr(self, self._testMethodName, expect_failure(method))
+
+                def ignore_failure(f):
+                    @wraps(f)
+                    def wrapper(*args, **kwargs):
+                        try:
+                            f(*args, **kwargs)
+                        except BaseException as e:
+                            self.skipTest(e)
+                        self.skipTest("This test passed, maybe we can remove the skip from dynamo_test_failures.py")
+                    return wrapper
+
                 if key in dynamo_skips:
                     method = getattr(self, self._testMethodName)
-                    setattr(self, self._testMethodName, unittest.skip("marked skip in dynamo_test_failures.py")(method))
+                    setattr(self, self._testMethodName, ignore_failure(method))
 
             super_run(result=result)
 
@@ -4532,6 +4582,9 @@ def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.devi
     dtype_to_ctype: Dict[torch.dtype, Any] = {
         torch.int8: ctypes.c_int8,
         torch.uint8: ctypes.c_uint8,
+        torch.uint16: ctypes.c_uint16,
+        torch.uint32: ctypes.c_uint32,
+        torch.uint64: ctypes.c_uint64,
         torch.int16: ctypes.c_int16,
         torch.int32: ctypes.c_int32,
         torch.int64: ctypes.c_int64,

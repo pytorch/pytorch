@@ -27,7 +27,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo
 )
 
-from torch._dynamo import disable as disable_dynamo
 
 from torch.testing._internal.common_cuda import TEST_CUDA
 from typing import Dict, Any, Tuple
@@ -216,111 +215,6 @@ class TestOptim(TestCase):
             else:
                 self.assertLess(fn().item(), initial_value)
 
-    # Note: disable dynamo on this function
-    # This allows us to continue running actual logic of the optimizer
-    # tests in dynamo without tracing this test code which has a lot of unsupported
-    # behavior
-    @disable_dynamo(recursive=False)
-    def _test_state_dict(self, weight, bias, input, constructor, atol=None, rtol=None):
-        weight = Parameter(weight)
-        bias = Parameter(bias)
-        with torch.no_grad():
-            input = input.clone().detach().requires_grad_()
-
-        # Note: Disable dynamo on this function
-        # This avoids a bug where input_cuda is not detected in the environment
-        # because it currently is not defined in the local environmet. Unable to repro
-        # anywhere else however and this is test code that we don't need to spend
-        # time getting dynamo to trace unless the issue repros in real models.
-        @disable_dynamo(recursive=False)
-        def fn_base(optimizer, weight, bias):
-            optimizer.zero_grad()
-            i = input_cuda if weight.is_cuda else input
-            loss = (weight.mv(i) + bias).pow(2).sum()
-            loss.backward()
-            return loss
-
-        optimizer = constructor(weight, bias)
-        fn = functools.partial(fn_base, optimizer, weight, bias)
-
-        # Prime the optimizer
-        for _i in range(20):
-            optimizer.step(fn)
-
-        # Make sure that optimizers that support maximize can load older models
-        old_state_dict = deepcopy(optimizer.state_dict())
-        state_dict_no_maximize = deepcopy(optimizer.state_dict())
-        if "maximize" in state_dict_no_maximize["param_groups"][0]:
-            for group in state_dict_no_maximize["param_groups"]:
-                del group["maximize"]
-            optimizer.load_state_dict(state_dict_no_maximize)
-            # Make sure we can still step
-            optimizer.step()
-            # Undo these changes before proceeding!
-            optimizer.load_state_dict(old_state_dict)
-        # Make sure that optimizers that support foreach can load older models
-        state_dict_no_foreach = deepcopy(optimizer.state_dict())
-        if "foreach" in state_dict_no_foreach["param_groups"][0]:
-            for group in state_dict_no_foreach["param_groups"]:
-                del group["foreach"]
-            optimizer.load_state_dict(state_dict_no_foreach)
-            # Make sure we can still step
-            optimizer.step()
-            # Undo these changes before proceeding!
-            optimizer.load_state_dict(old_state_dict)
-
-        # Make sure that loading optimizers with step not wrapped in tensor can work
-        state_dict = optimizer.state_dict()
-        if "step" in state_dict["state"][0] and torch.is_tensor(
-            state_dict["state"][0]["step"]
-        ):
-            for state in state_dict["state"].values():
-                state["step"] = state["step"].item()
-            optimizer.load_state_dict(state_dict)
-            optimizer.step()
-
-        # Check that state dict can be loaded even when we cast parameters
-        # to a different type and move to a different device.
-        if not torch.cuda.is_available():
-            return
-
-        with torch.no_grad():
-            input_cuda = input.clone().detach().to(dtype=torch.float32, device="cuda")
-            weight_cuda = Parameter(
-                weight.clone().detach().to(dtype=torch.float32, device="cuda")
-            )
-            bias_cuda = Parameter(
-                bias.clone().detach().to(dtype=torch.float32, device="cuda")
-            )
-        optimizer_cuda = constructor(weight_cuda, bias_cuda)
-        fn_cuda = functools.partial(fn_base, optimizer_cuda, weight_cuda, bias_cuda)
-
-        state_dict = deepcopy(optimizer.state_dict())
-        state_dict_c = deepcopy(optimizer.state_dict())
-        optimizer_cuda.load_state_dict(state_dict_c)
-
-        # Make sure state_dict_c isn't modified by merely calling load_state_dict
-        self.assertEqual(state_dict, state_dict_c)
-
-        # Make sure that device of state['step'] is still CPU
-        new_state_dict = optimizer_cuda.state_dict()
-        if "step" in state_dict["state"][0] and torch.is_tensor(
-            state_dict["state"][0]["step"]
-        ):
-            for state in new_state_dict["state"].values():
-                self.assertEqual(state["step"].device.type, "cpu")
-
-        for _ in range(20):
-            optimizer.step(fn)
-            optimizer_cuda.step(fn_cuda)
-            self.assertEqual(weight, weight_cuda)
-            self.assertEqual(bias, bias_cuda, atol=atol, rtol=rtol)
-
-        # validate deepcopy() copies all public attributes
-        def getPublicAttr(obj):
-            return {k for k in obj.__dict__ if not k.startswith("_")}
-
-        self.assertEqual(getPublicAttr(optimizer), getPublicAttr(deepcopy(optimizer)))
 
     def _test_basic_cases(
         self,
@@ -346,18 +240,6 @@ class TestOptim(TestCase):
                 return lambda weight, bias: constructor(weight, bias, foreach)
             return constructor
 
-        for maximize, foreach in itertools.product(
-            {False, constructor_accepts_maximize},
-            {False, constructor_accepts_foreach},
-        ):
-            self._test_state_dict(
-                torch.randn(10, 5),
-                torch.randn(10),
-                torch.randn(5),
-                make_two_arg_constructor(constructor, maximize, foreach),
-                atol=atol,
-                rtol=rtol,
-            )
         self._test_basic_cases_template(
             torch.randn(10, 5),
             torch.randn(10),
@@ -1408,7 +1290,7 @@ class TestOptim(TestCase):
         if not torch.cuda.is_available():
             self.skipTest("CUDA is required.")
 
-        from torch.optim import adam, adamw
+        from torch.optim import adam, adamw, sgd
 
         num_tensors = 5
         for functional_optim, amsgrad, no_grad_scale in itertools.product((adam.adam, adamw.adamw), (False, True), (False, True)):
@@ -1449,32 +1331,31 @@ class TestOptim(TestCase):
                 ],
             )
             self.assertEqual(params, prev_params)
-
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required.")
-    def test_fused_optimizer_load_state_dict(self):
-        # NOTE: This SIMULATES a fused/capturable optimizer with state moved to CPU, issue 103256
-        # How do we get there? Users typically create CUDA models on fused optimizers and then
-        # store checkpoints on CPU as CUDA memory is limited with torch.load(...map_location="cpu").
-        # Since this is a unit test, it is more expedient to simulate what the state_dict
-        # would look like, which is basically CPU tensors with fused/capturable flag = True.
-        for optimC, kwarg in itertools.product((Adam, AdamW), ("fused", "capturable")):
-            input = torch.tensor([0.1, 0.2], dtype=torch.float32, device="cpu")
-            optimizer = optimC([input])
-            optimizer.zero_grad()
-            input.grad = torch.rand_like(input)
-            optimizer.step()
-            optim_state_dict_cpu = deepcopy(optimizer.state_dict())
-            optim_state_dict_cpu["param_groups"][0][kwarg] = True
-
-            # load
-            input_cuda = input.clone().detach().to(device="cuda")
-            defaults = {kwarg: True}
-            optimizer_cuda = optimC([input_cuda], **defaults)
-            optimizer_cuda.load_state_dict(optim_state_dict_cpu)
-            optimizer_cuda.zero_grad()
-            input_cuda.grad = torch.rand_like(input_cuda)
-            optimizer_cuda.step()
+        else:
+            for momentum in (0.0, 0.1):
+                params, d_p_list, momentum_buffer_list = (
+                    [torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(3))
+                if momentum == 0.0:
+                    momentum_buffer_list = [None for _ in range(num_tensors)]
+                prev_params = [t.clone().detach() for t in params]
+                grad_scale = None if no_grad_scale else torch.ones((1,), dtype=torch.float32, device="cuda")
+                found_inf = torch.ones((), dtype=torch.float32, device="cuda")
+                sgd.sgd(
+                    params,
+                    d_p_list,
+                    momentum_buffer_list,
+                    has_sparse_grad=False,
+                    foreach=False,
+                    fused=True,
+                    grad_scale=grad_scale,
+                    found_inf=found_inf,
+                    weight_decay=0.0,
+                    momentum=momentum,
+                    lr=0.01,
+                    dampening=0.0,
+                    nesterov=False,
+                    maximize=False,
+                )
 
 
     @skipIfTorchDynamo()
