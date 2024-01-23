@@ -454,19 +454,35 @@ def _process_dynamic_shapes(
                     f"Unexpected dynamic_shape {shape} of Tensor, " "try None instead",
                 )
 
-    import inspect
+    if f is None:
+        # When user doesn't specify a callable `f`, we assume users provide a) a `dynamic_shapes` tuple
+        # and a `dynamic_shapes` tuple with the same length and order, and b) a `None` for `kwargs`.
+        combined_args = args
+        if not isinstance(dynamic_shapes, Sequence):
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                f"Expected dynamic_shapes of a {type(combined_args)} to be a Sequence, "
+                f"got {dynamic_shapes} instead",
+            )
+        if len(combined_args) != len(dynamic_shapes):
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                f"Expected {dynamic_shapes} to have {len(combined_args)} items",
+            )
+    else:
+        import inspect
 
-    if isinstance(f, ExportedProgram):
-        f = f.module()
-    signature = (
-        inspect.signature(f.forward)
-        if isinstance(f, torch.nn.Module)
-        else inspect.signature(f)
-    )
-    combined_args = signature.bind(*args, **kwargs).arguments
+        if isinstance(f, ExportedProgram):
+            f = f.module()
+        signature = (
+            inspect.signature(f.forward)
+            if isinstance(f, torch.nn.Module)
+            else inspect.signature(f)
+        )
+        combined_args = signature.bind(*args, **kwargs).arguments
+        # This means user didn't specify dynamic shapes with argument names.
+        combined_args = combined_args if isinstance(dynamic_shapes, Mapping) else list(combined_args.values())  # type: ignore[assignment]
 
-    # This means user didn't specify dynamic shapes with argument names.
-    combined_args = combined_args if isinstance(dynamic_shapes, Mapping) else list(combined_args.values())  # type: ignore[assignment]
     for tensor, shape in tree_zip(combined_args, dynamic_shapes):
         update_symbols(tensor, shape)
 
