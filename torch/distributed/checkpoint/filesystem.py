@@ -339,8 +339,9 @@ class FileSystemWriter(StorageWriter):
             path = Path(path)
         self.path = path
 
-    def set_checkpoint_id(self, checkpoint_id: Union[str, os.PathLike]) -> None:
-        self._init_path(checkpoint_id)
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None]) -> None:
+        if checkpoint_id:
+            self._init_path(checkpoint_id)
 
     def set_up_storage_writer(self, is_coordinator: bool) -> None:
         pass
@@ -446,9 +447,10 @@ class FileSystemReader(StorageReader):
     def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
         return _create_file_view(file, sinfo.offset, sinfo.length)
 
-    def set_checkpoint_id(self, checkpoint_id: Union[str, os.PathLike]) -> None:
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None]) -> None:
         self.storage_data = dict()
-        self._init_path(checkpoint_id)
+        if checkpoint_id:
+            self._init_path(checkpoint_id)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file

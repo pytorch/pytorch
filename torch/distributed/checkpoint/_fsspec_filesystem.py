@@ -341,8 +341,9 @@ class FsspecWriter(StorageWriter):
         self.path = path
         self.fs, _ = url_to_fs(path)
 
-    def set_checkpoint_id(self, checkpoint_id: Union[str, os.PathLike]) -> None:
-        self._init_path(checkpoint_id)
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None]) -> None:
+        if checkpoint_id:
+            self._init_path(checkpoint_id)
 
     def set_up_storage_writer(self, is_coordinator: bool) -> None:
         pass
@@ -448,9 +449,10 @@ class FsspecReader(StorageReader):
         self.path = path
         self.fs, _ = url_to_fs(path)
 
-    def set_checkpoint_id(self, checkpoint_id: Union[str, os.PathLike]) -> None:
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None]) -> None:
         self.storage_data = dict()
-        self._init_path(checkpoint_id)
+        if checkpiont_id:
+            self._init_path(checkpoint_id)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
