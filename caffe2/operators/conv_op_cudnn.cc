@@ -523,7 +523,7 @@ bool CudnnConvOp::DoRunWithType() {
   auto* Y = Output(0, output_sizes, at::dtype<T_Y>());
 
   int N = 0, C = 0, H = 0, W = 0, D = 0, H_out = 0, W_out = 0, D_out = 0;
-  int group_offset_X = 0, group_offset_Y = 0;
+  [[maybe_unused]] int group_offset_X = 0, group_offset_Y = 0;
 
   switch (order_) {
     case StorageOrder::NHWC:
@@ -905,7 +905,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
 
   const int M = filter.dim32(0);
   int N = 0, C = 0, H = 0, W = 0, D = 0, H_out = 0, W_out = 0, D_out = 0;
-  int group_offset_X = 0, group_offset_Y = 0;
+  [[maybe_unused]] int group_offset_X = 0, group_offset_Y = 0;
 
   switch (order_) {
     case StorageOrder::NHWC:
