@@ -102,9 +102,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater.incremental_update()
 
-    # Keep this last, since it introduces mutation. Look at
+    # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_inplaceable_ops(gm.graph)
+    lower_auto_functionalized(gm.graph)
+
     gm.recompile()
     gm.graph.lint()
 
@@ -629,6 +631,26 @@ def remove_noop_ops(graph: torch.fx.Graph):
             if same_meta(node, src) and cond(*args, **kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
+
+
+def lower_auto_functionalized(graph):
+    graph_pass = PatternMatcherPass()
+
+    @register_graph_pattern(
+        CallFunction(
+            torch.ops.higher_order.auto_functionalized,
+            Arg(),
+            Arg(),
+            Arg(),
+        ),
+        pass_dict=graph_pass,
+    )
+    def replacement(match: Match, *args):
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
+        with V.fake_mode:
+            match.replace_by_example(auto_functionalized_dense, args)
+
+    graph_pass.apply(graph)
 
 
 @register_lowering_pattern(

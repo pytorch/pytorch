@@ -832,6 +832,7 @@ class ReplacementPatternEntry(PatternEntry):
             replacement = Replacer(replacement_graph).run(*args)
             if isinstance(replacement, torch.fx.Node):
                 replacement = [replacement]
+            breakpoint()
             assert len(replacement) == len(output_nodes)
             for old, new in zip(output_nodes, replacement):
                 if old is None:
