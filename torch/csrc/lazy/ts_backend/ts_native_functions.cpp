@@ -14,7 +14,6 @@
 #include <torch/csrc/lazy/core/tensor_util.h>
 #include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
-#include <torch/csrc/lazy/ts_backend/ops/random_ops.h>
 #include <torch/csrc/lazy/ts_backend/ops/to_copy.h>
 #include <torch/csrc/lazy/ts_backend/tensor_aten_ops.h>
 #include <torch/csrc/lazy/ts_backend/ts_autograd_functions.h>
@@ -70,14 +69,14 @@ at::Tensor LazyNativeFunctions::_copy_from(
   if (!self_tensor) {
     // providing a new 'eager' value (self) for an existing lazy tensor (dst)
     static bool sync_update = FLAGS_torch_lazy_ts_tensor_update_sync;
-    CHECK(dst_tensor);
+    TORCH_CHECK(dst_tensor);
     dst_tensor->UpdateFromTensor(self, /*sync=*/sync_update);
   } else if (!dst_tensor) {
     // materializing a lazy tensor (self) and copying its value into eager
     // tensor (dst) detached=false lets us skip a copy in `ToTensor`, which
     // should be safe because we are only going to use the tensor for
     // dst.copy_()
-    CHECK(self_tensor);
+    TORCH_CHECK(self_tensor);
     at::Tensor tensor = self_tensor->ToTensor(/*detached=*/false);
     at::Tensor typed_tensor =
         torch::lazy::CopyTensor(tensor, dst.scalar_type(), /*copy=*/false);
@@ -88,7 +87,7 @@ at::Tensor LazyNativeFunctions::_copy_from(
       // if dest is not backed by IR (e.g. result of some lazy operation),
       // then it should have at::Tensor data backing it instead
       auto dst_tensor_data = dst_tensor->CurrentTensorData();
-      CHECK(dst_tensor_data);
+      TORCH_CHECK(dst_tensor_data);
       auto src_tensor_data = self_tensor->CurrentTensorData();
       if (src_tensor_data) {
         // both src/dst are simply backed by at::Tensor data, no IR- do a
@@ -119,10 +118,10 @@ at::Tensor LazyNativeFunctions::_copy_from_and_resize(
   auto dst_tensor = torch::lazy::TryGetLtcTensor(dst);
   auto self_tensor = torch::lazy::TryGetLtcTensor(self);
   if (!self_tensor) {
-    CHECK(dst_tensor);
+    TORCH_CHECK(dst_tensor);
     dst_tensor->UpdateFromTensorOut(self);
   } else if (!dst_tensor) {
-    CHECK(self_tensor);
+    TORCH_CHECK(self_tensor);
     at::Tensor tensor = self_tensor->ToTensor(/*detached=*/true);
     at::Tensor typed_tensor =
         torch::lazy::CopyTensor(tensor, dst.scalar_type(), /*copy=*/false);
@@ -371,36 +370,6 @@ at::Tensor LazyNativeFunctions::max_pool3d_with_indices_backward(
           ceil_mode,
           indices);
 }
-
-at::Tensor& LazyNativeFunctions::normal_(
-    at::Tensor& self,
-    double mean,
-    double std,
-    c10::optional<at::Generator> generator) {
-  // Unconditionally fall back.
-  // implementing normal_ via lazy tensor caused differences in results compared
-  // to eager.
-  return at::native::call_fallback_fn<&ltc_eager_fallback, ATEN_OP(normal_)>::
-      call(self, mean, std, generator);
-
-  // if (force_eager_fallback(c10::Symbol::fromQualString("aten::normal_"))) {
-  //   return at::native::call_fallback_fn<&ltc_eager_fallback,
-  //   ATEN_OP(normal_)>::call(self, mean, std, generator);
-  // }
-
-  // if (generator.has_value()) {
-  //   return at::native::call_fallback_fn<&ltc_eager_fallback,
-  //   ATEN_OP(normal_)>::call(self, mean, std, generator);
-  // }
-
-  // TORCH_LAZY_FN_COUNTER("lazy::");
-  // auto device = bridge::GetBackendDevice(self);
-  // LazyTensor lazy_self = GetLtcTensorOrCreateForWrappedNumber(self, *device);
-  // std::vector<torch::lazy::Shape> shapes =
-  // {torch::lazy::Shape(self.scalar_type(), self.sizes().vec())}; auto node =
-  // torch::lazy::MakeNode<Normal>(lazy_self.GetIrValue(), mean, std,
-  // std::move(shapes)); lazy_self.SetInPlaceIrValue(node); return self;
-};
 
 at::Tensor LazyNativeFunctions::_unsafe_view(
     const at::Tensor& self,

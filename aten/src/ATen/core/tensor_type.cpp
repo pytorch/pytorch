@@ -76,6 +76,7 @@ std::ostream& operator<<(std::ostream& out, const VaryingShape<T>& vs) {
       out << ", ";
     }
     if (vs[i].has_value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       out << vs[i].value();
     } else {
       out << "*";
@@ -281,18 +282,23 @@ TensorTypePtr TensorType::create(
     c10::optional<bool> undefined, bool tensor_contiguity) {
   if(strides.concrete_sizes() && strides.concrete_sizes().has_value()){
     // handles case where strides are set
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     TORCH_INTERNAL_ASSERT(sizes.concrete_sizes()->size() == strides.concrete_sizes()->size());
     auto sprops = strides.concrete_sizes().has_value()
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       ? computeStrideProps(*sizes.concrete_sizes(), *strides.concrete_sizes(), tensor_contiguity)
       : VaryingShape<Stride>();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     auto symbol_sizes = SymbolicShape(*sizes.concrete_sizes());
     return TensorType::create(
       scalar_type, device, symbol_sizes, sprops, requires_grad, undefined);
   } else {
     // strides are all null, but still have number of strides equal to number of ranks
     TORCH_INTERNAL_ASSERT(sizes.sizes() && sizes.size());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     auto symbol_sizes = SymbolicShape(*sizes.sizes());
     return TensorType::create(
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       scalar_type, device, symbol_sizes, VaryingShape<Stride>(*sizes.size()), requires_grad, undefined);
   }
 }
@@ -338,6 +344,7 @@ VaryingShape<int64_t> TensorType::sizes() const {
     return VaryingShape<int64_t>();
   }
   return VaryingShape<int64_t>(
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       fmap(*sizes_.sizes(), [](ShapeSymbol ss) {
         // we turn symbolic shapes into unknowns
         return ss.is_static()

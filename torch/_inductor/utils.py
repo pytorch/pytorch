@@ -12,6 +12,7 @@ import math
 import operator
 import os
 import platform
+import re
 import shutil
 import sys
 import tempfile
@@ -37,12 +38,12 @@ from typing import (
 from unittest import mock
 
 import sympy
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
-from torch.fx.immutable_collections import immutable_list
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
@@ -130,7 +131,7 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
     log.debug("profiling time breakdown")
     log.debug(actual_events.table(row_limit=-1))
 
-    res = sum(event.cuda_time for event in actual_events) / 1000.0
+    res = sum(event.cuda_time_total for event in actual_events) / 1000.0 / n_repeat
     log.debug("profiling results: %s ms", res)
     return res
 
@@ -233,7 +234,9 @@ def next_power_of_2(n: int) -> int:
     return n
 
 
-def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy.Expr]:
+def convert_shape_to_inductor(
+    lst: Iterable[Union[int, torch.SymInt]]
+) -> List[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
     trivial. But for symbolic tensors, we need to map from SymIntNode into
@@ -245,7 +248,7 @@ def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy
 
 
 def convert_shape_to_symint(
-    lst: List[Union[int, sympy.Expr]]
+    lst: Iterable[Union[int, sympy.Expr]]
 ) -> List[Union[int, torch.SymInt]]:
     """
     Takes a list of shapes from Inductor and converts them into symints (or just
@@ -380,20 +383,21 @@ def tuple_sorted(x):
     return sorted(x, key=sort_func)
 
 
+P = ParamSpec("P")
 RV = TypeVar("RV", covariant=True)
 
 
-# FIXME this should take in a ParamSpec too
-class CachedFunction(Generic[RV], Protocol):
+class CachedMethod(Generic[P, RV], Protocol):
     @staticmethod
     def clear_cache(self) -> None:
         ...
 
-    def __call__(self, *args, **kwargs) -> RV:
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV:
         ...
 
 
-def cache_on_self(fn: Callable[..., RV]) -> CachedFunction[RV]:
+# See https://github.com/python/mypy/issues/13222#issuecomment-1193073470 to understand the type signature
+def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
     key = f"__{fn.__name__}_cache"
 
     @functools.wraps(fn)
@@ -436,7 +440,9 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
         sources = [
             origin.meta["original_aten"]._overloadpacket.__name__
             for origin in all_origins
-            if origin.op == "call_function" and "original_aten" in origin.meta
+            if origin.op == "call_function"
+            and "original_aten" in origin.meta
+            and origin.meta["original_aten"] is not None
         ]
         sources = sorted(set(sources))
     elif descriptive_names == "torch":
@@ -467,7 +473,7 @@ def get_kernel_metadata(node_schedule, wrapper):
     from_node_dict = collections.defaultdict(list)
     original_aten_dict = collections.defaultdict(list)
     for node in inductor_nodes:
-        if "original_aten" in node.meta:
+        if "original_aten" in node.meta and node.meta["original_aten"] is not None:
             key = str(node.meta["original_aten"]._overloadpacket)
             original_aten_dict[key].append(node.name)
         if "from_node" in node.meta:
@@ -572,6 +578,17 @@ def free_symbol_has(index: sympy.Expr, pattern: str):
     return any(pattern in v.name for v in index.free_symbols)
 
 
+def is_symbolic(a: Any) -> bool:
+    return isinstance(a, torch.SymInt) or (
+        isinstance(a, torch.Tensor)
+        and any(is_symbolic(x) for x in itertools.chain(a.size(), a.stride()))
+    )
+
+
+def any_is_symbolic(*args: Any) -> bool:
+    return any(is_symbolic(a) for a in args)
+
+
 def has_incompatible_cudagraph_ops(gm):
     forbidden_set = {
         "aten._fused_moving_avg_obs_fq_helper.default",
@@ -605,18 +622,27 @@ def has_incompatible_cudagraph_ops(gm):
     return False
 
 
-instance_descriptor = collections.namedtuple(
-    "instance_descriptor",
-    ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
-    defaults=[tuple(), tuple(), tuple(), tuple()],
-)
+try:
+    from triton.compiler.compiler import AttrsDescriptor as instance_descriptor
+except ImportError:
+    # To support older version of triton which does not have AttrsDescriptor
+    # class
+    instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
+        "instance_descriptor",
+        ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
+        defaults=[tuple(), tuple(), tuple(), tuple()],
+    )
 
 
 @functools.lru_cache(None)
 def cache_dir() -> str:
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
     if cache_dir is None:
-        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
+        sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
+        cache_dir = os.path.join(
+            tempfile.gettempdir(),
+            "torchinductor_" + sanitized_username,
+        )
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
@@ -873,10 +899,10 @@ def use_aten_gemm_kernels():
 
 class DebugDirManager:
     counter = itertools.count(0)
+    prev_debug_name: str
 
     def __init__(self):
         self.id = next(DebugDirManager.counter)
-        self.prev_debug_name = None
 
     def __enter__(self):
         self.prev_debug_name = torch._dynamo.config.debug_dir_root
@@ -983,7 +1009,7 @@ def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
 def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
     info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
     try:
-        import colorama  # type: ignore[import]
+        import colorama
 
         if ms > 0.012 and gb_per_s < 650:
             info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET
@@ -1101,129 +1127,31 @@ def blue_text(msg):
 
 
 @functools.lru_cache(None)
-def python_type_to_schema_type():
-    from . import ir
-
-    PYTHON_TYPE_TO_SCHEMA_TYPE = {
-        torch.dtype: "int",
-        torch.device: "Device",
-        bool: "bool",
-        float: "float",
-        ir.TensorBox: "Tensor",
-    }
-    return PYTHON_TYPE_TO_SCHEMA_TYPE
-
-
-def may_get_optional_schema_type(schema_type, is_optional_arg):
-    return f"Optional[{schema_type}]" if is_optional_arg else schema_type
-
-
-def type_match(arg, arg_type, is_optional_arg):
-    if isinstance(arg, immutable_list):
-        if all(
-            isinstance(x, int) or (isinstance(x, sympy.Symbol) and x.is_integer)
-            for x in arg
-        ):
-            may_optional_schema_type = may_get_optional_schema_type(
-                "List[int]", is_optional_arg
-            )
-            return may_optional_schema_type == str(arg_type)
-        else:
-            # TODO: add support here
-            return False
-
-    if arg.__class__ in python_type_to_schema_type():
-        schema_type = python_type_to_schema_type()[arg.__class__]
-        may_optional_schema_type = may_get_optional_schema_type(
-            schema_type, is_optional_arg
-        )
-        return may_optional_schema_type == str(arg_type)
-
-    # TODO: add support here
-    return False
-
-
-# torch/csrc/utils/python_arg_parser.cpp:FunctionSignature::parse
-def schema_match(schema, args, kwargs):
-    min_args = 0
-    max_pos_args = 0
-    for argument in schema.arguments:
-        if not argument.has_default_value():
-            min_args += 1
-        if not argument.kwarg_only:
-            max_pos_args += 1
-
-    nargs = len(args)
-    remaining_kwargs = len(kwargs)
-    arg_pos = 0
-
-    def args_error_message(nargs, max_pos_args, min_args):
-        if min_args != max_pos_args:
-            return f"takes from {min_args} to {max_pos_args} positional arguments but {nargs} were given"
-        else:
-            return f"takes {max_pos_args} positional arguments but {nargs} were given"
-
-    def is_optional(arg):
-        return "Optional" in str(arg.type)
-
-    def allow_none(arg):
-        return is_optional(arg) or arg.has_default_value()
-
-    assert len(args) <= max_pos_args, args_error_message(
-        len(args), max_pos_args, min_args
-    )
-
-    for argument in schema.arguments:
-        obj = None
-        is_kwd = False
-        if arg_pos < nargs:
-            if argument.kwarg_only:
-                return False
-            obj = args[arg_pos]
-        elif kwargs:
-            if argument.name in kwargs:
-                obj = kwargs[argument.name]
-                is_kwd = True
-
-        if obj is None and not allow_none(argument):
-            return False
-
-        if obj is not None:
-            expected_type = argument.type
-            if not type_match(obj, expected_type, is_optional(argument)):
-                return False
-
-        if not is_kwd:
-            arg_pos += 1
-        elif (obj is None and is_optional(argument)) or obj is not None:
-            remaining_kwargs -= 1
-
-    if remaining_kwargs > 0:
-        return False
-
-    return True
-
-
-def try_find_schema(schemas, args, kwargs):
-    for schema in schemas:
-        if schema_match(schema, args, kwargs):
-            return schema
-
-    return None
-
-
-@functools.lru_cache(None)
 def get_device_tflops(dtype):
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
-    if dtype in (torch.float16, torch.bfloat16):
-        return get_max_tensorcore_tflops(dtype)
 
-    if torch.backends.cuda.matmul.allow_tf32:
-        return get_max_tensorcore_tflops(torch.float32)
+    if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
+        # Triton API change in https://github.com/openai/triton/pull/2293
+        from triton.testing import nvsmi
+
+        sm_clock = nvsmi(["clocks.max.sm"])[0]
+        if dtype in (torch.float16, torch.bfloat16):
+            return get_max_tensorcore_tflops(dtype, sm_clock)
+
+        if torch.backends.cuda.matmul.allow_tf32:
+            return get_max_tensorcore_tflops(torch.float32, sm_clock)
+        else:
+            return get_max_simd_tflops(torch.float32, sm_clock)
     else:
-        return get_max_simd_tflops(torch.float32)
+        if dtype in (torch.float16, torch.bfloat16):
+            return get_max_tensorcore_tflops(dtype)
+
+        if torch.backends.cuda.matmul.allow_tf32:
+            return get_max_tensorcore_tflops(torch.float32)
+        else:
+            return get_max_simd_tflops(torch.float32)
 
 
 @functools.lru_cache(None)
@@ -1279,37 +1207,3 @@ class Placeholder(enum.Enum):
     # The descriptive name of the triton kernel; when unique_kernel_names = False, this
     # placeholder will be replaced with a string with more information.
     DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
-
-
-# A utility function for easier AOTInductor testing
-def aot_inductor_launcher(so_path: str, device: str):
-    if device == "cuda":
-        return f"""
-            #include <torch/csrc/inductor/aoti_model_runner_cuda.h>
-
-            torch::inductor::AOTIModelRunnerCuda runner("{so_path}");
-
-            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
-                return runner.run(input_tensors);
-            }}
-
-            std::vector<const char*> get_call_spec() {{
-                return runner.get_call_spec();
-            }}
-        """
-    elif device == "cpu":
-        return f"""
-            #include <torch/csrc/inductor/aoti_model_runner.h>
-
-            torch::inductor::AOTIModelRunnerCpu runner("{so_path}");
-
-            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
-                return runner.run(input_tensors);
-            }}
-
-            std::vector<const char*> get_call_spec() {{
-                return runner.get_call_spec();
-            }}
-        """
-    else:
-        raise RuntimeError(f"Unsupported device: {device}")

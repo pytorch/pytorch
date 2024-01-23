@@ -20,8 +20,7 @@
 #include <ATen/ops/upsample_bicubic2d_native.h>
 #endif
 
-namespace at {
-namespace meta {
+namespace at::meta {
 
 TORCH_META_FUNC(upsample_bicubic2d) (
   const Tensor& input, IntArrayRef output_size, bool align_corners, c10::optional<double> scales_h, c10::optional<double> scales_w
@@ -101,8 +100,8 @@ TORCH_META_FUNC(_upsample_bicubic2d_aa_backward) (
   set_output_raw_strided(0, input_size, {}, grad_output.options());
 }
 
-} // namespace meta
-namespace native {
+} // namespace at::meta
+namespace at::native {
 namespace {
 
 template <typename scalar_t>
@@ -303,5 +302,4 @@ DEFINE_DISPATCH(upsample_bicubic2d_kernel);
 DEFINE_DISPATCH(_upsample_bicubic2d_aa_kernel);
 DEFINE_DISPATCH(_upsample_bicubic2d_aa_backward_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -26,7 +26,9 @@ def register_prop_rule(op, schema_info=None):
     def wrapper(impl):
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
-            DTensor._propagator.register_sharding_prop_rule(overload, impl, schema_info)
+            DTensor._op_dispatcher.sharding_propagator.register_sharding_prop_rule(
+                overload, impl, schema_info
+            )
         return impl
 
     return wrapper
@@ -39,7 +41,9 @@ def register_op_strategy(op, schema_info=None):
     def wrapper(impl):
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
-            DTensor._propagator.register_op_strategy(overload, impl, schema_info)
+            DTensor._op_dispatcher.sharding_propagator.register_op_strategy(
+                overload, impl, schema_info
+            )
         return impl
 
     return wrapper
@@ -63,10 +67,7 @@ def normalize_dim(dim: int, ndim: int) -> int:
 
 
 def normalize_dims(dims: Union[int, Sequence[int]], ndim: int) -> Sequence[int]:
-    """
-    normalize a dim or a sequence of dims, so that they
-    are all positive.
-    """
+    """Normalize a dim or a sequence of dims, so that they are all positive."""
     if isinstance(dims, int):
         dims = (normalize_dim(dims, ndim),)
     elif isinstance(dims, list):
@@ -100,9 +101,7 @@ def prod(xs: Iterable[int]) -> int:
 
 
 def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
-    """
-    Check if the shape is shardable according to the spec.
-    """
+    """Check if the shape is shardable according to the spec."""
     # number of shards in each tensor dimension
     shards_map = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
@@ -120,12 +119,12 @@ def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
 
 
 def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:
-    """Return True if tensor dim is sharded"""
+    """Return True if tensor dim is sharded."""
     return any(p.is_shard(dim) for p in spec.placements)
 
 
 def is_tensor_partial(spec: DTensorSpec) -> bool:
-    """Return True if tensor is partial on the mesh"""
+    """Return True if tensor is partial on the mesh."""
     return any(p.is_partial() for p in spec.placements)
 
 
@@ -148,9 +147,7 @@ def map_placements_after_broadcast(
     shape: torch.Size,
     broadcast_dims_map: List[int],
 ) -> Tuple[Placement, ...]:
-    """
-    Map each placement based on the output shape after broadcast.
-    """
+    """Map each placement based on the output shape after broadcast."""
     new_placements: List[Placement] = []
     for placement in placements:
         if isinstance(placement, (Replicate, _Partial)):
@@ -181,6 +178,6 @@ def generate_redistribute_costs(
 ) -> List[float]:
     redistribute_costs: List[float] = []
     for strat in src_strategy.strategies:
-        redistribute_costs.append(redistribute_cost(strat.output_spec, dst_spec))
+        redistribute_costs.append(redistribute_cost(strat.out_spec, dst_spec))
 
     return redistribute_costs

@@ -10,12 +10,14 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
+    GPU_TYPE,
     HAS_CPU,
-    HAS_CUDA,
+    HAS_GPU,
 )
 
 if IS_WINDOWS and IS_CI:
@@ -54,14 +56,14 @@ def check_codegen(
 
     if is_cpp_code is False:
         if hasattr(model, "to"):
-            model = model.to("cuda")
+            model = model.to(device=GPU_TYPE)
 
         def copy_fn(x):
             # preserve strides of the input on the device
             if not isinstance(x, torch.Tensor):
                 return x
             return torch.empty_strided(
-                x.size(), x.stride(), device="cuda", dtype=x.dtype
+                x.size(), x.stride(), device=GPU_TYPE, dtype=x.dtype
             ).copy_(x)
 
         example_inputs = tuple(copy_fn(x) for x in example_inputs)
@@ -125,7 +127,6 @@ test_failures = {
     "test_isinf2_dynamic_shapes": TestFailure(("cpu",)),
     "test_linspace1_dynamic_shapes": TestFailure(("cpu",)),
     "test_masked_scatter_dynamic_shapes": TestFailure(("cpu",)),
-    "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_stack_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor2_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor3_dynamic_shapes": TestFailure(("cpu",)),
@@ -153,6 +154,7 @@ test_failures = {
     "test_conv_backward_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_conv_functional_bn_fuse_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_convolution2_dynamic_shapes": TestFailure(("cpu",)),
+    "test_cumsum_dynamic_shapes": TestFailure(("cpu",)),
     "test_div8_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_embedding_bag_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_empty1_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -173,12 +175,13 @@ test_failures = {
         ("cpu", "cuda")
     ),
     "test_misaligned_address_issue1_dynamic_shapes": TestFailure(("cpu",)),
+    "test_multilayer_cumsum_dynamic_shapes": TestFailure(("cpu",)),
     "test_mm_views_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_empty_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_ones_dynamic_shapes": TestFailure(("cpu",)),
     "test_permute2_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_randn_generator_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_randn_generator_dynamic_shapes": TestFailure(("cpu",)),
     "test_randn_like_empty_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_single_elem_dynamic_shapes": TestFailure(("cpu",)),
     "test_single_elem_indirect_dynamic_shapes": TestFailure(("cpu",)),
@@ -195,6 +198,9 @@ test_failures = {
         ("cpu", "cuda")
     ),
     "test_zero_element_mutation_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
+        ("cpu", "cuda")
+    ),
     "test_cat_uint8_dynamic_shapes": TestFailure(
         ("cpu",)
     ),  # cat on uint8 input is using aten fallback on cpu
@@ -206,6 +212,8 @@ test_failures = {
     "test_cat_of_loops_and_extern_kernel_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
+    # need to enable CL with dynamic shapes
+    "test_conv_inference_heuristics_dynamic_shapes": TestFailure("cuda"),
     "test_scaled_dot_product_efficient_attention_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
@@ -265,6 +273,7 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
     "test_sdpa_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_sdpa_unaligned_mask_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     #
     # The following tests do not support dynamic shapes yet:
     #
@@ -278,6 +287,13 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
 }
+
+if TEST_WITH_ROCM:
+    test_failures.update(
+        {
+            "test_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
+        }
+    )
 
 
 DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
@@ -308,11 +324,11 @@ if HAS_CPU:
     )
 
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_GPU and not TEST_WITH_ASAN:
 
-    class DynamicShapesCodegenCudaTests(TestCase):
+    class DynamicShapesCodegenGPUTests(TestCase):
         maxDiff = None
-        device = "cuda"
+        device = GPU_TYPE
 
         def common(self: TestCase, model, example_inputs, kwargs=None, **_rest):
             return check_codegen(
@@ -325,8 +341,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
     copy_tests(
         DynamicShapesCodegenCommonTemplate,
-        DynamicShapesCodegenCudaTests,
-        "cuda",
+        DynamicShapesCodegenGPUTests,
+        GPU_TYPE,
         test_failures,
     )
 
@@ -334,5 +350,5 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")

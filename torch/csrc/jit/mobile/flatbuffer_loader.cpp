@@ -302,7 +302,7 @@ mobile::Module FlatbufferLoader::parseModule(
   storage_loaded_.resize(module->storage_data_size(), false);
 
   mobile_ivalue_size_ = module_->mobile_ivalue_size();
-  if (mobile_ivalue_size_ == 0) {
+  if (mobile_ivalue_size_ == 0 || mobile_ivalue_size_ > ivalues->size()) {
     mobile_ivalue_size_ = ivalues->size();
   }
 

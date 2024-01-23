@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 from torch.utils.data import DataLoader
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     ops,
     onlyCPU,
@@ -24,13 +25,12 @@ from torch.testing._internal.common_methods_invocations import op_db
 import torch.cuda
 from torch.utils._pytree import tree_any, tree_all_only
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
-from torch import set_default_device
 from torch.utils._device import set_device
 from torch.utils._traceback import report_compile_source_on_error, format_traceback_short, CapturedTraceback
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS
+from torch.testing._internal.common_utils import load_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS  # type: ignore[attr-defined]
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -842,14 +842,14 @@ class TestExtensionUtils(TestCase):
         self.assertEqual(custom_backend_name, 'foo')
 
         with self.assertRaises(AttributeError):
-            torch.foo.is_available()
+            torch.foo.is_available()  # type: ignore[attr-defined]
 
         with self.assertRaisesRegex(AssertionError, "Tried to use AMP with the"):
             with torch.autocast(device_type=custom_backend_name):
                 pass
         torch._register_device_module('foo', DummyXPUModule)
 
-        torch.foo.is_available()
+        torch.foo.is_available()  # type: ignore[attr-defined]
         with torch.autocast(device_type=custom_backend_name):
             pass
 
@@ -889,7 +889,6 @@ class TestDeviceUtils(TestCase):
         self.assertEqual(r1.device.type, 'meta')
         self.assertEqual(r2.device.type, 'meta')
 
-
     def test_nn_module(self):
         with torch.device('meta'):
             m = nn.Linear(40, 50)
@@ -897,12 +896,32 @@ class TestDeviceUtils(TestCase):
 
     def test_set_default_device(self):
         try:
-            set_default_device('meta')
+            torch.set_default_device('meta')
             r = torch.empty(2, 2)
         finally:
-            set_default_device(None)
+            torch.set_default_device(None)
 
         self.assertEqual(r.device.type, 'meta')
+
+    def test_get_default_device(self):
+        torch.set_default_device('meta')
+        self.assertEqual(torch.get_default_device().type, 'meta')
+        torch.set_default_device(None)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_get_default_device_more(self):
+        torch.set_default_device("cuda")
+        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+        torch.set_default_device(None)
+
+        torch.set_default_device("cuda")
+        torch.cuda.set_device("cuda:1")
+        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+        torch.set_default_device(None)
+
+        torch.set_default_device("cuda:1")
+        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+        torch.set_default_device(None)
 
     @onlyCPU
     @ops(op_db)

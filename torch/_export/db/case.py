@@ -79,7 +79,7 @@ class ExportCase:
     name: str
     extra_inputs: Optional[InputsType] = None  # For testing graph generalization.
     # Tags associated with the use case. (e.g dynamic-shape, escape-hatch)
-    tags: Set[str] = field(default_factory=lambda: set())
+    tags: Set[str] = field(default_factory=set)
     support_level: SupportLevel = SupportLevel.SUPPORTED
     dynamic_shapes: Optional[Dict[str, Any]] = None
 
@@ -120,10 +120,9 @@ def to_snake_case(name):
 
 
 def _make_export_case(m, name, configs):
-    if inspect.isclass(m):
-        if not issubclass(m, torch.nn.Module):
-            raise TypeError("Export case class should be a torch.nn.Module.")
-        m = m()
+    if not issubclass(m, torch.nn.Module):
+        raise TypeError("Export case class should be a torch.nn.Module.")
+    m = m()
 
     if "description" not in configs:
         # Fallback to docstring if description is missing.

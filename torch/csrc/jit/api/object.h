@@ -25,6 +25,8 @@ struct TORCH_API Object {
   Object() = default;
   Object(const Object&) = default;
   Object& operator=(const Object&) = default;
+  Object(Object&&) noexcept = default;
+  Object& operator=(Object&&) noexcept = default;
   Object(ObjectPtr _ivalue) : _ivalue_(std::move(_ivalue)) {}
   Object(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Object(

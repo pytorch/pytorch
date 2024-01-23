@@ -7,8 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Library that launches and manages ``n`` copies of worker subprocesses
-either specified by a function or a binary.
+Library that launches and manages ``n`` copies of worker subprocesses either specified by a function or a binary.
 
 For functions, it uses ``torch.multiprocessing`` (and therefore python
 ``multiprocessing``) to spawn/fork worker processes. For binaries it uses python
@@ -106,7 +105,8 @@ def start_processes(
     tee: Union[Std, Dict[int, Std]] = Std.NONE,
 ) -> PContext:
     """
-    Starts ``n`` copies of ``entrypoint`` processes with the provided options.
+    Start ``n`` copies of ``entrypoint`` processes with the provided options.
+
     ``entrypoint`` is either a ``Callable`` (function) or a ``str`` (binary).
     The number of copies is determined by the number of entries for ``args`` and
     ``envs`` arguments, which need to have the same key set.
@@ -142,7 +142,6 @@ def start_processes(
     .. note:: It is expected that the ``log_dir`` exists, is empty, and is a directory.
 
     Example:
-
     ::
 
      log_dir = "/tmp/test"
@@ -197,7 +196,6 @@ def start_processes(
         tee: which std streams to redirect + print to console
 
     """
-
     # listdir raises FileNotFound or NotADirectoryError so no need to check manually
     if log_dir != os.devnull and os.listdir(log_dir):
         raise RuntimeError(

@@ -16,11 +16,15 @@ on:
   schedule:
     # Run hourly.
     - cron: 30 * * * *
+  workflow_dispatch:
 
 jobs:
   stale:
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: ubuntu-latest
+    runs-on: linux.large.arc
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
       - uses: actions/github-script@v6

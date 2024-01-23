@@ -1,3 +1,4 @@
+import operator
 import sys
 from abc import abstractmethod
 from copy import copy
@@ -62,7 +63,7 @@ class TestPrioritizations:
     Describes the results of whether heuristics consider a test relevant or not.
 
     All the different ranks of tests are disjoint, meaning a test can only be in one category, and they are only
-    declared at initization time.
+    declared at initialization time.
 
     A list can be empty if a heuristic doesn't consider any tests to be in that category.
 
@@ -179,14 +180,10 @@ class TestPrioritizations:
             self._test_priorities[new_relevance.value].append(upgraded_tests)
 
     def set_test_relevance(self, test_run: TestRun, new_relevance: Relevance) -> None:
-        return self._update_test_relevance(
-            test_run, new_relevance, lambda curr, new: curr == new
-        )
+        return self._update_test_relevance(test_run, new_relevance, operator.eq)
 
     def raise_test_relevance(self, test_run: TestRun, new_relevance: Relevance) -> None:
-        return self._update_test_relevance(
-            test_run, new_relevance, lambda curr, new: curr >= new
-        )
+        return self._update_test_relevance(test_run, new_relevance, operator.ge)
 
     def validate_test_priorities(self) -> None:
         # Union all TestRuns that contain include/exclude pairs
@@ -249,55 +246,77 @@ class TestPrioritizations:
     def get_none_relevance_tests(self) -> TestRuns:
         return tuple(test for test in self._test_priorities[Relevance.NONE.value])
 
-    def print_info(self) -> None:
-        def _print_tests(label: str, tests: List[TestRun]) -> None:
-            if not tests:
-                return
+    def get_info_str(self) -> str:
+        info = ""
 
-            print(f"{label} tests ({len(tests)}):")
+        def _test_info(label: str, tests: List[TestRun]) -> str:
+            if not tests:
+                return ""
+
+            s = f"{label} tests ({len(tests)}):\n"
             for test in tests:
                 if test in tests:
-                    print(f"  {test}")
+                    s += f"  {test}\n"
+            return s
 
         for relevance_group, tests in self._traverse_priorities():
-            _print_tests(f"{Relevance(relevance_group).name.title()} Relevance", tests)
+            if relevance_group == Relevance.UNRANKED:
+                continue
+            info += _test_info(
+                f"{Relevance(relevance_group).name.title()} Relevance", tests
+            )
+
+        return info.strip()
+
+    def print_info(self) -> None:
+        print(self.get_info_str())
 
     def _get_test_relevance_group(self, test_run: TestRun) -> Relevance:
-        """Returns the rank of the given test run."""
+        """
+        Returns the relevance of the given test run.
+        If the heuristic split this test run among multiple runs, then return the
+        highest relevance of any of the test runs.
+        """
         for relevance_group, tests in self._traverse_priorities():
-            if any(t.contains(test_run) for t in tests):
-                return Relevance(relevance_group)
-
-        print("holup, retry")
-        for relevance_group, tests in self._traverse_priorities():
-            if any(
-                t.contains(test_run) for t in tests
-            ):  # t could be the entire test_run or a superset
+            #  Different heuristics may result in a given test file being split
+            #  into different test runs, so look for the overlapping tests to
+            #  find the match
+            if any(t & test_run for t in tests):
                 return Relevance(relevance_group)
 
         raise ValueError(f"Test {test_run} not found in any relevance group")
 
     def _get_test_order(self, test_run: TestRun) -> int:
-        """Returns the rank this heuristic suggested for the test run."""
+        """
+        Returns the rank this heuristic suggested for the test run.
+        If the heuristic split this test run among multiple runs, then return the
+        highest relevance of any of the test runs.
+        """
         base_rank = 0
 
         for _, relevance_group_tests in self._traverse_priorities():
             for idx, test in enumerate(relevance_group_tests):
-                if test.contains(
-                    test_run
-                ):  # test could be the entire test_run or a superset
+                #  Different heuristics may result in a given test file being split
+                #  into different test runs, so look for the overlapping tests to
+                #  find the match
+                if test & test_run:
                     return base_rank + idx
             base_rank += len(relevance_group_tests)
 
         raise ValueError(f"Test {test_run} not found in any relevance group")
 
     def _get_test_order_within_relevance_group(self, test_run: TestRun) -> int:
-        """Returns the highest test order of any test class within the same relevance group."""
+        """
+        Returns the highest test order of any test class within the same relevance group.
+        If the heuristic split this test run among multiple runs, then return the
+        highest relevance of any of the test runs.
+        """
         for _, relevance_group_tests in self._traverse_priorities():
             for idx, test in enumerate(relevance_group_tests):
-                if test.contains(
-                    test_run
-                ):  # test could be the entire test_run or a superset
+                #  Different heuristics may result in a given test file being split
+                #  into different test runs, so look for the overlapping tests to
+                #  find the match
+                if test & test_run:
                     return idx
 
         raise ValueError(f"Test {test_run} not found in any relevance group")

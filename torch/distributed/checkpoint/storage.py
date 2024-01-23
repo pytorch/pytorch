@@ -1,20 +1,11 @@
 import abc
 from dataclasses import dataclass
-from typing import List, Any
+from typing import Any, List
 
 from torch.futures import Future
 
-from .metadata import (
-    Metadata,
-    MetadataIndex,
-)
-
-from .planner import (
-    LoadPlan,
-    SavePlan,
-    SavePlanner,
-    LoadPlanner,
-)
+from .metadata import Metadata, MetadataIndex
+from .planner import LoadPlan, LoadPlanner, SavePlan, SavePlanner
 
 __all__ = ["WriteResult", "StorageWriter", "StorageReader"]
 
@@ -115,11 +106,9 @@ class StorageWriter(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def finish(
-        self, metadata: Metadata, results: List[List[WriteResult]]
-    ) -> None:
+    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
         """
-        Writes the metadata and marks the current checkpoint as successful.
+        Write the metadata and marks the current checkpoint as successful.
 
         The actual format/schema used for serializing `metadata` is an
         implementation detail. The only requirement is that it's recoverable
@@ -155,7 +144,7 @@ class StorageReader(abc.ABC):
     @abc.abstractmethod
     def read_metadata(self) -> Metadata:
         """
-        Reads the checkpoint metadata.
+        Read the checkpoint metadata.
 
         Returns:
             The metadata object associated with the checkpoint being loaded.
@@ -212,7 +201,7 @@ class StorageReader(abc.ABC):
     @abc.abstractmethod
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         """
-        Reads all items from ``plan`` using ``planner`` to resolve the data.
+        Read all items from ``plan`` using ``planner`` to resolve the data.
 
         A subclass should call ``LoadPlanner::load_bytes`` to deserialize a BytesIO
         object into the right place.

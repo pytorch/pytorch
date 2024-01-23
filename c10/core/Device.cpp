@@ -146,7 +146,7 @@ std::string Device::str() const {
   std::string str = DeviceTypeName(type(), /* lower case */ true);
   if (has_index()) {
     str.push_back(':');
-    str.append(to_string(index()));
+    str.append(std::to_string(index()));
   }
   return str;
 }

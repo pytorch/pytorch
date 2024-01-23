@@ -8,8 +8,8 @@ from torch.distributed._tensor._utils import (
     compute_local_shape,
     compute_local_shape_and_global_offset,
 )
-from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import Replicate, Shard
+from torch.distributed.device_mesh import DeviceMesh
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -58,26 +58,31 @@ class UtilTest(DTensorTestBase):
         one_d_placements = [[Shard(0)], [Replicate()]]
 
         for placements in one_d_placements:
-            mesh_tensor = torch.arange(self.world_size)
-            device_mesh = DeviceMesh(self.device_type, mesh_tensor)
-            global_tensor = torch.arange(64).view(8, 8)
-            global_shape = global_tensor.size()
+            # When the placements is [Shard(0)], we test for three different scenarios:
+            # 1) sharding resulting in empty shards on all or some of the ranks
+            # 2) sharding resulting in shards of different size across different ranks
+            # 3) sharding resulting in non-empty shards of same size across all ranks
+            for size in range(self.world_size * 2 + 1):
+                mesh_tensor = torch.arange(self.world_size)
+                device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+                global_tensor = torch.arange(size)
+                global_shape = global_tensor.size()
 
-            dtensor = distribute_tensor(global_tensor, device_mesh, placements)
-            local_size, global_offset = compute_local_shape_and_global_offset(
-                global_shape, device_mesh, placements
-            )
+                dtensor = distribute_tensor(global_tensor, device_mesh, placements)
+                local_size, global_offset = compute_local_shape_and_global_offset(
+                    global_shape, device_mesh, placements
+                )
 
-            # TODO: make this test cleaner and work for nD
-            dim0_start = global_offset[0]
-            dim0_end = global_offset[0] + local_size[0]
+                # TODO: make this test cleaner and work for nD
+                dim0_start = global_offset[0]
+                dim0_end = global_offset[0] + local_size[0]
 
-            # Check the local tensor of dtensor is exactly the same
-            # if we slice the global_tensor with local_size and global_offset
-            self.assertEqual(
-                dtensor.to_local(),
-                global_tensor[dim0_start:dim0_end],
-            )
+                # Check the local tensor of dtensor is exactly the same
+                # if we slice the global_tensor with local_size and global_offset
+                self.assertEqual(
+                    dtensor.to_local(),
+                    global_tensor[dim0_start:dim0_end],
+                )
 
     @with_comms
     def test_compute_local_shape_and_global_offset_2D(self):
@@ -88,29 +93,30 @@ class UtilTest(DTensorTestBase):
         )
 
         for placements in two_d_placements:
-            # mesh: 2 * 4
-            mesh_tensor = torch.arange(self.world_size).reshape(2, 4)
-            device_mesh = DeviceMesh(self.device_type, mesh_tensor)
-            global_tensor = torch.arange(64).view(8, 8)
-            global_shape = global_tensor.size()
+            for dim_0_size in (1, 2, 4, 8):
+                # mesh: 2 * 4
+                mesh_tensor = torch.arange(self.world_size).reshape(2, 4)
+                device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+                global_tensor = torch.arange(64).view(dim_0_size, -1)
+                global_shape = global_tensor.size()
 
-            dtensor = distribute_tensor(global_tensor, device_mesh, placements)
-            local_size, global_offset = compute_local_shape_and_global_offset(
-                global_shape, device_mesh, placements
-            )
+                dtensor = distribute_tensor(global_tensor, device_mesh, placements)
+                local_size, global_offset = compute_local_shape_and_global_offset(
+                    global_shape, device_mesh, placements
+                )
 
-            # TODO: make this test cleaner and work for nD
-            dim0_start = global_offset[0]
-            dim0_end = global_offset[0] + local_size[0]
-            dim1_start = global_offset[1]
-            dim1_end = global_offset[1] + local_size[1]
+                # TODO: make this test cleaner and work for nD
+                dim0_start = global_offset[0]
+                dim0_end = global_offset[0] + local_size[0]
+                dim1_start = global_offset[1]
+                dim1_end = global_offset[1] + local_size[1]
 
-            # Check the local tensor of dtensor is exactly the same
-            # if we slice the global_tensor with local_size and global_offset
-            self.assertEqual(
-                dtensor.to_local(),
-                global_tensor[dim0_start:dim0_end, dim1_start:dim1_end],
-            )
+                # Check the local tensor of dtensor is exactly the same
+                # if we slice the global_tensor with local_size and global_offset
+                self.assertEqual(
+                    dtensor.to_local(),
+                    global_tensor[dim0_start:dim0_end, dim1_start:dim1_end],
+                )
 
 
 if __name__ == "__main__":

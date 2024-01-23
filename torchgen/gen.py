@@ -4,7 +4,7 @@ import json
 import os
 import pathlib
 from collections import defaultdict, namedtuple, OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     Any,
     Callable,
@@ -274,6 +274,7 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
             "inplace_view" in f.tags
             and str(f.func.name) != "resize_"
             and str(f.func.name) != "resize_as_"
+            and str(f.func.name.name) != "set_"
         ):
             base_name = f.func.name.name
             overload_name = f.func.name.overload_name
@@ -542,13 +543,21 @@ def static_dispatch(
 @dataclass(frozen=True)
 class RegisterSchema:
     selector: SelectiveBuilder
+    known_tags: Dict[str, int] = field(default_factory=dict)
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if not self.selector.is_native_function_selected(f):
             return None
         tags = "{" + ", ".join(f"at::Tag::{tag}" for tag in sorted(f.tags)) + "}"
-        return f"m.def({cpp_string(str(f.func))}, {tags});\n"
+        if tags == "{}":
+            return f"m.def({cpp_string(str(f.func))}, {{}});\n"
+        maybe_tags = ""
+        if tags not in self.known_tags:
+            idx = len(self.known_tags)
+            self.known_tags[tags] = idx
+            maybe_tags = f"const std::vector<at::Tag> tags_{idx} = {tags};\n"
+        return f"{maybe_tags}m.def({cpp_string(str(f.func))}, tags_{self.known_tags[tags]});\n"
 
 
 # Generates Operators.h and Operators.cpp.
@@ -1374,8 +1383,7 @@ def get_grouped_by_view_native_functions(
             )
         # Take the remaining functions that weren't part of the view group
         # and emit them separately
-        for func in d.values():
-            funcs.append(func)
+        funcs.extend(d.values())
         return funcs
 
     grouped_by_views: Dict[

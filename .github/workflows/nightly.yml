@@ -40,15 +40,43 @@ jobs:
     runs-on: ubuntu-latest
     environment: update-commit-hash
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
       - name: update-vision-commit-hash
-        uses: ./.github/actions/update-commit-hash
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
         if: ${{ github.event_name == 'schedule' }}
         with:
           repo-name: vision
           branch: main
+          pin-folder: .github/ci_commit_pins
+          test-infra-ref: main
+          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
+          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+
+  update-audio-commit-hash:
+    runs-on: ubuntu-latest
+    environment: update-commit-hash
+    steps:
+      - name: update-audio-commit-hash
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        if: ${{ github.event_name == 'schedule' }}
+        with:
+          repo-name: audio
+          branch: main
+          pin-folder: .github/ci_commit_pins
+          test-infra-ref: main
+          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
+          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+
+  update-executorch-commit-hash:
+    runs-on: ubuntu-latest
+    environment: update-commit-hash
+    steps:
+      - name: update-executorch-commit-hash
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        if: ${{ github.event_name == 'schedule' }}
+        with:
+          repo-name: executorch
+          branch: main
+          pin-folder: .ci/docker/ci_commit_pins
+          test-infra-ref: main
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}

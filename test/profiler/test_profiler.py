@@ -426,7 +426,7 @@ class TestExecutionTrace(TestCase):
                 loop_count += 1
             # Check if tensor tuple representation size is correct.
             if n["name"] == "## TEST 2 ##":
-                assert len(n["inputs"][3][0]) == tensor_tuple_size
+                assert len(n["inputs"]["values"][3][0]) == tensor_tuple_size
         assert found_root_node
         assert loop_count == expected_loop_events
 
@@ -1796,6 +1796,25 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                     x.add(y)
 
         self.assertGreaterEqual(len([e for e in p.events() if e.name == "guarded_rff"]), 4)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_event_list(self):
+        # AFAIK event list is part of legacy profiler and/or used when kineto is not available.
+        # This test has basic sanity checks to test against obvious regressions.
+        x, y = (torch.rand((4, 4), requires_grad=True, device="cuda") for _ in range(2))
+        with profile(with_stack=True) as p:
+            z = (x @ y).relu().sum()
+            z.backward()
+
+        event_list = torch.autograd.profiler_util.EventList(p.events())
+        # event_list._build_tree()
+
+        with TemporaryFileName(mode="w+") as fname:
+            event_list.export_chrome_trace(fname)
+            with open(fname) as f:
+                json.load(f)
+
+        event_list.table()
 
 
 def find_node_with_name(nodes, name):

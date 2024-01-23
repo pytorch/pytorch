@@ -58,7 +58,6 @@
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
 #include <ATen/ops/pow.h>
-#include <ATen/ops/zeros_like_ops.h>
 #endif
 
 namespace at::native {
@@ -334,6 +333,7 @@ FOREACH_BINARY_OP_LIST_ALPHA(lerp);
 
 FOREACH_BINARY_OP_TENSOR_ALPHA(add);
 FOREACH_BINARY_OP_TENSOR(mul);
+FOREACH_BINARY_OP_TENSOR(div);
 
 FOREACH_BINARY_OP_SCALAR(add);
 FOREACH_BINARY_OP_SCALAR(sub);

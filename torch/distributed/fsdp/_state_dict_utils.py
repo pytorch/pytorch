@@ -17,7 +17,7 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
 )
 from torch.distributed._tensor import DTensor
-from torch.distributed._tensor.device_mesh import _mesh_resources
+from torch.distributed.device_mesh import _mesh_resources
 
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
@@ -558,12 +558,14 @@ def _sharded_post_state_dict_hook(
                 world_size=fsdp_state.world_size,
                 num_devices_per_node=fsdp_state._device_handle.device_count(),
                 pg=fsdp_state.process_group,
+                fsdp_extension=fsdp_state._fsdp_extension,
             )
         else:
             sharded_tensor = _ext_chunk_dtensor(
                 tensor=param,
                 rank=fsdp_state.rank,
                 device_mesh=fsdp_state._device_mesh,
+                fsdp_extension=fsdp_state._fsdp_extension,
             )
         if fsdp_state._state_dict_config.offload_to_cpu:
             sharded_tensor = sharded_tensor.cpu()
@@ -627,7 +629,9 @@ def _sharded_pre_load_state_dict_hook(
 
         if not fsdp_state._state_dict_config._use_dtensor:
             # All-gather the param (ShardedTensor)
-            param, shards = _ext_pre_load_state_dict_transform(param)
+            param, shards = _ext_pre_load_state_dict_transform(
+                param, fsdp_state._fsdp_extension
+            )
 
             assert len(shards) < 2, (
                 "Expects 0 or 1 shard per rank "
@@ -667,11 +671,15 @@ def _sharded_pre_load_state_dict_hook(
                 param = param.to(fsdp_state._device_mesh.device_type)
 
             parent_mesh = _mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
-            local_tensor = _ext_all_gather_dtensor(param, parent_mesh)
+            local_tensor = _ext_all_gather_dtensor(
+                param, parent_mesh, fsdp_state._fsdp_extension
+            )
 
             if fqn_to_param_ext.get(fqn) is not None:
                 ext = fqn_to_param_ext[fqn]
-                local_tensor = _ext_post_unflatten_transform(local_tensor, ext)
+                local_tensor = _ext_post_unflatten_transform(
+                    local_tensor, ext, fsdp_state._fsdp_extension
+                )
             state_dict[fqn_from_global_root] = local_tensor
 
     with SimpleProfiler.profile("_enter_unshard_params_ctx"):
@@ -767,7 +775,7 @@ def _pre_state_dict_hook(
             "be returned."
         )
     else:
-        _set_use_dtensor(module, fsdp_state)
+        _set_use_dtensor(fsdp_state)
         context = contextlib.nullcontext()
 
     with context:
@@ -785,14 +793,24 @@ def _pre_state_dict_hook(
 
 
 @no_type_check
-def _set_use_dtensor(fsdp_state: _FSDPState, module: nn.Module) -> None:
+def _set_use_dtensor(fsdp_state: _FSDPState) -> None:
     # If device_mesh is passed in when initalizing FSDP, we automatically turn the
     # _use_dtensor flag to be true for ShardedStateDictConfig().
-    if (
-        getattr(module, "device_mesh", None)
-        and fsdp_state._state_dict_type == StateDictType.SHARDED_STATE_DICT
-    ):
-        fsdp_state._state_dict_config._use_dtensor = True
+    if getattr(fsdp_state, "_device_mesh", None):
+        state_dict_type = fsdp_state._state_dict_type
+        if state_dict_type == StateDictType.LOCAL_STATE_DICT:
+            raise RuntimeError(
+                "Found state_dict_type LOCAL_STATE_DICT",
+                "DeviceMesh is not compatible with LOCAL_STATE_DICT.",
+                "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict.",
+            )
+        elif state_dict_type == StateDictType.FULL_STATE_DICT:
+            logger.warning(
+                "Found both state_dict_type FULL_STATE_DICT and device_mesh. "  # noqa: G004
+                "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict."
+            )
+        else:
+            fsdp_state._state_dict_config._use_dtensor = True
 
 
 @no_type_check
@@ -816,7 +834,7 @@ def _pre_load_state_dict_hook(
             "be returned."
         )
     else:
-        _set_use_dtensor(module, fsdp_state)
+        _set_use_dtensor(fsdp_state)
         context = contextlib.nullcontext()
 
     _lazy_init(fsdp_state, module)

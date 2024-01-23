@@ -12,7 +12,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(_compute_linear_combination_stub);
 
@@ -115,4 +115,4 @@ Tensor& _compute_linear_combination_out(const Tensor& input, const Tensor& coeff
   return output;
 }
 
-}} // namespace at::native
+} // namespace at::native

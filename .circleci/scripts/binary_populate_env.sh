@@ -58,8 +58,7 @@ fi
 PIP_UPLOAD_FOLDER='nightly/'
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
-#TODO: We should be pulling semver version from the base version.txt
-BASE_BUILD_VERSION="2.2.0.dev$DATE"
+BASE_BUILD_VERSION="$(cat ${PYTORCH_ROOT}/version.txt|cut -da -f1).dev${DATE}"
 # Change BASE_BUILD_VERSION to git tag when on a git tag
 # Use 'git -C' to make doubly sure we're in the correct directory for checking
 # the git tag
@@ -77,14 +76,7 @@ else
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
 fi
 
-# The build with with-pypi-cudnn suffix is only applicabe to
-# pypi small wheel Linux x86 build
-if [[ -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]] && [[ "$(uname)" == 'Linux' && "$(uname -m)" == "x86_64" ]]; then
-  export PYTORCH_BUILD_VERSION="${PYTORCH_BUILD_VERSION}-with-pypi-cudnn"
-fi
-
 export PYTORCH_BUILD_NUMBER=1
-
 
 JAVA_HOME=
 BUILD_JNI=OFF

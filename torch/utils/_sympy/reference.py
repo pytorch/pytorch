@@ -1,7 +1,14 @@
+import math
+
 import sympy
 
+import torch
 
-# The normal Python interpretation of the operators
+
+# The sympy interpretation of operators.  It will also sometimes work with
+# plain int/float, but if you do certain operations you will get out a
+# sympy.Basic in the end.  If you want the Python/FX traceable interpretation,
+# check PythonReferenceAnalysis.
 # NB: For magic methods this needs to use normal magic methods
 # so that test_magic_methods works
 class ReferenceAnalysis:
@@ -11,12 +18,10 @@ class ReferenceAnalysis:
 
     @staticmethod
     def or_(a, b):
-        assert not isinstance(a, bool) and not isinstance(b, bool)
         return a | b
 
     @staticmethod
     def and_(a, b):
-        assert not isinstance(a, bool) and not isinstance(b, bool)
         return a & b
 
     @staticmethod
@@ -151,3 +156,59 @@ class ReferenceAnalysis:
     @staticmethod
     def ceil(x):
         return sympy.ceiling(x)
+
+
+# Unlike ReferenceAnalysis, does NOT sympyify, instead, works with plain
+# Python types and is FX traceable.  Inheritance here is purely for code
+# sharing (TODO: considering splitting out a BaseReferenceAnalysis).
+class PythonReferenceAnalysis(ReferenceAnalysis):
+    @staticmethod
+    def constant(c, dtype):
+        if dtype is torch.int64:
+            return int(c)
+        elif dtype is torch.double:
+            return float(c)
+        elif dtype is torch.bool:
+            return bool(c)
+        else:
+            raise AssertionError(f"unrecognized dtype {dtype}")
+
+    @staticmethod
+    def not_(a):
+        return torch.sym_not(a)
+
+    @staticmethod
+    def floordiv(a, b):
+        return a // b
+
+    @staticmethod
+    def truncdiv(a, b):
+        return a / b
+
+    @staticmethod
+    def exp(x):
+        raise AssertionError("exp is not valid shape sympy expr")
+
+    @staticmethod
+    def log(x):
+        raise AssertionError("log is not valid shape sympy expr")
+
+    @staticmethod
+    def sqrt(x):
+        return torch._sym_sqrt(x)  # type: ignore[attr-defined]
+
+    @staticmethod
+    def minimum(a, b):
+        return torch.sym_min(a, b)
+
+    @staticmethod
+    def maximum(a, b):
+        return torch.sym_max(a, b)
+
+    @staticmethod
+    def floor(x):
+        return math.floor(x)
+
+    @staticmethod
+    def ceil(x):
+        return math.ceil(x)

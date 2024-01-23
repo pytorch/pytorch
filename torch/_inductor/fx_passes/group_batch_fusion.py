@@ -1,10 +1,11 @@
 import collections
 import logging
 import operator
-from typing import Any, DefaultDict, Deque, Iterator, List, Optional, Set, Tuple
+from typing import Any, DefaultDict, Deque, Dict, Iterator, List, Optional, Set, Tuple
 
 import torch
 from torch._dynamo.utils import counters
+from torch._utils_internal import print_graph
 
 from .. import config
 from ..pattern_matcher import (
@@ -12,11 +13,6 @@ from ..pattern_matcher import (
     get_arg_value,
     stable_topological_sort,
 )
-
-if config.is_fbcode():
-    from torch._inductor.fb.utils import (  # type: ignore[import]  # noqa: F401
-        get_everpaste_url,
-    )
 
 try:
     # importing this will register fbgemm lowerings for inductor
@@ -42,12 +38,62 @@ MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR = 4096
 SEARCH_EXCLUSIONS = {operator.getitem}
 
 
+default_graph_search_options = {
+    "min_fuse_set_size": MIN_FUSE_SET_SIZE,
+    "max_fuse_set_size": MAX_FUSE_SET_SIZE,
+    "max_fuse_search_depth": MAX_FUSE_SEARCH_DEPTH,
+    "max_fuse_tensor_size_group_linear": MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR,
+}
+
+graph_search_options = default_graph_search_options
+
+
 class GroupBatchFusionBase:
+    def __init__(self, **kwargs):
+        self.graph_search_options = kwargs.pop(
+            "graph_search_options", default_graph_search_options
+        )
+
     def match(self, node):
         raise NotImplementedError("match called on base")
 
     def fuse(self, graph, subset):
         raise NotImplementedError("fuse called on base")
+
+
+PRE_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = dict()
+POST_GRAD_FUSIONS: Dict[str, GroupBatchFusionBase] = dict()
+
+
+def register_fusion(name: str, pre_grad=True):
+    def decorator(fusion_cls: GroupBatchFusionBase):
+        if pre_grad:
+            PRE_GRAD_FUSIONS[name] = fusion_cls
+        else:
+            POST_GRAD_FUSIONS[name] = fusion_cls
+        return fusion_cls
+
+    return decorator
+
+
+def list_group_batch_fusions(pre_grad=True) -> List[str]:
+    if pre_grad:
+        return list(PRE_GRAD_FUSIONS.keys())
+    else:
+        return list(POST_GRAD_FUSIONS.keys())
+
+
+def decompose_stack(graph: torch.fx.GraphModule, input_tensors: List[Any]) -> Any:
+    unsqueezed_inputs = []
+    for input_tensor in input_tensors:
+        unsqueezed_input = graph.call_function(
+            aten.unsqueeze, args=(input_tensor,), kwargs={"dim": 0}
+        )
+        unsqueezed_inputs.append(unsqueezed_input)
+    stacked_inputs = graph.call_function(
+        aten.cat, args=(unsqueezed_inputs,), kwargs={"dim": 0}
+    )
+    return stacked_inputs
 
 
 class GroupFusion(GroupBatchFusionBase):
@@ -66,6 +112,92 @@ class BatchFusion(GroupBatchFusionBase):
     pass
 
 
+class BatchPointwiseOpsFusionFactory(BatchFusion):
+    def __init__(self, op, **kwargs):
+        super().__init__(**kwargs)
+        self.op = op
+
+
+@register_fusion("batch_linear_post_grad", pre_grad=False)
+class PostGradBatchLinearFusion(BatchFusion):
+    """
+    Fuse ops in a batch way in post grad (aten level).
+    """
+
+    def _addmm_node_can_be_fused(self, node: torch.fx.Node) -> bool:
+        return (
+            node.kwargs.get("beta", 1.0) == 1.0 and node.kwargs.get("alpha", 1.0) == 1.0
+        )
+
+    def _is_input_2d(self, input: torch.fx.Node) -> bool:
+        input_shapes = input.meta["tensor_meta"].shape
+        return (
+            len(input_shapes) == 2
+            and isinstance(input_shapes[0], int)
+            and isinstance(input_shapes[1], int)
+        )
+
+    def match(self, node: torch.fx.Node) -> Optional[Tuple[str, int, int, int, bool]]:
+        if CallFunctionVarArgs(aten.mm).match(node):
+            input_m, weight_m = node.args
+            bias_m = None
+
+        elif CallFunctionVarArgs(aten.addmm.default).match(
+            node
+        ) and self._addmm_node_can_be_fused(node):
+            bias_m, input_m, weight_m = node.args
+        else:
+            return None
+
+        # only handle the cases where inputs are 2D tensors
+        if not self._is_input_2d(input_m) or not self._is_input_2d(weight_m):
+            return None
+        m, k = input_m.meta["tensor_meta"].shape
+        n = weight_m.meta["tensor_meta"].shape[1]
+        batch_key = ("batch_linear", m, k, n, bias_m is not None)
+        return batch_key
+
+    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
+        batch_inputs = []
+        batch_weights = []
+        batch_biases = []
+        batch_nodes = []
+
+        for node in subset:
+            if CallFunctionVarArgs(aten.addmm.default).match(node):
+                bias, input, weight = node.args
+            elif CallFunctionVarArgs(aten.mm.default).match(node):
+                input, weight = node.args
+                bias = None
+            batch_nodes.append(node)
+            batch_inputs.append(input)
+            batch_weights.append(weight)
+            batch_biases.append(bias)
+
+        with graph.inserting_before(subset[-1]):
+            fused_inputs = decompose_stack(graph, batch_inputs)
+            fused_weights = decompose_stack(graph, batch_weights)
+            fused_bmm = graph.call_function(
+                aten.bmm,
+                args=(fused_inputs, fused_weights),
+            )
+
+        for i, original_mm in enumerate(batch_nodes):
+            has_bias = False
+            with graph.inserting_after(fused_bmm):
+                new_mm = graph.call_function(aten.select, args=((fused_bmm, 0, i)))
+                if batch_biases[i]:
+                    has_bias = True
+                    new_bias_add = graph.call_function(
+                        aten.add, args=((batch_biases[i], new_mm))
+                    )
+            new_mm_cont = new_bias_add if has_bias else new_mm
+            original_mm.replace_all_uses_with(new_mm_cont)
+            new_mm_cont.meta.update(original_mm.meta)
+            graph.erase_node(original_mm)
+
+
+@register_fusion("group_linear", pre_grad=False)
 class GroupLinearFusion(GroupFusion):
     def _addmm_node_can_be_fused(self, node: torch.fx.Node):
         input_shape = node.args[1].meta["tensor_meta"].shape
@@ -77,7 +209,7 @@ class GroupLinearFusion(GroupFusion):
             and len(weight_shape) == 2
             and all(x % 2 == 0 for x in input_shape + weight_shape)
             and all(
-                shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
+                shape <= self.graph_search_options["max_fuse_tensor_size_group_linear"]
                 for shape in input_shape + weight_shape
             )
         )
@@ -90,7 +222,7 @@ class GroupLinearFusion(GroupFusion):
             and len(weight_shape) == 2
             and all(x % 2 == 0 for x in input_shape + weight_shape)
             and all(
-                shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
+                shape <= self.graph_search_options["max_fuse_tensor_size_group_linear"]
                 for shape in input_shape + weight_shape
             )
         )
@@ -135,6 +267,7 @@ class GroupLinearFusion(GroupFusion):
             fused_mm = graph.call_function(
                 torch.ops.fbgemm.gmm.default,
                 args=(group_inputs, group_weights, group_biases),
+                kwargs={"smart_fused": True},
             )
 
         for i, original_mm in enumerate(group_nodes):
@@ -145,6 +278,80 @@ class GroupLinearFusion(GroupFusion):
             graph.erase_node(original_mm)
 
 
+class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
+    """
+    Batch pointwise operator (e.g., add, mul) in post grad pass.
+    """
+
+    def __init__(self, op, **kwargs):
+        super().__init__(op, **kwargs)
+        self.op = op
+
+    def _pointwise_node_can_be_fused(self, node: torch.fx.Node):
+        # note: we only consider the case where the inputs are tensors
+        # for mixed precision training, we need to make sure the inputs
+        # of the aten.cat when do the stack should be the same dtype
+        # otherwise, the output of the aten.cat may be not the same as
+        # its inputs, and cause dtype not same error in mm or addmm
+        input, other = node.args
+        return (
+            input.meta["tensor_meta"].shape == other.meta["tensor_meta"].shape
+            if hasattr(input, "meta")
+            and hasattr(other, "meta")
+            and "tensor_meta" in input.meta
+            and "tensor_meta" in other.meta
+            else False
+        )
+
+    def match(self, node: torch.fx.Node):
+        if CallFunctionVarArgs(self.op).match(
+            node
+        ) and self._pointwise_node_can_be_fused(node):
+            alpha = node.kwargs.get("alpha", 1.0)
+            rounding_mode = node.kwargs.get("rounding_mode", None)
+            input, other = node.args
+            shape = list(input.meta["tensor_meta"].shape)
+            group_key = (
+                "batch_" + self.op.__name__.lower() + "_post_grad",
+                str(shape),
+                str(input.meta["tensor_meta"].dtype),
+                str(other.meta["tensor_meta"].dtype),
+                str(alpha),
+                str(rounding_mode),
+            )
+        else:
+            group_key = None
+        return group_key
+
+    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
+        batch_inputs, batch_others = [], []
+        alpha = subset[0].kwargs.get("alpha", 1.0)
+
+        for node in subset:
+            input, other = node.args
+            batch_inputs.append(input)
+            batch_others.append(other)
+
+        with graph.inserting_before(subset[0]):
+            stack_inputs = decompose_stack(graph, batch_inputs)
+            stack_others = decompose_stack(graph, batch_others)
+
+            batch_op = graph.call_function(
+                self.op,
+                args=(stack_inputs, stack_others),
+                kwargs={"alpha": alpha} if self.op == aten.add.Tensor else {},
+            )
+            for i, original_add in enumerate(subset):
+                with graph.inserting_after(batch_op):
+                    new_add = graph.call_function(
+                        torch.ops.aten.select, args=((batch_op, 0, i))
+                    )
+                original_add.replace_all_uses_with(new_add)
+                new_add.meta.update(original_add.meta)
+                graph.erase_node(original_add)
+
+
+@register_fusion("batch_linear_lhs")
 class BatchLinearLHSFusion(BatchFusion):
     """
     Batch linear left-hand side fusion. This pass tries to fuse the following patterns:
@@ -240,7 +447,8 @@ def is_linear_node_can_be_fused(node: torch.fx.Node):
     )
 
 
-class BatchLinearFusion(BatchFusion):
+@register_fusion("batch_linear")
+class PreGradBatchLinearFusion(BatchFusion):
     """
     Batch linear fusion in pre grad pass.
     Fuse linear with same size with torch.baddmm
@@ -318,65 +526,7 @@ class BatchLinearFusion(BatchFusion):
                 graph.erase_node(linear)
 
 
-class BatchTanhFusion(BatchFusion):
-    """
-    Batch tanh fusion in pre grad pass.
-    We only fuse the tahn if the input is after same split node.
-    """
-
-    def _getitem_args(self, getitem_node: torch.fx.Node):
-        if getitem_node.target != operator.__getitem__ or (
-            getitem_node.op != "call_function"
-        ):
-            return None
-        return getitem_node.args[0]
-
-    def match(self, node: torch.fx.Node):
-        input = get_arg_value(node, 0, "input")
-        if (
-            CallFunctionVarArgs(torch.tanh).match(node)
-            and is_node_meta_valid(node)
-            and self._getitem_args(input) is not None
-        ):
-            group_key = (
-                "batch_tanh",
-                self._getitem_args(input),
-                str(input.meta["example_value"].shape),
-            )
-        else:
-            group_key = None
-        return group_key
-
-    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
-        batch_nodes = []
-        batch_inputs = []
-
-        for node in subset:
-            batch_nodes.append(node)
-            batch_inputs.append(get_arg_value(node, 0, "input"))
-
-        with graph.inserting_before(subset[0]):
-            stack_inputs = graph.call_function(
-                torch.stack, args=(batch_inputs,), kwargs={"dim": 0}
-            )
-
-            batch_tanh = graph.call_function(
-                torch.tanh,
-                args=(stack_inputs,),
-            )
-            unbind_tanh = graph.call_function(
-                torch.unbind, args=(batch_tanh,), kwargs={"dim": 0}
-            )
-            for i, node in enumerate(batch_nodes):
-                with graph.inserting_after(unbind_tanh):
-                    getitem = graph.call_function(
-                        operator.getitem, args=(unbind_tanh, i)
-                    )
-                node.replace_all_uses_with(getitem)
-                getitem.meta.update(node.meta)
-                graph.erase_node(node)
-
-
+@register_fusion("batch_layernorm")
 class BatchLayernormFusion(BatchFusion):
     """
     Batch layer norm fusion in pre grad pass
@@ -461,7 +611,10 @@ class BatchLayernormFusion(BatchFusion):
 
             if group_weights is not None and group_biases is not None:
                 batch_layer_norm = graph.call_function(
-                    torch.addcmul, args=(stack_bias, stack_weight, batch_layer_norm)
+                    torch.mul, args=(stack_weight, batch_layer_norm)
+                )
+                batch_layer_norm = graph.call_function(
+                    torch.add, args=(stack_bias, batch_layer_norm)
                 )
             elif group_weights is not None and group_biases is None:
                 batch_layer_norm = graph.call_function(
@@ -488,30 +641,24 @@ class BatchLayernormFusion(BatchFusion):
             graph.erase_node(node)
 
 
-class BatchReLUFusion(BatchFusion):
+class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     """
-    Batch relu fusion in pre grad pass.
-    We only fuse the relu if the input is after same split/unbind node.
+    Batch poinwise ops (e.g., sigmoid, relu, tanh) fusion in pre grad pass.
+    We fuse it in random place, and the introduced stack node may be merged in split cat.
     """
 
-    def _getitem_args(self, getitem_node: torch.fx.Node):
-        if getitem_node.target != operator.__getitem__ or (
-            getitem_node.op != "call_function"
-        ):
-            return None
-        return getitem_node.args[0]
+    def __init__(self, op, **kwargs):
+        super().__init__(op, **kwargs)
+        self.op = op
 
     def match(self, node: torch.fx.Node):
         input = get_arg_value(node, 0, "input")
-        if (
-            CallFunctionVarArgs(torch.nn.functional.relu).match(node)
-            and is_node_meta_valid(node)
-            and self._getitem_args(input) is not None
-        ):
+        if CallFunctionVarArgs(self.op).match(node) and is_node_meta_valid(node):
+            # for relu op, we also use the inplace to construct the key
             group_key = (
-                "batch_relu",
-                self._getitem_args(input),
+                "batch_" + self.op.__name__.lower() + "_pre_grad",
                 str(input.meta["example_value"].shape),
+                str(node.kwargs.get("inplace", False)),
             )
         else:
             group_key = None
@@ -525,33 +672,77 @@ class BatchReLUFusion(BatchFusion):
             batch_nodes.append(node)
             batch_inputs.append(get_arg_value(node, 0, "input"))
 
-        # assume all the nodes to be batched have the same inplace
-        inplace = subset[0].kwargs.get("inplace", False)
         with graph.inserting_before(subset[0]):
             stack_inputs = graph.call_function(
                 torch.stack, args=(batch_inputs,), kwargs={"dim": 0}
             )
-
-            batch_relu = graph.call_function(
-                torch.nn.functional.relu,
-                args=(stack_inputs,),
-                kwargs={"inplace": inplace},
-            )
-            unbind_relu = graph.call_function(
-                torch.unbind, args=(batch_relu,), kwargs={"dim": 0}
+            if self.op == torch.nn.functional.relu:
+                batch_op = graph.call_function(
+                    self.op,
+                    args=(stack_inputs,),
+                    kwargs={"inplace": subset[0].kwargs.get("inplace", False)},
+                )
+            else:
+                batch_op = graph.call_function(
+                    self.op,
+                    args=(stack_inputs,),
+                )
+            unbind_op = graph.call_function(
+                torch.unbind, args=(batch_op,), kwargs={"dim": 0}
             )
             for i, node in enumerate(batch_nodes):
-                with graph.inserting_after(unbind_relu):
-                    getitem = graph.call_function(
-                        operator.getitem, args=(unbind_relu, i)
-                    )
+                with graph.inserting_after(unbind_op):
+                    getitem = graph.call_function(operator.getitem, args=(unbind_op, i))
                 node.replace_all_uses_with(getitem)
                 getitem.meta.update(node.meta)
                 graph.erase_node(node)
 
 
+@register_fusion("batch_tanh")
+class BatchTanhPreGradFusion(BatchPointwiseOpsPreGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(torch.tanh, **kwargs)
+
+
+@register_fusion("batch_sigmoid")
+class BatchSigmoidPreGradFusion(BatchPointwiseOpsPreGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(torch.sigmoid, **kwargs)
+
+
+@register_fusion("batch_relu")
+class BatchReLuPreGradFusion(BatchPointwiseOpsPreGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(torch.nn.functional.relu, **kwargs)
+
+
+@register_fusion("batch_aten_add", pre_grad=False)
+class BatchAddPostGradFusion(BatchPointwiseOpsPostGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(aten.add.Tensor, **kwargs)
+
+
+@register_fusion("batch_aten_sub", pre_grad=False)
+class BatchSubPostGradFusion(BatchPointwiseOpsPostGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(aten.sub.Tensor, **kwargs)
+
+
+@register_fusion("batch_aten_div", pre_grad=False)
+class BatchDivPostGradFusion(BatchPointwiseOpsPostGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(aten.div.Tensor, **kwargs)
+
+
+@register_fusion("batch_aten_mul", pre_grad=False)
+class BatchMulPostGradFusion(BatchPointwiseOpsPostGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(aten.mul.Tensor, **kwargs)
+
+
 def find_independent_subset_greedy(
     node_list: List[torch.fx.Node],
+    graph_search_options: Dict[str, Any],
 ) -> Iterator[List[torch.fx.Node]]:
     """
     Return a list of subset from node_list, all nodes in each subset are independent with each other and can be fused together.
@@ -574,7 +765,7 @@ def find_independent_subset_greedy(
         subset_deps: Set[torch.fx.Node] = set()
 
         for node in node_list:
-            if len(subset) >= MAX_FUSE_SET_SIZE:
+            if len(subset) >= graph_search_options["max_fuse_set_size"]:
                 break
 
             visited_node_set.clear()
@@ -585,7 +776,7 @@ def find_independent_subset_greedy(
                 subset.append(node)
                 subset_deps.update(dep_set)
 
-        if len(subset) >= MIN_FUSE_SET_SIZE:
+        if len(subset) >= graph_search_options["min_fuse_set_size"]:
             yield subset
 
         next_round_node_list = [node for node in node_list if node not in subset]
@@ -597,7 +788,7 @@ def get_fusion_candidates(
 ) -> DefaultDict[Any, List[torch.fx.Node]]:
     """
     Search fusion candidates for a specific rule using BFS starting from the root node.
-    We only search the subgraph within MAX_FUSE_SEARCH_DEPTH.
+    We only search the subgraph within graph_search_options["max_fuse_search_depth"].
     """
     q: Deque[Tuple[int, torch.fx.Node]] = collections.deque()
 
@@ -626,7 +817,7 @@ def get_fusion_candidates(
             if node not in candidate_nodes:
                 candidate_nodes.append(node)
         else:
-            if depth < MAX_FUSE_SEARCH_DEPTH:
+            if depth < rule.graph_search_options["max_fuse_search_depth"]:
                 for next_node in node.all_input_nodes:
                     if next_node not in visited_set:
                         visited_set.add(next_node)
@@ -643,50 +834,64 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
         candidates = get_fusion_candidates(rule, node, fused_set)
 
         for key, candidate_nodes in candidates.items():
-            if len(candidate_nodes) < MIN_FUSE_SET_SIZE:
+            if len(candidate_nodes) < rule.graph_search_options["min_fuse_set_size"]:
                 continue
 
-            for subset in find_independent_subset_greedy(candidate_nodes):
+            for subset in find_independent_subset_greedy(
+                candidate_nodes, rule.graph_search_options
+            ):
                 rule.fuse(graph, subset)
                 fused_set.update(subset)
                 if isinstance(rule, GroupFusion):
                     counters["inductor"]["group_fusion"] += 1
-                else:
+                elif isinstance(rule, BatchFusion):
                     counters["inductor"]["batch_fusion"] += 1
+                else:
+                    counters["inductor"]["unknown_group_batch_fusion"] += 1
 
                 log.info(
                     f"{rule.__class__.__name__}: key = {key}; subset size = {len(subset)}"  # noqa: G004
                 )
 
 
-def print_graph(graph: torch.fx.Graph, msg: str):
-    if config.is_fbcode():
-        log.info("%s Print graph: %s", msg, get_everpaste_url(str(graph)))  # noqa: F401
-
-
-def group_batch_fusion_post_grad_passes(graph: torch.fx.Graph):
-    print_graph(graph, "Before group_batch fusion in post grads pass.")
+def generate_fusion_from_config(config_options: Dict[str, Any], pre_grad=True):
     fusions: List[GroupBatchFusionBase] = []
+    for name, options in config_options.items():
+        fusion_cls = PRE_GRAD_FUSIONS[name] if pre_grad else POST_GRAD_FUSIONS[name]
+        _options = graph_search_options.copy()
+        _options.update(options)
+        fusions.append(fusion_cls(graph_search_options=_options))  # type: ignore[operator]
+    return fusions
 
-    if config.group_fusion and has_fbgemm:
-        fusions += [GroupLinearFusion()]
 
-    for rule in fusions:
-        apply_group_batch_fusion(graph, rule)
-        print_graph(graph, f"Apply fusion {rule.__class__.__name__}.")
-
-
-def group_batch_fusion_pre_grad_passes(graph: torch.fx.Graph):
-    print_graph(graph, "Before group_batch fusion in pre grads pass.")
+def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
+    print_graph(graph, "Before group_batch fusion in pre grad pass.")
     fusions: List[GroupBatchFusionBase] = []
-    if config.batch_fusion:
-        fusions += [
-            BatchLinearFusion(),
-            BatchLinearLHSFusion(),
-            BatchLayernormFusion(),
-            BatchTanhFusion(),
-            BatchReLUFusion(),
+    # we keep all current pre grad fusions to keep
+    # current implementation, will remove this later
+    if pre_grad:
+        fusions += generate_fusion_from_config(
+            config.pre_grad_fusion_options, pre_grad=True
+        )
+    else:
+        fbgemm_fusion_keys = [
+            x
+            for x in config.post_grad_fusion_options
+            if config.post_grad_fusion_options[x].get("require_fbgemm", False)
         ]
+        fbgemm_fusions = {
+            fusion: config.post_grad_fusion_options[fusion]
+            for fusion in fbgemm_fusion_keys
+        }
+        non_fbgemm_fusions = {
+            fusion: config.post_grad_fusion_options[fusion]
+            for fusion in config.post_grad_fusion_options.keys()
+            if fusion not in fbgemm_fusion_keys
+        }
+        fusions += generate_fusion_from_config(non_fbgemm_fusions, pre_grad=False)
+        if has_fbgemm:
+            fusions += generate_fusion_from_config(fbgemm_fusions, pre_grad=False)
+
     for rule in fusions:
         apply_group_batch_fusion(graph, rule)
         print_graph(graph, f"Apply fusion {rule.__class__.__name__}.")

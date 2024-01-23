@@ -19,23 +19,6 @@ __all__ = [
     "QuantizationAnnotation",
 ]
 
-# TODO: maybe remove torch.float32
-SUPPORTED_DTYPES = [
-    torch.uint8,
-    torch.int8,
-    torch.int16,
-    torch.int32,
-    torch.float16,
-    torch.float32,
-]
-SUPPORTED_QSCHEMES = [
-    torch.per_tensor_affine,
-    torch.per_tensor_symmetric,
-    torch.per_channel_affine,
-    torch.per_channel_symmetric,
-    torch.per_channel_affine_float_qparams,
-]
-
 
 class QuantizationSpecBase(ABC):  # noqa: B024
     """Base class for different types of quantization specs that allows users to
@@ -64,10 +47,6 @@ class QuantizationSpec(QuantizationSpecBase):
     is_dynamic: bool = False
 
     def __post_init__(self):
-        # check dtype is one of the supported types
-        if self.dtype not in SUPPORTED_DTYPES:
-            raise TypeError(f"Unsupported dtype {self.dtype}.")
-
         # quant_min must be less than quant_max
         if (
             self.quant_min is not None
@@ -77,10 +56,6 @@ class QuantizationSpec(QuantizationSpecBase):
             raise ValueError(
                 f"quant_min {self.quant_min} must be <= quant_max {self.quant_max}."
             )
-
-        # check qscheme is on of the supported ones
-        if self.qscheme is not None and self.qscheme not in SUPPORTED_QSCHEMES:
-            raise ValueError(f"Unsupported qscheme {self.qscheme}.")
 
         # ch_axis must be less than the number of channels
         # but no way to check here. Just check that it is not < 0.
@@ -157,6 +132,20 @@ class QuantizationAnnotation:
 
 
 class Quantizer(ABC):
+    def transform_for_annotation(
+        self, model: torch.fx.GraphModule
+    ) -> torch.fx.GraphModule:
+        """Allows for user defined transforms to run before annotating the graph.
+        This allows quantizer to allow quantizing part of the model that are otherwise not quantizable.
+        For example quantizer can
+        a) decompose a compound operator like scaled dot product attention,
+        into bmm and softmax if quantizer knows how to quantize bmm/softmax but not sdpa
+        or b) transform scalars to tensor to allow quantizing scalares.
+
+        Note: this is an optional method
+        """
+        return model
+
     # annotate nodes in the graph with observer or fake quant constructors
     # to convey the desired way of quantization
     @abstractmethod

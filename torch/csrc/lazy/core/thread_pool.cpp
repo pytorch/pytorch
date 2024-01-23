@@ -9,6 +9,7 @@
 #include <deque>
 #include <exception>
 #include <mutex>
+#include <thread>
 
 namespace torch {
 namespace lazy {

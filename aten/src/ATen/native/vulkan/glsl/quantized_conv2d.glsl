@@ -1,6 +1,6 @@
 #version 450 core
-#define PRECISION $precision
-#define FORMAT $format
+#define PRECISION ${PRECISION}
+#define FORMAT ${FORMAT}
 
 /*
  * TILE_SIZE = (1, 1, 1)
@@ -21,8 +21,8 @@ layout(set = 0, binding = 0, rgba8ui) uniform PRECISION restrict writeonly uimag
  * Input Textures
  */
 layout(set = 0, binding = 1) uniform PRECISION isampler3D uInput;
-layout(set = 0, binding = 2) uniform PRECISION isampler3D uKernel;
-layout(set = 0, binding = 3) uniform PRECISION isampler3D uBias;
+layout(set = 0, binding = 2) uniform PRECISION sampler2D uKernel;
+layout(set = 0, binding = 3) uniform PRECISION sampler2D uBias;
 
 /*
  * Params Buffer
@@ -102,10 +102,7 @@ void main() {
   kstart.x *= 4;
   kstart.y += pos.z * uBlock.kernel_size.y;
 
-  vec4 sum = dequantize(
-      texelFetch(uBias, ivec3(pos.z, 0, 0), 0),
-      uBlock.scales.w,
-      uBlock.zero_points.w);
+  vec4 sum = texelFetch(uBias, ivec2(pos.z, 0), 0);
 
   // Perform the convolution by iterating over the overlay region
   const int dil_y = uBlock.dilate.y;
@@ -152,28 +149,16 @@ void main() {
         //
         //  which is what is expressed in the following calculations.
 
-        const vec4 ktex_0 = dequantize(
-            texelFetch(uKernel, ivec3(kx + 0, ky, 0), 0),
-            uBlock.scales.z,
-            uBlock.zero_points.z);
+        const vec4 ktex_0 = texelFetch(uKernel, ivec2(kx + 0, ky), 0);
         sum = fma(in_tex.xxxx, ktex_0, sum);
 
-        const vec4 ktex_1 = dequantize(
-            texelFetch(uKernel, ivec3(kx + 1, ky, 0), 0),
-            uBlock.scales.z,
-            uBlock.zero_points.z);
+        const vec4 ktex_1 = texelFetch(uKernel, ivec2(kx + 1, ky), 0);
         sum = fma(in_tex.yyyy, ktex_1, sum);
 
-        const vec4 ktex_2 = dequantize(
-            texelFetch(uKernel, ivec3(kx + 2, ky, 0), 0),
-            uBlock.scales.z,
-            uBlock.zero_points.z);
+        const vec4 ktex_2 = texelFetch(uKernel, ivec2(kx + 2, ky), 0);
         sum = fma(in_tex.zzzz, ktex_2, sum);
 
-        const vec4 ktex_3 = dequantize(
-            texelFetch(uKernel, ivec3(kx + 3, ky, 0), 0),
-            uBlock.scales.z,
-            uBlock.zero_points.z);
+        const vec4 ktex_3 = texelFetch(uKernel, ivec2(kx + 3, ky), 0);
         sum = fma(in_tex.wwww, ktex_3, sum);
       }
     }

@@ -380,6 +380,7 @@ static optional_variable_list _process_backward_mode_ad(
       continue;
     }
 
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Variable var = raw_outputs[i].value();
 
     auto out_tensor_impl = var.unsafeGetTensorImpl();

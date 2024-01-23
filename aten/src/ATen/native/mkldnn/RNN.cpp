@@ -15,6 +15,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/mkldnn_convolution_native.h>
+#include <ATen/ops/mkldnn_rnn_layer_backward_native.h>
+#include <ATen/ops/mkldnn_rnn_layer_native.h>
 #endif
 
 #if !AT_MKLDNN_ENABLED()

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import collections
 import dataclasses
 import itertools
@@ -8,7 +10,7 @@ import sympy
 
 import torch
 from .. import config, ir
-from ..utils import cache_on_self, CachedFunction, IndentedBuffer
+from ..utils import cache_on_self, CachedMethod, IndentedBuffer
 from ..virtualized import V
 
 from .wrapper import (
@@ -63,11 +65,11 @@ class LiveRange:
     begin: float  # int | ±inf
     end: float  # int | ±inf
 
-    def contains(self, other: "LiveRange"):
+    def contains(self, other: LiveRange):
         """Is other entirely within self"""
         return self.begin <= other.begin and other.end <= self.end
 
-    def join(self, other: "LiveRange"):
+    def join(self, other: LiveRange):
         """Combine two ranges using a union operation"""
         return LiveRange(min(self.begin, other.begin), max(self.end, other.end))
 
@@ -93,7 +95,7 @@ class LiveRanges:
             else:
                 self.ranges.append(r)
 
-    def overlaps(self, other: "LiveRanges"):
+    def overlaps(self, other: LiveRanges):
         """Check if any pair of ranges in self and other overlap"""
         left = collections.deque(self.ranges)
         right = collections.deque(other.ranges)
@@ -123,7 +125,7 @@ class AllocationTreeNode:
     Abstract base class for nodes in allocation pool.
     """
 
-    def allocate(self, block: "Allocation", is_last: bool) -> bool:
+    def allocate(self, block: Allocation, is_last: bool) -> bool:
         """
         Try to assign block to a memory location in this bool.  Return True if
         an assignment was made.
@@ -142,7 +144,7 @@ class AllocationTreeNode:
         """Number of bytes needed at runtime"""
         raise NotImplementedError()
 
-    def finalize(self, pool, offset) -> "AllocationTreeNode":
+    def finalize(self, pool, offset) -> AllocationTreeNode:
         """Called after all allocations have been made"""
         return self
 
@@ -161,7 +163,7 @@ class Allocation(AllocationTreeNode):
     size_hint: int
     symbolic_size: sympy.Expr
     allocated: bool = False
-    pool: Optional["AllocationPool"] = None
+    pool: Optional[AllocationPool] = None
     offset: Optional[sympy.Expr] = None
 
     @property
@@ -231,11 +233,11 @@ class Empty(AllocationTreeNode):
 
 
 class MemorySplitProtocol(Protocol):
-    get_live_ranges: CachedFunction[LiveRanges]
-    get_size_hint: CachedFunction[int]
-    get_symbolic_size: CachedFunction[sympy.Expr]
+    get_live_ranges: CachedMethod[[], LiveRanges]
+    get_size_hint: CachedMethod[[], int]
+    get_symbolic_size: CachedMethod[[], sympy.Expr]
 
-    def _allocate(self, block: "Allocation", is_last: bool) -> bool:
+    def _allocate(self, block: Allocation, is_last: bool) -> bool:
         ...
 
 
@@ -245,7 +247,7 @@ class ClearCacheOnAllocateMixin(MemorySplitProtocol):
     get_symbolic_size.
     """
 
-    def allocate(self, block: "Allocation", is_last: bool):
+    def allocate(self, block: Allocation, is_last: bool):
         is_allocated = self._allocate(block, is_last)
         if is_allocated:
             self.clear_cache()
@@ -268,7 +270,7 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
 
     allocations: List[AllocationTreeNode]
 
-    def _allocate(self, block: "Allocation", is_last: bool):
+    def _allocate(self, block: Allocation, is_last: bool):
         slot_size = self.get_size_hint()
         block_size = block.get_size_hint()
         if not is_last and block_size > slot_size:
@@ -354,7 +356,7 @@ class SpatialSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
         assert isinstance(extra_space, int) and extra_space >= 1
         return SpatialSplit(TemporalSplit([left]), TemporalSplit([Empty(extra_space)]))
 
-    def _allocate(self, block: "Allocation", is_last: bool):
+    def _allocate(self, block: Allocation, is_last: bool):
         return self.left.allocate(block, False) or self.right.allocate(block, is_last)
 
     @cache_on_self
@@ -399,7 +401,7 @@ class AllocationPool:
     names_to_del: List[str] = dataclasses.field(default_factory=list)
     creation_cache: Dict[str, str] = dataclasses.field(default_factory=dict)
 
-    def allocate(self, block: "Allocation", is_last: bool):
+    def allocate(self, block: Allocation, is_last: bool):
         if self.restrict_live_range and not self.restrict_live_range.contains(
             block.live_range
         ):

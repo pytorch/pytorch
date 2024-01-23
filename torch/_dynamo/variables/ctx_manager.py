@@ -148,20 +148,61 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         return x
 
 
+class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
+    """represents torch VMap increment/decrement nesting"""
+
+    # A guard is needed as the vmap level is baked into the torch FX graph
+    # generated. This is fine if vmap is only called from within the function
+    # being compiled. But the FX graph may be invalid in the case of a vmap
+    # call from eager that calls the compiled function, as the vmap levels
+    # may be different.
+    _guards_singleton = Guard(
+        GlobalStateSource(), GuardBuilder.FUNCTORCH_CURRENT_LEVEL_MATCH
+    )
+
+    @staticmethod
+    def create(tx, target_values, **kwargs):
+        var = VmapIncrementNestingCtxManagerVariable(
+            target_values=target_values,
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def enter(self, tx):
+        install_guard(self._guards_singleton)
+        batch_size, randomness = self.target_values
+        vmap_level = torch._C._functorch._vmap_increment_nesting(batch_size, randomness)
+        self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch._vmap_increment_nesting,
+            (batch_size, randomness),
+            {},
+        )
+        return variables.ConstantVariable.create(vmap_level)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function", torch._C._functorch._vmap_decrement_nesting, (), {}
+        )
+        return variables.ConstantVariable.create(None)
+
+
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
     _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)
 
     @staticmethod
-    def create(tx, target_value, initialized=True, **kwargs):
+    def create(tx, target_value, initialized=False, **kwargs):
         var = GradModeVariable(
             target_values=[target_value],
             initial_values=[torch.is_grad_enabled()],
-            initialized=initialized,
             **kwargs,
         )
-        if var.initialized:
+        if initialized:
             var._call_func(tx, var.target_values)
         return var
 
@@ -169,25 +210,31 @@ class GradModeVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.initialized = initialized
         install_guard(self._guards_singleton)
 
     def enter(self, tx):
-        if not self.initialized:
-            self._call_func(tx, self.target_values)
+        self._call_func(tx, self.target_values)
         return variables.ConstantVariable.create(None)
 
     def exit(self, tx, *args):
         self._call_func(tx, self.initial_values)
         return variables.ConstantVariable.create(None)
 
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ):
+        self._call_func(tx, self.initial_values)  # undo eager initialization
+        return super().call_function(tx, args, kwargs)
+
     def _call_func(self, tx, values):
         assert len(values) == 1
         value = values[0]
-        tx.output.create_node(
-            "call_function", torch._C._set_grad_enabled, (value,), {}
-        ),
-        torch._C._set_grad_enabled(value)
+        # Coalesce grad mode mutations
+        if torch.is_grad_enabled() != value:
+            tx.output.create_node(
+                "call_function", torch._C._set_grad_enabled, (value,), {}
+            )
+            torch._C._set_grad_enabled(value)
 
     def module_name(self):
         return "torch"
@@ -516,19 +563,13 @@ class StreamContextVariable(ContextWrappingVariable):
         )
         self.state.cleanup_assert()
 
-    def module_name(self):
-        return "torch." + str(self.device)
-
-    def fn_name(self):
-        return "stream"
-
 
 class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs):
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
         assert (
-            value.device.type == device
+            value.device.type == device.type
         ), "stream value is not equal to the passed device"
         super().__init__(**kwargs)
         self.proxy = proxy
@@ -580,6 +621,22 @@ class StreamVariable(VariableTracker):
 
     def as_proxy(self):
         return self.proxy
+
+    def reconstruct(self, codegen):
+        # If we got here, this stream is fully subsumed by the graph - this means it is
+        # not an input or global
+        assert not self.source
+        # Since we just proved that - for other such structures, like lists and dicts, reconstruction
+        # is fine and sound according to dynamo principles of treating collectives. However,
+        # streams are special in that we want to preserve the identity of the stream as the same as in the graph
+        # Normally, we would do this via codegen for the proxy mapping to an output - we cannot do this yet, as we do not
+        # yet have a plan for how we want to handle the case where the stream is used as an input or an output. Pending
+        # design, to unblock current work, we lift the stream into a global and then codegen bytecode to load it from there.
+        name = f"_stream_{self.device}_{id(self.value)}"
+        if name not in codegen.tx.output.global_scope:
+            codegen.tx.output.install_global(name, self.value)
+
+        return [codegen.create_load_global(name, push_null=False, add=True)]
 
 
 class EventVariable(VariableTracker):

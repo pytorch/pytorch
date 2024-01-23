@@ -261,7 +261,7 @@ void initLazyBindings(PyObject* module) {
             if (tsDataPtr->HasValue()) {
               ivalues.emplace_back(tsDataPtr->data());
             } else {
-              CHECK(tsDataPtr->scalar.has_value());
+              TORCH_CHECK(tsDataPtr->scalar.has_value());
               ivalues.emplace_back(tsDataPtr->scalar.value());
             }
           }
@@ -307,6 +307,21 @@ void initLazyBindings(PyObject* module) {
 #endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
         return result;
       });
+  lazy_ts_backend.def("_get_latest_computation_graph", []() {
+#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+    auto computation = LazyGraphExecutor::Get()
+                           ->GetComputationCache()
+                           ->GetLatest()
+                           ->computation;
+    auto ts_computation = dynamic_cast<TSComputation*>(computation.get());
+    TORCH_CHECK(ts_computation, "Found non-TSComputation in cache");
+    return ts_computation->graph()->toString();
+#else
+    TORCH_CHECK(
+        false, "TorchScript backend not yet supported in FBCODE builds");
+    return "";
+#endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+  });
 
   // GetPythonFramesFunction() has not ever worked with torchdeploy/multipy
   // possibly becuase GetPythonFrames resolves to external cpython rather

@@ -5,13 +5,14 @@ import os
 import re
 from dataclasses import dataclass, field
 from importlib import __import__
-from typing import Dict, Optional, Set, Union
+from typing import Dict, List, Optional, Set, Union
 from weakref import WeakSet
 
 log = logging.getLogger(__name__)
 
 DEFAULT_LOG_LEVEL = logging.WARNING
 LOG_ENV_VAR = "TORCH_LOGS"
+LOG_OUT_ENV_VAR = "TORCH_LOGS_OUT"
 LOG_FORMAT_ENV_VAR = "TORCH_LOGS_FORMAT"
 
 
@@ -21,7 +22,7 @@ class LogRegistry:
     # Note: this only contains loggers registered
     # from register_log
     # e.g. "dynamo" -> "torch._dynamo"
-    log_alias_to_log_qname: Dict[str, str] = field(default_factory=dict)
+    log_alias_to_log_qnames: Dict[str, List[str]] = field(default_factory=dict)
 
     # artifact logger qualified names,
     # this is populated lazily, as calls to getArtifactLogger
@@ -57,11 +58,13 @@ class LogRegistry:
         return name in self.artifact_names
 
     def is_log(self, alias):
-        return alias in self.log_alias_to_log_qname
+        return alias in self.log_alias_to_log_qnames
 
     # register a log with an alias
-    def register_log(self, alias, log_qname):
-        self.log_alias_to_log_qname[alias] = log_qname
+    def register_log(self, alias, log_qnames: Union[str, List[str]]):
+        if isinstance(log_qnames, str):
+            log_qnames = [log_qnames]
+        self.log_alias_to_log_qnames[alias] = log_qnames
 
     # register an artifact name
     def register_artifact_name(
@@ -89,8 +92,13 @@ class LogRegistry:
     def register_child_log(self, log_qname):
         self.child_log_qnames.add(log_qname)
 
-    def get_log_qnames(self):
-        return set(self.log_alias_to_log_qname.values())
+    # flattens all the qnames together (TODO: consider memoizing?)
+    def get_log_qnames(self) -> Set[str]:
+        return {
+            qname
+            for qnames in self.log_alias_to_log_qnames.values()
+            for qname in qnames
+        }
 
     def get_artifact_log_qnames(self):
         return set(self.artifact_log_qnames)
@@ -116,10 +124,24 @@ class LogState:
     def is_artifact_enabled(self, name):
         return name in self.artifact_names
 
-    def enable_log(self, log_qname, log_level):
-        self.log_qname_to_level[log_qname] = log_level
+    def enable_log(self, log_qnames, log_level):
+        if isinstance(log_qnames, str):
+            log_qnames = [log_qnames]
+        for log_qname in log_qnames:
+            self.log_qname_to_level[log_qname] = log_level
 
     def get_log_level_pairs(self):
+        """Returns all qualified module names for which the user requested
+        explicit logging settings.
+
+        .. warning:
+
+            This function used to return all loggers, regardless of whether
+            or not the user specified them or not; it now only returns logs
+            which were explicitly mentioned by the user (and torch, which
+            always is implicitly requested when we initialize our logging
+            subsystem.)
+        """
         return self.log_qname_to_level.items()
 
     def clear(self):
@@ -148,9 +170,13 @@ def set_logs(
     all: Optional[int] = None,
     dynamo: Optional[int] = None,
     aot: Optional[int] = None,
+    autograd: Optional[int] = None,
     dynamic: Optional[int] = None,
     inductor: Optional[int] = None,
     distributed: Optional[int] = None,
+    dist_c10d: Optional[int] = None,
+    dist_ddp: Optional[int] = None,
+    dist_fsdp: Optional[int] = None,
     onnx: Optional[int] = None,
     bytecode: bool = False,
     aot_graphs: bool = False,
@@ -162,6 +188,7 @@ def set_logs(
     graph_sizes: bool = False,
     guards: bool = False,
     recompiles: bool = False,
+    recompiles_verbose: bool = False,
     trace_source: bool = False,
     trace_call: bool = False,
     output_code: bool = False,
@@ -171,6 +198,7 @@ def set_logs(
     onnx_diagnostics: bool = False,
     fusion: bool = False,
     overlap: bool = False,
+    export: Optional[int] = None,
     modules: Optional[Dict[str, Union[int, bool]]] = None,
 ):
     """
@@ -218,6 +246,9 @@ def set_logs(
         aot (:class:`Optional[int]`):
             The log level for the AOTAutograd component. Default: ``logging.WARN``
 
+        autograd (:class:`Optional[int]`):
+            The log level for autograd. Default: ``logging.WARN``
+
         inductor (:class:`Optional[int]`):
             The log level for the TorchInductor component. Default: ``logging.WARN``
 
@@ -225,7 +256,19 @@ def set_logs(
             The log level for dynamic shapes. Default: ``logging.WARN``
 
         distributed (:class:`Optional[int]`):
-            Whether to log communication operations and other debug info from pytorch distributed components.
+            Whether to log c10d communication operations and other debug info from PyTorch Distributed components.
+            Default: ``logging.WARN``
+
+        dist_c10d (:class:`Optional[int]`):
+            Whether to log c10d communication operations related debug info in PyTorch Distributed components.
+            Default: ``logging.WARN``
+
+        dist_ddp (:class:`Optional[int]`):
+            Whether to log debug info related to ``DistributedDataParallel``(DDP) from PyTorch Distributed components.
+            Default: ``logging.WARN``
+
+        dist_fsdp (:class:`Optional[int]`):
+            Whether to log debug info related to ``FullyShardedDataParallel``(FSDP) in PyTorch Distributed components.
             Default: ``logging.WARN``
 
         onnx (:class:`Optional[int]`):
@@ -268,6 +311,10 @@ def set_logs(
             Whether to emit a guard failure reason and message every time
             TorchDynamo recompiles a function. Default: ``False``
 
+        recompiles_verbose (:class:`bool`):
+            Whether to emit all guard failure reasons when TorchDynamo recompiles
+            a function, even those that are not actually run. Default: ``False``
+
         trace_source (:class:`bool`):
             Whether to emit when TorchDynamo begins tracing a new line. Default: ``False``
 
@@ -295,6 +342,9 @@ def set_logs(
 
         overlap (:class:`bool`):
             Whether to emit detailed Inductor compute/comm overlap decisions. Default: ``False``
+
+        export (:class:`Optional[int]`):
+            The log level for export. Default: ``logging.WARN``
 
         modules (dict):
             This argument provides an alternate way to specify the above log
@@ -333,24 +383,9 @@ def set_logs(
     modules = modules or {}
 
     def _set_logs(**kwargs):
-        default_level = kwargs.pop("all", None)
-        if default_level:
-            if default_level not in logging._levelToName:
-                raise ValueError(
-                    f"Unrecognized log level for kwarg all: {default_level}, valid level values "
-                    f"are: {','.join([str(k) for k in logging._levelToName.keys()])}"
-                )
-
-            # add any missing aliases to kwargs
-            for alias in log_registry.log_alias_to_log_qname.keys():
-                if alias not in kwargs:
-                    kwargs[alias] = default_level
-        else:
-            default_level = DEFAULT_LOG_LEVEL
-
         for alias, val in itertools.chain(kwargs.items(), modules.items()):  # type: ignore[union-attr]
             if val is None:
-                val = default_level
+                continue
 
             if log_registry.is_artifact(alias):
                 if not isinstance(val, bool):
@@ -368,10 +403,8 @@ def set_logs(
                     )
 
                 log_state.enable_log(
-                    log_registry.log_alias_to_log_qname.get(alias, alias), val
+                    log_registry.log_alias_to_log_qnames.get(alias, alias), val
                 )
-            elif alias == "all":
-                continue
             else:
                 raise ValueError(
                     f"Unrecognized log or artifact name passed to set_logs: {alias}"
@@ -380,9 +413,10 @@ def set_logs(
         _init_logs()
 
     _set_logs(
-        all=all,
+        torch=all,
         dynamo=dynamo,
         aot=aot,
+        autograd=autograd,
         inductor=inductor,
         dynamic=dynamic,
         bytecode=bytecode,
@@ -390,12 +424,16 @@ def set_logs(
         aot_joint_graph=aot_joint_graph,
         ddp_graphs=ddp_graphs,
         distributed=distributed,
+        dist_c10d=dist_c10d,
+        dist_ddp=dist_ddp,
+        dist_fsdp=dist_fsdp,
         graph=graph,
         graph_code=graph_code,
         graph_breaks=graph_breaks,
         graph_sizes=graph_sizes,
         guards=guards,
         recompiles=recompiles,
+        recompiles_verbose=recompiles_verbose,
         trace_source=trace_source,
         trace_call=trace_call,
         output_code=output_code,
@@ -406,6 +444,7 @@ def set_logs(
         onnx_diagnostics=onnx_diagnostics,
         fusion=fusion,
         overlap=overlap,
+        export=export,
     )
 
 
@@ -504,11 +543,13 @@ def help_message(verbose=False):
         heading = "Visible registered names (use TORCH_LOGS='+help' for full list)"
     lines = (
         ["all"]
-        + list(log_registry.log_alias_to_log_qname.keys())
-        + [
-            f"{pad_to(name)}\t{log_registry.artifact_descriptions[name]}"
-            for name in printed_artifacts
-        ]
+        + sorted(log_registry.log_alias_to_log_qnames.keys())
+        + sorted(
+            [
+                f"{pad_to(name)}\t{log_registry.artifact_descriptions[name]}"
+                for name in printed_artifacts
+            ]
+        )
     )
     setting_info = "  " + "\n  ".join(lines)
     examples = """
@@ -531,6 +572,9 @@ Examples:
   string will set the output format
   Valid keys are "levelname", "message", "pathname", "levelno", "lineno",
   "filename" and "name".
+
+  TORCH_LOGS_OUT=/tmp/output.txt will output the logs to /tmp/output.txt as
+  well. This is useful when the output is long.
 """  # flake8: noqa: B950
     msg = f"""
 TORCH_LOGS Info
@@ -545,7 +589,7 @@ TORCH_LOGS Info
 def _invalid_settings_err_msg(settings, verbose=False):
     valid_settings = ", ".join(
         ["all"]
-        + list(log_registry.log_alias_to_log_qname.keys())
+        + list(log_registry.log_alias_to_log_qnames.keys())
         + list(log_registry.artifact_names)
     )
     msg = f"""
@@ -590,21 +634,16 @@ def _parse_log_settings(settings):
 
     for name in log_names:
         name, level = get_name_level_pair(name)
-        if name == "all":
-            for log_qname in log_registry.get_log_qnames():
-                log_state.enable_log(log_qname, level)
 
-    for name in log_names:
-        name, level = get_name_level_pair(name)
+        if name == "all":
+            name = "torch"
 
         if log_registry.is_log(name):
             assert level is not None
-            log_qname = log_registry.log_alias_to_log_qname[name]
-            log_state.enable_log(log_qname, level)
+            log_qnames = log_registry.log_alias_to_log_qnames[name]
+            log_state.enable_log(log_qnames, level)
         elif log_registry.is_artifact(name):
             log_state.enable_artifact(name)
-        elif name == "all":
-            continue
         elif _is_valid_module(name):
             if not _has_registered_parent(name):
                 log_registry.register_log(name, name)
@@ -660,13 +699,22 @@ class TorchLogsFormatter(logging.Formatter):
         record.asctime = self.formatTime(record, self.datefmt)
 
         # exception handling - copied from logging.Formatter.format
+        s = record.message
         if record.exc_info:
             # Cache the traceback text to avoid converting it multiple times
             # (it's constant anyway)
             if not record.exc_text:
                 record.exc_text = self.formatException(record.exc_info)
+        if record.exc_text:
+            if s[-1:] != "\n":
+                s = s + "\n"
+            s = s + record.exc_text
+        if record.stack_info:
+            if s[-1:] != "\n":
+                s = s + "\n"
+            s = s + self.formatStack(record.stack_info)
 
-        lines = record.message.split("\n")
+        lines = s.split("\n")
         record.rankprefix = ""
         if dist.is_available() and dist.is_initialized():
             record.rankprefix = f"[rank{dist.get_rank()}]:"
@@ -748,11 +796,27 @@ def _init_logs(log_file_name=None):
     _reset_logs()
     _update_log_state_from_env()
 
+    out = os.environ.get(LOG_OUT_ENV_VAR, None)
+    if out is not None:
+        log_file_name = out
+
+    # First, reset all known (registered) loggers to NOTSET, so that they
+    # respect their parent log level
+    for log_qname in log_registry.get_log_qnames():
+        # But not the top level torch level: this defaults to WARNING so
+        # that our log messages don't leak to the lower levels
+        if log_qname == "torch":
+            continue
+        log = logging.getLogger(log_qname)
+        log.setLevel(logging.NOTSET)
+
+    # Now, for all loggers which the user requested to have non-standard
+    # logging behavior, modify their log levels
     for log_qname, level in log_state.get_log_level_pairs():
         log = logging.getLogger(log_qname)
         log.setLevel(level)
 
-    # setup handlers for all registered loggers
+    # Finally, setup handlers for all registered loggers
     for log_qname in log_registry.get_log_qnames():
         log = logging.getLogger(log_qname)
         _setup_handlers(

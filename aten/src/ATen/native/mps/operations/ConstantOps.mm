@@ -79,7 +79,7 @@ static bool fill_mps_tensor_(Tensor& self, uint8_t value) {
   if (self.is_contiguous()) {
     MPSStream* stream = getCurrentMPSStream();
     auto storage_byte_offset = self.storage_offset() * self.itemsize();
-    stream->fill(mps::getMTLBufferStorage(self), 0, self.storage().nbytes(), storage_byte_offset);
+    stream->fill(mps::getMTLBufferStorage(self), value, self.nbytes(), storage_byte_offset);
     return true;
   }
   return false;

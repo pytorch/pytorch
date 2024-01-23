@@ -4,7 +4,7 @@ class SGD(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: float,
+        lr: float = ...,
         momentum: float = ...,
         dampening: float = ...,
         weight_decay: float = ...,

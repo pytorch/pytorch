@@ -161,7 +161,8 @@ struct TensorArgs {
 
 struct AutogradCompilerCall {
   void add_size_input(const c10::SymInt& s) {
-    all_size_inputs.emplace_back(SizeInput(default_dyn_type, s.expect_int()));
+    all_size_inputs.emplace_back(
+        SizeInput(default_dyn_type, s.guard_int(__FILE__, __LINE__)));
   }
 
   int emplace_hook(c10::SafePyObject&& fn) {
@@ -368,6 +369,10 @@ class CompiledNodeArgs {
     Node* node = _node_call.node.get();
     return CacheKey(
         typeid(*node), _specialization_key, _specialization_key_size);
+  }
+
+  int add_backward(c10::SafePyObject&& obj) {
+    return _compiler.emplace_hook(std::move(obj));
   }
 
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {

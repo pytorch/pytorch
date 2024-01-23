@@ -16,6 +16,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoX86,
     skipIfNoDynamoSupport,
 )
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.common_quantized import override_quantized_engine
 from enum import Enum
 import itertools
@@ -42,11 +43,11 @@ class TestHelperModules:
                 x = self.bn(x)
             return x
 
-    class Conv2dReLUModule(torch.nn.Module):
-        def __init__(self, inplace_relu: bool = False, use_bias: bool = False, with_bn=False) -> None:
+    class Conv2dUnaryModule(torch.nn.Module):
+        def __init__(self, post_op, use_bias: bool = False, with_bn=False) -> None:
             super().__init__()
             self.conv = nn.Conv2d(3, 6, (2, 2), stride=(1, 1), padding=(1, 1), bias=use_bias)
-            self.relu = nn.ReLU(inplace=inplace_relu)
+            self.post_op = post_op
             self.bn = torch.nn.BatchNorm2d(6)
             self.with_bn = with_bn
 
@@ -54,7 +55,7 @@ class TestHelperModules:
             x = self.conv(x)
             if self.with_bn:
                 x = self.bn(x)
-            x = self.relu(x)
+            x = self.post_op(x)
             return x
 
     class Conv2dAddModule(torch.nn.Module):
@@ -155,15 +156,15 @@ class TestHelperModules:
                 else:
                     return self.relu2(self.conv(x) + self.conv2(x))
 
-    class Conv2dMaxpoolPowModule(nn.Module):
-        def __init__(self):
+    class Conv2dSingleOpPowModule(nn.Module):
+        def __init__(self, single_op):
             super().__init__()
             self.conv = nn.Conv2d(2, 2, 1)
-            self.pool = nn.MaxPool2d(1, 1)
+            self.single_op = single_op
 
         def forward(self, x):
             x = self.conv(x)
-            x = self.pool(x)
+            x = self.single_op(x)
             return torch.pow(x, 2)
 
     class SerialsConv2dAddReLUModule(torch.nn.Module):
@@ -258,6 +259,48 @@ class TestHelperModules:
         def forward(self, x):
             return self.postop(self.linear(x))
 
+    class Conv2dAddModule2(torch.nn.Module):
+        def __init__(self,
+                     inplace_add: bool = False,
+                     ) -> None:
+            super().__init__()
+            self.conv = torch.nn.Conv2d(
+                in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1
+            )
+            self.conv2 = torch.nn.Conv2d(
+                in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1
+            )
+            self.inplace_add = inplace_add
+            self.bn = torch.nn.BatchNorm2d(3)
+            self.bn2 = torch.nn.BatchNorm2d(3)
+
+        def forward(self, x):
+            if self.inplace_add:
+                tmp = self.bn(self.conv(x))
+                tmp += self.bn2(self.conv2(tmp))
+                return tmp
+            else:
+                tmp = self.bn(self.conv(x))
+                return tmp + self.bn2(self.conv2(tmp))
+
+    class SelfAttnLikeModule(torch.nn.Module):
+        def __init__(self, input_dim) -> None:
+            super().__init__()
+            self.input_dim = input_dim
+            self.q_proj = nn.Linear(input_dim, input_dim, bias=False)
+            self.k_proj = nn.Linear(input_dim, input_dim, bias=False)
+            self.v_proj = nn.Linear(input_dim, input_dim, bias=False)
+            self.softmax = nn.Softmax(dim=-1)
+
+        def forward(self, x):
+            q = self.q_proj(x)
+            k = self.k_proj(x)
+            v = self.v_proj(x)
+            scores = torch.bmm(q, k.transpose(1, 2)) / (self.input_dim ** 0.5)
+            attention = self.softmax(scores)
+            weighted = torch.bmm(attention, v)
+            return weighted
+
 class X86InductorQuantTestCase(QuantizationTestCase):
     def _test_quantizer(
         self,
@@ -334,14 +377,22 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     @skipIfNoX86
     def test_conv2d_unary(self):
         """
-        Test pattern of conv2d with unary post ops (such as relu, sigmoid) with X86InductorQuantizer.
-        Currently, only relu as unary post op is supported.
+        Test pattern of conv2d with unary post ops (such as relu, hardtanh, hardswish, relu6) with X86InductorQuantizer.
         """
-        inplace_relu_list = [True, False]
+        unary_map = {
+            "relu": [torch.nn.ReLU(inplace=False), torch.ops.aten.relu.default],
+            "relu_inplace": [torch.nn.ReLU(inplace=True), torch.ops.aten.relu_.default],
+            "hardtanh": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=False), torch.ops.aten.hardtanh.default],
+            "hardtanh_inplace": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=True), torch.ops.aten.hardtanh_.default],
+            "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
+            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default],
+            "hardswish": [torch.nn.Hardswish(inplace=False), torch.ops.aten.hardswish.default],
+            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default]
+        }
         use_bias_list = [True, False]
         with override_quantized_engine("x86"), torch.no_grad():
-            for inplace_relu, use_bias in itertools.product(inplace_relu_list, use_bias_list):
-                m = TestHelperModules.Conv2dReLUModule(inplace_relu=inplace_relu, use_bias=use_bias).eval()
+            for unary_op, use_bias in itertools.product(unary_map.keys(), use_bias_list):
+                m = TestHelperModules.Conv2dUnaryModule(unary_map[unary_op][0], use_bias=use_bias).eval()
                 example_inputs = (torch.randn(2, 3, 16, 16),)
                 quantizer = X86InductorQuantizer().set_global(
                     xiq.get_default_x86_inductor_quantization_config()
@@ -358,7 +409,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.conv2d.default,
-                    torch.ops.aten.relu_.default if inplace_relu else torch.ops.aten.relu.default,
+                    unary_map[unary_op][1],
                 ]
                 self._test_quantizer(
                     m,
@@ -409,6 +460,46 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.conv2d.default,
                     torch.ops.aten.add.Tensor,
+                ]
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                )
+
+
+    @skipIfNoX86
+    def test_conv2d_binary2(self):
+        """
+        Test Pattern:
+            tmp = conv2d_1(x)
+            tmp2 = conv2d_2(tmp)
+            return tmp + tmp2
+        Since conv2d_1 has 2 users, we should annotate conv2d_2 for binary fusion instead of conv2d_1
+        """
+        example_inputs = (torch.randn(2, 3, 6, 6),)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
+        inplace_add_list = [True, False]
+        with override_quantized_engine("x86"), torch.no_grad():
+            for inplace_add in inplace_add_list:
+                m = TestHelperModules.Conv2dAddModule2(inplace_add=inplace_add).eval()
+                node_occurrence = {
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+                    # quantize_per_channel for weights are const propagated
+                    torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+                }
+                node_list = [
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    torch.ops.aten.conv2d.default,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor,
                 ]
                 self._test_quantizer(
                     m,
@@ -505,14 +596,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_list,
             )
 
-    @skipIfNoX86
-    def test_maxpool2d_recipe(self):
-        r"""
-        Test pattern: int8_in_int8_out_ops(maxpool) - non_quantizable op(pow)
-        Since maxpool is a int8_in_int8_out_op, there is obs between maxpool and pow.
-        """
-        m = TestHelperModules.Conv2dMaxpoolPowModule().eval()
-        x = torch.rand(1, 2, 14, 14)
+    def _single_op_share_observer_recipe_test_helper(self, m, x, single_op):
         quantizer = X86InductorQuantizer().set_global(
             xiq.get_default_x86_inductor_quantization_config()
         )
@@ -531,7 +615,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             torch.ops.aten.conv2d.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            torch.ops.aten.max_pool2d.default,
+            single_op,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
         ]
@@ -546,14 +630,14 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         for node in prepare_model.graph.nodes:
             if (
                 node.op == "call_function"
-                and node.target is torch.ops.aten.max_pool2d.default
+                and node.target is single_op
             ):
-                maxpool_node = node
-                input_obs_of_maxpool = getattr(
-                    prepare_model, maxpool_node.args[0].target
+                single_op_node = node
+                input_obs_of_single_op = getattr(
+                    prepare_model, single_op_node.args[0].target
                 )
-                output_obs_of_maxpool = getattr(
-                    prepare_model, list(maxpool_node.users)[0].target
+                output_obs_of_single_op = getattr(
+                    prepare_model, next(iter(single_op_node.users)).target
                 )
             elif (
                 node.op == "call_function"
@@ -561,11 +645,51 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             ):
                 conv_node = node
                 input_obs_of_conv = getattr(prepare_model, conv_node.args[0].target)
-        self.assertTrue(isinstance(input_obs_of_maxpool, ObserverBase))
-        self.assertTrue(isinstance(output_obs_of_maxpool, ObserverBase))
+        self.assertTrue(isinstance(input_obs_of_single_op, ObserverBase))
+        self.assertTrue(isinstance(output_obs_of_single_op, ObserverBase))
         self.assertTrue(isinstance(input_obs_of_conv, ObserverBase))
-        self.assertTrue(input_obs_of_maxpool is output_obs_of_maxpool)
-        self.assertTrue(input_obs_of_maxpool is not input_obs_of_conv)
+        self.assertTrue(input_obs_of_single_op is output_obs_of_single_op)
+        self.assertTrue(input_obs_of_single_op is not input_obs_of_conv)
+
+
+    @skipIfNoX86
+    def test_maxpool2d_recipe(self):
+        r"""
+        Test pattern: int8_in_int8_out_ops(maxpool) - non_quantizable op(pow)
+        Since maxpool is a int8_in_int8_out_op, there is obs between maxpool and pow.
+        """
+        self._single_op_share_observer_recipe_test_helper(
+            TestHelperModules.Conv2dSingleOpPowModule(nn.MaxPool2d(1, 1)).eval(),
+            torch.rand(1, 2, 14, 14),
+            torch.ops.aten.max_pool2d.default,
+        )
+
+
+    @skipIfNoX86
+    def test_adaptive_avg_pool2d_recipe(self):
+        r"""
+        Test pattern: int8_in_int8_out_ops(adaptive_avg_pool2d) - non_quantizable op(pow)
+        Since adaptive_avg_pool2d is a int8_in_int8_out_op, there is obs between adaptive_avg_pool2d and pow.
+        """
+        self._single_op_share_observer_recipe_test_helper(
+            TestHelperModules.Conv2dSingleOpPowModule(nn.AdaptiveAvgPool2d((1, 1))).eval(),
+            torch.rand(1, 2, 14, 14),
+            torch.ops.aten.adaptive_avg_pool2d.default,
+        )
+
+
+    @skipIfNoX86
+    def test_flatten_recipe(self):
+        r"""
+        Test pattern: int8_in_int8_out_ops(flatten) - non_quantizable op(pow)
+        Since flatten is a int8_in_int8_out_op, there is obs between flatten and pow.
+        """
+        self._single_op_share_observer_recipe_test_helper(
+            TestHelperModules.Conv2dSingleOpPowModule(lambda x: torch.flatten(x, 1)).eval(),
+            torch.rand(1, 2, 14, 14),
+            torch.ops.aten.flatten.using_ints,
+        )
+
 
     @skipIfNoX86
     def test_cat_recipe(self):
@@ -619,7 +743,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, node.all_input_nodes[1].target
                 )
                 cat_out_obs = getattr(
-                    prepare_model, list(node.users)[0].target
+                    prepare_model, next(iter(node.users)).target
                 )
             elif (
                 node.op == "call_function"
@@ -630,7 +754,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, maxpool_node.args[0].target
                 )
                 output_obs_of_maxpool = getattr(
-                    prepare_model, list(maxpool_node.users)[0].target
+                    prepare_model, next(iter(maxpool_node.users)).target
                 )
         self.assertTrue(isinstance(cat_act_obs0, ObserverBase))
         self.assertTrue(isinstance(cat_act_obs1, ObserverBase))
@@ -691,7 +815,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, node.args[0][1].target
                 )
                 cat_out_obs = getattr(
-                    prepare_model, list(node.users)[0].target
+                    prepare_model, next(iter(node.users)).target
                 )
         self.assertTrue(isinstance(cat_act_obs0, ObserverBase))
         self.assertTrue(isinstance(cat_act_obs1, ObserverBase))
@@ -745,7 +869,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, node.args[0][0].target
                 )
                 cat_out_obs = getattr(
-                    prepare_model, list(node.users)[0].target
+                    prepare_model, next(iter(node.users)).target
                 )
         self.assertTrue(isinstance(cat_act_obs0, ObserverBase))
         self.assertTrue(isinstance(cat_out_obs, ObserverBase))
@@ -797,14 +921,14 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     prepare_model, avgpool_node.args[0].target
                 )
                 output_obs_of_avgpool = getattr(
-                    prepare_model, list(avgpool_node.users)[0].target
+                    prepare_model, next(iter(avgpool_node.users)).target
                 )
             elif (
                 node.op == "call_function"
                 and node.target is torch.ops.aten.conv2d.default
             ):
                 conv_node = node
-                output_obs_of_conv = getattr(prepare_model, list(conv_node.users)[0].target)
+                output_obs_of_conv = getattr(prepare_model, next(iter(conv_node.users)).target)
         self.assertTrue(isinstance(input_obs_of_avgpool, ObserverBase))
         self.assertTrue(isinstance(output_obs_of_avgpool, ObserverBase))
         self.assertTrue(isinstance(output_obs_of_conv, ObserverBase))
@@ -886,6 +1010,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_list,
                 )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d(self):
         """
@@ -923,16 +1048,27 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 is_qat=True,
             )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d_unary(self):
         """
         Test QAT pattern of conv2d_bn with unary post ops (such as relu, sigmoid) with X86InductorQuantizer.
         Currently, only relu as unary post op is supported.
         """
-        inplace_relu_list = [True, False]
+        unary_map = {
+            "relu": [torch.nn.ReLU(inplace=False), torch.ops.aten.relu.default],
+            "relu_inplace": [torch.nn.ReLU(inplace=True), torch.ops.aten.relu_.default],
+            "hardtanh": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=False), torch.ops.aten.hardtanh.default],
+            "hardtanh_inplace": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=True), torch.ops.aten.hardtanh_.default],
+            "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
+            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default],
+            "hardswish": [torch.nn.Hardswish(inplace=False), torch.ops.aten.hardswish.default],
+            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default]
+        }
+
         with override_quantized_engine("x86"):
-            for inplace_relu in itertools.product(inplace_relu_list):
-                m = TestHelperModules.Conv2dReLUModule(inplace_relu=inplace_relu, with_bn=True)
+            for unary_op in unary_map.keys():
+                m = TestHelperModules.Conv2dUnaryModule(unary_map[unary_op][0], with_bn=True)
                 example_inputs = (torch.randn(2, 3, 16, 16),)
                 quantizer = X86InductorQuantizer().set_global(
                     xiq.get_default_x86_inductor_quantization_config(is_qat=True)
@@ -951,7 +1087,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.conv2d.default,
-                    torch.ops.aten.relu_.default if inplace_relu else torch.ops.aten.relu.default,
+                    unary_map[unary_op][1],
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                 ]
@@ -964,6 +1100,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     is_qat=True,
                 )
 
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d_binary(self):
         """
@@ -1006,6 +1143,50 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     is_qat=True,
                 )
 
+    @skipIfTorchDynamo("very slow")
+    @skipIfNoX86
+    def test_qat_conv2d_binary2(self):
+        """
+        Test qat Pattern:
+            tmp = bn1(conv2d_1(x))
+            tmp2 = bn2(conv2d_2(tmp))
+            return tmp + tmp2
+        Since conv2d_1 has 2 users, we should annotate conv2d_2 for binary fusion instead of conv2d_1
+        """
+        example_inputs = (torch.randn(2, 3, 6, 6),)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config(is_qat=True)
+        )
+        inplace_add_list = [True, False]
+        with override_quantized_engine("x86"), torch.no_grad():
+            for inplace_add in inplace_add_list:
+                m = TestHelperModules.Conv2dAddModule2(inplace_add=inplace_add)
+                node_occurrence = {
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
+                    # quantize_per_channel for weights are const propagated
+                    torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+                    # BN should be folded into Conv
+                    torch.ops.aten._native_batch_norm_legit.default: 0,
+                }
+                node_list = [
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    torch.ops.aten.conv2d.default,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor,
+                ]
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                    is_qat=True,
+                )
+
+    @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d_binary_unary(self):
         """
@@ -1037,6 +1218,78 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 torch.ops.aten.add.Tensor,
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+                is_qat=True,
+            )
+
+    @skipIfNoX86
+    def test_dynamic_quant_linear(self):
+        """
+        Test pattern of dynamic quantization of linear with X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.SelfAttnLikeModule(input_dim=64).eval()
+            example_inputs = (torch.randn(1, 4, 64),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config(is_dynamic=True)
+            )
+            node_occurrence = {
+                torch.ops.quantized_decomposed.choose_qparams.tensor: 1,
+                torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
+                # quantize_per_channel for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
+            }
+            node_list = [
+                torch.ops.quantized_decomposed.choose_qparams.tensor,
+                torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default,
+                torch.ops.aten.linear.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+            )
+
+    @skipIfNoX86
+    def test_qat_dynamic_quant_linear(self):
+        """
+        Test pattern of qat dynamic quantization of linear with X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.SelfAttnLikeModule(input_dim=64).eval()
+            example_inputs = (torch.randn(1, 4, 64),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config(
+                    is_qat=True,
+                    is_dynamic=True
+                )
+            )
+            node_occurrence = {
+                torch.ops.quantized_decomposed.choose_qparams.tensor: 1,
+                torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
+                # quantize_per_channel for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
+            }
+            node_list = [
+                torch.ops.quantized_decomposed.choose_qparams.tensor,
+                torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default,
+                torch.ops.aten.linear.default,
             ]
             self._test_quantizer(
                 m,

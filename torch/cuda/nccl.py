@@ -37,7 +37,10 @@ def version():
     minor = (ver >> 16) & 65535
     patch = ver & 65535
     suffix = torch._C._nccl_version_suffix().decode("utf-8")
-    return (major, minor, patch, suffix)
+    if suffix == "":
+        return (major, minor, patch)
+    else:
+        return (major, minor, patch, suffix)
 
 
 def unique_id():

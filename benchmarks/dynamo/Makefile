@@ -35,7 +35,7 @@ build-deps: clone-deps
 	(cd ../../../torchdata && python setup.py install)
 	(cd ../../../torchtext && python setup.py clean && python setup.py develop)
 	(cd ../../../torchaudio && python setup.py clean && python setup.py develop)
-	(cd ../../../FBGEMM/fbgemm_gpu && python setup.py clean && pip install -r requirements.txt && python setup.py develop)
+	(cd ../../../FBGEMM/fbgemm_gpu && pip install -r requirements.txt && python setup.py clean && python setup.py develop)
 	(cd ../../../torchrec && python setup.py clean && python setup.py develop)
 	(cd ../../../detectron2  && python setup.py clean && python setup.py develop)
 	(cd ../../../torchbenchmark && python install.py --continue_on_fail)

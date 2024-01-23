@@ -144,7 +144,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
             name = "options"
             return [
                 ADD_TRACE_INPUT.substitute(
-                    name=name, input="optTypeMetaToScalarType(options.dtype_opt())"
+                    name=name, input="c10::optTypeMetaToScalarType(options.dtype_opt())"
                 ),
                 ADD_TRACE_INPUT.substitute(name=name, input="options.layout()"),
                 ADD_TRACE_INPUT.substitute(name=name, input="options.device()"),
@@ -205,7 +205,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
             outplace = [
                 ADD_TRACE_INPUT.substitute(
                     name="out",
-                    input="optTypeMetaToScalarType(out.options().dtype_opt())",
+                    input="c10::optTypeMetaToScalarType(out.options().dtype_opt())",
                 ),
                 ADD_TRACE_INPUT.substitute(name="out", input="out.options().layout()"),
                 ADD_TRACE_INPUT.substitute(name="out", input="out.options().device()"),

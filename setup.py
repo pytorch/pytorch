@@ -160,6 +160,9 @@
 #   USE_ZSTD
 #     Enables use of ZSTD, if the libraries are found
 #
+#   USE_ROCM_KERNEL_ASSERT=1
+#     Enable kernel assert in ROCm platform
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
@@ -518,8 +521,8 @@ def check_pydep(importname, module):
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
-    # Copy libiomp5.dylib inside the wheel package on OS X
-    def _embed_libiomp(self):
+    def _embed_libomp(self):
+        # Copy libiomp5.dylib/libomp.dylib inside the wheel package on MacOS
         lib_dir = os.path.join(self.build_lib, "torch", "lib")
         libtorch_cpu_path = os.path.join(lib_dir, "libtorch_cpu.dylib")
         if not os.path.exists(libtorch_cpu_path):
@@ -542,17 +545,31 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 assert rpath.startswith("path ")
                 rpaths.append(rpath.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
 
-        omp_lib_name = "libiomp5.dylib"
+        omp_lib_name = (
+            "libomp.dylib" if os.uname().machine == "arm64" else "libiomp5.dylib"
+        )
         if os.path.join("@rpath", omp_lib_name) not in libs:
             return
 
-        # Copy libiomp5 from rpath locations
+        # Copy libomp/libiomp5 from rpath locations
         for rpath in rpaths:
             source_lib = os.path.join(rpath, omp_lib_name)
             if not os.path.exists(source_lib):
                 continue
             target_lib = os.path.join(self.build_lib, "torch", "lib", omp_lib_name)
             self.copy_file(source_lib, target_lib)
+            break
+
+        # Copy omp.h from OpenMP_C_FLAGS and copy it into include folder
+        omp_cflags = get_cmake_cache_vars()["OpenMP_C_FLAGS"]
+        if not omp_cflags:
+            return
+        for include_dir in [f[2:] for f in omp_cflags.split(" ") if f.startswith("-I")]:
+            omp_h = os.path.join(include_dir, "omp.h")
+            if not os.path.exists(omp_h):
+                continue
+            target_omp_h = os.path.join(self.build_lib, "torch", "include", "omp.h")
+            self.copy_file(omp_h, target_omp_h)
             break
 
     def run(self):
@@ -576,6 +593,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report("-- Detected CUDA at " + cmake_cache_vars["CUDA_TOOLKIT_ROOT_DIR"])
         else:
             report("-- Not using CUDA")
+        if cmake_cache_vars["USE_XPU"]:
+            report("-- Detected XPU runtime at " + cmake_cache_vars["SYCL_LIBRARY_DIR"])
+        else:
+            report("-- Not using XPU")
         if cmake_cache_vars["USE_MKLDNN"]:
             report("-- Using MKLDNN")
             if cmake_cache_vars["USE_MKLDNN_ACL"]:
@@ -643,7 +664,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         setuptools.command.build_ext.build_ext.run(self)
 
         if IS_DARWIN and package_type != "conda":
-            self._embed_libiomp()
+            self._embed_libomp()
 
         # Copy the essential export library to compile C++ extensions.
         if IS_WINDOWS:
@@ -1040,50 +1061,6 @@ def configure_extension_build():
     return extensions, cmdclass, packages, entry_points, extra_install_requires
 
 
-def add_triton(install_requires, extras_require) -> None:
-    """
-    Add triton package as a dependency when it's needed
-    """
-    # NB: If the installation requirments list already includes triton dependency,
-    # there is no need to add it one more time as an extra dependency. In nightly
-    # or when release PyTorch, that is done by setting PYTORCH_EXTRA_INSTALL_REQUIREMENTS
-    # environment variable on pytorch/builder
-    has_triton = any("triton" in pkg for pkg in install_requires)
-    if has_triton:
-        return
-
-    cmake_cache_vars = get_cmake_cache_vars()
-    use_rocm = cmake_cache_vars["USE_ROCM"]
-    use_cuda = cmake_cache_vars["USE_CUDA"]
-
-    # Triton is only needed for CUDA or ROCm
-    if not use_rocm and not use_cuda:
-        return
-
-    if use_rocm:
-        triton_text_file = "triton-rocm.txt"
-        triton_package_name = "pytorch-triton-rocm"
-    else:
-        triton_text_file = "triton.txt"
-        triton_package_name = "pytorch-triton"
-    triton_pin_file = os.path.join(
-        cwd, ".ci", "docker", "ci_commit_pins", triton_text_file
-    )
-    triton_version_file = os.path.join(cwd, ".ci", "docker", "triton_version.txt")
-
-    if os.path.exists(triton_pin_file) and os.path.exists(triton_version_file):
-        with open(triton_pin_file) as f:
-            triton_pin = f.read().strip()
-        with open(triton_version_file) as f:
-            triton_version = f.read().strip()
-
-        if "dynamo" not in extras_require:
-            extras_require["dynamo"] = []
-        extras_require["dynamo"].append(
-            triton_package_name + "==" + triton_version + "+" + triton_pin[:10]
-        )
-
-
 # post run, warnings, printed at the end to make them more visible
 build_update_message = """
     It is no longer necessary to use the 'build' or 'rebuild' targets
@@ -1110,7 +1087,7 @@ def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
         "filelock",
-        "typing-extensions",
+        "typing-extensions>=4.8.0",
         "sympy",
         "networkx",
         "jinja2",
@@ -1146,10 +1123,6 @@ def main():
         "optree": ["optree>=0.9.1"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
-    # Triton is only available on Linux atm
-    if platform.system() == "Linux":
-        extras_require["dynamo"] = ["jinja2"]
-        add_triton(install_requires=install_requires, extras_require=extras_require)
 
     # Read in README.md for our long_description
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
@@ -1222,12 +1195,12 @@ def main():
         "include/ATen/core/dispatch/*.h",
         "include/ATen/core/op_registration/*.h",
         "include/c10/core/impl/*.h",
-        "include/c10/core/impl/cow/*.h",
         "include/c10/util/*.h",
         "include/c10/cuda/*.h",
         "include/c10/cuda/impl/*.h",
         "include/c10/hip/*.h",
         "include/c10/hip/impl/*.h",
+        "include/c10/xpu/*.h",
         "include/torch/*.h",
         "include/torch/csrc/*.h",
         "include/torch/csrc/api/include/torch/*.h",
@@ -1262,6 +1235,7 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
         "include/torch/csrc/inductor/aoti_torch/*.h",
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
@@ -1286,6 +1260,7 @@ def main():
         "include/torch/csrc/profiler/*.h",
         "include/torch/csrc/profiler/orchestration/*.h",
         "include/torch/csrc/profiler/stubs/*.h",
+        "include/torch/csrc/profiler/unwind/*.h",
         "include/torch/csrc/utils/*.h",
         "include/torch/csrc/tensor/*.h",
         "include/torch/csrc/lazy/backend/*.h",

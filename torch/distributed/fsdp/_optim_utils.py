@@ -12,6 +12,7 @@ from typing import (
     Iterator,
     List,
     NamedTuple,
+    no_type_check,
     Optional,
     Sequence,
     Set,
@@ -24,8 +25,8 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed._state_dict_utils import _gather_state_dict
 from torch.distributed._tensor import DTensor, Replicate
-from torch.distributed.checkpoint._state_dict_utils import _gather_state_dict
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
@@ -46,7 +47,11 @@ from torch.distributed.fsdp._runtime_utils import (
     _lazy_init,
     _reset_flat_param_grad_info_if_needed,
 )
-from torch.distributed.fsdp.api import ShardingStrategy
+from torch.distributed.fsdp.api import (
+    ShardingStrategy,
+    StateDictSettings,
+    StateDictType,
+)
 from torch.utils._pytree import tree_map_only
 
 
@@ -299,7 +304,10 @@ def _unflatten_communicated_optim_state(
                 if getattr(osd_config, "_use_dtensor", False):
                     assert fsdp_state._device_mesh is not None
                     optim_state = _ext_chunk_dtensor(
-                        optim_state, fsdp_state.rank, fsdp_state._device_mesh
+                        optim_state,
+                        fsdp_state.rank,
+                        fsdp_state._device_mesh,
+                        fsdp_state._fsdp_extension,
                     )
                 else:
                     assert fsdp_state.process_group is not None
@@ -309,6 +317,7 @@ def _unflatten_communicated_optim_state(
                         fsdp_state.world_size,
                         fsdp_state._device_handle.device_count(),
                         fsdp_state.process_group,
+                        fsdp_state._fsdp_extension,
                     )
             unflat_state_param[state_name] = optim_state
 
@@ -331,7 +340,7 @@ def _broadcast_processed_state(
     if fsdp_state.rank == 0:
         objects[0] = tree_map_only(
             torch.Tensor,
-            lambda v: v.cpu() if v.dim() == 0 else _PosDimTensorInfo(v.shape, v.dtype),
+            lambda v: v.cpu() if v.dim() == 0 else _PosDimTensorInfo(v.shape, v.dtype),  # type: ignore[union-attr]
             optim_state,
         )
     dist.broadcast_object_list(objects, src=0, group=group)
@@ -394,7 +403,7 @@ def _shard_orig_param_state(
             and value.dim() > 0
             and fsdp_state.sharding_strategy != ShardingStrategy.NO_SHARD
         ):
-            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1]  # type: ignore[operator]
+            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1].clone()  # type: ignore[operator]
         new_optim_state[state_name] = value
     return new_optim_state
 
@@ -1009,10 +1018,9 @@ def _get_param_id_to_param_from_optim_input(
             'A parameter group should map "params" to a list of the '
             "parameters in the group"
         )
-        for param in param_group["params"]:  # type: ignore[index]
-            # Implicitly map `flat_param_id` (current length of the list) to
-            # `param`
-            param_id_to_param.append(param)
+        # Implicitly map `flat_param_id` (current length of the list) to
+        # `param`
+        param_id_to_param.extend(param_group["params"])  # type: ignore[index]
     return dict(enumerate(param_id_to_param))
 
 
@@ -1395,14 +1403,20 @@ def _convert_all_state_info(
                 assert (
                     curr_non_tensor_value is None
                     or curr_non_tensor_value == non_tensor_value
-                ), f"Different ranks have different values for {name}."
+                ), (
+                    f"Rank {rank} has different values for {name}: {non_tensor_value}."
+                    + f" Other ranks: {curr_non_tensor_value}"
+                )
                 gathered_state[name] = non_tensor_value
 
             for name, scalar_tensor_value in object_state.scalar_tensors.items():
                 curr_scalar_tensor_value = gathered_state.get(name, None)
                 assert curr_scalar_tensor_value is None or torch.equal(
                     scalar_tensor_value, curr_scalar_tensor_value
-                ), f"Different ranks have different values for {name}."
+                ), (
+                    f"Rank {rank} has different values for {name}: {scalar_tensor_value}."
+                    + f" Other ranks: {curr_scalar_tensor_value}"
+                )
                 gathered_state[name] = scalar_tensor_value
 
     return dtype, state_buffers
@@ -1440,7 +1454,7 @@ def _unflatten_orig_param_states(
                 placement_dim = placement.dim  # type: ignore[attr-defined]
                 value_local = value.redistribute(placements=(Replicate(),))
                 reshape_size = list(flat_param._shapes[param_idx])
-                reshape_size[placement_dim] *= 2
+                reshape_size[placement_dim] *= value.device_mesh.size(0)
                 reshape_size = torch.Size(reshape_size)
                 value = value.reshape(reshape_size)
             # If gathered state is a replicate DTensor, we directly reshape it.
@@ -1455,7 +1469,10 @@ def _unflatten_orig_param_states(
             if getattr(osd_config, "_use_dtensor", False):
                 assert fsdp_state._device_mesh is not None
                 value = _ext_chunk_dtensor(
-                    value, fsdp_state.rank, fsdp_state._device_mesh
+                    value,
+                    fsdp_state.rank,
+                    fsdp_state._device_mesh,
+                    fsdp_state._fsdp_extension,
                 )
             else:
                 assert fsdp_state.process_group is not None
@@ -1465,10 +1482,11 @@ def _unflatten_orig_param_states(
                     fsdp_state.world_size,
                     fsdp_state._device_handle.device_count(),
                     fsdp_state.process_group,
+                    fsdp_state._fsdp_extension,
                 )
         elif not cpu_offload:
             with SimpleProfiler.profile("clone"):
-                value = value.detach.clone()
+                value = value.detach().clone()
 
         if cpu_offload:
             with SimpleProfiler.profile(SimpleProfiler.Type.D2H):
@@ -1490,7 +1508,7 @@ def _allgather_orig_param_states(
     """
     fsdp_state = fsdp_param_info.state
     if fsdp_state.rank == 0:
-        logger.warning(
+        logger.debug(
             "CUDA Memory Summary before calling to _allgather_orig_param_states %s",
             torch.cuda.memory_summary(),
         )
@@ -2046,3 +2064,28 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         [fqn for fqn, _ in _named_parameters_with_duplicates(model)],
         fqn_to_param_info,
     )
+
+
+@no_type_check
+def _set_optim_use_dtensor(
+    fsdp_state: _FSDPState,
+    state_dict_settings: StateDictSettings,
+) -> None:
+    # If device_mesh is passed in when initalizing FSDP, we automatically turn the
+    # _use_dtensor flag to be true for ShardedOptimStateDictConfig() if state_dict_type
+    # has to be set to SHARDED_STATE_DICT.
+    if getattr(fsdp_state, "_device_mesh", None):
+        state_dict_type = state_dict_settings.state_dict_type
+        if state_dict_type == StateDictType.LOCAL_STATE_DICT:
+            raise RuntimeError(
+                "Found state_dict_type LOCAL_STATE_DICT.",
+                "DeviceMesh is not compatible with LOCAL_STATE_DICT.",
+                "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict.",
+            )
+        elif state_dict_type == StateDictType.FULL_STATE_DICT:
+            logger.warning(
+                "Found both state_dict_type FULL_STATE_DICT and device_mesh. "  # noqa: G004
+                "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict."
+            )
+        else:
+            state_dict_settings.optim_state_dict_config._use_dtensor = True

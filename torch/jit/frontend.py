@@ -817,7 +817,7 @@ class StmtBuilder(Builder):
         if is_torch_jit_ignore_context_manager(stmt):
             if not _IS_ASTUNPARSE_INSTALLED:
                 raise RuntimeError(
-                    "torch.jit._IgnoreContextManager requires installing Python library `astunparse`,\
+                    "torch.jit._IgnoreContextManager requires installing Python library `astunparse`, \
                                    please install it in your Python environment"
                 )
             assign_ast = build_ignore_context_manager(ctx, stmt)
@@ -1162,7 +1162,7 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Num(ctx, expr):
-        value = str(expr.n)
+        value = str(expr.value)
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(value))
         return Const(r, value)
 
@@ -1187,7 +1187,7 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Str(ctx, expr):
-        value = str(expr.s)
+        value = str(expr.value)
         r = ctx.make_range(
             expr.lineno, expr.col_offset, expr.col_offset + len(value) + 1
         )

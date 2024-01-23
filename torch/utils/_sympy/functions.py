@@ -4,7 +4,7 @@ from sympy.core.logic import fuzzy_and, fuzzy_not, fuzzy_or
 
 __all__ = [
     "FloorDiv", "ModularIndexing", "CleanDiv", "CeilDiv", "Pow", "TrueDiv",
-    "LShift", "RShift", "IsNonOverlappingAndDenseIndicator",
+    "LShift", "RShift", "IsNonOverlappingAndDenseIndicator", "Round", "RoundDecimal",
 ]
 
 
@@ -66,6 +66,8 @@ class FloorDiv(sympy.Function):
             return base
         if base.is_real and divisor == 1:
             return sympy.floor(base)
+        if base.is_integer and divisor == -1:
+            return sympy.Mul(base, -1)
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
         if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
@@ -308,3 +310,29 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
                 [int(a) for a in stride_args]
             )
         return None
+
+
+class Round(sympy.Function):
+    is_integer = True
+
+    @classmethod
+    def eval(cls, number):
+        if number.is_integer:
+            return number
+        elif isinstance(number, sympy.Number):
+            return sympy.Integer(round(float(number)))
+
+    def __int__(self):
+        # This will only ever be called when computing size hints. At that point, self.args[0] should be a number and
+        # no longer an expression. If it were, the float call would fail and the caller would handle this further.
+        return round(float(self.args[0]))  # type: ignore[arg-type]
+
+
+class RoundDecimal(sympy.Function):
+    @classmethod
+    def eval(cls, number, ndigits):
+        if number.is_integer and ndigits >= 0:
+            return number
+        elif isinstance(number, sympy.Number) and isinstance(ndigits, sympy.Integer):
+            value_type, output_type = (int, sympy.Integer) if isinstance(number, sympy.Integer) else (float, sympy.Float)
+            return output_type(round(value_type(number), int(ndigits)))

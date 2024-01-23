@@ -83,6 +83,13 @@ class DTensorConstructorTest(DTensorTestBase):
                 exp_tensor = init_op(tensor_size, *args, **kwargs)
                 eq_op(exp_tensor, dist_tensor.to_local())
 
+        # empty shape
+        local_tensor = dist_init_op(
+            [], *args, **kwargs, device_mesh=device_mesh, placements=[Replicate()]
+        ).to_local()
+        expected_tensor = init_op([], *args, **kwargs)
+        eq_op(expected_tensor, local_tensor)
+
     @with_comms
     def test_ones(self):
         self._run_init_op(
@@ -204,7 +211,7 @@ class DTensorConstructorTest(DTensorTestBase):
             self.assertEqual(local_tensor, torch.zeros([16, 3]))
         else:
             self.assertEqual(local_tensor.size(), torch.Size([0]))
-            self.assertEqual(local_tensor, torch.tensor([]))
+            self.assertEqual(local_tensor, torch.zeros(0))
 
         # construct a cuda device 1d mesh: unevenly, with subpg initialized
         sub_mesh_list = [0, 1, 3]

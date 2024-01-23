@@ -53,6 +53,7 @@ See below a demonstration of exporter API in action with a simple Multilayer Per
 .. code-block:: python
 
   import torch
+  import torch.nn as nn
 
   class MLPModel(nn.Module):
     def __init__(self):
@@ -144,6 +145,9 @@ API Reference
     :members:
 
 .. autoclass:: torch.onnx.ONNXProgramSerializer
+    :members:
+
+.. autoclass:: torch.onnx.ONNXRuntimeOptions
     :members:
 
 .. autoclass:: torch.onnx.InvalidExportOptionsError

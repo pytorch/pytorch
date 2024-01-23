@@ -7,8 +7,7 @@
 #include <cuda.h>
 #include <vector>
 
-#include <ATen/cuda/CUDAGeneratorImpl.h>
-#include <ATen/cuda/CUDAGraphsUtils.cuh>
+#include <ATen/cuda/PhiloxUtils.cuh>
 
 namespace pytorch_flash{
 
@@ -74,6 +73,9 @@ struct Flash_fwd_params : public Qkv_params {
     // array of length b+1 holding starting offset of each sequence.
     int * __restrict__ cu_seqlens_q;
     int * __restrict__ cu_seqlens_k;
+
+    // If provided, the actual length of each k sequence.
+    int * __restrict__ seqused_k;
 
     int *__restrict__ blockmask;
 

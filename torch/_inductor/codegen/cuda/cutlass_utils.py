@@ -72,9 +72,9 @@ def try_import_cutlass() -> bool:
                 os.symlink(cutlass_py_full_path, dst_link)
             sys.path.append(tmp_cutlass_py_full_path)
         try:
-            import cutlass_library.generator  # type: ignore[import]  # noqa: F401
-            import cutlass_library.library  # type: ignore[import]  # noqa: F401
-            import cutlass_library.manifest  # type: ignore[import]  # noqa: F401
+            import cutlass_library.generator  # noqa: F401
+            import cutlass_library.library  # noqa: F401
+            import cutlass_library.manifest  # noqa: F401
 
             return True
 
@@ -139,8 +139,8 @@ def _gen_ops_cached(arch, version) -> List[Any]:
 
     # Import cutlass python scripts.
     assert try_import_cutlass()
-    import cutlass_library.generator as cutlass_generator  # type: ignore[import]
-    import cutlass_library.manifest as cutlass_manifest  # type: ignore[import]
+    import cutlass_library.generator as cutlass_generator
+    import cutlass_library.manifest as cutlass_manifest
 
     if arch is None or version is None:
         log.error(
@@ -179,12 +179,12 @@ def gen_ops() -> List[Any]:
 
 
 def dtype_match(
-    torch_dtype: torch.dtype,
-    cutlass_dtype: "cutlass_library.library.DataType",  # type: ignore[name-defined]
+    torch_dtype: Optional[torch.dtype],
+    cutlass_dtype: "cutlass_library.library.DataType",  # type: ignore[name-defined]  # noqa: F821
 ) -> bool:
     # Import cutlass python scripts.
     assert try_import_cutlass()
-    import cutlass_library  # type: ignore[import]
+    import cutlass_library
 
     if torch_dtype == torch.float:
         return (
@@ -199,7 +199,9 @@ def dtype_match(
         return False
 
 
-def get_accumulator_dtype(input_torch_dtypes: List[torch.dtype]) -> torch.dtype:
+def get_accumulator_dtype(
+    input_torch_dtypes: List[torch.dtype],
+) -> Optional[torch.dtype]:
     """
     Given a list of input torch dtypes, returns the inferred accumulator torch dtype.
     """

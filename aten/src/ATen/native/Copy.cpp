@@ -3,6 +3,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorIterator.h>
@@ -43,6 +44,7 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
   return self.is_contiguous() && src.numel() != 0 && src.dim() == 2 &&
       src.stride(0) == 1 && src.stride(1) == src.size(0) &&
       self.scalar_type() == src.scalar_type() &&
+      !isBitsType(self.scalar_type()) &&
       self.sizes().equals(src.sizes()) &&
       self.is_neg() == src.is_neg() &&
       self.is_conj() == src.is_conj() &&
@@ -50,10 +52,10 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
 }
 
 #if !defined(C10_MOBILE)
-#define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)                                   \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                                  \
-            kComplexHalf, kHalf, kBool, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
-            TYPE, NAME, __VA_ARGS__)
+#define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)                              \
+        AT_DISPATCH_V2(                             \
+            TYPE, NAME, AT_WRAP(__VA_ARGS__), kComplexHalf, kHalf, kBool, kBFloat16, kFloat8_e5m2,            \
+            kFloat8_e4m3fn, kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
 #else
 #define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)     \
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(    \
@@ -128,8 +130,7 @@ bool is_supported_device(Device device) {
 
 } // namespace
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
@@ -349,5 +350,4 @@ void _propagate_xla_data(const Tensor& input, const Tensor& output) {
 
 DEFINE_DISPATCH(copy_stub);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

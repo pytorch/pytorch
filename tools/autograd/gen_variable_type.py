@@ -342,6 +342,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "unfold_backward",
     "index",
     "masked_fill",
+    "masked_scatter_backward",
     "linalg_cross",
     "lu_unpack",
     "renorm",

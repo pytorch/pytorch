@@ -1,11 +1,11 @@
 from functools import lru_cache
 from itertools import chain
-from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, cast, Dict, List, Optional, Sequence, Union
 
 import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
-from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor._utils import try_find_mesh_from_args
 from torch.distributed._tensor.op_schema import (
     DTensorSpec,
     OpInfo,
@@ -19,6 +19,7 @@ from torch.distributed._tensor.op_schema import (
     TupleStrategy,
 )
 from torch.distributed._tensor.placement_types import TensorMeta
+from torch.distributed.device_mesh import DeviceMesh
 
 aten = torch.ops.aten
 
@@ -70,11 +71,15 @@ class ShardingPropagator:
 
     def _propagate_tensor_meta(
         self, op_schema: OpSchema
-    ) -> Union[None, TensorMeta, List[TensorMeta], Tuple[TensorMeta, ...]]:
+    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas
         """
+        if op_schema.op == aten.equal.default:
+            # data dependent ops can't be used for fake propagation
+            return None
+
         # NOTE: We must call the tracing in fake tensor mode so that it
         # avoids materializing memory
         with FakeTensorMode():
@@ -88,7 +93,7 @@ class ShardingPropagator:
             )
 
         elif isinstance(fake_out, (tuple, list)):
-            tensor_meta_list = []
+            tensor_meta_list: List[Optional[TensorMeta]] = []
             for fake_out_item in fake_out:
                 if isinstance(fake_out_item, torch.Tensor):
                     tensor_meta_list.append(
@@ -98,6 +103,8 @@ class ShardingPropagator:
                             dtype=fake_out_item.dtype,
                         )
                     )
+                else:
+                    tensor_meta_list.append(None)
             return (
                 tuple(tensor_meta_list)
                 if isinstance(fake_out, tuple)
@@ -111,9 +118,7 @@ class ShardingPropagator:
         self,
         op: OpOverload,
         output_spec: OutputSpecType,
-        output_tensor_meta: Union[
-            None, TensorMeta, List[TensorMeta], Tuple[TensorMeta, ...]
-        ],
+        output_tensor_meta: Union[None, TensorMeta, Sequence[Optional[TensorMeta]]],
     ) -> None:
         """
         Wrap the output_spec with the tensor metadata from the output.
@@ -163,14 +168,9 @@ class ShardingPropagator:
         """
         Propagate the sharding for an operator given the op_schema.
         """
-        # special case op list, we don't need to propagate for local
+        # special case op, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
-        skip_prop_list = {
-            aten._local_scalar_dense.default,
-            aten.equal.default,
-            aten.is_same_size.default,
-        }
-        if op_schema.op in skip_prop_list:
+        if op_schema.op is aten._local_scalar_dense.default:
             return OutputSharding(None, [op_schema])
 
         out_tensor_meta = self._propagate_tensor_meta(op_schema)
@@ -178,7 +178,11 @@ class ShardingPropagator:
         def spec_to_strategy(spec: object) -> object:
             if isinstance(spec, DTensorSpec):
                 return OpStrategy([PlacementStrategy(spec)])
-            elif isinstance(spec, (list, tuple)) and isinstance(spec[0], DTensorSpec):
+            elif (
+                isinstance(spec, (list, tuple))
+                and len(spec) > 0
+                and isinstance(spec[0], DTensorSpec)
+            ):
                 # tensor list create tuple strategy
                 tuple_strategy = [spec_to_strategy(s) for s in spec]
                 tuple_strategy = cast(Sequence[StrategyType], tuple_strategy)
@@ -190,17 +194,7 @@ class ShardingPropagator:
 
         if op_schema.op in self.op_strategy_funcs:
             # generate op strategy for the op.
-            mesh = None
-            for arg in op_schema.args_schema:
-                if isinstance(arg, DTensorSpec):
-                    mesh = arg.mesh
-                    break
-                elif isinstance(arg, (list, tuple)) and isinstance(arg[0], DTensorSpec):
-                    mesh = arg[0].mesh
-                    break
-
-            assert mesh is not None, f"Cannot find mesh for op {op_schema.op}"
-
+            mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
             # swap the args spec with args strategies
             args_op_strategy = [spec_to_strategy(i) for i in op_schema.args_schema]
 
@@ -221,11 +215,19 @@ class ShardingPropagator:
                 # single Op strategy
                 output_strategy = self._select_strategy(op_strategy)
 
+                # check if we need to redistribute the input
                 needs_redistribute = False
                 expected_input_specs = []
+
+                # in case where the op does not specify input_specs and output_spec
+                # is a DTensorSpec, we use output_spec as the spec for each DTensor
+                # input arg.
+                if output_strategy.input_specs is None:
+                    assert isinstance(output_strategy.output_spec, DTensorSpec)
+
                 for idx, input_spec in enumerate(op_schema.args_spec):
                     desired_spec = (
-                        output_strategy.output_spec
+                        output_strategy.out_spec
                         if output_strategy.input_specs is None
                         else output_strategy.input_specs[idx]
                     )
@@ -241,17 +243,28 @@ class ShardingPropagator:
                     reshard_schema._inplace_rewrap_schema_suggestion(op_schema)
                     suggestion_schema = [reshard_schema]
 
+                # construct output spec for the op
                 if op_schema.return_type_tuple_tensors():
                     # for ops return multiple tensors, make output spec return same spec
-                    # returned from the op strategy
-                    output_spec: OutputSpecType = tuple(
-                        [
-                            output_strategy.output_spec
-                            for _ in range(len(op_schema.op._schema.returns))
-                        ]
-                    )
-                else:
+                    # returned from the op strategy if output_spec is not a sequence
+                    output_spec: OutputSpecType = output_strategy.output_spec
+                    if isinstance(output_spec, DTensorSpec):
+                        output_spec = tuple(
+                            [
+                                # create a new DTensorSpec with the same placement as the
+                                # output_spec in output_strategy
+                                DTensorSpec(
+                                    mesh=output_spec.mesh,
+                                    placements=output_spec.placements,
+                                    tensor_meta=output_spec.tensor_meta,
+                                )
+                                for _ in range(len(op_schema.op._schema.returns))
+                            ]
+                        )
+                elif op_schema.return_type_tensor():
                     output_spec = output_strategy.output_spec
+                else:
+                    output_spec = None
 
                 output_sharding = OutputSharding(
                     output_spec,
@@ -260,10 +273,11 @@ class ShardingPropagator:
                 )
             elif isinstance(op_strategy, TupleStrategy):
                 # tuple strategy output sharding
-                out_spec_list = []
+                out_spec_list: List[DTensorSpec] = []
                 for strategy in op_strategy.childs:
                     assert isinstance(strategy, OpStrategy)
                     output_strategy = self._select_strategy(strategy)
+                    assert isinstance(output_strategy.output_spec, DTensorSpec)
                     out_spec_list.append(output_strategy.output_spec)
 
                 needs_redistribute = False

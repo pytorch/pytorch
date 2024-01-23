@@ -9,7 +9,7 @@ from torchgen import dest
 from torchgen.api.types import DispatcherSignature  # isort:skip
 from torchgen.context import method_with_native_function
 from torchgen.executorch.model import ETKernelIndex
-from torchgen.model import DispatchKey, NativeFunction, Variant
+from torchgen.model import BaseTy, BaseType, DispatchKey, NativeFunction, Variant
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import concatMap, Target
 
@@ -42,17 +42,28 @@ class ComputeNativeFunctionStub:
                     "",
                 )
             if not ret_name:
-                raise Exception(f"Can't handle this return type {f.func}")
-        else:
-            assert len(f.func.arguments.out) == len(f.func.returns), (
-                "Out variant number of returns need to match the number of out arguments."
-                f" Got outs {str(f.func.arguments.out)} but returns {str(f.func.returns)}"
-            )
-            # returns a tuple of out arguments
+                # if return type is tensor
+                if f.func.returns[0].type == BaseType(BaseTy.Tensor):
+                    # Returns an empty tensor
+                    ret_name = "at::Tensor()"
+                else:
+                    raise Exception(f"Can't handle this return type {f.func}")
+        elif len(f.func.arguments.out) == len(f.func.returns):
+            # Returns a tuple of out arguments
             tensor_type = "at::Tensor &"
             comma = ", "
             ret_name = f"""::std::tuple<{comma.join([tensor_type] * len(f.func.returns))}>(
                 {comma.join([r.name for r in f.func.arguments.out])}
+            )"""
+        else:
+            assert all(
+                a.type == BaseType(BaseTy.Tensor) for a in f.func.returns
+            ), f"Only support tensor returns but got {f.func.returns}"
+            # Returns a tuple of empty tensors
+            tensor_type = "at::Tensor"
+            comma = ", "
+            ret_name = f"""::std::tuple<{comma.join([tensor_type] * len(f.func.returns))}>(
+                {comma.join(["at::Tensor()" for _ in f.func.returns])}
             )"""
         ret_str = f"return {ret_name};" if len(f.func.returns) > 0 else ""
         return f"""
