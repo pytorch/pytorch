@@ -138,9 +138,10 @@ from .misc import (
     SkipFilesVariable,
     TypingVariable,
 )
-
 from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
 from .optimizer import OptimizerVariable
+
+from .sdpa import SDPAParamsVariable
 from .tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -586,6 +587,9 @@ class VariableBuilder:
                 value.device,
                 source=self.source,
             )
+        elif isinstance(value, torch._C._SDPAParams):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return SDPAParamsVariable.create(self.tx, value, self.source)
         elif isinstance(value, _EventBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EventVariable(
@@ -1273,7 +1277,7 @@ def wrap_fx_proxy(tx, proxy, example_value=None, subclass_type=None, **options):
         return wrap_fx_proxy_cls(target_cls=TensorVariable, **kwargs)
     else:
         result = wrap_fx_proxy_cls(target_cls=TensorWithTFOverrideVariable, **kwargs)
-        result.install_global(tx)
+        result.install_global_unsafe(tx)
         return result
 
 
@@ -1503,6 +1507,9 @@ def wrap_fx_proxy_cls(
         torch._utils._element_size,
         torch.seed,
         operator.mod,
+        torch._C._functorch._vmap_increment_nesting,
+        torch._C._functorch._vmap_decrement_nesting,
+        torch._functorch.vmap._validate_and_get_batch_size,
         # some mac builds are missing torch.distributed.get_rank()
         getattr(torch.distributed, "get_rank", _missing),
         getattr(torch.distributed, "get_world_size", _missing),
@@ -1513,6 +1520,11 @@ def wrap_fx_proxy_cls(
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable.create(example_value, **options)
+    elif isinstance(example_value, torch.backends.cuda.SDPAParams):
+        from .sdpa import SDPAParamsVariable
+
+        proxy.node.meta["example_value"] = example_value
+        return SDPAParamsVariable(proxy, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "

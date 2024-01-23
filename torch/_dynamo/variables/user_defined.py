@@ -285,9 +285,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif (
             issubclass(type(self.value), type)
-            and hasattr(self.value, "__enter__")
-            and hasattr(self.value, "__exit__")
+            and hasattr(
+                self.value, "__enter__"
+            )  # TODO(voz): These can invoke user code!
+            and hasattr(
+                self.value, "__exit__"
+            )  # TODO(voz): These can invoke user code!
             and check_constant_args(args, kwargs)
+            and self.value.__init__ == object.__init__
             and len(kwargs) == 0  # TODO(ybliang): support kwargs
         ):
             unwrapped_args = [x.as_python_constant() for x in args]
@@ -295,6 +300,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 unwrapped_args,
                 cm_obj=self.value(*unwrapped_args),
             )
+
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             field_defaults = self.value._field_defaults
