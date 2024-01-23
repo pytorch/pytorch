@@ -105,6 +105,11 @@ def foreach_all_gather_copy_out(
         torch._foreach_copy_(out, splits)  # one `copy_` per parameter
 
 
+# We need this context for the backward all-gather, which would otherwise
+# raise an error when writing to the all-gather output tensors in-place, e.g.:
+# RuntimeError: one of the variables needed for gradient computation has been
+# modified by an inplace operation: [torch.cuda.FloatTensor [15, 3]], which is
+# output 0 of AsStridedBackward0, is at version 3; expected version 2 instead.
 class _unsafe_preserve_version_counters(_DecoratorContextManager):
     # Same as `_unsafe_preserve_version_counter` but only entering/exiting the
     # context manager once for a list of tensors to reduce CPU overhead
