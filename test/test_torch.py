@@ -5200,6 +5200,15 @@ else:
         self.assertTrue(torch._C._data_address(view) == t_new_data_addr)
         self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
 
+    @skipXLA
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_lazy_clone_binary_op_no_materialize(self, device, dtype):
+        t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
+        clone = t._lazy_clone()
+        res = t + clone
+        self.assertTrue(torch._C._is_cow_tensor(t))
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+
     # FIXME: move to test distributions
     @skipIfMps
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
