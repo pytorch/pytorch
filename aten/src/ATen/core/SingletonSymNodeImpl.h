@@ -197,6 +197,8 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
     return false;
   }
 
+// NB: if you support a new operation and it returns singleton int, be sure
+//     to update python_symnode.
 #define DEFINE_BINARY_NOT_SUPPORTED(name)                           \
   c10::SymNode name(const c10::SymNode& other) override {           \
     TORCH_CHECK(false, #name " not supported by SingletonSymNode"); \
