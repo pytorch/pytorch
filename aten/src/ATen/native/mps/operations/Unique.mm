@@ -119,6 +119,9 @@ static std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self,
 
     if (dim != 0)
       sortedInput = [graph transposeTensor:sortedInput dimension:0 withDimension:dim name:nil];
+
+    [randomTensor release];
+    [tensor release];
   } else {
     sortedInput = [graph sortWithTensor:inputTensor axis:0 name:nil];
   }
