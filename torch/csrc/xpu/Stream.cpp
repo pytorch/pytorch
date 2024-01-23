@@ -93,8 +93,8 @@ static PyObject* THXPStream_priority_range(
 
 static PyObject* THXPStream_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      false, "The query method of Stream on XPU backend is not implemented.");
+  auto self = (THXPStream*)_self;
+  return PyBool_FromLong(self->xpu_stream.query());
   END_HANDLE_TH_ERRORS
 }
 
