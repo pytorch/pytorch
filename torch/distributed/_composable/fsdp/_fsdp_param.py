@@ -329,15 +329,17 @@ def unsafe_free_storage(tensor: torch.Tensor) -> None:
     tensor.untyped_storage().resize_(0)
 
 
-# NOTE: These are hacks to bypass `nn.Module.__setattr__` checks, which incur
-# non-trivial CPU overhead. We do not need to do those checks repeatedly.
+# NOTE: These bypass `nn.Module.__setattr__` checks, which incur non-trivial
+# CPU overhead, if the module did not override it. For FSDP, we know we do not
+# need those checks when transitioning between sharded/unsharded parameters.
 def unsafe_setattr_param(
     module: nn.Module, param_name: str, param: torch.Tensor
 ) -> None:
-    module._parameters[param_name] = cast(nn.Parameter, param)
-    # This bypasses any overrides in case `module` is an instance of an
-    # `nn.Module` subclass
-    super(nn.Module, module).__setattr__(param_name, param)
+    if getattr(module.__setattr__, "__func__", None) is nn.Module.__setattr__:
+        module._parameters[param_name] = cast(nn.Parameter, param)
+        super(nn.Module, module).__setattr__(param_name, param)
+    else:  # slow path
+        setattr(module, param_name, param)
 
 
 def set_requires_grad_if_needed(
