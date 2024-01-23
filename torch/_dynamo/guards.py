@@ -586,9 +586,6 @@ class GuardBuilder(GuardBuilderBase):
     def BACKEND_MATCH(self, guard: Guard):
         """Guard on backend matching based on id of current_backend"""
         assert guard.source is GuardSource.GLOBAL
-        assert (
-            torch._dynamo.eval_frame.guarded_backend_cache.current_backend is not None
-        )
         backend_id = (
             f"{id(torch._dynamo.eval_frame.guarded_backend_cache.current_backend)}"
         )
