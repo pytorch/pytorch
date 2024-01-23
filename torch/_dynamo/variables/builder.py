@@ -587,10 +587,7 @@ class VariableBuilder:
                 value.device,
                 source=self.source,
             )
-        elif (
-            isinstance(value, (torch._C._SDPAParams))
-            or getattr(value, "__name__", None) == "SDPAParams"
-        ):
+        elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
         elif isinstance(value, _EventBase):
@@ -1525,10 +1522,7 @@ def wrap_fx_proxy_cls(
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable.create(example_value, **options)
-    elif (
-        isinstance(example_value, torch.backends.cuda.SDPAParams)
-        or getattr(example_value, "__name__", None) == "SDPAParams"
-    ):
+    elif isinstance(example_value, torch.backends.cuda.SDPAParams):
         from .sdpa import SDPAParamsVariable
 
         proxy.node.meta["example_value"] = example_value

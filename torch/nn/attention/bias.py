@@ -21,6 +21,11 @@ from torch.nn.functional import scaled_dot_product_attention
 __all__ = ["causal_upper_left", "causal_lower_right", "CausalVariant", "CausalBias"]
 
 
+torch._dynamo.allow_in_graph(can_use_flash_attention)
+torch._dynamo.allow_in_graph(can_use_efficient_attention)
+torch._dynamo.allow_in_graph(SDPAParams)
+
+
 class CausalVariant(IntEnum):
     r"""
     Enum for causal variants used in attention mechanisms.
