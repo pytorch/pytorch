@@ -1,7 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
-#include <ATen/xpu/EmptyTensor.h>
-#include <ATen/EmptyTensor.h>
 #include <ATen/Context.h>
+#include <ATen/EmptyTensor.h>
+#include <ATen/xpu/EmptyTensor.h>
 #include <c10/core/DeviceGuard.h>
 
 namespace at::detail {
@@ -28,15 +28,17 @@ TensorBase empty_xpu(
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt,
     c10::optional<c10::MemoryFormat> memory_format_opt) {
-  TORCH_CHECK(!pin_memory_opt.has_value() || !*pin_memory_opt, "Only dense CPU tensors can be pinned");
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
+  TORCH_CHECK(
+      !pin_memory_opt.has_value() || !*pin_memory_opt,
+      "Only dense CPU tensors can be pinned");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      layout_or_default(layout_opt) == Layout::Strided);
 
   const auto dtype = dtype_or_default(dtype_opt);
   return at::detail::empty_xpu(size, dtype, device_opt, memory_format_opt);
 }
 
-TensorBase empty_xpu(
-    IntArrayRef size, const TensorOptions &options) {
+TensorBase empty_xpu(IntArrayRef size, const TensorOptions& options) {
   return at::detail::empty_xpu(
       size,
       optTypeMetaToScalarType(options.dtype_opt()),
@@ -68,8 +70,11 @@ TensorBase empty_strided_xpu(
     c10::optional<Layout> layout_opt,
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt) {
-  TORCH_CHECK(!pin_memory_opt.has_value() || !*pin_memory_opt, "Only dense CPU tensors can be pinned");
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
+  TORCH_CHECK(
+      !pin_memory_opt.has_value() || !*pin_memory_opt,
+      "Only dense CPU tensors can be pinned");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      layout_or_default(layout_opt) == Layout::Strided);
 
   const auto dtype = dtype_or_default(dtype_opt);
   return at::detail::empty_strided_xpu(size, stride, dtype, device_opt);
@@ -78,7 +83,7 @@ TensorBase empty_strided_xpu(
 TensorBase empty_strided_xpu(
     IntArrayRef size,
     IntArrayRef stride,
-    const TensorOptions &options) {
+    const TensorOptions& options) {
   return at::detail::empty_strided_xpu(
       size,
       stride,
