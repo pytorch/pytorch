@@ -585,8 +585,8 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(
             isinstance(type_manager.get_accessors()[0], GetAttrGuardAccessor)
         )
-        mro_manager.add_lambda_guard(
-            lambda x: len(x) == 3,
+        mro_manager.add_length_check_guard(
+            3,
             "Expected length 2",
         )
 

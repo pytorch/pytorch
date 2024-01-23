@@ -625,10 +625,7 @@ static struct PyModuleDef _module = {
  * failure. The data structure is also accessible in Python.
  */
 struct GuardDebugInfo {
-  GuardDebugInfo(
-      bool result,
-      std::string failed_guard,
-      int num_guards_executed)
+  GuardDebugInfo(bool result, std::string failed_guard, int num_guards_executed)
       : result(result),
         failed_guard(failed_guard),
         num_guards_executed(num_guards_executed) {}
@@ -671,12 +668,13 @@ class LeafGuard {
   }
 
   std::string repr() {
-    return _guard_str;
+    return repr_prefix() + ": " + _guard_str;
   }
 
   // This is on the hot path and avoids any refcounting code from pybind. This
   // is not exposed to Python and can only be called from C++.
   virtual bool check_nopybind(PyObject* value) = 0;
+  virtual std::string repr_prefix() = 0;
   virtual ~LeafGuard() = default;
 
  private:
@@ -713,6 +711,10 @@ class PythonLambdaGuard : public LeafGuard {
     return result;
   }
 
+  std::string repr_prefix() override {
+    return "PythonLambdaGuard";
+  }
+
  private:
   // The user provided lambda function for check_fn.
   py::function _guard_check_fn;
@@ -727,6 +729,10 @@ class TYPE_MATCH : public LeafGuard {
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return Py_TYPE(value) == (void*)_expected;
+  }
+
+  std::string repr_prefix() override {
+    return "TYPE_MATCH";
   }
 
  private:
@@ -744,6 +750,10 @@ class ID_MATCH : public LeafGuard {
     return value == (void*)_expected;
   }
 
+  std::string repr_prefix() override {
+    return "ID_MATCH";
+  }
+
  private:
   // id of the original object.
   unsigned long _expected;
@@ -758,9 +768,33 @@ class EQUALS_MATCH : public LeafGuard {
     return PyObject_RichCompareBool(value, _value, Py_EQ);
   }
 
+  std::string repr_prefix() override {
+    return "EQUALS_MATCH";
+  }
+
  private:
   // value to compare against.
   PyObject* _value;
+};
+
+class LENGTH_CHECK : public LeafGuard {
+ public:
+  LENGTH_CHECK(py::object value, py::object guard_str)
+      : LeafGuard(guard_str), _length(py::cast<Py_ssize_t>(value)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return Py_SIZE(value) == _length;
+    // return PyList_Size(value) == _length;
+    // return PyObject_RichCompareBool(value, _value, Py_EQ);
+  }
+
+  std::string repr_prefix() override {
+    return "LENGTH_CHECK";
+  }
+
+ private:
+  // Length of the guarded list
+  Py_ssize_t _length;
 };
 
 /**
@@ -814,6 +848,10 @@ class NoTensorAliasingGuard : public RelationalGuard {
 
   void reset_state_on_guard_failure() override {
     _is_first_call = true;
+  }
+
+  std::string repr_prefix() override {
+    return "NoTensorAliasingGuard";
   }
 
  private:
@@ -1485,6 +1523,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "EQUALS_MATCH")
       .def(py::init<py::object, py::str>())
       .def("__call__", &EQUALS_MATCH::check);
+  py::class_<LENGTH_CHECK, LeafGuard, std::shared_ptr<LENGTH_CHECK>>(
+      py_m, "LENGTH_CHECK")
+      .def(py::init<py::object, py::str>())
+      .def("__call__", &LENGTH_CHECK::check);
   py::class_<NoTensorAliasingGuard, std::shared_ptr<NoTensorAliasingGuard>>(
       py_m, "NoTensorAliasingGuard");
 
@@ -1566,6 +1608,14 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object guard_str) -> void {
             self.add_leaf_guard(
                 std::make_shared<EQUALS_MATCH>(value, guard_str));
+          })
+      .def(
+          "add_length_check_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object guard_str) -> void {
+            self.add_leaf_guard(
+                std::make_shared<LENGTH_CHECK>(value, guard_str));
           })
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
