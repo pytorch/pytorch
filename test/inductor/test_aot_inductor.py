@@ -4,7 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
-from typing import Dict
+from typing import Dict, Tuple
 
 import torch
 import torch._export
@@ -1356,6 +1356,27 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), inputs)
 
+    def test_index_put_fallback(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(
+                self,
+                self_tensor: torch.Tensor,
+                indices: Tuple[torch.Tensor],
+                values: torch.Tensor,
+            ):
+                return torch.index_put(self_tensor, indices, values, accumulate=True)
+
+        inputs = (
+            torch.ones(4, device=self.device, dtype=torch.int64),
+            (torch.tensor([1, 1, 2, 2], device=self.device, dtype=torch.bool),),
+            torch.ones(4, device=self.device, dtype=torch.int64),
+        )
+
+        self.check_model(Model(), inputs)
+
     def test_convolution(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1554,6 +1575,42 @@ class AOTInductorTestsTemplate:
         model.weight += 1
         self.check_model(model, example_inputs)
 
+    def test_triton_kernel_extern_kernel_arg(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.zeros_like(x)
+                # torch.mm is ExternKernelOut
+                add_kernel[(4,)](x, torch.mm(x, y), out, 4, 16)
+                return out
+
+        example_inputs = (
+            torch.randn(4, 4, device="cuda"),
+            torch.randn(4, 4, device="cuda"),
+        )
+
+        self.check_model(Model(), example_inputs)
+
+    def test_triton_kernel_multi_output_arg(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.zeros_like(x)
+                # torch.sort creates fallback kernel and hence MultiOutput
+                add_kernel[(4,)](x, torch.sort(y).values, out, 4, 16)
+                return out
+
+        example_inputs = (
+            torch.randn(4, 4, device="cuda"),
+            torch.randn(4, 4, device="cuda"),
+        )
+
+        self.check_model(Model(), example_inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1633,6 +1690,7 @@ CPU_TEST_FAILURES = {
     # the test segfaults
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
+    "test_index_put_fallback": fail_stack_allocation(is_skip=True),
     # C++ compile error, need for aoti_torch___scaled_dot_product_flash_attention_for_cpu
     "test_sdpa": fail_with_and_without_stack_allocation(is_skip=True),
     "test_sdpa_2": fail_with_and_without_stack_allocation(is_skip=True),
@@ -1651,6 +1709,8 @@ CUDA_TEST_FAILURES = {
     "test_normal_functional": fail_abi_compatible_cuda(),
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_abi_compatible_cuda(is_skip=True),
+    # no ABI shim fn for torch.sort; remove this when adding one
+    "test_triton_kernel_multi_output_arg": fail_abi_compatible_cuda(is_skip=True),
 }
 
 if TEST_WITH_ROCM:
