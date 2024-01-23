@@ -62,7 +62,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 self.update_list_args(tx, args, kwargs, py_args, py_kwargs)
                 # stash a weak_ptr to optimizer to invalidate code
                 # if the optimizer object dies
-                tx.store_global_weakref(self.get_global_name(), self.value)
+                mangled_name = f"__optimizer_{id(self.value)}"
+                tx.store_global_weakref(mangled_name, self.value)
                 self.create_finalizer(tx)
 
                 # This is currently safe only because the only actual `ret_val`s returned
@@ -175,9 +176,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
             # mark these tensors as static for cudagraphs
             mark_static_address(tensor_value, guard=False)
 
-            tx.store_global_weakref(global_key_name(tensor_value), tensor_value)
+            global_name = tx.store_global_weakref(global_key_name(tensor_value), tensor_value)
             builder = VariableBuilder(
-                tx, GlobalWeakRefSource(global_key_name(tensor_value))
+                tx, GlobalWeakRefSource(global_name)
             )
             self.static_tensor_names.add(tx.output.module_key_name(builder.name))
 
@@ -221,6 +222,3 @@ class OptimizerVariable(UserDefinedObjectVariable):
             weakref.finalize(value, clear_static_tensor_refs)
 
         tx.output.add_graph_finalizer(init_finalizer)
-
-    def get_global_name(self):
-        return f"__optimizer_{id(self.value)}"

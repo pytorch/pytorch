@@ -1890,9 +1890,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
 
     def store_global_weakref(self, name, value):
-        install_guard(GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE))
-        if name not in self.output.global_scope:
-            self.output.install_global_unsafe(name, weakref.ref(value))
+        new_name = self.output.install_global_once(name, weakref.ref(value))
+        install_guard(GlobalWeakRefSource(new_name).make_guard(GuardBuilder.WEAKREF_ALIVE))
+        return new_name
 
     @property
     def fake_mode(self):
