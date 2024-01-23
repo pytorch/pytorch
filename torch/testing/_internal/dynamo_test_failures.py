@@ -34,7 +34,6 @@ dynamo_expected_failures = {
     "TestCppExtensionOpenRgistration.test_open_device_registration",
     "TestAutogradFallback.test_inplace_autograd_function_registered_to_cpu_mode_warn",
     "TestAutogradFallback.test_inplace_autograd_function_registered_to_cpu_mode_nothing",
-    "TestFunctionalOptimParity.test_functional_optim_parity_sgd",
     "TestIndexingCPU.test_invalid_index_cpu",
     "NumpyTestsCPU.test_boolean_shape_mismatch_cpu",
     "TestIndexingCPU.test_empty_ndim_index_bool_cpu",
@@ -912,7 +911,6 @@ dynamo_expected_failures = {
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_bfloat16_batch_size_2_seq_len_267_n_head_1_head_dim_16_causal_True_train_False_cpu_bfloat16",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_bfloat16_batch_size_12_seq_len_1030_n_head_1_head_dim_8_causal_False_train_False_cpu_bfloat16",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float64_batch_size_2_seq_len_267_n_head_3_head_dim_16_causal_False_train_False_cpu_float64",
-    "TestTransformersCPU.test_train_with_is_causal_cpu",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float32_batch_size_12_seq_len_1030_n_head_1_head_dim_8_causal_True_train_True_cpu_float32",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float64_batch_size_12_seq_len_267_n_head_3_head_dim_16_causal_False_train_True_cpu_float64",
     "TestSDPACPU.test_scaled_dot_product_fused_attention_vs_math_cpu_fused_kernel0_float64_batch_size_12_seq_len_267_n_head_3_head_dim_8_causal_False_train_True_cpu_float64",
@@ -2875,7 +2873,6 @@ dynamo_expected_failures = {
     "TestTorchTidyProfiler.test_impl_reuse",  # profiler/test_profiler
     "TestExperimentalUtils.test_profiler_pattern_matcher_json_report",  # profiler/test_profiler
     "TestTorchTidyProfiler.test_tensorimpl_invalidation_full",  # profiler/test_profiler
-    "TestProfiler.test_kineto_profiler_multiple_steppers",  # profiler/test_profiler
     "TestProfiler.test_profiler_tracing",  # profiler/test_profiler
     "TestProfiler.test_is_profiler_enabled",  # profiler/test_profiler
     "TestExperimentalUtils.test_utils_compute_idle_time",  # profiler/test_profiler
