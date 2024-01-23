@@ -3173,6 +3173,8 @@ def _unsafe_masked_index_put(x, mask, indices, values, accumulate=False):
         clamp(indices[i], -shape[i], shape[i] - 1) if indices[i] else None
         for i in range(len(indices))
     ]
+    # TODO: use a masked store for this. currently only triton
+    # supports masked stores and cpp backend does not.
     return _unsafe_index_put(x, clamped_indices, masked_value, accumulate)
 
 
