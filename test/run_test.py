@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import defaultdict
 from contextlib import ExitStack
 from datetime import datetime
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
@@ -69,6 +70,7 @@ RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1
 CPP_TEST_PREFIX = "cpp"
 CPP_TEST_PATH = "build/bin"
 DISTRIBUTED_TEST_PREFIX = "distributed"
+INDUCTOR_TEST_PREFIX = "inductor"
 
 
 # Note [ROCm parallel CI testing]
@@ -199,6 +201,7 @@ TESTS = discover_tests(
         "distributed/test_c10d_spawn",
         "distributions/test_transforms",
         "distributions/test_utils",
+        "test/inductor/test_aot_inductor_utils",
         "onnx/test_pytorch_onnx_onnxruntime_cuda",
         "onnx/test_models",
         # These are not C++ tests
@@ -358,6 +361,9 @@ CI_SERIAL_LIST = [
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
     "inductor/test_max_autotune",  # Testing, probably revert later
+    "inductor/test_torchinductor",  # OOM on test_large_block_sizes
+    "inductor/test_torchinductor_dynamic_shapes",  # OOM on test_large_block_sizes
+    "inductor/test_torchinductor_codegen_dynamic_shapes",  # OOM on test_large_block_sizes
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
@@ -435,6 +441,7 @@ JIT_EXECUTOR_TESTS = [
     "test_jit_fuser_legacy",
 ]
 
+INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
@@ -509,7 +516,7 @@ def run_test(
         return 0
 
     if is_cpp_test:
-        stepcurrent_key = test_file
+        stepcurrent_key = f"{test_file}_{os.urandom(8).hex()}"
     else:
         unittest_args.extend(
             [
@@ -517,7 +524,7 @@ def run_test(
                 f"--num-shards={test_module.num_shards}",
             ]
         )
-        stepcurrent_key = f"{test_file}_{test_module.shard - 1}"
+        stepcurrent_key = f"{test_file}_{test_module.shard - 1}_{os.urandom(8).hex()}"
 
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
@@ -599,11 +606,7 @@ def run_test(
         os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    should_file_rerun = (
-        "--subprocess" not in command
-        and not RERUN_DISABLED_TESTS
-        and not options.continue_through_error
-    )
+    num_retries = 0 if "--subprocess" in command or RERUN_DISABLED_TESTS else 2
     is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
         "BUILD_ENVRIONMENT", ""
     )
@@ -611,7 +614,7 @@ def run_test(
         THRESHOLD * 6
         if is_slow
         else THRESHOLD * 3
-        if should_file_rerun
+        if num_retries > 0
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
         else None
@@ -622,30 +625,101 @@ def run_test(
         output = None
         if IS_CI:
             output = stack.enter_context(open(log_path, "w"))
-        ret_code, was_rerun = retry_shell(
-            command,
-            test_directory,
-            stdout=output,
-            stderr=output,
-            env=env,
-            timeout=timeout,
-            retries=2 if should_file_rerun else 0,
-        )
 
-        # Pytest return code 5 means no test is collected. This is needed
-        # here as we use pytest directly when running C++ tests. Return
-        # code 4 is ok too as this happens when the binary is not a C++
-        # test executable. All binary files under build/bin that are not
-        # C++ test at the time of this writing have been excluded, but we
-        # can accept code 4 too just in case a new non-test binary file
-        # comes up in the future.
-        ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
+        if options.continue_through_error and "--subprocess" not in command:
+            # I think subprocess is better handled by common_utils? but it's not working atm
+            ret_code, was_rerun = run_test_continue_through_error(
+                command, test_directory, env, timeout, stepcurrent_key, output
+            )
+        else:
+            ret_code, was_rerun = retry_shell(
+                command,
+                test_directory,
+                stdout=output,
+                stderr=output,
+                env=env,
+                timeout=timeout,
+                retries=num_retries,
+            )
+
+            # Pytest return code 5 means no test is collected. This is needed
+            # here as we use pytest directly when running C++ tests. Return
+            # code 4 is ok too as this happens when the binary is not a C++
+            # test executable. All binary files under build/bin that are not
+            # C++ test at the time of this writing have been excluded, but we
+            # can accept code 4 too just in case a new non-test binary file
+            # comes up in the future.
+            ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
 
     if IS_CI:
         handle_log_file(
             test_module, log_path, failed=(ret_code != 0), was_rerun=was_rerun
         )
     return ret_code
+
+
+def run_test_continue_through_error(
+    command, test_directory, env, timeout, stepcurrent_key, output
+):
+    # Run the test with -x to stop at first failure. Try again, skipping the
+    # previously run tests, repeating this until there is a test that fails 3
+    # times (same number of rVetries we typically give).  Then we skip that
+    # test, and keep going. Basically if the same test fails 3 times in a row,
+    # skip the test on the next run, but still fail in the end. I take advantage
+    # of the value saved in stepcurrent to keep track of the most recently run
+    # test (which is the one that failed if there was a failure).
+
+    num_failures = defaultdict(int)
+
+    sc_command = f"--sc={stepcurrent_key}"
+    while True:
+        ret_code = shell(
+            command + [sc_command],
+            test_directory,
+            stdout=output,
+            stderr=output,
+            env=env,
+            timeout=timeout,
+        )
+        ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
+        if ret_code == 0:
+            break  # Got to the end of the test suite successfully
+        signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
+        print(
+            f"Got exit code {ret_code}{signal_name}, retrying...",
+            file=output,
+            flush=True,
+        )
+
+        # Read what just failed
+        with open(
+            REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
+        ) as f:
+            current_failure = f.read()
+
+        num_failures[current_failure] += 1
+        if num_failures[current_failure] >= 3:
+            sc_command = f"--scs={stepcurrent_key}"
+        else:
+            sc_command = f"--sc={stepcurrent_key}"
+
+    consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
+    flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
+    if len(flaky_failures) > 0:
+        print(
+            "The following tests failed flakily (had to be rerun in a new process,"
+            + f" doesn't include reruns froms same process): {flaky_failures}",
+            file=output,
+            flush=True,
+        )
+    if len(consistent_failures) > 0:
+        print(
+            f"The following tests failed consistently: {consistent_failures}",
+            file=output,
+            flush=True,
+        )
+        return 1, True
+    return 0, any(x > 0 for x in num_failures.values())
 
 
 def run_test_with_subprocess(test_module, test_directory, options):
@@ -819,7 +893,7 @@ def run_doctests(test_module, test_directory, options):
 
     pkgpath = pathlib.Path(torch.__file__).parent
 
-    exclude_module_list = []
+    exclude_module_list = ["torch._vendor.*"]
     enabled = {
         # TODO: expose these options to the user
         # For now disable all feature-conditional tests
@@ -981,9 +1055,6 @@ def get_pytest_args(
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
         rerun_options = ["--flake-finder", f"--flake-runs={count}"]
-    elif options.continue_through_error:
-        # If continue through error, don't stop on first failure
-        rerun_options = ["--reruns=2"]
     else:
         # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
         # failure
@@ -1136,30 +1207,6 @@ def parse_args():
         help="select a set of tests to exclude",
     )
     parser.add_argument(
-        "-f",
-        "--first",
-        choices=TESTS,
-        metavar="TESTS",
-        help="select the test to start from (excludes previous tests)",
-    )
-    parser.add_argument(
-        "-l",
-        "--last",
-        choices=TESTS,
-        metavar="TESTS",
-        help="select the last test to run (excludes following tests)",
-    )
-    parser.add_argument(
-        "--bring-to-front",
-        nargs="+",
-        choices=TestChoices(TESTS),
-        default=[],
-        metavar="TESTS",
-        help="select a set of tests to run first. This can be used in situations"
-        " where you want to run all tests, but care more about some set, "
-        "e.g. after making a change to a specific component",
-    )
-    parser.add_argument(
         "--ignore-win-blocklist",
         action="store_true",
         help="always run blocklisted windows tests",
@@ -1201,6 +1248,11 @@ def parse_args():
         help="exclude distributed tests",
     )
     parser.add_argument(
+        "--exclude-inductor-tests",
+        action="store_true",
+        help="exclude inductor tests",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Only list the test that will run.",
@@ -1234,43 +1286,6 @@ def parse_args():
     )
 
     return parser.parse_args()
-
-
-def find_test_index(test, selected_tests, find_last_index=False):
-    """Find the index of the first or last occurrence of a given test/test module in the list of selected tests.
-
-    This function is used to determine the indices when slicing the list of selected tests when
-    ``options.first``(:attr:`find_last_index`=False) and/or ``options.last``(:attr:`find_last_index`=True) are used.
-
-    :attr:`selected_tests` can be a list that contains multiple consequent occurrences of tests
-    as part of the same test module, e.g.:
-
-    ```
-    selected_tests = ['autograd', 'cuda', **'torch.TestTorch.test_acos',
-                     'torch.TestTorch.test_tan', 'torch.TestTorch.test_add'**, 'utils']
-    ```
-
-    If :attr:`test`='torch' and :attr:`find_last_index`=False, result should be **2**.
-    If :attr:`test`='torch' and :attr:`find_last_index`=True, result should be **4**.
-
-    Args:
-        test (str): Name of test to lookup
-        selected_tests (list): List of tests
-        find_last_index (bool, optional): should we lookup the index of first or last
-            occurrence (first is default)
-
-    Returns:
-        index of the first or last occurrence of the given test
-    """
-    idx = 0
-    found_idx = -1
-    for t in selected_tests:
-        if t.startswith(test):
-            found_idx = idx
-            if not find_last_index:
-                break
-        idx += 1
-    return found_idx
 
 
 def exclude_tests(
@@ -1352,27 +1367,15 @@ def get_selected_tests(options) -> List[str]:
         # Exclude all onnx tests otherwise
         options.exclude.extend(onnx_tests)
 
-    # process reordering
-    if options.bring_to_front:
-        to_front = set(options.bring_to_front)
-        selected_tests = options.bring_to_front + list(
-            filter(lambda name: name not in to_front, selected_tests)
-        )
-
-    if options.first:
-        first_index = find_test_index(options.first, selected_tests)
-        selected_tests = selected_tests[first_index:]
-
-    if options.last:
-        last_index = find_test_index(options.last, selected_tests, find_last_index=True)
-        selected_tests = selected_tests[: last_index + 1]
-
     # process exclusion
     if options.exclude_jit_executor:
         options.exclude.extend(JIT_EXECUTOR_TESTS)
 
     if options.exclude_distributed_tests:
         options.exclude.extend(DISTRIBUTED_TESTS)
+
+    if options.exclude_inductor_tests:
+        options.exclude.extend(INDUCTOR_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:
@@ -1512,27 +1515,30 @@ class TestFailure(NamedTuple):
 def run_test_module(
     test: ShardedTest, test_directory: str, options
 ) -> Optional[TestFailure]:
-    maybe_set_hip_visible_devies()
+    try:
+        maybe_set_hip_visible_devies()
 
-    test_name = test.name
+        test_name = test.name
 
-    # Printing the date here can help diagnose which tests are slow
-    print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
-    handler = CUSTOM_HANDLERS.get(test_name, run_test)
-    return_code = handler(test, test_directory, options)
-    assert isinstance(return_code, int) and not isinstance(
-        return_code, bool
-    ), f"While running {str(test)} got non integer return code {return_code}"
-    if return_code == 0:
-        return None
+        # Printing the date here can help diagnose which tests are slow
+        print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
+        handler = CUSTOM_HANDLERS.get(test_name, run_test)
+        return_code = handler(test, test_directory, options)
+        assert isinstance(return_code, int) and not isinstance(
+            return_code, bool
+        ), f"While running {str(test)} got non integer return code {return_code}"
+        if return_code == 0:
+            return None
 
-    message = f"{str(test)} failed!"
-    if return_code < 0:
-        # subprocess.Popen returns the child process' exit signal as
-        # return code -N, where N is the signal number.
-        signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
-        message += f" Received signal: {signal_name}"
-    return TestFailure(test.test, message)
+        message = f"{str(test)} failed!"
+        if return_code < 0:
+            # subprocess.Popen returns the child process' exit signal as
+            # return code -N, where N is the signal number.
+            signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
+            message += f" Received signal: {signal_name}"
+        return TestFailure(test.test, message)
+    except Exception as e:
+        return TestFailure(test.test, f"{str(test)} failed! {e}")
 
 
 def run_tests(
@@ -1661,28 +1667,26 @@ def main():
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
 
+    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
+
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
     aggregated_heuristics: AggregatedHeuristics = AggregatedHeuristics(
         unranked_tests=selected_tests
     )
-    metrics_dict = {}
-    if IS_CI:
-        # downloading test cases configuration to local environment
-        get_test_case_configs(dirpath=test_directory)
-        aggregated_heuristics = get_test_prioritizations(selected_tests)
 
-    test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
-    test_prioritizations.print_info()
+    with open(
+        REPO_ROOT / "test" / "test-reports" / "td_heuristic_rankings.log", "w"
+    ) as f:
+        if IS_CI:
+            # downloading test cases configuration to local environment
+            get_test_case_configs(dirpath=test_directory)
+            aggregated_heuristics = get_test_prioritizations(selected_tests, file=f)
 
-    if IS_CI:
-        metrics_dict = {
-            "high_relevance_tests": test_prioritizations.get_high_relevance_tests(),
-            "probable_relevance_tests": test_prioritizations.get_probable_relevance_tests(),
-            "unranked_relevance_tests": test_prioritizations.get_unranked_relevance_tests(),
-            "cpp": options.cpp,
-        }
+        test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
+
+        f.write(test_prioritizations.get_info_str())
 
     test_file_times_dict = load_test_file_times()
     test_class_times_dict = load_test_class_times()
@@ -1756,13 +1760,12 @@ def main():
 
     if options.dynamo:
         os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
+
     elif options.inductor:
         os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
 
     if not options.no_translation_validation:
         os.environ["PYTORCH_TEST_WITH_TV"] = "1"
-
-    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
     try:
         # Actually run the tests
@@ -1775,13 +1778,9 @@ def main():
             print_to_stderr(
                 f"With sharding, this batch will run {len(test_batch.sharded_tests)} tests"
             )
-            metrics_dict[f"{test_batch.name}_start_time"] = elapsed_time
             run_tests(
                 test_batch.sharded_tests, test_directory, options, test_batch.failures
             )
-            metrics_dict[f"{test_batch.name}_failures"] = [
-                str(x.test) for x in test_batch.failures
-            ]
 
     finally:
         if options.coverage:
@@ -1799,8 +1798,6 @@ def main():
         all_failures = [failure for batch in test_batches for failure in batch.failures]
 
         if IS_CI:
-            emit_metric("td_experiment_1", metrics_dict)
-
             num_tests = len(selected_tests)
             for test, _ in all_failures:
                 test_stats = aggregated_heuristics.get_test_stats(test)

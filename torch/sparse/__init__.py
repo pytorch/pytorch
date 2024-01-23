@@ -180,7 +180,8 @@ Examples::
 
 def sum(input: Tensor, dim: DimOrDims = None,
         dtype: Optional[DType] = None) -> Tensor:
-    r"""
+    r"""Return the sum of each row of the given sparse tensor.
+
     Returns the sum of each row of the sparse tensor :attr:`input` in the given
     dimensions :attr:`dim`. If :attr:`dim` is a list of dimensions,
     reduce over all of them. When sum over all ``sparse_dim``, this method
@@ -390,56 +391,56 @@ Specifying a positive offset::
 class check_sparse_tensor_invariants:
     """A tool to control checking sparse tensor invariants.
 
-The following options exists to manage sparsr tensor invariants
-checking in sparse tensor construction:
+    The following options exists to manage sparsr tensor invariants
+    checking in sparse tensor construction:
 
-1. Using a context manager:
+    1. Using a context manager:
 
-   .. code:: python
+       .. code:: python
 
-       with torch.sparse.check_sparse_tensor_invariants():
+           with torch.sparse.check_sparse_tensor_invariants():
+               run_my_model()
+
+    2. Using a procedural approach:
+
+       .. code:: python
+
+           prev_checks_enabled = torch.sparse.check_sparse_tensor_invariants.is_enabled()
+           torch.sparse.check_sparse_tensor_invariants.enable()
+
            run_my_model()
 
-2. Using a procedural approach:
+           if not prev_checks_enabled:
+               torch.sparse.check_sparse_tensor_invariants.disable()
 
-   .. code:: python
+    3. Using function decoration:
 
-       prev_checks_enabled = torch.sparse.check_sparse_tensor_invariants.is_enabled()
-       torch.sparse.check_sparse_tensor_invariants.enable()
+       .. code:: python
 
-       run_my_model()
+           @torch.sparse.check_sparse_tensor_invariants()
+           def run_my_model():
+               ...
 
-       if not prev_checks_enabled:
-           torch.sparse.check_sparse_tensor_invariants.disable()
+           run_my_model()
 
-3. Using function decoration:
+    4. Using ``check_invariants`` keyword argument in sparse tensor constructor call.
+       For example:
 
-   .. code:: python
-
-       @torch.sparse.check_sparse_tensor_invariants()
-       def run_my_model():
-           ...
-
-       run_my_model()
-
-4. Using ``check_invariants`` keyword argument in sparse tensor constructor call.
-   For example:
-
-   >>> torch.sparse_csr_tensor([0, 1, 3], [0, 1], [1, 2], check_invariants=True)
-   Traceback (most recent call last):
-     File "<stdin>", line 1, in <module>
-   RuntimeError: `crow_indices[..., -1] == nnz` is not satisfied.
+       >>> torch.sparse_csr_tensor([0, 1, 3], [0, 1], [1, 2], check_invariants=True)
+       Traceback (most recent call last):
+         File "<stdin>", line 1, in <module>
+       RuntimeError: `crow_indices[..., -1] == nnz` is not satisfied.
     """
 
     @staticmethod
     def is_enabled():
-        r"""Returns True if the sparse tensor invariants checking is enabled.
+        r"""Return True if the sparse tensor invariants checking is enabled.
 
-.. note::
+        .. note::
 
-    Use :func:`torch.sparse.check_sparse_tensor_invariants.enable` or
-    :func:`torch.sparse.check_sparse_tensor_invariants.disable` to
-    manage the state of the sparse tensor invariants checks.
+            Use :func:`torch.sparse.check_sparse_tensor_invariants.enable` or
+            :func:`torch.sparse.check_sparse_tensor_invariants.disable` to
+            manage the state of the sparse tensor invariants checks.
         """
         return torch._C._check_sparse_tensor_invariants()
 
@@ -447,19 +448,19 @@ checking in sparse tensor construction:
     def enable():
         r"""Enable sparse tensor invariants checking in sparse tensor constructors.
 
-.. note::
+        .. note::
 
-    By default, the sparse tensor invariants checks are disabled. Use
-    :func:`torch.sparse.check_sparse_tensor_invariants.is_enabled` to
-    retrieve the current state of sparse tensor invariants checking.
+            By default, the sparse tensor invariants checks are disabled. Use
+            :func:`torch.sparse.check_sparse_tensor_invariants.is_enabled` to
+            retrieve the current state of sparse tensor invariants checking.
 
-.. note::
+        .. note::
 
-    The sparse tensor invariants check flag is effective to all sparse
-    tensor constructors, both in Python and ATen.
+            The sparse tensor invariants check flag is effective to all sparse
+            tensor constructors, both in Python and ATen.
 
-    The flag can be locally overridden by the ``check_invariants``
-    optional argument of the sparse tensor constructor functions.
+        The flag can be locally overridden by the ``check_invariants``
+        optional argument of the sparse tensor constructor functions.
         """
         torch._C._set_check_sparse_tensor_invariants(True)
 
@@ -467,7 +468,7 @@ checking in sparse tensor construction:
     def disable():
         r"""Disable sparse tensor invariants checking in sparse tensor constructors.
 
-See :func:`torch.sparse.check_sparse_tensor_invariants.enable` for more information.
+        See :func:`torch.sparse.check_sparse_tensor_invariants.enable` for more information.
         """
         torch._C._set_check_sparse_tensor_invariants(False)
 
@@ -499,7 +500,9 @@ See :func:`torch.sparse.check_sparse_tensor_invariants.enable` for more informat
 
 
 def as_sparse_gradcheck(gradcheck):
-    """Decorator for torch.autograd.gradcheck or its functools.partial
+    """Decorate function, to extend gradcheck for sparse tensors.
+
+    Decorator for torch.autograd.gradcheck or its functools.partial
     variants that extends the gradcheck function with support to input
     functions that operate on or/and return sparse tensors.
 
@@ -515,8 +518,10 @@ def as_sparse_gradcheck(gradcheck):
     """
 
     def gradcheck_with_sparse_support(func, inputs, **kwargs):
-        """Same as :func:`torch.autograd.gradcheck` but with sparse tensors
-        inputs and outputs support.
+        """
+        Create gradcheck with support for sparse tensors.
+
+        Same as :func:`torch.autograd.gradcheck` but with sparse tensors inputs and outputs support.
         """
         masked = kwargs.pop('masked', False)
         sparse_layouts = {torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
@@ -525,9 +530,7 @@ def as_sparse_gradcheck(gradcheck):
         STRIDED_REPRESENTATION = '__STRIDED_REPRESENTATION__'
 
         def convert_to_strided_representation(args):
-            """Convert differentiable non-strided tensors to a representation
-            containing differentiable strided tensors.
-            """
+            """Convert differentiable non-strided tensors to a representation containing differentiable strided tensors."""
             if not isinstance(args, (list, tuple)):
                 args = args,
             new_args: List[Any] = []
@@ -556,9 +559,7 @@ def as_sparse_gradcheck(gradcheck):
             return tuple(new_args)
 
         def restore_from_strided_representation(args):
-            """Restore non-strided differentiable tensosr from their strided
-            representations.
-            """
+            """Restore non-strided differentiable tensosr from their strided representations."""
             new_args = []
             args = list(args)
             while args:

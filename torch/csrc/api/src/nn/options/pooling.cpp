@@ -25,6 +25,7 @@ template struct MaxUnpoolOptions<3>;
 
 template struct LPPoolOptions<1>;
 template struct LPPoolOptions<2>;
+template struct LPPoolOptions<3>;
 
 } // namespace nn
 } // namespace torch

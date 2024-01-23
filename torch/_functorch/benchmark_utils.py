@@ -75,7 +75,7 @@ def is_gpu_compute_event(event):
 def get_sorted_gpu_events(events):
     sorted_gpu_events = []
     for event in events:
-        if(not is_gpu_compute_event(event)):
+        if not is_gpu_compute_event(event):
             continue
         sorted_gpu_events.append(event)
     return sorted(sorted_gpu_events, key=lambda x: x["ts"])
@@ -102,7 +102,7 @@ def get_sorted_gpu_mm_conv_events(events):
     gpu_events = get_sorted_gpu_events(events)
     sorted_events = []
     for event in gpu_events:
-        if(not is_mm_conv_event(event)):
+        if not is_mm_conv_event(event):
             continue
         sorted_events.append(event)
     return sorted_events

@@ -132,6 +132,8 @@ class TestContract(TestCase):
         model = api2(model)
         self.assertEqual(2, len(_get_registry(model)))
         self.assertTrue([_get_registry(model).keys()], ["api1", "api2"])
+        self.assertEqual(None, _get_registry(model.seq1))
+        self.assertEqual(None, _get_registry(model.seq2))
 
         with self.assertRaisesRegex(AssertionError, "api1 has already been applied"):
             model = api1(model)

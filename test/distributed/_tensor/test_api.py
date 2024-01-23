@@ -218,7 +218,7 @@ class DTensorAPITest(DTensorTestBase):
         input = torch.randn(10, 10, requires_grad=True)
         output = replica_model(input)
         output.sum().backward()
-        param_grad = list(replica_model.parameters())[0].grad
+        param_grad = next(iter(replica_model.parameters())).grad
         self.assertTrue(isinstance(param_grad, DTensor))
         self.assertTrue(isinstance(param_grad.placements[0], Replicate))
 

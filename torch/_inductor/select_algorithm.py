@@ -21,7 +21,6 @@ from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import ChoiceCaller, IndentedBuffer, KernelTemplate
-from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
@@ -107,6 +106,9 @@ class TritonTemplateKernel(TritonKernel):
         self.epilogue_fn = epilogue_fn
         self.render_hooks = dict()
 
+    def need_numel_args(self):
+        return False
+
     def jit_line(self):
         if self.use_jit:
             return "@triton.jit"
@@ -185,6 +187,7 @@ class TritonTemplateKernel(TritonKernel):
                     "from torch._inductor.triton_heuristics import template",
                     "from torch._inductor.utils import instance_descriptor",
                     "from torch._inductor import triton_helpers",
+                    TritonKernel.gen_attr_descriptor_import(),
                     "",
                     self.jit_line(),
                     f"def {self.kernel_name}({', '.join(arg_defs)}):",
@@ -266,7 +269,7 @@ class TritonTemplateKernel(TritonKernel):
             input_node.freeze_layout()
             epilogue_args.append(input_node.make_loader()(index_symbols))
 
-        V.ops.store(  # type: ignore[attr-defined]
+        V.ops.store(
             self.output_node.get_name(),
             output_index,
             self.epilogue_fn(*epilogue_args),
@@ -323,21 +326,22 @@ class TritonTemplateKernel(TritonKernel):
         self,
         index: sympy.Expr,
         *,
-        copy_shape=None,
         dense_indexing=False,
+        copy_shape=None,
         override_mask=None,
+        block_ptr=False,
     ):
         """
         Override the default indexing to use our custom mask and force
         dense indexing.
         """
-        result, *mask = super().indexing(
+        return super().indexing(
             index,
             dense_indexing=False,
             copy_shape=self.template_mask,
             override_mask=self.template_mask,
+            block_ptr=block_ptr,
         )
-        return (result, *mask)
 
     def initialize_range_tree(self, pid_cache):
         super().initialize_range_tree(pid_cache)
@@ -374,7 +378,6 @@ class TritonTemplateKernel(TritonKernel):
                 grid=grid,
             )
         else:
-            call_args = ", ".join(call_args)  # type: ignore[assignment]
             stream_name = wrapper.write_get_raw_stream(
                 V.graph.scheduler.current_device.index
             )
@@ -387,7 +390,7 @@ class TritonTemplateKernel(TritonKernel):
             ] + [meta]
             grid_call = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
             wrapper.writeline(
-                f"{name}.run({call_args}, grid={grid_call}, stream={stream_name})"
+                f"{name}.run({', '.join(call_args)}, grid={grid_call}, stream={stream_name})"
             )
 
 
@@ -558,7 +561,7 @@ class ExternKernelChoice:
         assert callable(kernel)
         assert not hasattr(extern_kernels, name), "duplicate extern kernel"
         self.name = name
-        self.cpp_kernel = cpp_kernel
+        self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
         setattr(extern_kernels, name, kernel)
 
@@ -650,7 +653,7 @@ class ExternKernelCaller(ChoiceCaller):
         else:
             algo = self.to_callable()
             out_new = algo(*args)
-            torch._C._dynamo.guards.assert_size_stride(  # type: ignore[attr-defined]
+            torch._C._dynamo.guards.assert_size_stride(
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
@@ -685,8 +688,8 @@ class ExternKernelCaller(ChoiceCaller):
             cls(
                 layout=self.layout,
                 inputs=self.input_nodes,
-                kernel=self.choice.call_name(),
-                cpp_kernel=self.choice.cpp_kernel,
+                python_kernel_name=self.choice.call_name(),
+                cpp_kernel_name=self.choice.cpp_kernel_name,
                 ordered_kwargs_for_cpp_kernel=self.choice.ordered_kwargs_for_cpp_kernel,
                 kwargs=self.kwargs,
             )
@@ -714,6 +717,8 @@ class AlgorithmSelectorCache(PersistentCache):
         # generating a random torch.Tensor for benchmarking.
         input_gen_fns: Optional[Dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
     ):
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
         if len(choices) == 0:
@@ -721,7 +726,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
-        log.info("Max autotune selects from %s choices.", str(len(choices)))
+        log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
         if len(choices) == 1:
             if not isinstance(choices[0], CUDATemplateCaller):

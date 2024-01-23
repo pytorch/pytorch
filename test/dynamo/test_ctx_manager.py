@@ -10,6 +10,7 @@ from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
 
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
 class CutomizedCtxManager:
@@ -57,15 +58,23 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             return x
 
         with torch.no_grad():
-            torch._dynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=5)
-            torch._dynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=5)
+            torch._dynamo.testing.standard_test(
+                self, fn=fn1, nargs=2, expected_ops=3
+            )  # coalesced noop
+            torch._dynamo.testing.standard_test(
+                self, fn=fn2, nargs=2, expected_ops=3
+            )  # coalesced noop
             torch._dynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=5)
             torch._dynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=5)
         with torch.enable_grad():
             torch._dynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=5)
             torch._dynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=5)
-            torch._dynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=5)
-            torch._dynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=5)
+            torch._dynamo.testing.standard_test(
+                self, fn=fn3, nargs=2, expected_ops=3
+            )  # coalesced noop
+            torch._dynamo.testing.standard_test(
+                self, fn=fn4, nargs=2, expected_ops=3
+            )  # coalesced noop
 
     def test_grad_mode_guard(self):
         def fn(a, b):
@@ -164,8 +173,32 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         res = opt_fn(x)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 9)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_across_graph_break(self):
+        def fn(x):
+            s = torch.cuda.Stream()
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+
+            print("foo")
+            tcs = torch.cuda.stream(s)
+            with tcs:
+                x = torch.relu(x)
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 9)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -194,7 +227,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         res = opt_fn(x, s)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 18)
 
@@ -370,7 +403,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION or TEST_WITH_ROCM,
         "Can't run fused SDPA on this platform",
     )
     def test_autocast_sdpa(self):
@@ -658,6 +691,49 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res2 = opt_f2(x)
         self.assertTrue(same(ref1, res1))
         self.assertTrue(same(ref2, res2))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_autocast_decorator(self):
+        def autocast_func(orig_func):
+            @torch.amp.autocast(device_type="cuda", dtype=torch.float16)
+            def new_fwd(*args, **kwargs):
+                return orig_func(*args, **kwargs)
+
+            return new_fwd
+
+        def autocast_func_cuda(orig_func):
+            @torch.cuda.amp.autocast(dtype=torch.float16)
+            def new_fwd(*args, **kwargs):
+                return orig_func(*args, **kwargs)
+
+            return new_fwd
+
+        def autocast_func_cpu(orig_func):
+            @torch.cpu.amp.autocast(dtype=torch.float16)
+            def new_fwd(*args, **kwargs):
+                return orig_func(*args, **kwargs)
+
+            return new_fwd
+
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        mm_float16 = autocast_func(mm)
+        mm_float16_cuda = autocast_func_cuda(mm)
+        mm_float16_cpu = autocast_func_cpu(mm)
+
+        def fn(a, b):
+            return mm_float16(a, b), mm_float16_cuda(a, b), mm_float16_cpu(a, b)
+
+        a_float32 = torch.rand((8, 8), device="cuda")
+        b_float32 = torch.rand((8, 8), device="cuda")
+
+        ref = fn(a_float32, b_float32)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(a_float32, b_float32)
+        self.assertTrue(same(ref, res))
+        self.assertTrue(res[0].dtype == torch.float16)
+        self.assertTrue(res[1].dtype == torch.float16)
 
     def test_generic_context_manager(self):
         def fn(x):
@@ -976,40 +1052,100 @@ class GraphModule(torch.nn.Module):
         check_graph(actual, expected)
 
     def test_context_wrapping_grad_mode_decorator(self):
-        ctx_wrappers = [torch.enable_grad, torch.no_grad]
-        for i in range(2):
-            torch._dynamo.reset()
+        ctx_wrappers = [(torch.enable_grad, True), (torch.no_grad, False)]
+        for call in [True, False]:
+            for i in range(2):
+                torch._dynamo.reset()
 
-            ctx_wrapper = ctx_wrappers[i]
-            ctx_wrapper_inverse = ctx_wrappers[(i + 1) % 2]
+                ctx_wrapper, mode = ctx_wrappers[i]
+                ctx_wrapper_inverse, mode_inverse = ctx_wrappers[(i + 1) % 2]
 
-            def fn(x):
-                def inner_func(x):
-                    return x.sin()
+                def fn(x):
+                    def inner_func(x):
+                        return x.sin()
 
-                with ctx_wrapper_inverse():
-                    return ctx_wrapper(inner_func)(x)
+                    with ctx_wrapper_inverse():
+                        if call:
+                            inner_func = ctx_wrapper()(inner_func)
+                        else:
+                            inner_func = ctx_wrapper(inner_func)
 
-            x = torch.zeros(10, requires_grad=True)
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            self.assertEqual(fn(x), opt_fn(x))
-            self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+                        # Calling no_grad or enabled_grad should not mutate global state
+                        assert torch.is_grad_enabled() == mode_inverse
+
+                    with ctx_wrapper_inverse():
+                        return inner_func(x)
+
+                x = torch.zeros(10, requires_grad=True)
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(fn(x), opt_fn(x))
+                self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
 
     def test_context_wrapping_grad_mode_nested_function_decorator(self):
-        ctx_wrappers = [torch.enable_grad, torch.no_grad]
-        for i in range(2):
-            torch._dynamo.reset()
+        ctx_wrappers = [(torch.enable_grad, True), (torch.no_grad, False)]
 
-            ctx_wrapper = ctx_wrappers[i]
-            ctx_wrapper_inverse = ctx_wrappers[(i + 1) % 2]
+        for call in [True, False]:
+            for i in range(2):
+                torch._dynamo.reset()
 
-            def fn(x):
-                @ctx_wrapper
-                def inner_func(x):
-                    return x.sin()
+                ctx_wrapper, mode = ctx_wrappers[i]
+                ctx_wrapper_inverse, mode_inverse = ctx_wrappers[(i + 1) % 2]
 
-                with ctx_wrapper_inverse():
-                    return inner_func(x)
+                def fn(x):
+                    with ctx_wrapper_inverse():
+                        if call:
+
+                            @ctx_wrapper()
+                            def inner_func(x):
+                                return x.sin()
+
+                        else:
+
+                            @ctx_wrapper
+                            def inner_func(x):
+                                return x.sin()
+
+                        # Calling no_grad or enabled_grad should not mutate global state
+                        assert torch.is_grad_enabled() == mode_inverse
+
+                    with ctx_wrapper_inverse():
+                        return inner_func(x)
+
+                x = torch.zeros(10, requires_grad=True)
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(fn(x), opt_fn(x))
+                self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+
+    def test_context_wrapping_set_grad_enabled_nested_function(self):
+        modes = [True, False]
+        for decorator in [True, False]:
+            for i in range(2):
+                torch._dynamo.reset()
+
+                mode = modes[i]
+                mode_inverse = modes[(i + 1) % 2]
+
+                def fn(x):
+                    with torch.set_grad_enabled(mode_inverse):
+                        if decorator:
+
+                            @torch.set_grad_enabled(mode)
+                            def inner_func(x):
+                                return x.sin()
+
+                        else:
+
+                            def inner_func(x):
+                                return x.sin()
+
+                            inner_func = torch.set_grad_enabled(mode)(inner_func)
+
+                        # Consuming set_grad_enabled by calling it on a function
+                        # should not mutate global state
+                        assert torch.is_grad_enabled() == mode_inverse
+
+                    with torch.set_grad_enabled(mode_inverse):
+                        return inner_func(x)
 
             x = torch.zeros(10, requires_grad=True)
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)

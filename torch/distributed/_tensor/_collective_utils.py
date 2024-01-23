@@ -5,7 +5,7 @@ from typing import List, Optional
 
 import torch
 import torch.distributed._tensor.placement_types as placement_types
-from torch.distributed._tensor.device_mesh import _mesh_resources, DeviceMesh
+from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
     all_to_all,
     broadcast,
@@ -54,7 +54,7 @@ def mesh_scatter(
     # remove the check below once that is done.
     if output.is_meta:
         return None
-    dim_group = mesh.get_dim_groups(mesh_dim)
+    dim_group = mesh.get_group(mesh_dim)
     assert isinstance(dim_group, ProcessGroup)
     # src need to be global rank
     src_for_dim = 0
@@ -110,7 +110,7 @@ def mesh_broadcast(
     # remove the check below once that is done.
     if tensor.is_meta:
         return None
-    dim_group = mesh.get_dim_groups(mesh_dim)
+    dim_group = mesh.get_group(mesh_dim)
     assert isinstance(dim_group, ProcessGroup)
     # src need to be global rank
     src_for_dim = 0
@@ -128,7 +128,7 @@ def mesh_all_to_all(
     mesh_dim: int = 0,
     async_op: bool = False,
 ) -> Optional[Work]:
-    dim_group = mesh.get_dim_groups(mesh_dim)
+    dim_group = mesh.get_group(mesh_dim)
     assert isinstance(dim_group, ProcessGroup)
 
     work = None

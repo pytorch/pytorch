@@ -35,8 +35,6 @@
 
 #pragma once
 
-#include <ATen/cuda/CUDAContext.h>
-
 #include <cuda_fp16.h>
 
 #include <cutlass/array.h>

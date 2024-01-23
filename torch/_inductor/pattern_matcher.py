@@ -71,9 +71,9 @@ class Match:
         self.args = args or []
         self.kwargs = kwargs or {}
         # The nodes matched in this expression
-        self.nodes: List[torch.fx.Nodes] = []
+        self.nodes: List[torch.fx.Node] = []
         # Mapping CallFunction to the node.target
-        self.targets: Dict[_TargetExpr, torch.fx.Target] = {}
+        self.targets: Dict[_TargetExpr, torch.fx.node.Target] = {}
         self.ctx: Optional[MatchContext] = None
         self.replacement_graph: Optional[torch.fx.Graph] = None
 
@@ -814,10 +814,15 @@ class ReplacementPatternEntry(PatternEntry):
             last_node = min(indices, key=lambda tup: tup[0])[1]
 
         def percolate_tags(node, recompute_tag):
-            for arg in node.all_input_nodes:
-                if hasattr(arg, "meta"):
+            queue = [node]
+            visited = set()
+
+            while queue:
+                arg = queue.pop()
+                if arg not in visited and hasattr(arg, "meta"):
+                    visited.add(arg)
                     arg.meta["recompute"] = recompute_tag
-                    percolate_tags(arg, recompute_tag)
+                    queue.extend(arg.all_input_nodes)
 
         with graph.inserting_before(last_node):
             replacement = Replacer(replacement_graph).run(*args)
@@ -861,6 +866,14 @@ def _return_true(match):
     return True
 
 
+def log_trace_fialure(search_fn, e):
+    log.info(
+        "Replacement pattern %s failed to apply due to shape mismatch: %s",
+        search_fn.__name__,
+        e,
+    )
+
+
 def register_replacement(
     search_fn,
     replace_fn,
@@ -885,7 +898,7 @@ def register_replacement(
         pass_dict: dict of passes to register to
         extra_check: additional check to run on match(using real shapes)
     """
-    argnames = [*inspect.signature(search_fn).parameters.keys()]
+    argnames_static = [*inspect.signature(search_fn).parameters.keys()]
 
     def check_fn(match: Match):
         """
@@ -894,6 +907,7 @@ def register_replacement(
 
         Recheck the match with the correct shapes.
         """
+        argnames = list(argnames_static)
         for name in argnames:
             if name not in match.kwargs:
                 raise RuntimeError(
@@ -903,9 +917,10 @@ def register_replacement(
 
         args = list(
             torch.fx.map_arg(
-                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]  # type: ignore[has-type]
+                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
             )
         )
+        sym_args = []
         with torch._dynamo.utils.detect_fake_mode(args):
             for i, grad in enumerate(requires_grad):
                 if isinstance(args[i], torch.Tensor):
@@ -919,11 +934,57 @@ def register_replacement(
                         device=args[i].device,
                         requires_grad=grad,
                     )
-            specific_graph = trace_fn(search_fn, args)
+                    for v in itertools.chain(args[i].shape, args[i].stride()):
+                        if isinstance(v, torch.SymInt) and v not in sym_args:
+                            sym_args.append(v)
+
+            if sym_args:
+                # AOT Autograd and make fx will dedupe symbolic shape size
+                # accesses of sym ints that appear as inputs
+                # We don't want the sym_size uses to interfere with pattern matching
+                # so we provide them as inputs.
+                # Later, when we actually do the replacement, the symbolic shape
+                # sizes will get re-traced and added to the graph.
+
+                def search_fn_new(*args_new):
+                    return search_fn(*args_new[len(args_new) - len(args) :])
+
+                try:
+                    specific_graph = trace_fn(search_fn_new, sym_args + args)
+                except RuntimeError as e:
+                    log_trace_fialure(search_fn, e)
+                    return False
+
+                # correct argnames in the graph
+                sym_arg_names = []
+                for i, placeholder in zip(
+                    range(len(sym_args) + len(args)),
+                    specific_graph.graph.nodes,
+                ):
+                    if i < len(sym_args):
+                        sym_arg_names.append(placeholder.target)
+                        continue
+
+                    with specific_graph.graph.inserting_after(placeholder):
+                        new_node = specific_graph.graph.placeholder(
+                            argnames[i - len(sym_args)]
+                        )
+                        new_node.target = new_node.name
+                        placeholder.replace_all_uses_with(new_node)
+                        specific_graph.graph.erase_node(placeholder)
+
+                argnames = sym_arg_names + argnames
+            else:
+                try:
+                    specific_graph = trace_fn(search_fn, args)
+                except RuntimeError as e:
+                    log_trace_fialure(search_fn, e)
+                    return False
+
             specific_pattern = fx_to_pattern(
                 specific_graph,
                 argnames=argnames,
-                exclusive_arg_names=exclusive_arg_names,  # type: ignore[has-type]
+                exclusive_arg_names=exclusive_arg_names,
                 scalar_workaround=scalar_workaround,
             )
             specific_pattern_match = specific_pattern.match(match.output_nodes()[0])
@@ -935,7 +996,7 @@ def register_replacement(
 
     def normalize_args(**kwargs):
         args = []
-        for name in argnames:  # type: ignore[has-type]
+        for name in argnames_static:
             args.append(kwargs.pop(name))
         for i in range(1, len(kwargs) + 1):
             if f"tangents_{i}" not in kwargs:
@@ -1091,12 +1152,12 @@ def compute_mutation_region_ids(graph: torch.fx.GraphModule):
 class PatternMatcherPass:
     def __init__(self, prevent_match_across_mutations=False):
         super().__init__()
-        self.patterns: DefaultDict[torch.fx.Target, List[PatternEntry]] = defaultdict(
-            list
-        )
+        self.patterns: DefaultDict[
+            torch.fx.node.Target, List[PatternEntry]
+        ] = defaultdict(list)
         self.prevent_match_across_mutations = prevent_match_across_mutations
 
-    def __getitem__(self, item: torch.fx.Target) -> List[PatternEntry]:
+    def __getitem__(self, item: torch.fx.node.Target) -> List[PatternEntry]:
         return self.patterns[item]
 
     def apply(self, graph: torch.fx.GraphModule) -> int:
@@ -1228,7 +1289,10 @@ def fwd_only(fn, args) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
-        gm = make_fx(fn, select_decomp_table())(*args)
+        mode = (
+            "real" if not torch._inductor.utils.any_is_symbolic(*args) else "symbolic"
+        )
+        gm = make_fx(fn, select_decomp_table(), tracing_mode=mode)(*args)
     gm.graph.eliminate_dead_code()
     gm.recompile()
     return gm
@@ -1282,25 +1346,38 @@ def _args(n: torch.fx.Node) -> List[torch.fx.node.Argument]:
 
 
 def stable_topological_sort(graph: torch.fx.Graph):
-    waiting = defaultdict(list)
-    ready = set()
-    cursor = None
+    # Nodes are in exactly one of these three collections:
 
-    def check(node):
+    # - Nodes in `pending` are waiting to be processed (in reverse order):
+    pending = list(reversed(graph.nodes))
+
+    # - Nodes in `ready` have been processed and are already in the correct
+    #   order.
+    ready = set()
+
+    # - `waiting` is a mapping from a dependency to nodes which depend on that
+    #   dependency.
+    waiting = defaultdict(list)
+
+    # The cursor indicates the last processed node so we can add new nodes
+    # after it.
+    cursor = None
+    while pending:
+        node = pending.pop()
         waiting_for = [x for x in _args(node) if x not in ready]
         if waiting_for:
-            # revisit this node when next input is ready
-            waiting[waiting_for[0]].append(node)
+            # We have unprocessed input nodes. Might as well wait for the last
+            # arg so an already sorted list will only recheck this node once.
+            waiting[waiting_for[-1]].append(node)
         else:
-            nonlocal cursor
-            cursor = node
             ready.add(node)
-            for other in waiting.pop(node, ()):
-                cursor.append(other)
-                check(other)
+            if cursor and cursor.next is not node:
+                cursor.append(node)
+            cursor = node
+            # Mark the nodes that have been waiting for this node to finish as
+            # ready to check again.
+            pending.extend(reversed(waiting.pop(node, ())))
 
-    for n in list(graph.nodes):
-        check(n)
     assert not waiting and len(ready) == len(graph.nodes)
 
 

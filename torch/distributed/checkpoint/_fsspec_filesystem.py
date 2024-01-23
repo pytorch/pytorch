@@ -9,20 +9,28 @@ import pickle
 import queue
 import threading
 from abc import ABC, abstractmethod
-
 from dataclasses import dataclass
-from typing import Callable, cast, Dict, List, Optional, Union
+from typing import (
+    Callable,
+    cast,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 
 import fsspec
-import torch
 from fsspec import AbstractFileSystem
 from fsspec.core import url_to_fs
+
+import torch
 from torch import Tensor
 from torch._utils import _get_device_module
-
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex
-
 from torch.distributed.checkpoint.planner import (
     LoadItemType,
     LoadPlan,
@@ -49,9 +57,7 @@ __all__ = [
 
 @dataclass
 class _StorageInfo:
-    """
-    This is the per entry storage info
-    """
+    """This is the per entry storage info."""
 
     relative_path: str
     offset: int
@@ -66,40 +72,32 @@ class _StoragePrefix:
 DEFAULT_SUFFIX = ".distcp"
 
 
-def _result_from_write_item(
-    item: WriteItem, size_in_bytes, storage_data
-) -> WriteResult:
-    return WriteResult(
-        index=item.index, size_in_bytes=size_in_bytes, storage_data=storage_data
-    )
-
-
 class _TensorLoader(ABC):
     @abstractmethod
-    def add(self, size: int, obj: object):
+    def add(self, size: int, obj: object) -> None:
         pass
 
     @abstractmethod
-    def start_loading(self):
+    def start_loading(self) -> None:
         pass
 
     @abstractmethod
-    def values(self):
+    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
         pass
 
 
 class _SerialCpuLoader(_TensorLoader):
-    def __init__(self, resolve_fun: Callable):
+    def __init__(self, resolve_fun: Callable) -> None:
         self.resolve_fun = resolve_fun
         self.items = []
 
-    def add(self, size: int, obj: object):
+    def add(self, size: int, obj: object) -> None:
         self.items.append((size, obj))
 
-    def start_loading(self):
+    def start_loading(self) -> None:
         pass
 
-    def values(self):
+    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
         for _, obj in self.items:
             tensor = self.resolve_fun(obj).detach()
             tensor = tensor.cpu()
@@ -115,9 +113,9 @@ class _OverlappingCpuLoader(_TensorLoader):
     def __init__(
         self,
         resolve_fun: Callable,
-        stream: Union[None, io.RawIOBase, torch.Stream] = None,
+        stream: Optional[torch.Stream] = None,
         inflight_threshhold: int = 1_000_000,
-    ):
+    ) -> None:
         self.resolve_fun = resolve_fun
         self.items = []
         self.inflight_threshhold = inflight_threshhold
@@ -132,10 +130,10 @@ class _OverlappingCpuLoader(_TensorLoader):
             self.stream.wait_stream(self.device_module.current_stream())
 
     @property
-    def _done(self):
+    def _done(self) -> bool:
         return self.idx >= len(self.items)
 
-    def _drain(self):
+    def _drain(self) -> List[object]:
         drained = []
         if self.in_flight_data >= self.inflight_threshhold:
             self.stream.synchronize()
@@ -145,12 +143,9 @@ class _OverlappingCpuLoader(_TensorLoader):
             drained.append(val)
         return drained
 
-    def _refill(self):
+    def _refill(self) -> None:
         with self.device_module.stream(self.stream):
-            while (
-                not self._done
-                and self.in_flight_data < self.inflight_threshhold
-            ):
+            while not self._done and self.in_flight_data < self.inflight_threshhold:
                 _, obj = self.items[self.idx]
                 self.idx += 1
                 tensor = self.resolve_fun(obj).detach()
@@ -158,7 +153,8 @@ class _OverlappingCpuLoader(_TensorLoader):
                     tensor = tensor.to(device="cpu", non_blocking=True)
                 elif tensor.device == torch.device("cpu"):
                     if tensor.storage().size() != tensor.numel():
-                        # this forces the tensor to be both contiguous and with minimal storage
+                        # this forces the tensor to be both contiguous and with
+                        # minimal storage
                         tensor = tensor.clone()
 
                 self.current_items.append(
@@ -169,25 +165,25 @@ class _OverlappingCpuLoader(_TensorLoader):
                 )
                 self.in_flight_data += tensor.numel() * tensor.element_size()
 
-    def _finish(self):
+    def _finish(self) -> Iterable[object]:
         assert self._done
         if len(self.current_items) > 0:
             self.stream.synchronize()
         return self.current_items
 
-    def add(self, size: int, obj: object):
+    def add(self, size: int, obj: object) -> None:
         if self.started:
             raise RuntimeError("cannot add items after loading started")
         self.items.append((size, obj))
 
-    def start_loading(self):
+    def start_loading(self) -> None:
         if self.started:
             return
         self.started = True
         self.items.sort(key=lambda x: x[0])
         self._refill()
 
-    def values(self):
+    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
         self.start_loading()
         while not self._done:
             drained = self._drain()
@@ -208,9 +204,7 @@ def _item_size(item: WriteItem) -> int:
     return size * torch._utils._element_size(dtype)
 
 
-def _split_by_size_and_type(
-    bins: int, items: List[WriteItem]
-) -> List[List[WriteItem]]:
+def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[WriteItem]]:
     if bins == 1:
         return [items]
 
@@ -235,11 +229,11 @@ def _split_by_size_and_type(
 
 
 def _write_item(
-    stream: Optional[Union[io.RawIOBase, torch.Stream]],
+    stream: io.IOBase,
     data: Union[io.BytesIO, torch.Tensor],
     write_item: WriteItem,
     storage_key: str,
-):
+) -> WriteResult:
     offset = stream.tell()
 
     if write_item.type == WriteItemType.BYTE_IO:
@@ -251,8 +245,10 @@ def _write_item(
         torch.save(data, stream)
     length = stream.tell() - offset
 
-    return _result_from_write_item(
-        write_item, length, _StorageInfo(storage_key, offset, length)
+    return WriteResult(
+        index=write_item.index,
+        size_in_bytes=length,
+        storage_data=_StorageInfo(storage_key, offset, length),
     )
 
 
@@ -262,7 +258,7 @@ def _write_files_from_queue(
     planner: SavePlanner,
     inflight_threshhold: int,
     fs: AbstractFileSystem,
-):
+) -> None:
     try:
         while True:
             file_name, storage_key, write_items = file_queue.get_nowait()
@@ -270,24 +266,20 @@ def _write_files_from_queue(
 
             if torch.cuda.is_available() and inflight_threshhold > 0:
                 loader = _OverlappingCpuLoader(
-                    lambda x: planner.resolve_data(x),
+                    planner.resolve_data,
                     inflight_threshhold=inflight_threshhold,
                 )
             else:
                 loader = _SerialCpuLoader(
-                    lambda x: planner.resolve_data(x),
+                    planner.resolve_data,
                 )
 
-            tensor_w = [
-                wi for wi in write_items if wi.type != WriteItemType.BYTE_IO
-            ]
+            tensor_w = [wi for wi in write_items if wi.type != WriteItemType.BYTE_IO]
             for write_item in tensor_w:
                 loader.add(_item_size(write_item), write_item)
             loader.start_loading()
 
-            bytes_w = [
-                wi for wi in write_items if wi.type == WriteItemType.BYTE_IO
-            ]
+            bytes_w = [wi for wi in write_items if wi.type == WriteItemType.BYTE_IO]
             write_results = []
 
             with fs.transaction:
@@ -330,7 +322,7 @@ class FsspecWriter(StorageWriter):
         per_thread_copy_ahead: int = 10_000_000,
     ) -> None:
         """
-        Initialize the writer pointing to `path`
+        Initialize the writer pointing to `path`.
 
         Args:
             path: diretory where the checkpoint will be writen to.
@@ -353,9 +345,7 @@ class FsspecWriter(StorageWriter):
         self.fs.makedirs(self.path, exist_ok=True)
         return plan
 
-    def prepare_global_plan(
-        self, global_plan: List[SavePlan]
-    ) -> List[SavePlan]:
+    def prepare_global_plan(self, global_plan: List[SavePlan]) -> List[SavePlan]:
         new_plans = [
             dataclasses.replace(plan, storage_data=_StoragePrefix(f"__{i}_"))
             for i, plan in enumerate(global_plan)
@@ -378,9 +368,7 @@ class FsspecWriter(StorageWriter):
 
         file_queue: queue.Queue = queue.Queue()
         if self.single_file_per_rank:
-            for bucket in _split_by_size_and_type(
-                self.thread_count, plan.items
-            ):
+            for bucket in _split_by_size_and_type(self.thread_count, plan.items):
                 file_name = gen_file()
                 file_path = os.path.join(self.path, file_name)
                 file_queue.put((file_path, file_name, bucket))
@@ -429,9 +417,7 @@ class FsspecWriter(StorageWriter):
             fut.set_result(res)
             return fut
 
-    def finish(
-        self, metadata: Metadata, results: List[List[WriteResult]]
-    ) -> None:
+    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
         storage_md = dict()
         for wr_list in results:
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
@@ -450,7 +436,7 @@ class FsspecReader(StorageReader):
         self.fs, _ = url_to_fs(path)
         self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
 
-    def _slice_file(self, file, sinfo: _StorageInfo):
+    def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
         return _create_file_view(file, sinfo.offset, sinfo.length)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
@@ -497,16 +483,12 @@ class FsspecReader(StorageReader):
         with fsspec.open(metadata_path, "rb") as metadata_file:
             return pickle.load(metadata_file)
 
-    def set_up_storage_reader(
-        self, metadata: Metadata, is_coordinator: bool
-    ) -> None:
+    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
         self.storage_data = metadata.storage_data
         assert self.storage_data is not None
 
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         return plan
 
-    def prepare_global_plan(
-        self, global_plan: List[LoadPlan]
-    ) -> List[LoadPlan]:
+    def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return global_plan

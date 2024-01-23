@@ -19,6 +19,9 @@ aten::_softmax
 aten::_softmax.out
 aten::_to_copy
 aten::_to_copy.out
+aten::_upsample_nearest_exact1d
+aten::_upsample_nearest_exact2d
+aten::_upsample_nearest_exact3d
 aten::abs
 aten::abs.out
 aten::abs_

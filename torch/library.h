@@ -87,6 +87,8 @@ namespace torch {
 struct NoInferSchemaTag {};
 #endif
 
+#define HAS_PT2_COMPLIANT_TAG
+
 // For multipy/torchdeploy use case
 enum class _RegisterOrVerify { REGISTER, VERIFY };
 
@@ -730,20 +732,20 @@ class TORCH_API Library final {
   // These overloads cover cases when a SelectiveStr (see Note [Selective
   // build]) has been disabled at compile time.  In that case, don't generate
   // any code referencing the passed in functions at all.
-  Library& def(detail::SelectiveStr<false>) & {
+  Library& def(detail::SelectiveStr<false>, const std::vector<at::Tag>& tags = {}) & {
     return *this;
   }
-  Library& def(detail::SelectiveStr<true> raw_schema) & {
-    return def(raw_schema.operator const char*());
+  Library& def(detail::SelectiveStr<true> raw_schema, const std::vector<at::Tag>& tags = {}) & {
+    return def(raw_schema.operator const char*(), tags);
   }
   template <typename Func>
-  Library& def(detail::SelectiveStr<false>, Func&& /*raw_f*/) & {
+  Library& def(detail::SelectiveStr<false>, Func&& /*raw_f*/, const std::vector<at::Tag>& tags = {}) & {
     return *this;
   }
   template <typename Func>
-  Library& def(detail::SelectiveStr<true> raw_name_or_schema, Func&& raw_f) & {
+  Library& def(detail::SelectiveStr<true> raw_name_or_schema, Func&& raw_f, const std::vector<at::Tag>& tags = {}) & {
     return def(
-        raw_name_or_schema.operator const char*(), std::forward<Func>(raw_f));
+        raw_name_or_schema.operator const char*(), std::forward<Func>(raw_f), tags);
   }
 
   template <typename Func>

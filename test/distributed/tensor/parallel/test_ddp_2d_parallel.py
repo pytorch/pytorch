@@ -3,8 +3,12 @@
 import torch
 import torch.distributed as dist
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate
-from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
-from torch.distributed.tensor.parallel.ddp import pre_dp_module_transform
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+)
+from torch.distributed.tensor.parallel.ddp import _pre_dp_module_transform
 
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -36,12 +40,14 @@ def init_model(device_type, model_parallel_size=TP_DEGREE):
         mesh=torch.arange(0, world_size).view(-1, model_parallel_size),
     )
 
-    dp_pg = twod_mesh.get_dim_groups()[0]
+    dp_pg = twod_mesh.get_group(mesh_dim=0)
 
-    twod_model = parallelize_module(
-        twod_model, twod_mesh, PairwiseParallel(), tp_mesh_dim=1
-    )
-    pre_dp_module_transform(twod_model)
+    parallelize_plan = {
+        "net1": ColwiseParallel(),
+        "net2": RowwiseParallel(),
+    }
+    twod_model = parallelize_module(twod_model, twod_mesh, parallelize_plan, tp_mesh_dim=1)
+    _pre_dp_module_transform(twod_model)
     # TODO: Add tests when using gradient_as_bucket_view and static_graph for DDP.
     twod_model = DDP(twod_model, process_group=dp_pg)
     return model, twod_model, dp_pg

@@ -94,8 +94,8 @@ ProfilerConfig ProfilerConfig::fromIValue(
 // ----------------------------------------------------------------------------
 // -- Profiler base class -----------------------------------------------------
 // ----------------------------------------------------------------------------
-/*explicit*/ ProfilerStateBase::ProfilerStateBase(const ProfilerConfig& config)
-    : c10::MemoryReportingInfoBase(), config_(config) {}
+/*explicit*/ ProfilerStateBase::ProfilerStateBase(ProfilerConfig config)
+    : c10::MemoryReportingInfoBase(), config_(std::move(config)) {}
 
 ProfilerStateBase::~ProfilerStateBase() {
   if (handle_) {

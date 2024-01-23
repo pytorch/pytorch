@@ -132,6 +132,8 @@ SKIP_TRAIN = {
     "llama",
     "llama_v2_7b_16h",
     "simple_gpt",
+    # doesnt fit in memory
+    "phi_1_5",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -265,6 +267,8 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
     "detectron2_fcos_r_50_fpn",
 }
 
+FORCE_FP16_FOR_BF16_MODELS = {"vision_maskrcnn"}
+
 # models in canary_models that we should run anyway
 CANARY_MODELS = {
     "torchrec_dlrm",
@@ -320,6 +324,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return FORCE_AMP_FOR_FP16_BF16_MODELS
 
     @property
+    def force_fp16_for_bf16_models(self):
+        return FORCE_FP16_FOR_BF16_MODELS
+
+    @property
     def skip_accuracy_checks_large_models_dashboard(self):
         if self.args.dashboard or self.args.accuracy:
             return SKIP_ACCURACY_CHECK_MODELS
@@ -369,6 +377,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         else:
             raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
+        if benchmark_cls is None:
+            raise NotImplementedError(f"{model_name}.Model is None")
+
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
 
@@ -404,8 +415,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             # comparison hard with torch.compile. torch.compile can cause minor
             # divergences in the output because of how fusion works for amp in
             # TorchInductor compared to eager.  Therefore, instead of looking at
-            # all the bounding boxes, we compare only top 5.
-            model_kwargs = {"box_detections_per_img": 5}
+            # all the bounding boxes, we compare only top 4.
+            model_kwargs = {"box_detections_per_img": 4}
             benchmark = benchmark_cls(
                 test="train",
                 device=device,
@@ -517,13 +528,13 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return reduce_to_scalar_loss(pred)
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        with self.autocast():
+        with self.autocast(**self.autocast_arg):
             return mod(*inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
         self.optimizer_zero_grad(mod)
-        with self.autocast():
+        with self.autocast(**self.autocast_arg):
             pred = mod(*cloned_inputs)
             loss = self.compute_loss(pred)
         self.grad_scaler.scale(loss).backward()

@@ -78,17 +78,21 @@ static void accumulate_grad_(const Tensor& variable, const Tensor& new_grad) {
 TORCH_LIBRARY_FRAGMENT(inductor, m) {
   m.def(
       "_mm_plus_mm(Tensor a, Tensor b, Tensor c, Tensor d, Tensor(t!) out) -> Tensor(t!)",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, _mm_plus_mm));
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, _mm_plus_mm),
+      {at::Tag::pt2_compliant_tag});
   m.def(
       "_alloc_from_pool(Tensor self, int offset_bytes, ScalarType dtype, int[] size, int[] stride) -> Tensor",
-      _alloc_from_pool);
+      _alloc_from_pool,
+      {at::Tag::pt2_compliant_tag});
   m.def(
       "_reinterpret_tensor(Tensor self, int[] size, int[] stride, int offset_increment=0) -> Tensor",
       dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, _reinterpret_tensor));
+          c10::DispatchKey::CompositeExplicitAutograd, _reinterpret_tensor),
+      {at::Tag::pt2_compliant_tag});
   m.def(
       "accumulate_grad_(Tensor variable, Tensor new_grad) -> ()",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, accumulate_grad_));
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, accumulate_grad_),
+      {at::Tag::pt2_compliant_tag});
 }
 
 } // namespace inductor

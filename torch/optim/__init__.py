@@ -1,5 +1,6 @@
 """
 :mod:`torch.optim` is a package implementing various optimization algorithms.
+
 Most commonly used methods are already supported, and the interface is general
 enough, so that more sophisticated ones can also be easily integrated in the
 future.
@@ -22,17 +23,17 @@ from .lbfgs import LBFGS
 from . import lr_scheduler
 from . import swa_utils
 
-del adadelta
-del adagrad
-del adam
-del adamw
-del sparse_adam
-del adamax
-del asgd
-del sgd
-del radam
-del rprop
-del rmsprop
-del optimizer
-del nadam
-del lbfgs
+del adadelta  # noqa: F821
+del adagrad  # noqa: F821
+del adam  # noqa: F821
+del adamw  # noqa: F821
+del sparse_adam  # noqa: F821
+del adamax  # noqa: F821
+del asgd  # noqa: F821
+del sgd  # noqa: F821
+del radam  # noqa: F821
+del rprop  # noqa: F821
+del rmsprop  # noqa: F821
+del optimizer  # noqa: F821
+del nadam  # noqa: F821
+del lbfgs  # noqa: F821

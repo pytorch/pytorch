@@ -1491,7 +1491,9 @@ def forward(self, x_1):
 
         self.assertEqual(
             dict(counters["graph_break"]),
-            {"dynamic shape operator: _torch_testing.numpy_nonzero.default": 1},
+            {
+                "dynamic shape operator: _torch_testing.numpy_nonzero.default; to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True": 1  # noqa: B950
+            },
         )
 
     # pre-existing problem: torch.compile(dynamic=True) will, by default,
@@ -1697,6 +1699,10 @@ def forward(self, x_1):
         for op in [torch.ops.aten.sin.default, torch.ops.aten.sum.dim_IntList]:
             self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
+    def test_builtin_torchscript_ops(self):
+        for op in [torch.ops.aten.sub.complex, torch.ops.aten.mul.complex]:
+            self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
+
     def test_autogen_aten_ops_are_pt2_compliant(self):
         for op in [
             torch.ops.aten._foreach_copy.default,
@@ -1713,7 +1719,7 @@ def forward(self, x_1):
         result = torch._C._jit_resolve_packet("aten::sum", x, dim=1)
         self.assertEqual(result, "dim_IntList")
 
-        with self.assertRaisesRegex(RuntimeError, "failed to many any schema"):
+        with self.assertRaisesRegex(RuntimeError, "failed to match any schema"):
             result = torch._C._jit_resolve_packet("aten::sum", x, x, x)
 
     def test_define_bad_schema(self):

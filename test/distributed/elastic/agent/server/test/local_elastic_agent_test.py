@@ -181,7 +181,7 @@ def _check_env_function():
         "TORCHELASTIC_MAX_RESTARTS",
         "TORCHELASTIC_RUN_ID",
         "TORCHELASTIC_USE_AGENT_STORE",
-        "NCCL_ASYNC_ERROR_HANDLING",
+        "TORCH_NCCL_ASYNC_ERROR_HANDLING",
     ]
     for var in env_vars:
         _ = os.environ[var]
@@ -515,13 +515,13 @@ class LocalElasticAgentTest(unittest.TestCase):
         self.assertFalse(res.is_failed())
 
     def run_check_nccl_async_error_handling_env(self):
-        # make sure NCCL_ASYNC_ERROR_HANDLING set in os.environ is honored
-        with patch.dict(os.environ, {"NCCL_ASYNC_ERROR_HANDLING": "0"}):
+        # make sure TORCH_NCCL_ASYNC_ERROR_HANDLING set in os.environ is honored
+        with patch.dict(os.environ, {"TORCH_NCCL_ASYNC_ERROR_HANDLING": "0"}):
             res = self.run_agent(
                 Conf(
                     entrypoint=_check_env_value,
                     local_world_size=1,
-                    args=("NCCL_ASYNC_ERROR_HANDLING", "0"),
+                    args=("TORCH_NCCL_ASYNC_ERROR_HANDLING", "0"),
                 )
             )
             self.assertFalse(res.is_failed())
@@ -532,7 +532,7 @@ class LocalElasticAgentTest(unittest.TestCase):
             Conf(
                 entrypoint=_check_env_value,
                 local_world_size=1,
-                args=("NCCL_ASYNC_ERROR_HANDLING", "1"),
+                args=("TORCH_NCCL_ASYNC_ERROR_HANDLING", "1"),
             )
         )
         self.assertFalse(res.is_failed())

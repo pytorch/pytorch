@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import torch
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch._functorch.aot_autograd import aot_function
 from torch._functorch.compilers import nop
@@ -18,3 +19,7 @@ class TestAOTLogging(LoggingTestCase):
         )
         compiled_f(torch.randn(3))
         self.assertGreater(len(records), 0)
+
+
+if __name__ == '__main__':
+    run_tests()

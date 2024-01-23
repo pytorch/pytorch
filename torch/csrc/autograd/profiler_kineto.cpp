@@ -167,7 +167,12 @@ struct MetadataBase {
 
   void addMetadata(const std::string& key, const std::string& value) {
     if (kineto_activity_ && !value.empty() && value != "\"\"") {
-      torch::profiler::impl::kineto::addMetadata(kineto_activity_, key, value);
+      torch::profiler::impl::kineto::addMetadata(
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+          const_cast<torch::profiler::impl::kineto::activity_t*>(
+              kineto_activity_),
+          key,
+          value);
     }
   }
 
@@ -884,7 +889,9 @@ TYPED_ATTR(TorchOp, fallbackEnd, e.device_fallback_.device_event_end_)
 TYPED_ATTR(
     TorchOp,
     flops,
-    !e.extra_args_.empty() ? computeFlops(e.name_, e.extra_args_) : 0)
+    !e.extra_args_.empty()
+        ? torch::profiler::impl::computeFlops(e.name_, e.extra_args_)
+        : 0)
 TYPED_ATTR(Backend, backend, e.backend_)
 TYPED_ATTR(Allocation, nBytes, e.alloc_size_)
 TYPED_ATTR(Kineto, linkedCorrelationId, [&]() {

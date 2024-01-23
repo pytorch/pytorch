@@ -306,7 +306,7 @@ class FullStateDictConfig(StateDictConfig):
         >>>     state = fsdp.state_dict()
         >>>     # `state` will be empty on non rank 0 and contain CPU tensors on rank 0.
         >>> # To reload checkpoint for inference, finetuning, transfer learning, etc:
-        >>> model = model_fn() # Initialize model on CPU in preparation for wrapping with FSDP
+        >>> model = model_fn() # Initialize model in preparation for wrapping with FSDP
         >>> if dist.get_rank() == 0:
         >>>     # Load checkpoint only on rank 0 to avoid memory redundancy
         >>>     state_dict = torch.load("my_checkpoint.pt")

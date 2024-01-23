@@ -8,7 +8,10 @@ from typing import Any, Callable, Dict, List, Optional, Set
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn.functional as F
-from torch.ao.quantization.fake_quantize import FusedMovingAvgObsFakeQuantize
+from torch.ao.quantization.fake_quantize import (
+    FakeQuantize,
+    FusedMovingAvgObsFakeQuantize,
+)
 from torch.ao.quantization.observer import (
     HistogramObserver,
     MinMaxObserver,
@@ -23,6 +26,7 @@ from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.ao.quantization.quantizer import QuantizationSpec, Quantizer
 
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
+    _convert_scalars_to_attrs,
     OP_TO_ANNOTATOR,
     OperatorConfig,
     OperatorPatternType,
@@ -102,13 +106,21 @@ def get_symmetric_quantization_config(
     is_per_channel: bool = False,
     is_qat: bool = False,
     is_dynamic: bool = False,
+    act_qmin: int = -128,
+    act_qmax: int = 127,
+    weight_qmin: int = -127,
+    weight_qmax: int = 127,
 ):
+    extra_args: Dict[str, Any] = {"eps": 2**-12}
     if is_qat:
         if is_dynamic:
-            raise NotImplementedError(
-                "dynamic quantization for qat is not yet implemented."
+            act_observer_or_fake_quant_ctr = FakeQuantize
+            dynamic_quant_observer = MovingAverageMinMaxObserver.with_args(
+                averaging_constant=1
             )
-        act_observer_or_fake_quant_ctr = FusedMovingAvgObsFakeQuantize
+            extra_args["observer"] = dynamic_quant_observer
+        else:
+            act_observer_or_fake_quant_ctr = FusedMovingAvgObsFakeQuantize  # type: ignore[assignment]
     else:
         if is_dynamic:
             act_observer_or_fake_quant_ctr = PlaceholderObserver  # type: ignore[assignment]
@@ -117,36 +129,37 @@ def get_symmetric_quantization_config(
 
     act_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
-        quant_min=-128,
-        quant_max=127,
+        quant_min=act_qmin,
+        quant_max=act_qmax,
         qscheme=torch.per_tensor_affine,
         is_dynamic=is_dynamic,
         observer_or_fake_quant_ctr=act_observer_or_fake_quant_ctr.with_args(
-            eps=2**-12
+            **extra_args,
         ),
     )
-    qscheme = (
+    weight_qscheme = (
         torch.per_channel_symmetric if is_per_channel else torch.per_tensor_symmetric
     )
     weight_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
         MinMaxObserver
     )
     if is_qat:
+        # TODO: qat + per channel?
         weight_observer_or_fake_quant_ctr = FusedMovingAvgObsFakeQuantize
     elif is_per_channel:
         weight_observer_or_fake_quant_ctr = PerChannelMinMaxObserver
 
     extra_args: Dict[str, Any] = {"eps": 2**-12}
     if is_qat:
-        if qscheme == torch.per_tensor_symmetric:
+        if weight_qscheme == torch.per_tensor_symmetric:
             extra_args["observer"] = MovingAverageMinMaxObserver
         else:
             extra_args["observer"] = MovingAveragePerChannelMinMaxObserver  # type: ignore[dict-item]
     weight_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
-        quant_min=-127,
-        quant_max=127,
-        qscheme=qscheme,
+        quant_min=weight_qmin,
+        quant_max=weight_qmax,
+        qscheme=weight_qscheme,
         ch_axis=0,
         is_dynamic=False,
         observer_or_fake_quant_ctr=weight_observer_or_fake_quant_ctr.with_args(
@@ -246,12 +259,14 @@ def _get_not_module_type_or_name_filter(
 class XNNPACKQuantizer(Quantizer):
     supported_config_and_operators = _get_supported_config_and_operators()
     STATIC_QAT_ONLY_OPS = [
-        "conv2d_bn_relu",
-        "conv2d_bn",
+        "conv_bn_relu",
+        "conv_bn",
     ]
 
     # static quantization ops (both PTQ and QAT)
+    # Preserve the order that fusions come before singular ops
     STATIC_OPS = [
+        "linear_relu",
         "linear",
         "conv_relu",
         "conv",
@@ -340,6 +355,12 @@ class XNNPACKQuantizer(Quantizer):
         ), " quantization_config == None is not supported yet"
         self.module_name_config[module_name] = quantization_config
         return self
+
+    def transform_for_annotation(
+        self, model: torch.fx.GraphModule
+    ) -> torch.fx.GraphModule:
+        """Transforms scalar values to tensor attributes"""
+        return _convert_scalars_to_attrs(model)
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""

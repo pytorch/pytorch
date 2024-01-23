@@ -95,6 +95,7 @@ ContextLinear create(
       output_max,                                                     // output_max
       0u,                                                             // flags
       nullptr,                                                        // xnn_caches_t
+      nullptr,                                                        // xnn_weights_cache_t
       &linear_op);                                                    // operator
 
   TORCH_CHECK(
@@ -136,12 +137,19 @@ Tensor run(
       padded_input.suggest_memory_format(),
       padded_input.opt_names());
 
-  const xnn_status setup_status = xnn_setup_fully_connected_nc_f32(
+  const xnn_status reshape_status = xnn_reshape_fully_connected_nc_f32(
       context.op.get(),                                   // operator
       Layout::ActivationND::batch(padded_input.sizes()),  // Batch,
-      padded_input.data_ptr<float>(),                     // input
-      output.data_ptr<float>(),                           // output
       caffe2::pthreadpool_());                            // threadpool
+
+  TORCH_CHECK(
+      xnn_status_success == reshape_status,
+      "xnn_reshape_fully_connected_nc_f32 failed!");
+
+  const xnn_status setup_status = xnn_setup_fully_connected_nc_f32(
+      context.op.get(),                                   // operator
+      padded_input.data_ptr<float>(),                     // input
+      output.data_ptr<float>());                          // output
 
   TORCH_CHECK(
       xnn_status_success == setup_status,

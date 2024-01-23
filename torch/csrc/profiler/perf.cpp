@@ -1,3 +1,4 @@
+#include <unordered_map>
 #include <unordered_set>
 
 #include <torch/csrc/profiler/perf-inl.h>

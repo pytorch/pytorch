@@ -10,6 +10,13 @@ inputs:
     description: Shard number for the current job
     required: false
     default: "0"
+  sha:
+    description: SHA for the commit
+    required: true
+  test_config:
+    description: Name of the test config
+    required: false
+    default: "default"
   job_identifier:
     description: Text that uniquely identifies a given job type within a workflow. All shards of a job should share the same job identifier.
     required: true
@@ -33,6 +40,8 @@ runs:
       env:
         CACHE_DIR: ${{ inputs.cache_dir }}
         JOB_IDENTIFIER: ${{ inputs.job_identifier }}
+        SHA: ${{ inputs.sha }}
+        TEST_CONFIG: ${{ inputs.test_config }}
         SHARD: ${{ inputs.shard }}
         REPO: ${{ github.repository }}
       run: |
@@ -41,6 +50,8 @@ runs:
           --cache_dir $GITHUB_WORKSPACE/$CACHE_DIR \
           --pr_identifier $GITHUB_REF \
           --job_identifier $JOB_IDENTIFIER \
+          --sha $SHA \
+          --test_config $TEST_CONFIG \
           --shard $SHARD \
           --repo $REPO \
           --temp_dir $RUNNER_TEMP \

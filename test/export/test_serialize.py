@@ -2,7 +2,7 @@
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["oncall: export"]
 import io
 import pathlib
 import tempfile
@@ -11,53 +11,61 @@ import zipfile
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._export import export, save, load
+import torch.utils._pytree as pytree
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
+    canonicalize,
+    deserialize,
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
-    deserialize,
     serialize,
     SerializeError,
 )
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.export import Dim, export, load, save
+from torch.export import WrapperModule
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
-import torch.utils._pytree as pytree
 from torch.testing._internal.common_utils import (
+    find_library_location,
     instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    TestCase,
-    TemporaryFileName,
     IS_FBCODE,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
-    find_library_location,
+    parametrize,
+    run_tests,
+    TemporaryFileName,
+    TestCase,
 )
 
 
 def get_filtered_export_db_tests():
-    unsupported_test_names = {
-        "dynamic_shape_constructor",  # 'NoneType' object has no attribute 'from_tensor'
-        "dictionary",  # Graph output must be a tuple()
-        "fn_with_kwargs",  # export doesn't support kwargs yet
-        "scalar_output",  # Tracing through 'f' must produce a single graph
-    }
-
     return [
         (name, case)
         for name, case in all_examples().items()
-        if (
-            case.support_level == SupportLevel.SUPPORTED and
-            name not in unsupported_test_names
-        )
+        if case.support_level == SupportLevel.SUPPORTED
     ]
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
+    def test_predispatch_export_with_autograd_op(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                with torch.enable_grad():
+                    return x + x
+
+        with torch.no_grad():
+            from torch.export._trace import _export
+            ep = _export(Foo(), (torch.ones(10),), pre_dispatch=True)
+
+        with self.assertRaisesRegex(SerializeError, "Failed serializing node _set_grad_enabled"):
+            torch.export.save(ep, io.BytesIO())
+
     def test_serialize_multiple_returns_from_node(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -81,8 +89,8 @@ class TestSerialize(TestCase):
             ),
         )
 
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
-        node = serialized.graph_module.graph.nodes[-1]
+        serialized = ExportedProgramSerializer().serialize(exported_module)
+        node = serialized.exported_program.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.native_layer_norm.default")
         # aten::native_layer_norm returns 3 tensors
         self.assertEqual(len(node.outputs), 3)
@@ -106,8 +114,8 @@ class TestSerialize(TestCase):
         input.requires_grad = True
         exported_module = export(MyModule(), (input,)).run_decompositions()
 
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
-        node = serialized.graph_module.graph.nodes[-1]
+        serialized = ExportedProgramSerializer().serialize(exported_module)
+        node = serialized.exported_program.graph_module.graph.nodes[-1]
         # split.Tensor gets decomposed to split_with_sizes by the core ATen decomposition table
         self.assertEqual(node.target, "torch.ops.aten.split_with_sizes.default")
         self.assertEqual(len(node.outputs), 1)
@@ -150,8 +158,8 @@ class TestSerialize(TestCase):
             (torch.ones([512, 512], requires_grad=True),),
         ).run_decompositions()
 
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
-        node = serialized.graph_module.graph.nodes[-1]
+        serialized = ExportedProgramSerializer().serialize(exported_module)
+        node = serialized.exported_program.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.var_mean.correction")
         self.assertEqual(len(node.outputs), 2)
 
@@ -167,22 +175,40 @@ class TestSerialize(TestCase):
         Tests that the kwargs default values are serialized even if they are not
         specified
         """
+        class Foo(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                values = torch.randn(3, 2)
+                return torch.searchsorted(x, values, side="right", right=True)
 
-        def f(x: torch.Tensor) -> torch.Tensor:
-            values = torch.randn(3, 2)
-            return torch.searchsorted(x, values, side="right", right=True)
+        f = Foo()
 
         x, _ = torch.sort(torch.randn(3, 4))
         exported_module = export(f, (x,)).run_decompositions()
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+        serialized = ExportedProgramSerializer().serialize(exported_module)
 
-        node = serialized.graph_module.graph.nodes[-1]
+        node = serialized.exported_program.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.searchsorted.Tensor")
         self.assertEqual(len(node.inputs), 4)
         self.assertEqual(node.inputs[2].name, "right")
         self.assertEqual(node.inputs[2].arg.as_bool, True)
         self.assertEqual(node.inputs[3].name, "side")
         self.assertEqual(node.inputs[3].arg.as_string, "right")
+
+    def test_canonicalize(self) -> None:
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                a = y + x
+                b = x + y
+                return b + a
+
+        ep = torch.export.export(Module(), (torch.randn(3, 2), torch.randn(3, 2)))
+        s = ExportedProgramSerializer().serialize(ep)
+        c = canonicalize(s.exported_program)
+        g = c.graph_module.graph
+        self.assertLess(
+            g.nodes[0].inputs[0].arg.as_tensor.name,
+            g.nodes[1].inputs[0].arg.as_tensor.name
+        )
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
@@ -193,8 +219,8 @@ class TestDeserialize(TestCase):
         ep = torch.export.export(fn, inputs, {}, dynamic_shapes=dynamic_shapes)
         ep.graph.eliminate_dead_code()
 
-        serialized_struct, state_dict = serialize(ep, opset_version={"aten": 0})
-        deserialized_ep = deserialize(serialized_struct, state_dict, expected_opset_version={"aten": 0})
+        serialized_artifact = serialize(ep, opset_version={"aten": 0})
+        deserialized_ep = deserialize(serialized_artifact, expected_opset_version={"aten": 0})
         deserialized_ep.graph.eliminate_dead_code()
 
         orig_outputs = ep(*inputs)
@@ -348,17 +374,18 @@ class TestDeserialize(TestCase):
             assert x.size(0) in y
             return x + y
 
-        self.check_graph(f, (torch.ones(1), torch.ones(3)))
+        self.check_graph(WrapperModule(f), (torch.ones(1), torch.ones(3)))
 
     def test_shape(self):
-        def f(x):
-            z, y = x.size()
-            return z + y + x[0], z
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                z, y = x.size()
+                return z + y + x[0], z
 
         inputs = (torch.ones(2, 3),)
         dim0_x, dim1_x = torch.export.dims("dim0_x", "dim1_x")
         dynamic_shapes = {"x": (dim0_x, dim1_x)}
-        self.check_graph(f, inputs, dynamic_shapes)
+        self.check_graph(Foo(), inputs, dynamic_shapes)
 
     def test_module(self):
         class M(torch.nn.Module):
@@ -418,12 +445,14 @@ class TestDeserialize(TestCase):
             return control_flow.map(f, xs, y)
 
         inputs = (torch.ones(3, 2, 2), torch.ones(2))
-        self.check_graph(g, inputs, _check_meta=False)
+        self.check_graph(WrapperModule(g), inputs, _check_meta=False)
 
     def test_tensor_tensor_list(self):
         from torch.library import Library
         lib = Library("_export", "FRAGMENT")
-        lib.define("_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])")
+        lib.define(
+            "_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])",
+            tags=torch.Tag.pt2_compliant_tag)
 
         def _test_tensor_tensor_list_output(x, y):
             return y, [x]
@@ -437,6 +466,29 @@ class TestDeserialize(TestCase):
                 return a + b[0]
 
         self.check_graph(M(), (torch.rand(3, 2), torch.rand(3, 2)))
+
+    def test_list_of_optional_tensors(self) -> None:
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y, z):
+                indices = [None, None, torch.tensor([1, 3, 5, 7])]
+                indexed = torch.ops.aten.index.Tensor(x + y, indices)
+                return indexed + z
+
+        inputs = (torch.rand(8, 8, 8), torch.rand(8, 8, 8), torch.rand(8, 8, 4))
+        self.check_graph(MyModule(), inputs)
+
+    def test_sym_ite(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                b = x.shape[0] == 5
+                ret = torch.sym_ite(b, x.shape[0], x.shape[1])
+                return ret
+
+        dynamic_shapes = {'x': {0: Dim("dim0"), 1: Dim("dim1")}}
+        self.check_graph(Foo(), (torch.ones(4, 5),), dynamic_shapes=dynamic_shapes)
 
     @parametrize(
         "name,case",
@@ -455,19 +507,37 @@ class TestDeserialize(TestCase):
             torch._constrain_as_size(n, min=2)
             return y.sum() + torch.ones(n, 5).sum()
 
-        self.check_graph(f, (torch.tensor(3), torch.randn(4, 5)))
+        self.check_graph(WrapperModule(f), (torch.tensor(3), torch.randn(4, 5)))
 
     def test_get_attr(self) -> None:
         def f(x):
             return x + torch.tensor(3)
 
-        self.check_graph(f, (torch.tensor(3),))
+        self.check_graph(WrapperModule(f), (torch.tensor(3),))
 
     def test_get_attr_list(self) -> None:
         def f(x):
             return torch.cat([x, torch.tensor([1, 1])])
 
-        self.check_graph(f, (torch.tensor([1, 1]),))
+        self.check_graph(WrapperModule(f), (torch.tensor([1, 1]),))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
+    def test_device(self) -> None:
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, 3, stride=1, bias=True)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                conv = self.conv(x)
+                relu = self.relu(conv)
+                mul = relu * 0.5
+                return mul
+
+        inp = torch.randn((1, 3, 224, 224), dtype=torch.float).to("cuda")
+        model = MyModule().eval().cuda()
+        self.check_graph(model, (inp,))
 
 
 instantiate_parametrized_tests(TestDeserialize)
@@ -478,12 +548,12 @@ class TestSchemaVersioning(TestCase):
         def f(x):
             return x + x
 
-        ep = export(f, (torch.randn(1, 3),))
+        ep = export(WrapperModule(f), (torch.randn(1, 3),))
 
-        serialized_ep, serialized_state_dict = ExportedProgramSerializer().serialize(ep)
-        serialized_ep.schema_version = -1
-        with self.assertRaisesRegex(SerializeError, r"Serialized schema version -1 does not match our current"):
-            ExportedProgramDeserializer().deserialize(serialized_ep, serialized_state_dict)
+        serialized_artifact = ExportedProgramSerializer().serialize(ep)
+        serialized_artifact.exported_program.schema_version.major = -1
+        with self.assertRaisesRegex(SerializeError, r"Serialized schema version .* does not match our current"):
+            ExportedProgramDeserializer().deserialize(serialized_artifact)
 
 
 class TestOpVersioning(TestCase):
@@ -511,8 +581,19 @@ class TestOpVersioning(TestCase):
             deserializer._validate_model_opset_version(model_opset_version)
             self.assertIn("Compiler doesn't have a version table for op namespace", log.output[0])
 
+# We didn't set up kwargs input yet
 unittest.expectedFailure(
-    TestDeserialize.test_exportdb_supported_case_tensor_setattr
+    TestDeserialize.test_exportdb_supported_case_fn_with_kwargs
+)
+
+# Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph.
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_scalar_output
+)
+
+# TODO(zhxchen17) Support serializing user inputs mutation.
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_user_input_mutation
 )
 
 
@@ -540,9 +621,11 @@ class TestSaveLoad(TestCase):
         self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
 
     def test_save_file(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x * x
 
-        def f(x):
-            return x * x
+        f = Foo()
 
         inp = (torch.randn(2, 2),)
         ep = export(f, inp)
@@ -555,8 +638,11 @@ class TestSaveLoad(TestCase):
         self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
 
     def test_save_path(self):
-        def f(x, y):
-            return x + y
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        f = Foo()
 
         inp = (torch.tensor([6]), torch.tensor([7]))
         ep = export(f, inp)
@@ -571,8 +657,11 @@ class TestSaveLoad(TestCase):
     def test_save_extra(self):
         inp = (torch.tensor([0.1, 0.1]),)
 
-        def f(x):
-            return x * x + x
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x * x + x
+
+        f = Foo()
 
         ep = export(f, inp)
 
@@ -586,8 +675,11 @@ class TestSaveLoad(TestCase):
         self.assertEqual(extra_files["extra.txt"], "moo")
 
     def test_version_error(self):
-        def f(x):
-            return x + x
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        f = Foo()
 
         ep = export(f, (torch.randn(1, 3),))
 
@@ -597,28 +689,54 @@ class TestSaveLoad(TestCase):
 
             # Modify the version
             with zipfile.ZipFile(f, 'a') as zipf:
-                zipf.writestr('version', "-1")
+                zipf.writestr('version', "-1.1")
 
-            with self.assertRaisesRegex(RuntimeError, r"Serialized version -1 does not match our current"):
+            with self.assertRaisesRegex(RuntimeError, r"Serialized version .* does not match our current"):
                 f.seek(0)
-                loaded_ep = load(f)
+                load(f)
 
+    def test_save_constants(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor(3)
+
+            def forward(self, x):
+                list_tensor = [torch.tensor(3), torch.tensor(4)]
+                return x + self.a + list_tensor[0] + list_tensor[1]
+
+        ep = export(Foo(), (torch.tensor(1),))
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+
+        inp = (torch.tensor(1),)
+        self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerializeCustomClass(TestCase):
     def setUp(self):
-        if IS_SANDCASTLE or IS_MACOS or IS_FBCODE:
+        if IS_SANDCASTLE or IS_FBCODE:
+            torch.ops.load_library(
+                "//caffe2/test/cpp/jit:test_custom_class_registrations"
+            )
+        elif IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
-        lib_file_path = find_library_location('libtorchbind_test.so')
-        if IS_WINDOWS:
-            lib_file_path = find_library_location('torchbind_test.dll')
-        torch.ops.load_library(str(lib_file_path))
+        else:
+            lib_file_path = find_library_location('libtorchbind_test.so')
+            if IS_WINDOWS:
+                lib_file_path = find_library_location('torchbind_test.dll')
+            torch.ops.load_library(str(lib_file_path))
 
     def test_custom_class(self):
         custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
-        def f(x):
-            return x + x
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        f = Foo()
 
         inputs = (torch.zeros(4, 4),)
         ep = export(f, inputs)
@@ -636,7 +754,7 @@ class TestSerializeCustomClass(TestCase):
                     node.args = (arg0, custom_node)
 
         serialized_vals = serialize(ep)
-        deserialized_ep = deserialize(*serialized_vals)
+        deserialized_ep = deserialize(serialized_vals)
 
         for node in deserialized_ep.graph.nodes:
             if (

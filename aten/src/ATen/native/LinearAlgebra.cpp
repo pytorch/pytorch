@@ -18,6 +18,7 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkldnn/Matmul.h>
+#include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <variant>
@@ -626,7 +627,7 @@ Tensor linalg_matrix_power_impl(
   if (_out.has_value()) {
     checkSameDevice("matrix_power", out, self);
     checkLinalgCompatibleDtype("matrix_power", out, self);
-    at::native::resize_output(out, self.sizes());
+    at::native::resize_output_symint(out, self.sym_sizes());
   }
 
   // For n=0 we return the identity matrix of the same shape as input.
@@ -1323,9 +1324,9 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 
 
 #if !defined(C10_MOBILE)
-#define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)    \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(      \
-            kBFloat16, kHalf, kFloat8_e5m2, kFloat8_e4m3fn, \
+#define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)                                               \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                                                 \
+            kBFloat16, kHalf, kFloat8_e5m2, kFloat8_e4m3fn, kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, \
             TYPE, NAME, __VA_ARGS__)
 #else
 #define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)        \
@@ -1375,7 +1376,7 @@ static inline int64_t get_mkldnn_matmul_min_size() {
 static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
   const int64_t min_dim = get_mkldnn_matmul_min_dim();
   const int64_t min_size = get_mkldnn_matmul_min_size();
-  return m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
+  return at::globalContext().userEnabledMkldnn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
 
 
@@ -1500,10 +1501,15 @@ static void addmm_impl_cpu_(
   if (transpose_c) {
     bool apply_heur = apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
     if (apply_heur && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
+      try {
         mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
         // We have dispatched to ACL GEMM for single precision float
         // so do not need to dispatch to BLAS GEMM below
         dispatched = true;
+      } catch (const std::exception& e) {
+        TORCH_WARN("mkldnn_matmul failed, switching to BLAS gemm:", e.what());
+        at::globalContext().setUserEnabledMkldnn(false);
+      }
     }
   }
 #endif
@@ -1751,9 +1757,14 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   };
 
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
-  if (apply_heur && use_mkldnn_lower_precision_matmul(batch1, batch2, self_or_result)) {
+  if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result)) {
+    try {
       mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
       return;
+    } catch (const std::exception& e) {
+      TORCH_WARN("mkldnn_matmul failed, switching to baddbmm:", e.what());
+      at::globalContext().setUserEnabledMkldnn(false);
+    }
   }
 
   if (contraction_size * res_rows * res_cols < 400) {
@@ -1926,7 +1937,7 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
   // of shape [b, n, k] unnacessarily, which may cause a large memory footprint, and in the
   // worst case, an OOM
   bool t2_requires_grad = tensor1_larger ? tensor2.requires_grad() : tensor1.requires_grad();
-  if (t2_requires_grad) {
+  if (t2_requires_grad && at::GradMode::is_enabled()) {
     return true;
   }
 
@@ -1984,6 +1995,15 @@ static Tensor _matmul_impl(
 
 
   const bool has_out = out.defined();
+
+  if (has_out) {
+    // Usually we would rely on the out= kernels we decompose into to check this, but
+    // for matmul there is logic at the composite level that relies on this invariant.
+    TORCH_CHECK(!(tensor1.requires_grad() || tensor2.requires_grad() || out.requires_grad()) || !at::GradMode::is_enabled(),
+      "matmul(): functions with out=... arguments don't support automatic differentiation, "
+      "but one of the arguments requires grad."
+    );
+  }
 
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
     return has_out ? at::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);

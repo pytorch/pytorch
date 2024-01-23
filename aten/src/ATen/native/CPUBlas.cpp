@@ -5,7 +5,6 @@
 #include <ATen/Config.h>
 
 #include <c10/util/SmallBuffer.h>
-#include <c10/util/C++17.h>
 #include <c10/util/irange.h>
 
 #include <climits>
@@ -42,9 +41,7 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 #include <fbgemm/FbgemmI64.h>
 #endif  // USE_FBGEMM
 
-namespace at {
-namespace native {
-namespace cpublas {
+namespace at::native::cpublas {
 namespace internal {
 
 void normalize_last_dims(
@@ -167,6 +164,11 @@ void gemm(
     const float beta,
     float *c, int64_t ldc) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+#if AT_MKLDNN_ENABLED()
+   if (mkldnn_bf32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
+   }
+#endif
 #if AT_BUILD_WITH_BLAS()
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
@@ -581,7 +583,7 @@ void gemm_batched_with_stride(
       scalar_t beta,                                            \
       scalar_t *c, int64_t ldc, int64_t batch_stride_c);
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(INSTANTIATE_BATCHED_GEMM)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_F8NZ(INSTANTIATE_BATCHED_GEMM)
 
 DEFINE_DISPATCH(axpy_stub);
 
@@ -783,4 +785,4 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
       n, x, incx, y, incy);
 }
 
-}}}  // namespace at::native::cpublas
+}  // namespace at::native::cpublas

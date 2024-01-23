@@ -103,6 +103,7 @@ Pooling layers
     nn.FractionalMaxPool3d
     nn.LPPool1d
     nn.LPPool2d
+    nn.LPPool3d
     nn.AdaptiveMaxPool1d
     nn.AdaptiveMaxPool2d
     nn.AdaptiveMaxPool3d
@@ -395,6 +396,7 @@ Utility functions to convert Module parameter memory formats.
     :nosignatures:
 
     convert_conv2d_weight_memory_format
+    convert_conv3d_weight_memory_format
 
 Utility functions to apply and remove weight normalization from Module parameters.
 
@@ -447,6 +449,7 @@ in :func:`torch.nn.utils.parameterize.register_parametrization`.
     :nosignatures:
 
     parametrizations.orthogonal
+    parametrizations.weight_norm
     parametrizations.spectral_norm
 
 Utility functions to parametrize Tensors on existing Modules.
@@ -524,6 +527,7 @@ Lazy Modules Initialization
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
+.. py:module:: torch.nn.attention
 .. py:module:: torch.nn.backends
 .. py:module:: torch.nn.utils.stateless
 .. py:module:: torch.nn.backends.thnn

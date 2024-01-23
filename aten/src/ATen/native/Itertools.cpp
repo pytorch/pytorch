@@ -13,7 +13,6 @@
 #include <ATen/ops/full.h>
 #include <ATen/ops/meshgrid.h>
 #include <ATen/ops/stack.h>
-#include <ATen/ops/zeros_like_ops.h>
 #endif
 
 #include <vector>
@@ -42,8 +41,7 @@ Tensor _triu_mask(int64_t n, int64_t dims, bool diagonal, TensorOptions opt) {
 
 }  // namespace
 
-namespace at {
-namespace native{
+namespace at::native {
 
 Tensor cartesian_prod(TensorList tensors) {
   for(const Tensor &t : tensors) {
@@ -74,5 +72,4 @@ Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
   return at::stack(grids, 1);
 }
 
-}  // namespace native
-}  // namespace at
+}  // namespace at::native

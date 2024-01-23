@@ -5,7 +5,6 @@
 #endif
 #include <c10/util/Exception.h>
 
-#include <ATen/native/TensorTransformations.h>
 #include <ATen/native/cpu/ChannelShuffleKernel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -18,8 +17,7 @@
 #include <ATen/ops/native_channel_shuffle_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor channel_shuffle_cpu(const Tensor& self, int64_t groups) {
   auto memory_format = self.suggest_memory_format();
@@ -87,4 +85,4 @@ Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
 
 DEFINE_DISPATCH(channel_shuffle_kernel);
 
-}} // namespace at::native
+} // namespace at::native

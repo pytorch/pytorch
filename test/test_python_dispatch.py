@@ -428,7 +428,6 @@ class TestPythonRegistration(TestCase):
             register_functional_op(lib, "abs", torch.ops.aten.abs.out)
 
         schemas = [
-            'foo(Tensor x, Tensor(a!)? y) -> ()',
             'foo(Tensor x, Tensor(a!)[] y) -> ()',
             'foo(Tensor x, Tensor(a!) y, Tensor(b) z) -> Tensor(b)',
             'foo(Tensor x, Tensor(a!) y) -> (Tensor, Tensor(a))',
@@ -466,7 +465,7 @@ class TestPythonRegistration(TestCase):
 
         # check rest of functional_result is the mutated args
         mutated_args = [maybe_mutated_arg for maybe_mutated_arg, arg in zip(cloned_args, args)
-                        if not torch.allclose(maybe_mutated_arg, arg)]
+                        if not (maybe_mutated_arg is not None and arg is not None and torch.allclose(maybe_mutated_arg, arg))]
         self.assertEqual(flat_functional_result[len(flat_mutable_result):], mutated_args)
 
         # check that functionalization kernel was indeed registered
@@ -503,6 +502,33 @@ class TestPythonRegistration(TestCase):
         self._check_is_functional_variant(
             getattr(torch.ops, self.test_ns).foo.default,
             getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, w))
+
+    def test_register_functional_op_with_optional(self):
+        lib = Library(self.test_ns, 'FRAGMENT')
+        lib.define('foo(Tensor x, Tensor(a!) y, Tensor (b!) z, Tensor(c!)? w) -> ()')
+
+        def foo_impl(x, y, z, w):
+            y.fill_(3.14)
+            z.fill_(2.71)
+            if w is not None:
+                w.fill_(1.618)
+
+        lib.impl('foo', foo_impl, 'CPU')
+        register_functional_op(
+            lib,
+            'foo_functional',
+            getattr(torch.ops, self.test_ns).foo.default)
+        x = torch.randn([])
+        y = torch.randn([])
+        z = torch.randn([])
+        w = torch.randn([])
+        self._check_is_functional_variant(
+            getattr(torch.ops, self.test_ns).foo.default,
+            getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, w))
+        self._check_is_functional_variant(
+            getattr(torch.ops, self.test_ns).foo.default,
+            getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, None))
+
 
     def test_register_functional_op_one_return(self):
         lib = Library(self.test_ns, 'FRAGMENT')

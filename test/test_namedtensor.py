@@ -2051,6 +2051,13 @@ class TestNamedTensor(TestCase):
             res = torch.isinf(a)
             self.assertEqual(res.names, ['N', 'C'])
 
+    def test_support_device_named_grad(self):
+        named_tensor = torch.randn(3, 3, device='meta')
+        with self.assertRaisesRegex(RuntimeError, 'NYI: named tensors only support CPU, CUDA'):
+            named_tensor.rename_('N', 'C')
+            named_tensor.names = ['N', 'C']
+            named_tensor = torch.randn(3, 3, device='meta', names=['N', 'C'])
+
 
 if __name__ == '__main__':
     run_tests()

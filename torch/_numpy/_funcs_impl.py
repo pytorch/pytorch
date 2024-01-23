@@ -1353,7 +1353,7 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
             has_sublistout = len(operands) % 2 == 1
             if has_sublistout:
                 sublistout = operands[-1]
-            operands = list(itertools.chain(*zip(tensors, sublists)))
+            operands = list(itertools.chain.from_iterable(zip(tensors, sublists)))
             if has_sublistout:
                 operands.append(sublistout)
 
@@ -1882,6 +1882,9 @@ def histogram(
 ):
     if normed is not None:
         raise ValueError("normed argument is deprecated, use density= instead")
+
+    if weights is not None and weights.dtype.is_complex:
+        raise NotImplementedError("complex weights histogram.")
 
     is_a_int = not (a.dtype.is_floating_point or a.dtype.is_complex)
     is_w_int = weights is None or not weights.dtype.is_floating_point

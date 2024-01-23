@@ -125,6 +125,7 @@ std::vector<FileLineFunc> prepareCallstack(
         auto line =
             src->starting_line_no() + src->lineno_for_offset(range.start());
         entries.emplace_back(
+            // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
             FileLineFunc{*(src->filename()), line, entry.filename});
       }
     }
@@ -339,10 +340,12 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 #ifdef USE_C10D
 static constexpr auto kCommuName = "Collective name";
 static constexpr auto kDtype = "dtype";
-static constexpr auto kInMsgSize = "In msg size";
-static constexpr auto kOutMsgSize = "Out msg size";
+static constexpr auto kInMsgNelems = "In msg nelems";
+static constexpr auto kOutMsgNelems = "Out msg nelems";
 static constexpr auto kInSplit = "In split size";
 static constexpr auto kOutSplit = "Out split size";
+static constexpr auto kGlobalRankStart = "Global rank start";
+static constexpr auto kGlobalRankStride = "Global rank stride";
 static constexpr auto kGroupSize = "Group size";
 static constexpr int32_t kTruncatLength = 30;
 #endif // USE_C10D
@@ -364,16 +367,17 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
   map.emplace(kCommuName, fmt::format("\"{}\"", debugInfo->getColumnName()));
   map.emplace(
       kDtype, fmt::format("\"{}\"", c10::toString(debugInfo->getDType())));
-  map.emplace(kInMsgSize, std::to_string(debugInfo->getInMessageSize()));
-  map.emplace(kOutMsgSize, std::to_string(debugInfo->getOutMessageSize()));
+  map.emplace(kInMsgNelems, std::to_string(debugInfo->getInMessageNelems()));
+  map.emplace(kOutMsgNelems, std::to_string(debugInfo->getOutMessageNelems()));
   auto& inSplitSizes = debugInfo->getInputSplitSizes();
   if (!inSplitSizes.empty() && inSplitSizes.size() <= kTruncatLength) {
-    map.emplace(kInSplit, fmt::format("[{}]", fmt::join(inSplitSizes, ", ")));
+    map.emplace(
+        kInSplit, fmt::format("\"[{}]\"", fmt::join(inSplitSizes, ", ")));
   } else if (inSplitSizes.size() > kTruncatLength) {
     map.emplace(
         kInSplit,
         fmt::format(
-            "[{}, ...]",
+            "\"[{}, ...]\"",
             fmt::join(
                 inSplitSizes.begin(),
                 inSplitSizes.begin() + kTruncatLength,
@@ -381,17 +385,22 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
   }
   auto& outSplitSizes = debugInfo->getOutputSplitSizes();
   if (!outSplitSizes.empty() && outSplitSizes.size() <= kTruncatLength) {
-    map.emplace(kOutSplit, fmt::format("[{}]", fmt::join(outSplitSizes, ", ")));
+    map.emplace(
+        kOutSplit, fmt::format("\"[{}]\"", fmt::join(outSplitSizes, ", ")));
   } else if (outSplitSizes.size() > kTruncatLength) {
     map.emplace(
         kOutSplit,
         fmt::format(
-            "[{}, ...]",
+            "\"[{}, ...]\"",
             fmt::join(
                 outSplitSizes.begin(),
                 outSplitSizes.begin() + kTruncatLength,
                 ", ")));
   }
+  map.emplace(
+      kGlobalRankStart, std::to_string(debugInfo->getGlobalRankStart()));
+  map.emplace(
+      kGlobalRankStride, std::to_string(debugInfo->getGlobalRankStride()));
   map.emplace(kGroupSize, std::to_string(debugInfo->getWorldSize()));
 #endif // USE_C10D
 #endif // USE_DISTRIBUTED

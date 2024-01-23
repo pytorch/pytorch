@@ -5,8 +5,6 @@
 namespace c10 {
 
 template<typename T>
-class optional;
-template<typename T>
 class List;
 template<typename T>
 class IListRef;

@@ -836,7 +836,6 @@ void qsigmoid_kernel(
   float scale = qx.q_scale();
   auto scale_vec = Vectorized<float>(scale);
   auto zero_point_vec = Vectorized<float>((float)zero_point);
-  auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qsigmoid", [&]() {
     float inv_output_scale = 1.0 / output_scale;
@@ -861,8 +860,7 @@ void qsigmoid_kernel(
               output_scale, output_zero_point, value_dy);
         },
         [&](Vec value_qx) -> Vec {
-          auto value_dx = value_qx.dequantize(
-              scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
+          auto value_dx = value_qx.dequantize(scale_vec, zero_point_vec);
           for (auto & value : value_dx) {
             value = value.neg();
             value = value.exp();
@@ -2397,6 +2395,8 @@ void qtopk_kernel(Tensor& values,
   auto mode_values_stride = values.strides()[dim];
   auto mode_indices_stride = indices.strides()[dim];
   auto tmp_values_stride = self.strides()[dim];
+  // If sizes is empty, the tensor is scalar. This prevents accessing an empty array.
+  auto dim_size = sizes.empty() ? 1 : sizes[dim];
 
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "qtopk_cpu", [&] {
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
@@ -2404,7 +2404,7 @@ void qtopk_kernel(Tensor& values,
       static_assert(sizeof(scalar_t) == sizeof(underlying_t), "");
       return topk_impl_loop<underlying_t, underlying_t>(
           mode_values_stride, mode_indices_stride, tmp_values_stride,
-          k, sizes[dim], largest, sorted, data, strides, n);
+          k, dim_size, largest, sorted, data, strides, n);
     };
 
     int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, sizes[dim]);
