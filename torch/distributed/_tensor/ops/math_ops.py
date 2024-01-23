@@ -15,6 +15,7 @@ from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.utils import (
     as_list,
     generate_redistribute_costs,
+    normalize_dim,
     normalize_dims,
     normalize_to_torch_size,
     register_op_strategy,
@@ -221,17 +222,41 @@ def var_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     )
 
 
-@register_prop_rule(
+@register_op_strategy(
     [aten._log_softmax.default, aten._softmax.default], schema_info=RuntimeSchemaInfo(1)
 )
-def softmax_rule(op_schema: OpSchema) -> OutputSharding:
-    input_spec, softmax_dim, _ = op_schema.args_schema
-    input_spec = cast(DTensorSpec, input_spec)
+def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    input_strategy, softmax_dim, _ = op_schema.args_schema
+    input_strategy = cast(OpStrategy, input_strategy)
     softmax_dim = cast(int, softmax_dim)
-    dim_map = input_spec.dim_map
-    if softmax_dim < len(dim_map) and dim_map[softmax_dim] >= 0:
-        raise RuntimeError("Cannot run softmax on sharding dimension!")
-    return OutputSharding(input_spec)
+    softmax_dim = normalize_dim(softmax_dim, input_strategy.output_ndim)
+
+    output_strategy = OpStrategy([])
+    for idx, input_placement_strategy in enumerate(input_strategy.strategies):
+        redistribute_costs = []
+        input_src_spec = input_placement_strategy.output_spec
+
+        # make sure input is replicated along the softmax dim
+        input_target_spec = DTensorSpec(
+            mesh=mesh,
+            placements=replicate_reduction_dims(
+                input_src_spec.placements, [softmax_dim]
+            ),
+            tensor_meta=input_src_spec.tensor_meta,
+        )
+        redistribute_costs.append(
+            generate_redistribute_costs(input_strategy, input_target_spec)
+        )
+        output_target_spec = input_target_spec
+        output_strategy.strategies.append(
+            PlacementStrategy(
+                output_specs=output_target_spec,
+                input_specs=[input_target_spec],
+                redistribute_cost=redistribute_costs,
+            )
+        )
+
+    return output_strategy
 
 
 @register_prop_rule(
