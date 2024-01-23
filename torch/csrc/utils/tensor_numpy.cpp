@@ -218,9 +218,11 @@ at::Tensor tensor_from_numpy(
   if (!is_numpy_available()) {
     throw std::runtime_error("Numpy is not available");
   }
-  if (!PyArray_Check(obj)) {
-    throw TypeError("expected np.ndarray (got %s)", Py_TYPE(obj)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      PyArray_Check(obj),
+      "expected np.ndarray (got ",
+      Py_TYPE(obj)->tp_name,
+      ")");
   auto array = (PyArrayObject*)obj;
 
   // warn_if_not_writable is true when a copy of numpy variable is created.
@@ -235,30 +237,27 @@ at::Tensor tensor_from_numpy(
   // NumPy strides use bytes. Torch strides use element counts.
   auto element_size_in_bytes = PyArray_ITEMSIZE(array);
   for (auto& stride : strides) {
-    if (stride % element_size_in_bytes != 0) {
-      throw ValueError(
-          "given numpy array strides not a multiple of the element byte size. "
-          "Copy the numpy array to reallocate the memory.");
-    }
+    TORCH_CHECK_VALUE(
+        stride % element_size_in_bytes == 0,
+        "given numpy array strides not a multiple of the element byte size. "
+        "Copy the numpy array to reallocate the memory.");
     stride /= element_size_in_bytes;
   }
 
   for (const auto i : c10::irange(ndim)) {
-    if (strides[i] < 0) {
-      throw ValueError(
-          "At least one stride in the given numpy array is negative, "
-          "and tensors with negative strides are not currently supported. "
-          "(You can probably work around this by making a copy of your array "
-          " with array.copy().) ");
-    }
+    TORCH_CHECK_VALUE(
+        strides[i] >= 0,
+        "At least one stride in the given numpy array is negative, "
+        "and tensors with negative strides are not currently supported. "
+        "(You can probably work around this by making a copy of your array "
+        " with array.copy().) ");
   }
 
   void* data_ptr = PyArray_DATA(array);
-  if (!PyArray_EquivByteorders(PyArray_DESCR(array)->byteorder, NPY_NATIVE)) {
-    throw ValueError(
-        "given numpy array has byte order different from the native byte order. "
-        "Conversion between byte orders is currently not supported.");
-  }
+  TORCH_CHECK_VALUE(
+      PyArray_EquivByteorders(PyArray_DESCR(array)->byteorder, NPY_NATIVE),
+      "given numpy array has byte order different from the native byte order. "
+      "Conversion between byte orders is currently not supported.");
   Py_INCREF(obj);
   return at::lift_fresh(at::from_blob(
       data_ptr,
@@ -293,6 +292,12 @@ int aten_to_numpy_dtype(const ScalarType scalar_type) {
       return NPY_INT8;
     case kByte:
       return NPY_UINT8;
+    case kUInt16:
+      return NPY_UINT16;
+    case kUInt32:
+      return NPY_UINT32;
+    case kUInt64:
+      return NPY_UINT64;
     case kBool:
       return NPY_BOOL;
     default:
@@ -318,6 +323,12 @@ ScalarType numpy_dtype_to_aten(int dtype) {
       return kChar;
     case NPY_UINT8:
       return kByte;
+    case NPY_UINT16:
+      return kUInt16;
+    case NPY_UINT32:
+      return kUInt32;
+    case NPY_UINT64:
+      return kUInt64;
     case NPY_BOOL:
       return kBool;
     default:
@@ -344,7 +355,7 @@ ScalarType numpy_dtype_to_aten(int dtype) {
     throw python_error();
   throw TypeError(
       "can't convert np.ndarray of type %s. The only supported types are: "
-      "float64, float32, float16, complex64, complex128, int64, int32, int16, int8, uint8, and bool.",
+      "float64, float32, float16, complex64, complex128, int64, int32, int16, int8, uint64, uint32, uint16, uint8, and bool.",
       ((PyTypeObject*)pytype.get())->tp_name);
 }
 
@@ -397,9 +408,8 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
     }
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyArray_Descr* descr;
-    if (!PyArray_DescrConverter(py_typestr, &descr)) {
-      throw ValueError("cannot parse `typestr`");
-    }
+    TORCH_CHECK_VALUE(
+        PyArray_DescrConverter(py_typestr, &descr), "cannot parse `typestr`");
     dtype = numpy_dtype_to_aten(descr->type_num);
     dtype_size_in_bytes = descr->elsize;
     TORCH_INTERNAL_ASSERT(dtype_size_in_bytes > 0);
@@ -445,11 +455,10 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
       // __cuda_array_interface__ strides use bytes. Torch strides use element
       // counts.
       for (auto& stride : strides) {
-        if (stride % dtype_size_in_bytes != 0) {
-          throw ValueError(
-              "given array strides not a multiple of the element byte size. "
-              "Make a copy of the array to reallocate the memory.");
-        }
+        TORCH_CHECK_VALUE(
+            stride % dtype_size_in_bytes == 0,
+            "given array strides not a multiple of the element byte size. "
+            "Make a copy of the array to reallocate the memory.");
         stride /= dtype_size_in_bytes;
       }
     } else {
