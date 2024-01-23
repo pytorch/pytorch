@@ -33,11 +33,13 @@ namespace impl {
 // this is just an adapter so C++ calls can get to the object.
 class PythonSymNodeImpl : public c10::SymNodeImpl {
  public:
-  PythonSymNodeImpl(py::object pyobj) : c10::SymNodeImpl() {
+  PythonSymNodeImpl(py::object pyobj, c10::optional<bool> is_singleton=c10::nullopt) : c10::SymNodeImpl() {
     py::gil_scoped_acquire acquire;
-    // As an optimization, you can explicitly pass in is_singleton in the cases
-    // where you know it is definitely false (most cases today).
-    is_singleton_ = pyobj.attr("is_singleton")().is(py::handle(Py_True));
+    if (is_singleton.has_value()) {
+      is_singleton_ = is_singleton.value();
+    } else {
+      is_singleton_ = pyobj.attr("is_singleton")().is(py::handle(Py_True));
+    }
     pyobj_ = std::make_shared<c10::SafePyObject>(
         pyobj.release().ptr(), getPyInterpreter());
     key_set_ = is_singleton_ ? c10::py_singleton_ks : c10::DispatchKeySet();
@@ -67,7 +69,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
       override {                                                              \
     py::gil_scoped_acquire acquire;                                           \
     auto r = getPyObj().attr(#n)(sizes, strides);                             \
-    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));              \
+    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r), false);       \
   }
 
   // clang-format off
@@ -178,21 +180,29 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     TORCH_CHECK(pthird);
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr(fname)(pother->getPyObj(), pthird->getPyObj());
-    return c10::make_intrusive<PythonSymNodeImpl>(r);
+    return c10::make_intrusive<PythonSymNodeImpl>(r, false);
   }
 
-  c10::SymNode dispatch_common_(const char* fname, const c10::SymNode& other) {
+  c10::SymNode dispatch_common_(const char* fname, const c10::SymNode& other, bool mb_singleton=false) {
     auto pother = dynamic_cast<PythonSymNodeImpl*>(other.get());
     TORCH_CHECK(pother);
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr(fname)(pother->getPyObj());
-    return c10::make_intrusive<PythonSymNodeImpl>(r);
+    if (mb_singleton) {
+      return c10::make_intrusive<PythonSymNodeImpl>(r);
+    } else {
+      return c10::make_intrusive<PythonSymNodeImpl>(r, false);
+    }
   }
 
-  c10::SymNode dispatch_common_(const char* fname) {
+  c10::SymNode dispatch_common_(const char* fname, bool mb_singleton=false) {
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr(fname)();
-    return c10::make_intrusive<PythonSymNodeImpl>(r);
+    if (mb_singleton) {
+      return c10::make_intrusive<PythonSymNodeImpl>(r);
+    } else {
+      return c10::make_intrusive<PythonSymNodeImpl>(r, false);
+    }
   }
 
   c10::SymNode add(const c10::SymNode& other) override {
@@ -204,7 +214,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   }
 
   c10::SymNode mul(const c10::SymNode& other) override {
-    return dispatch_common_(__func__, other);
+    return dispatch_common_(__func__, other, true);
   }
 
   c10::SymNode truediv(const c10::SymNode& other) override {
@@ -280,11 +290,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   }
 
   c10::SymNode neg() override {
-    return dispatch_common_(__func__);
+    return dispatch_common_(__func__, true);
   }
 
   c10::SymNode clone() override {
-    return dispatch_common_(__func__);
+    return dispatch_common_(__func__, true);
   }
 
   c10::SymNode sym_float() override {
