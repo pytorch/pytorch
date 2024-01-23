@@ -39,7 +39,6 @@ class TestEmbeddingOp(DTensorTestBase):
         )
         return sharded_embedding
 
-
     def _run_embedding_op_test(
         self,
         device_mesh,
@@ -147,6 +146,7 @@ class TestEmbeddingOp(DTensorTestBase):
 
     @with_comms
     def test_sharded_embedding_colwise_max_norm_errors(self):
+        mesh = self.build_device_mesh()
         with self.assertRaisesRegex(
             NotImplementedError,
             "does not have a sharding strategy registered.",
@@ -166,14 +166,10 @@ class TestEmbeddingOp(DTensorTestBase):
         # test collectives
         embedding_mod = torch.nn.Embedding(10, 20, device=self.device_type)
         sharded_embedding = self._apply_sharding(embedding_mod, 0, mesh)
-        inp = torch.randint(
-            0, 10, (8, 8), device=self.device_type
-        )
+        inp = torch.randint(0, 10, (8, 8), device=self.device_type)
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
         output = sharded_embedding(replicated_inp)
         print(output._spec)
-
-
 
 
 if __name__ == "__main__":

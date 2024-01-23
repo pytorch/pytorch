@@ -100,7 +100,9 @@ class _MaskPartial(_Partial):
         self.mask_buffer.release_mask()
 
         # perform sum reduction
-        return funcol.all_reduce(tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim))
+        return funcol.all_reduce(
+            tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim)
+        )
 
     def _reduce_shard_value(
         self,
@@ -125,15 +127,20 @@ class _MaskPartial(_Partial):
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, _MaskPartial):
             return False
+
+        # if either data is not None, we invalidate the sharding cache, as this indicates
+        # the current MaskPartial placement is still in use and should not be used for cache hit.
+        if self.mask_buffer.data is not None or other.mask_buffer.data is not None:
+            return False
+
         return (
-            self.logical_dim_size == other.logical_dim_size
-            and self.mask_buffer.data == other.mask_buffer.data
-            and self.reduce_op == other.reduce_op
+            self.reduce_op == other.reduce_op
+            and self.logical_dim_size == other.logical_dim_size
         )
 
     def __hash__(self) -> int:
         return 1 + hash(
-            (self.logical_dim_size, self.mask_buffer.data, self.reduce_op)
+            (self.logical_dim_size, id(self.mask_buffer.data), self.reduce_op)
         )
 
     def __repr__(self) -> str:
@@ -162,8 +169,6 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     weight_shape = weight_strategy.output_shape
     indices_shape = indices_strategy.output_shape
     output_emd_dim = len(indices_shape)
-
-    weight_spec = weight_strategy.strategies[0].output_spec
 
     all_mesh_dim_strategies = []
 
