@@ -3,7 +3,11 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
-from torch.distributed._composable_state import _get_module_state, _State
+from torch.distributed._composable_state import (
+    _get_module_state,
+    _insert_module_state,
+    _State,
+)
 
 
 class FSDPState(_State):
@@ -12,6 +16,12 @@ class FSDPState(_State):
 
     def __init__(self):
         super().__init__()
+
+    # Define a separate init since `__init__` is called in the contract
+    def init(self, module: nn.Module, device: torch.device) -> None:
+        _insert_module_state(module, self)
+        self._module = module
+        self._device = device
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[FSDPState]:
