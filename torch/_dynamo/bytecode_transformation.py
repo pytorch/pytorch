@@ -955,7 +955,7 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
             return instructions[i].argval is not _NotProvided
 
         if instructions[i].opname == "LOAD_FAST":
-            if not instructions[i].argval in varnames:
+            if instructions[i].argval not in varnames:
                 breakpoint()
 
         if instructions[i].opname == "LOAD_GLOBAL":
@@ -980,6 +980,8 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
                 instructions[i].arg = names[instructions[i].argval]
         elif instructions[i].opcode in HAS_FREE:
             if should_compute_arg():
+                if instructions[i].argval not in freenames:
+                    breakpoint()
                 instructions[i].arg = freenames[instructions[i].argval]
         elif instructions[i].opcode in HAS_CONST:
             # NOTE: only update argval if arg is not provided. This assumes
@@ -1038,7 +1040,10 @@ def transform_code_object(code, transformations, safe=False) -> types.CodeType:
     instructions = cleaned_instructions(code, safe)
     propagate_line_nums(instructions)
 
+    print(f"pre transform: {id(code_options)} -> {code_options['co_freevars']}")
     transformations(instructions, code_options)
+    print("transformations:", transformations)
+    print(f"post transform: {id(code_options)} -> {code_options['co_freevars']}")
     return clean_and_assemble_instructions(instructions, keys, code_options)[1]
 
 
@@ -1074,7 +1079,7 @@ def clean_and_assemble_instructions(
     code_options["co_stacksize"] = stacksize_analysis(instructions)
     assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {
         "co_posonlyargcount"
-    }
+    }, breakpoint()
     if sys.version_info >= (3, 11):
         code_options["co_exceptiontable"] = assemble_exception_table(
             compute_exception_table(instructions)

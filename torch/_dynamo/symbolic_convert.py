@@ -43,7 +43,13 @@ from .bytecode_transformation import (
 from .code_context import code_context
 from .codegen import PyCodegen
 from .current_scope_id import current_scope_id
-from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported, NestedGraphBreak
+from .exc import (
+    ArgsMismatchError,
+    BackendCompilerFailed,
+    NestedGraphBreak,
+    unimplemented,
+    Unsupported,
+)
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
@@ -123,6 +129,32 @@ graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 tls = threading.local()
+
+
+def update_collection(a, b):
+    """Update a collection 'a' with another collection 'b'."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        for key, b_val in b.items():
+            if key in a:
+                a_val = a[key]
+                if isinstance(a_val, (dict, list, tuple)) and isinstance(
+                    b_val, (dict, list, tuple)
+                ):
+                    a[key] = update_collection(a_val, b_val)
+                # Non-collection values in a dictionary are left unchanged
+            else:
+                # If key in 'b' is not in 'a', add it to 'a'
+                a[key] = b_val
+    elif isinstance(a, list) and isinstance(b, list):
+        a.extend(b)
+    elif isinstance(a, tuple) and isinstance(b, tuple):
+        # breakpoint()
+        # combined_set = set(a) | set(b)
+        a = tuple(set(a + b))
+    else:
+        # If 'a' and 'b' are of different types, replace 'a' with 'b'
+        return b
+    return a
 
 
 @dataclasses.dataclass
@@ -655,7 +687,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         last_tracer = tracers[-1]
         if last_tracer.symbolic_result:
             return last_tracer.symbolic_result
-        new_co_names = list(self.output.global_scope)
+        # new_co_names = list(self.output.global_scope)
 
         # TODO(voz): Actually compute the push properly! Do not land as such. Tracer should
         # smuggle the push a la what it does when it calls create_call_resume_at
@@ -663,15 +695,81 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.push(UnknownVariable())
         if isinstance(self, InstructionTranslator):
             outs = []
+            co_names = ()
+            co_freevars = ()
+            co_varnames = ()
             for tracer in tracers:
-                cg = PyCodegen(tracer)
+                cg = PyCodegen(self)
                 resume_at_insts = tracer.create_call_resume_at(tracer.next_instruction)
-                out = torch._dynamo.bytecode_transformation.clean_and_assemble_instructions(resume_at_insts, torch._dynamo.bytecode_transformation.get_code_keys(), cg.code_options)
+                cg_options = copy.deepcopy(cg.code_options)
+                co_names = (
+                    cg.code_options["co_names"]
+                    + tracer.code_options["co_names"]
+                    + co_names
+                )
+                co_freevars = (
+                    cg.code_options["co_freevars"]
+                    + tracer.code_options["co_freevars"]
+                    + co_freevars
+                )
+                co_varnames = (
+                    cg.code_options["co_varnames"]
+                    + tracer.code_options["co_varnames"]
+                    + co_varnames
+                )
+                cg_options["co_names"] = co_names
+                cg_options["co_freevars"] = co_freevars
+                out = torch._dynamo.bytecode_transformation.clean_and_assemble_instructions(
+                    resume_at_insts,
+                    torch._dynamo.bytecode_transformation.get_code_keys(),
+                    cg_options,
+                )
+
                 outs = outs + out[0][:-1]
+            co_names = tuple(set(co_names))
+            co_freevars = tuple(set(co_freevars))
+            co_varnames = tuple(set(co_varnames))
+
+            self._cell_and_freevars += co_freevars
+
             resume_at = outs + self.create_call_resume_at(
-                self.next_instruction, [], []
+                self.next_instruction, [], [], [], []
             )
+            cg = PyCodegen(self)
+            for name in co_names:
+                if name not in self.code_options["co_names"]:
+                    self.code_options["co_names"] += (name,)
+
+            for freevar in co_freevars:
+                if freevar not in self.code_options["co_freevars"]:
+                    self.code_options["co_freevars"] += (freevar,)
+
+            for varname in co_varnames:
+                if varname not in self.code_options["co_varnames"]:
+                    self.code_options["co_varnames"] += (varname,)
+
+            for name in co_names:
+                if name not in self.output.code_options["co_names"]:
+                    self.output.code_options["co_names"] += (name,)
+
+            for freevar in co_freevars:
+                if freevar not in self.output.code_options["co_freevars"]:
+                    self.output.code_options["co_freevars"] += (freevar,)
+
+            for varname in co_varnames:
+                if varname not in self.output.code_options["co_varnames"]:
+                    self.output.code_options["co_varnames"] += (varname,)
+
+            # breakpoint()
+            # self.code_options['co_names'] += co_names
+            cg = PyCodegen(self)
+            print(f"cg: {id(cg.code_options)} -> {cg.code_options['co_freevars']}")
+            print(
+                f"self: {id(self.code_options)} -> {self.code_options['co_freevars']}"
+            )
+            # breakpoint()
             self.output.add_output_instructions(resume_at)
+
             raise NestedGraphBreak()
         else:
             self.nested_break_chain = tracers
@@ -1359,6 +1457,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         inst,
         prelude: List[Instruction] = [],  # noqa: B006
         new_co_names: List[str] = [],  # noqa: B006
+        new_co_freevars: List[str] = [],
+        new_co_varnames: List[str] = [],  # noqa: B006
     ):
         """
         If prelude is non-empty, it will first run the prelude within the resume at.
@@ -1419,6 +1519,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             tuple(null_idxes),
             tuple(prelude),
             tuple(new_co_names),
+            tuple(new_co_freevars),
+            tuple(new_co_varnames),
         )
 
         # Add original GraphModule context to the resume function to handle

@@ -2147,7 +2147,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(ValueError, "zip()"):
             opt_fn(x, ys[:1], zs)
 
-
     def test_nested_inlined_graph_break(self):
         def h(x):
             a = x.cos()
@@ -2256,6 +2255,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
         # self.assertEqual(cnts.frame_count, 2)
+
 
 instantiate_parametrized_tests(FunctionTests)
 

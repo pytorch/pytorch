@@ -599,17 +599,17 @@ def _compile(
         assert (
             code.co_varnames[:total_argcount_old]
             == out_code.co_varnames[:total_argcount_new]
-        ), msg
+        ), (msg, code, breakpoint())
 
         msg = "free var mismatch: "
         msg += f"old code object has free var {code.co_freevars}, "
         msg += f"new code object has free var {out_code.co_freevars}"
-        assert code.co_freevars == out_code.co_freevars, msg
+        assert code.co_freevars == out_code.co_freevars, (msg, code, breakpoint())
 
         msg = "cell var mismatch: "
         msg += f"old code object has cell var {code.co_cellvars}, "
         msg += f"new code object has cell var {out_code.co_cellvars}"
-        assert code.co_cellvars == out_code.co_cellvars, msg
+        assert code.co_cellvars == out_code.co_cellvars, (msg, code)
 
         # Skipping Dynamo on a frame without any extracted graph.
         # This does not affect eager functionality. But this is necessary

@@ -311,7 +311,7 @@ class PyCodegen:
             output.append(create_instruction("PUSH_NULL"))
             output.extend(self.rot_n(num_on_stack + 1))
         for var in freevars:
-            assert var in self.cell_and_freevars()
+            assert var in self.cell_and_freevars(), breakpoint()
             output.append(create_instruction("LOAD_CLOSURE", argval=var))
         output.append(create_instruction("BUILD_TUPLE", arg=len(freevars)))
         output.append(self.create_load_const(code))

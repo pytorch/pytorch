@@ -337,6 +337,8 @@ class ContinueExecutionCache:
         null_idxes: Tuple[int],
         prelude: Tuple[Instruction],
         updated_co_names: Tuple[str],
+        updated_co_freevars: Tuple[str],
+        updated_co_varnames: Tuple[str],
     ) -> types.CodeType:
         assert offset is not None
         assert not (
@@ -356,6 +358,8 @@ class ContinueExecutionCache:
                 null_idxes,
                 prelude,
                 updated_co_names,
+                updated_co_freevars,
+                updated_co_varnames,
             )
 
         is_py311_plus = sys.version_info >= (3, 11)
@@ -382,7 +386,9 @@ class ContinueExecutionCache:
                     ] = f"{module_name}.resume_in_{co_name}_at_{lineno}"
             code_options["co_firstlineno"] = lineno
             code_options["co_cellvars"] = tuple()
+            print(f"pre: {id(code_options)} -> {code_options['co_freevars']}")
             code_options["co_freevars"] = freevars
+            print(f"post: {id(code_options)} -> {code_options['co_freevars']}")
             code_options["co_argcount"] = len(args)
             code_options["co_posonlyargcount"] = 0
             code_options["co_kwonlyargcount"] = 0
@@ -395,6 +401,12 @@ class ContinueExecutionCache:
             for name in updated_co_names:
                 if name not in code_options["co_names"]:
                     code_options["co_names"] += (name,)
+            for name in updated_co_freevars:
+                if name not in code_options["co_freevars"]:
+                    code_options["co_freevars"] += (name,)
+            for name in updated_co_varnames:
+                if name not in code_options["co_varnames"]:
+                    code_options["co_varnames"] += (name,)
             target = next(i for i in instructions if i.offset == offset)
 
             prefix = []

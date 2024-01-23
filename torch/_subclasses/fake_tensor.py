@@ -1305,7 +1305,12 @@ class FakeTensor(torch.Tensor):
             return NotImplemented
 
         with fake_mode:  # type: ignore[attr-defined]
-            return func(*args, **kwargs)
+            print("RUNNING FUNC?", func)
+            try:
+                func(*args, **kwargs)
+            except Exception as e:
+                print("WTF??")
+                raise
 
     @staticmethod
     def _find_common_device(func, flat_args) -> Tuple[torch.device, bool]:

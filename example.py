@@ -1,11 +1,13 @@
 import torch
 import torch._dynamo
 
+
 def h(x):
     a = x.cos()
     print(x)
     b = a.cos()
     return b
+
 
 def g(x):
     x = x.sin()
