@@ -1126,7 +1126,12 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
   // Abort communicators after all threads have exited to avoid having the
   // threads dying due to aborted communicator and raising a SIGABRT
+  // We need to include PG information in the abort reason so we can tell the
+  // abort order.
   std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
+  LOG(INFO)
+      << logPrefix()
+      << "ProcessGroupNCCL aborting communicators, check for 'abort finished' logs or look for abort hang";
   abort(abortReason);
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL abort finished.";
 
@@ -1577,6 +1582,9 @@ void ProcessGroupNCCL::watchdogHandler() {
         // completed.
         ++it;
       }
+      // Increment heartbeat after each work processed,
+      // in case processing is slowed down (but not hung) by cuda api contention
+      heartbeat_++;
     }
     // process a request to dump the trace. only PG uid 0 will respond to dump
     // requests, but this is fine since all PG's feed into the same flight
