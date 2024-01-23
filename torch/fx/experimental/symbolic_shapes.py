@@ -15,7 +15,21 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
-from typing import Any, cast, Callable, Dict, List, Optional, Sequence, Set, Tuple, Type, Union, Iterable
+from typing import (
+    Any,
+    cast,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    Union,
+    TYPE_CHECKING
+)
 
 import torch
 import torch.fx
@@ -44,6 +58,9 @@ from torch._utils_internal import signpost_event
 
 from torch._logging import LazyString
 
+if TYPE_CHECKING:
+    from torch._dynamo.source import TensorPropertySource
+
 InputList = List
 DimList = List
 
@@ -64,7 +81,7 @@ __all__ = [
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool", "is_singleton", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
     "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext",
-    "StatefulSymbolicContext", "SubclassSymbolicContext"
+    "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -81,6 +98,7 @@ def uninteresting_files():
         sys.modules[__name__],
         torch.fx.experimental.recording,
         torch.fx.experimental.sym_node,
+        torch.fx.interpreter,
         torch,
         torch._inductor.sizevars,
         torch._library.abstract_impl,
@@ -256,7 +274,7 @@ def has_free_symbols(val: Union[SymInt, torch.Tensor]) -> bool:
 # Like free_symbols, but filtered to only report unbacked symbols
 def free_unbacked_symbols(x):
     # NB: keep synced with is_unbacked_symint
-    return {s for s in free_symbols(x) if s.name.startswith(("i", "f"))}
+    return {s for s in free_symbols(x) if s.name.startswith(("u", "f"))}
 
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!
@@ -318,16 +336,34 @@ def definitely_false(a):
             return False
     return not bool(a)
 
-# TODO: could improve parallel_or/parallel_and by avoiding guards
-# if there exists a quantity that can be handled un-guardedly.  However,
-# for backed SymInts, avoiding guards doesn't really matter in practice,
-# so I chose not to do it.
+def statically_known_true(x: Union[bool, SymBool]) -> bool:
+    """Returns True if x can be simplified to a constant and is true.
+
+    NOTE: This function doesn't introduce new guards, so the expression may end
+    up evaluating to true at runtime even if this function returns False.
+
+    """
+    if isinstance(x, SymBool):
+        expr = x.node.expr
+        shape_env = x.node.shape_env
+        try:
+            simplified = shape_env._maybe_evaluate_static(expr)
+            if simplified is not None:
+                return bool(simplified)
+        except Exception:
+            log.debug("Could not simplify %s", expr)
+        return False
+    assert isinstance(x, bool)
+    return x
+
 
 def parallel_or(*args):
     """
     Evaluate the logical OR of several arguments, avoiding guarding on
     unbacked SymInts if another argument is definitely True.
     """
+    if any(statically_known_true(a) for a in args):
+        return True
     if any(definitely_true(a) for a in args):
         return True
     return any(args)
@@ -337,6 +373,8 @@ def parallel_and(*args):
     Evaluate the logical FALSE of several arguments, avoiding guarding on
     unbacked SymInts if another argument is definitely False.
     """
+    if any(statically_known_true(torch.sym_not(a)) for a in args):
+        return False
     if any(definitely_false(a) for a in args):
         return False
     return all(args)
@@ -968,6 +1006,8 @@ SYMPY_INTERP = {
     'floor': math.floor,
     'ceiling': math.ceil,
     'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
+    'Round': builtins.round,
+    'RoundDecimal': builtins.round,
 }
 
 
@@ -1097,7 +1137,9 @@ class DynamicDimConstraintPrinter(StrPrinter):
 
     def _print_Symbol(self, expr) -> str:
         assert isinstance(expr, sympy.Symbol), str(type(expr))
-
+        assert self.symbol_to_source.get(expr), (
+            f"Unknown symbol {expr} created by constraints solver"
+        )
         return self.print_source(self.symbol_to_source[expr][0])
 
     def _print_Relational(self, expr):
@@ -1340,7 +1382,7 @@ class DimConstraints:
         self.raise_inconsistencies()
         # as long as there are symbols with equalities, solve for them
         # NOTE(avik): this is guaranteed to terminate (#iterations <= #symbols)
-        while(self._symbols_with_equalities):
+        while self._symbols_with_equalities:
             s = self._symbols_with_equalities.pop()
             exprs = self._univariate_inequalities.pop(s)
             solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
@@ -1386,7 +1428,7 @@ class DimConstraints:
                         self._dynamic_results.add(self._dcp.doprint(arg))
                 else:
                     self._dynamic_results.add(self._dcp.doprint(solution))
-            except NotImplementedError as e:
+            except (NotImplementedError, AssertionError) as e:
                 log.warning("Failed to reduce inequalities: %s", e)
                 for expr in exprs:
                     self._dynamic_results.add(self._dcp.doprint(expr))
@@ -1502,7 +1544,7 @@ class DimConstraints:
                 debug_names.update(k.split(" = ")[0] for k in forced_specializations.keys())
                 buf += (
                     f"Specializations unexpectedly required ({', '.join(debug_names)})! "
-                    "For more information, run with TORCH_LOGS=dynamic.\n"
+                    "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
                 )
                 for s, val in forced_specializations.items():
                     buf += f"  - {s} must be specialized to {val} because the guards generated for it are too complex.\n"
@@ -1712,6 +1754,8 @@ class ShapeEnv:
         duck_shape=True,
         # For debugging
         co_fields=None,
+        # XXX Add any new settings that could affect FakeTensor evaluation
+        # to: torch._subclasses.fake_tensor._ShapeEnvSettings
     ):
         # Not directly used by ShapeEnv; indirectly used by FakeTensor
         self.allow_scalar_outputs = allow_scalar_outputs
@@ -2064,7 +2108,7 @@ class ShapeEnv:
                            source: Source,
                            symbolic_context: SymbolicContext
                            ) -> List[sympy.Expr]:
-        return self._produce_dyn_sizes_from_int_tuple(tuple(ex.size()), source, symbolic_context)
+        return self._produce_dyn_sizes_from_int_tuple(tuple(ex_size), source, symbolic_context)
 
     def _produce_dyn_sizes_from_int_tuple(self,
                                           tensor_size: Tuple[int],
@@ -2338,7 +2382,7 @@ class ShapeEnv:
 
     @record_shapeenv_event()
     def create_unbacked_symint(self):
-        symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = self._default_unspecified_value_range()
@@ -2353,11 +2397,11 @@ class ShapeEnv:
 
     def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
         # NB: keep synced with free_unbacked_symbols
-        return str(symbol).startswith("i")
+        return str(symbol).startswith("u")
 
     @record_shapeenv_event()
     def create_unbacked_symbool(self):
-        symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         self.var_to_range[symbol] = ValueRanges(0, 1)
@@ -2999,7 +3043,7 @@ class ShapeEnv:
                 err = '\n'.join(error_msgs)
                 raise ConstraintViolationError(
                     f"Constraints violated ({debug_names})! "
-                    "For more information, run with TORCH_LOGS=dynamic.\n"
+                    "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
                     f"{err}"
                 )
             elif len(warn_msgs) > 0:
@@ -3336,7 +3380,7 @@ class ShapeEnv:
             "It appears that you're trying to get a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
             f"The expression we were trying to evaluate is {expr} (unhinted: {unhinted_expr}).  "
-            "Scroll up to see where each of these data-dependent accesses originally occurred."
+            "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )
@@ -3753,7 +3797,7 @@ class ShapeEnv:
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
-            cands = sorted([s for s in expr.free_symbols if s.name.startswith("i")], key=lambda s: int(s.name[1:]))
+            cands = sorted([s for s in expr.free_symbols if s.name.startswith("u")], key=lambda s: int(s.name[1:]))
             self.deferred_runtime_asserts.setdefault(cands[-1], []).append(ra)
             self.num_deferred_runtime_asserts += 1
             self._update_version_counter()

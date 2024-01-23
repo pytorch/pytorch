@@ -95,6 +95,8 @@ class Shard(Placement):
         tensor: torch.Tensor,
         pad_size: int,
     ) -> torch.Tensor:
+        if pad_size == 0:
+            return tensor
         pad = [0, 0] * (tensor.ndim - self.dim)
         pad[-1] = pad_size
         return torch.nn.functional.pad(tensor, pad)
@@ -104,6 +106,8 @@ class Shard(Placement):
         tensor: torch.Tensor,
         pad_size: int,
     ) -> torch.Tensor:
+        if pad_size == 0:
+            return tensor
         return tensor.narrow(
             self.dim,
             start=0,
@@ -121,25 +125,22 @@ class Shard(Placement):
         returns the local shard size and offset on a given tensor dim
         """
         # Compute the chunk size inline with ``torch.chunk``
+        if size_on_dim % num_chunks == 0:
+            full_chunk_size = size_on_dim // num_chunks
+            return full_chunk_size, full_chunk_size * rank if return_offset else -1
+
+        # uneven sharding case
         full_chunk_size = (size_on_dim + num_chunks - 1) // num_chunks
+        shard_starting_idx = full_chunk_size * rank
 
-        # Compute chunk size for each chunk on the dimension.
-        chunk_sizes = [
-            max(
-                min(size_on_dim, full_chunk_size * (idx + 1)) - full_chunk_size * idx,
-                0,
+        if size_on_dim < shard_starting_idx:
+            return 0, size_on_dim if return_offset else -1
+        else:
+            local_shard_size = (
+                min(size_on_dim, shard_starting_idx + full_chunk_size)
+                - shard_starting_idx
             )
-            for idx in range(num_chunks)
-        ]
-        local_shard_size = chunk_sizes[rank]
-
-        local_offset_on_dim = -1
-        if return_offset:
-            # Return global tensor dim size of current dimension if for empty shard
-            # to represent the end of the corresponding tensor dim.
-            local_offset_on_dim = sum(chunk_sizes[:rank])
-
-        return (local_shard_size, local_offset_on_dim)
+            return local_shard_size, shard_starting_idx if return_offset else -1
 
     def _shard_tensor(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
@@ -192,6 +193,8 @@ class Shard(Placement):
                 tensor, num_chunks, with_padding=True, contiguous=True
             )
             tensor = torch.cat(scattered_list, dim=self.dim)
+        elif not tensor.is_contiguous():
+            tensor = tensor.contiguous()
 
         output = funcol.reduce_scatter_tensor(
             tensor, reduce_op.name, scatter_dim=self.dim, group=(mesh, mesh_dim)
@@ -204,50 +207,37 @@ class Shard(Placement):
     def _to_replicate_tensor(
         self,
         local_tensor: torch.Tensor,
-        size: torch.Size,
         mesh: DeviceMesh,
         mesh_dim: int,
+        current_logical_shape: List[int],
     ) -> torch.Tensor:
         """
         This function all_gather all shards and return a tensor that
         is replicated on the previously sharded mesh dimension
         """
-        my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(mesh_dim=mesh_dim)
+        # check if it's uneven, so we need to pad input tensor before all_gather
+        local_shape = list(local_tensor.size())
 
-        if my_coordinate is None:
-            # if rank is not part of mesh, we simply return local_tensor,
-            # which should be an empty tensor
-            return local_tensor
+        logical_dim_size = current_logical_shape[self.dim]
+        is_padded = logical_dim_size % num_chunks != 0
 
-        # check if it needs to pad input tensor before all_gather
-        full_chunk_size = (size[self.dim] + num_chunks - 1) // num_chunks
-        chunk_sizes = [
-            max(
-                min(size[self.dim], full_chunk_size * (idx + 1))
-                - full_chunk_size * idx,
-                0,
-            )
-            for idx in range(num_chunks)
-        ]
-        pad_sizes = [full_chunk_size - chunk_size for chunk_size in chunk_sizes]
-        is_padded = size[self.dim] % num_chunks != 0
-
-        pad_size = pad_sizes[my_coordinate[mesh_dim]]
-        if pad_size > 0:
+        if is_padded:
+            full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
+            pad_size = full_chunk_size - local_shape[self.dim]
             local_tensor = self._pad_tensor(local_tensor, pad_size)
-        local_tensor = local_tensor.contiguous()
+
+        if not local_tensor.is_contiguous():
+            local_tensor = local_tensor.contiguous()
 
         result = funcol.all_gather_tensor(
             local_tensor,
             gather_dim=self.dim,
             group=(mesh, mesh_dim),
         )
-
-        # Unpad the tensor if the input tensor was padded
         if is_padded:
-            full_pad_size = sum(pad_sizes)
-            result = self._unpad_tensor(result, full_pad_size)
+            unpad_size = full_chunk_size * num_chunks - logical_dim_size
+            result = self._unpad_tensor(result, unpad_size)
         return result
 
     def __eq__(self, other: object) -> bool:
@@ -454,6 +444,12 @@ class DTensorSpec:
         if self.tensor_meta is None:
             raise ValueError("tensor_meta is not set")
         return self.tensor_meta.shape
+
+    @property
+    def stride(self) -> Tuple[int, ...]:
+        if self.tensor_meta is None:
+            raise ValueError("tensor_meta is not set")
+        return self.tensor_meta.stride
 
     @property
     def ndim(self) -> int:

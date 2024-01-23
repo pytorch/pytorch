@@ -868,7 +868,7 @@ def _as_iterable(obj) -> collections.abc.Iterable:
 
 def _ensure_all_tensors_same_dtype(*tensors) -> None:
     last_dtype = None
-    for tensor in itertools.chain(*map(_as_iterable, tensors)):
+    for tensor in itertools.chain.from_iterable(map(_as_iterable, tensors)):
         tensor_dtype = tensor.dtype
         # Mixing complex and its element type is allowed
         if tensor_dtype.is_complex:
@@ -1161,6 +1161,15 @@ def init_process_group(
             backend, ``is_high_priority_stream`` can be specified so that
             the nccl backend can pick up high priority cuda streams when
             there're compute kernels waiting.
+        device_id (torch.device, optional): a single, specific device
+            to "bind" this process to, allowing for backend-specific
+            optimizations.  Currently this has two effects, only under
+            NCCL: the communicator is immediately formed (calling
+            ``ncclCommInit*`` immediately rather than the normal lazy
+            call) and sub-groups will use ``ncclCommSplit`` when
+            possible to avoid unnecessary overhead of group creation. If you
+            want to know NCCL initialization error early, you can also use this
+            field.
 
     .. note:: To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
         on a system that supports MPI.
@@ -1373,7 +1382,7 @@ def _new_process_group_helper(
     if device_id:
         pg.bound_device_id = device_id
     backend_config = BackendConfig(backend)
-    backend_class: ProcessGroup
+    backend_class: torch._C._distributed_c10d.Backend
     for device, backend_str in backend_config.get_device_backend_map().items():
         # Use the group name as prefix in the default store, such that
         # a single store can be reused by multiple groups.
@@ -1420,6 +1429,7 @@ def _new_process_group_helper(
             if split_from:
                 pg_options.split_from = split_from
                 pg_options.split_color = _process_group_color(global_ranks_in_group)
+            pg_options.global_ranks_in_group = global_ranks_in_group
             backend_class = ProcessGroupNCCL(
                 backend_prefix_store, group_rank, group_size, pg_options)
             backend_type = ProcessGroup.BackendType.NCCL
@@ -1465,7 +1475,7 @@ def _new_process_group_helper(
         # TODO: This defaults to the old behavior for PythonProcessGroups which overwrites the
         # ProcessGroup instance
         if issubclass(type(backend_class), ProcessGroup):
-            pg = backend_class
+            pg = backend_class  # type: ignore[assignment]
             break
 
         # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
@@ -2110,8 +2120,8 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     Complex tensors are supported.
 
     Args:
-        tensors (List[Tensor]): Input and output of the collective. The function
-            operates in-place.
+        tensors (Union[List[Tensor], Tensor]): Input and output of the collective.
+            The function operates in-place.
         op (Optional[ReduceOp]): One of the values from
             ``torch.distributed.ReduceOp`` enum. Specifies an operation used for
             element-wise reductions.
@@ -2129,6 +2139,8 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         "use it, please revisit our documentation later at "
         "https://pytorch.org/docs/master/distributed.html#collective-functions"
     )
+    if isinstance(tensors, torch.Tensor):
+        tensors = [tensors]
     _check_tensor_list(tensors, "tensor")
     _ensure_all_tensors_same_dtype(tensors)
     if _rank_not_in_group(group):
@@ -2198,7 +2210,7 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
     else:
         work.wait()
 
-def _object_to_tensor(obj, device):
+def _object_to_tensor(obj, device, group):
     f = io.BytesIO()
     _pickler(f).dump(obj)
     byte_storage = torch.ByteStorage._from_buffer(f.getvalue())  # type: ignore[attr-defined]
@@ -2206,11 +2218,21 @@ def _object_to_tensor(obj, device):
     # Otherwise, it will casue 100X slowdown.
     # See: https://github.com/pytorch/pytorch/issues/65696
     byte_tensor = torch.ByteTensor(byte_storage).to(device)
+    if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
+        backend = get_backend(group)
+        if backend == Backend.NCCL:
+            hash = torch._C._distributed_c10d._hash_tensors([byte_tensor])
+            logger.warning(f"_object_to_tensor size: {byte_tensor.numel()} hash value: {hash}")  # noqa: G004
     local_size = torch.LongTensor([byte_tensor.numel()]).to(device)
     return byte_tensor, local_size
 
 
-def _tensor_to_object(tensor, tensor_size):
+def _tensor_to_object(tensor, tensor_size, group):
+    if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
+        backend = get_backend(group)
+        if backend == Backend.NCCL:
+            hash = torch._C._distributed_c10d._hash_tensors([tensor])
+            logger.warning(f"_tensor_to_object size: {tensor.numel()} hash value: {hash}")  # noqa: G004
     tensor = tensor.cpu()
     buf = tensor.numpy().tobytes()[:tensor_size]
     return _unpickler(io.BytesIO(buf)).load()
@@ -2275,7 +2297,7 @@ def all_gather_object(object_list, obj, group=None):
         return
 
     current_device = _get_pg_default_device(group)
-    input_tensor, local_size = _object_to_tensor(obj, current_device)
+    input_tensor, local_size = _object_to_tensor(obj, current_device, group)
 
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
@@ -2303,10 +2325,8 @@ def all_gather_object(object_list, obj, group=None):
     # Deserialize outputs back to object.
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.uint8)
-        if tensor.device != torch.device("cpu"):
-            tensor = tensor.cpu()
         tensor_size = object_size_list[i]
-        object_list[i] = _tensor_to_object(tensor, tensor_size)
+        object_list[i] = _tensor_to_object(tensor, tensor_size, group)
 
 
 @_exception_logger
@@ -2377,7 +2397,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     my_rank = get_rank()
     _validate_output_list_for_rank(my_rank, dst, object_gather_list)
     current_device = _get_pg_default_device(group)
-    input_tensor, local_size = _object_to_tensor(obj, current_device)
+    input_tensor, local_size = _object_to_tensor(obj, current_device, group)
 
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
@@ -2417,7 +2437,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.uint8)
         tensor_size = object_size_list[i]
-        object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
+        object_gather_list[i] = _tensor_to_object(tensor, tensor_size, group)
 
 
 @_exception_logger
@@ -2495,7 +2515,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
     my_rank = get_rank()
     # Serialize object_list elements to tensors on src rank.
     if my_rank == src:
-        tensor_list, size_list = zip(*[_object_to_tensor(obj, current_device) for obj in object_list])
+        tensor_list, size_list = zip(*[_object_to_tensor(obj, current_device, group) for obj in object_list])
         object_sizes_tensor = torch.cat(size_list)
     else:
         object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long, device=current_device)
@@ -2525,10 +2545,8 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         for i, obj_size in enumerate(object_sizes_tensor):
             obj_view = object_tensor[offset : offset + obj_size]
             obj_view = obj_view.type(torch.uint8)
-            if obj_view.device != torch.device("cpu"):
-                obj_view = obj_view.cpu()
             offset += obj_size
-            object_list[i] = _tensor_to_object(obj_view, obj_size)
+            object_list[i] = _tensor_to_object(obj_view, obj_size, group)
 
 
 @_exception_logger
@@ -2605,7 +2623,7 @@ def scatter_object_list(
     pg_device = _get_pg_default_device(group)
     if my_rank == src:
         tensor_list, tensor_sizes = zip(
-            *[_object_to_tensor(obj, pg_device) for obj in scatter_object_input_list]
+            *[_object_to_tensor(obj, pg_device, group) for obj in scatter_object_input_list]
         )
         tensor_list, tensor_sizes = list(tensor_list), list(tensor_sizes)
 
@@ -2638,7 +2656,7 @@ def scatter_object_list(
     )
 
     # Deserialize back to object
-    scatter_object_output_list[0] = _tensor_to_object(output_tensor, obj_tensor_size)
+    scatter_object_output_list[0] = _tensor_to_object(output_tensor, obj_tensor_size, group)
 
 
 @_exception_logger
@@ -3613,7 +3631,7 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
 
 
 def _create_process_group_wrapper(
-    wrapped_pg: ProcessGroup,
+    wrapped_pg: torch._C._distributed_c10d.Backend,
     store_prefix: str,
     store: Store,
     rank: int,
@@ -4087,7 +4105,7 @@ def _get_process_group_name(pg: ProcessGroup) -> str:
 def _get_process_group_store(pg: ProcessGroup) -> Store:
     return _world.pg_map[pg][1]
 
-# This ops are not friently to TorchDynamo. So, we decide to disallow these ops
+# This ops are not friendly to TorchDynamo. So, we decide to disallow these ops
 # in FX graph, allowing them to run them on eager, with torch.compile.
 dynamo_unsupported_distributed_c10d_ops = [
     recv,

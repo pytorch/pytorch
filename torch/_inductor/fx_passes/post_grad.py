@@ -17,7 +17,7 @@ from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_fun
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 
 from torch._utils_internal import print_graph
-from torch.fx.experimental.symbolic_shapes import definitely_true, sym_eq
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.fx.immutable_collections import immutable_dict
 
 from .. import config, inductor_prims, ir, pattern_matcher
@@ -381,7 +381,8 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
 
     assert new_size is not None
     dtype = functools.reduce(
-        torch.promote_types, [x.get_dtype() for x in itertools.chain(*inputs)]
+        torch.promote_types,
+        [x.get_dtype() for x in itertools.chain.from_iterable(inputs)],
     )
     device = inputs[0][0].get_device()
     kernel = ir.ConcatKernel(
@@ -501,13 +502,13 @@ def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
     return (
         val1 is not None
         and val2 is not None
-        and definitely_true(sym_eq(val1.size(), val2.size()))
+        and statically_known_true(sym_eq(val1.size(), val2.size()))
         and val1.layout == val2.layout
         and val1.dtype == val2.dtype
         and val1.device == val2.device
         and (
             val1.layout != torch.strided
-            or definitely_true(sym_eq(val1.stride(), val2.stride()))
+            or statically_known_true(sym_eq(val1.stride(), val2.stride()))
         )
     )
 
@@ -681,14 +682,13 @@ def reinplace_inplaceable_ops(graph):
     """
 
     copy_args_to_copy_nodes = {}
-    foreach_node_to_copy_nodes = defaultdict(list)
     mutated_inputs = set()
     storage_to_nodes = defaultdict(list)
     node_order: Dict[Any, int] = {}
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
-        if node.target == aten.copy_.default:
+        if node.target == aten.copy_.default and node.args[0].op == "placeholder":
             dst = node.args[0]
             src = node.args[1]
             # If the target is a getitem and it indexes a possible clone,
@@ -704,7 +704,6 @@ def reinplace_inplaceable_ops(graph):
 
             copy_args_to_copy_nodes[(dst, src)] = node
 
-            assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
 
     def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
@@ -749,6 +748,7 @@ def reinplace_inplaceable_ops(graph):
                 node, shared_view_nodes, copy_node=None
             )
 
+    replace_dict: Dict[torch.fx.Node, torch.fx.Node] = {}
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
             mutated_arg = node.args[inplaceable_op.mutated_arg]
@@ -773,6 +773,9 @@ def reinplace_inplaceable_ops(graph):
                     copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                     if copy_node is not None:
                         graph.erase_node(copy_node)
+                    for user in node.users:
+                        if user.target == operator.getitem and user.args[1] == arg:
+                            replace_dict[user] = mutated_arg
                 else:
                     tensors_to_clone.append(arg)
             kwargs = dict(node.kwargs)
@@ -792,6 +795,14 @@ def reinplace_inplaceable_ops(graph):
                     graph.erase_node(copy_node)
 
                 node.target = inplaceable_op.inplace_op
+
+    for node, replacement in replace_dict.items():
+        while replacement in replace_dict:
+            replacement = replace_dict[replacement]
+        replace_dict[node] = replacement
+
+        node.replace_all_uses_with(replacement)
+        graph.erase_node(node)
 
 
 @register_lowering_pattern(

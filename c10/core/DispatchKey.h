@@ -2,7 +2,9 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Export.h>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <ostream>
 #include <string>
 
@@ -714,6 +716,7 @@ constexpr DispatchKey toRuntimePerBackendFunctionalityKey(
 namespace torch {
 // Expose the constant, but not the TYPE (DispatchKey is an implementation
 // detail!)
+// NOLINTNEXTLINE(misc-unused-using-decls)
 using c10::kAutograd;
 } // namespace torch
 

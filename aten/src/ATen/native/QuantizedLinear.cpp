@@ -43,8 +43,7 @@ CAFFE_KNOWN_TYPE(c10::intrusive_ptr<PackedLinearWeightFp16>);
 } // namespace caffe2
 #endif // USE_FBGEMM
 
-namespace at {
-namespace native {
+namespace at::native {
 
 #ifdef USE_FBGEMM
 
@@ -581,5 +580,4 @@ Tensor fbgemm_linear_fp16_weight(
 
 #endif // USE_FBGEMM
 
-} // namespace native
-} // namespace at
+} // namespace at::native

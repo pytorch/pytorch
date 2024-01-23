@@ -17,7 +17,7 @@ from numbers import Number
 from typing import Dict, Any
 from packaging import version
 from torch.testing._internal.common_cuda import \
-    (SM53OrLater, SM80OrLater)
+    (SM53OrLater, SM80OrLater, TEST_MULTIGPU)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes)
@@ -162,58 +162,6 @@ class TestSparseLegacyAndDeprecation(TestCase):
             # Check warn-once:
             self.assertEqual(len(cm.warnings), 1)
 
-    @parametrize('fast_mode', (True, False))
-    def test_gradcheck_check_sparse_nnz(self, fast_mode):
-        """Tests for deprecated check_sparse_nnz keyword argument of gradcheck.
-
-        Deprecation steps:
-        2.1: Specification of check_sparse_nnz triggers a warning.
-        2.2: Specification of check_sparse_nnz triggers an
-             exception. Remove all check_sparse_nnz usages from
-             gradcheck and delete this test.
-        """
-        def fn(x, masked_grad):
-            return x.to_dense(masked_grad=masked_grad)
-
-        def test(x, masked_grad, masked, check_sparse_nnz):
-            x = x.detach().clone().requires_grad_()
-            torch.autograd.gradcheck(fn, (x, masked_grad), masked=masked, check_sparse_nnz=check_sparse_nnz, fast_mode=fast_mode)
-
-        x = torch.tensor([[0, 2], [3, 4]], dtype=torch.float64).to_sparse()
-
-        for masked_grad, masked, check_sparse_nnz in itertools.product(*[(True, False, None)] * 3):
-            effective_masked_grad = True if masked_grad is None else masked_grad
-            effective_check_sparse_nnz = False if check_sparse_nnz is None else check_sparse_nnz
-            # For BC, the effective masked depends on the value of specified check_sparse_nnz:
-            effective_masked = (check_sparse_nnz if check_sparse_nnz is not None else False) if masked is None else masked
-
-            warn_using_check_sparse_nnz = self.assertWarns(
-                UserWarning,
-                msg=('Backwards compatibility: check_sparse_nnz is deprecated, it will be removed in a future version of PyTorch.'
-                     f' Use masked={effective_check_sparse_nnz} instead.'))
-            raise_on_non_equal_masked_and_check_sparse_nnz = self.assertRaisesRegex(
-                ValueError,
-                f"Expected specified check_sparse_nnz [(]={effective_check_sparse_nnz}[)]"
-                f" to be equal to masked [(]={effective_masked}[)]")
-            raise_jacobian_mismatch = self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 0")
-
-            def run_test():
-                if effective_masked_grad != effective_masked and not fast_mode:
-                    with raise_jacobian_mismatch:
-                        test(x, masked_grad, masked, check_sparse_nnz)
-                else:
-                    test(x, masked_grad, masked, check_sparse_nnz)
-
-            if masked != check_sparse_nnz and None not in {masked, check_sparse_nnz}:
-                # the specified masked and check_sparse_nnz must match
-                with warn_using_check_sparse_nnz:
-                    with raise_on_non_equal_masked_and_check_sparse_nnz:
-                        test(x, masked_grad, masked, check_sparse_nnz)
-            elif check_sparse_nnz is not None:
-                with warn_using_check_sparse_nnz:
-                    run_test()
-            else:
-                self.assertNotWarn(run_test)
 
 class TestSparseBase(TestCase):
     def run(self, result=None):
@@ -920,7 +868,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(None, x1.grad)
 
     @coalescedonoff
-    @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @dtypes(torch.double, torch.cdouble)
     def test_Sparse_to_Sparse_copy_multi_gpu(self, device, dtype, coalesced):
         # This is for testing torch.copy_(SparseTensor, SparseTensor) across GPU devices
@@ -1004,6 +952,11 @@ class TestSparse(TestSparseBase):
             s.permute(dims=(1, 0))
         with self.assertRaisesRegex(RuntimeError, "duplicate dims"):
             s.permute(dims=(1, 1, 1))
+        # Calling permute on a sparse tensor with an empty tuple used to segfault,
+        # see https://github.com/pytorch/pytorch/issues/116325
+        x = torch.rand((), device=device, dtype=dtype).to_sparse()
+        x.permute(())
+        self.assertEqual(len(x.values()), 1)
 
         def test_shape(sparse_dims, nnz, with_size):
             ndim = len(with_size)
@@ -2700,7 +2653,7 @@ class TestSparse(TestSparseBase):
         self._test_new_device((30, 20, 10, 0), 0)
 
     @onlyCUDA
-    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_new_device_multi_gpu(self):
         self._test_new_device((), 1)
         self._test_new_device((30, 20), 1)
@@ -4035,11 +3988,11 @@ class TestSparse(TestSparseBase):
             yield (make_diags((1, 3)), make_offsets([0]), (3, 2, 3)), "Output shape must be 2d"
             yield (make_diags((2, 3)), make_offsets([[1, 2], [0, 3]]), (3, 3)), "Offsets must be scalar or vector"
             yield (make_diags((3, 2, 3)), make_offsets([0, 1, 2]), (4, 4)), "Diagonals must be vector or matrix"
-            yield (make_diags((3, 3)), make_offsets([-1, 0]), (3, 3)),\
+            yield (make_diags((3, 3)), make_offsets([-1, 0]), (3, 3)), \
                 r"Number of diagonals \(\d\) does not match the number of offsets \(\d\)"
-            yield (make_diags((5,)), make_offsets([0, 1, 2, 3, 4]), (3, 3)),\
+            yield (make_diags((5,)), make_offsets([0, 1, 2, 3, 4]), (3, 3)), \
                 r"Number of diagonals \(\d\) does not match the number of offsets \(\d\)"
-            yield (make_diags((2, 2)), make_offsets([-1, 0]), (2, 3), torch.strided),\
+            yield (make_diags((2, 2)), make_offsets([-1, 0]), (2, 3), torch.strided), \
                 r"Only output layouts \(\w+, \w+, \w+\) are supported, got \w+"
             yield (make_diags((2, 5)), make_offsets([0, 0]), (5, 5)), "Offset tensor contains duplicate values"
             yield (make_diags((1, 5)), make_offsets([0]).to(torch.int32), (5, 5)), r"Offset Tensor must have dtype Long but got \w+"
@@ -4707,15 +4660,6 @@ class TestSparseAny(TestCase):
                         r"conversion from Sparse to .* for input tensors with sparse_dim\(\)!=2 is not supported"):
                     explicit_to_sparse(t)
                 continue
-            elif from_layout in {torch.sparse_csr, torch.sparse_csc,
-                                 torch.sparse_bsr, torch.sparse_bsc} and to_layout is torch.sparse_coo and is_batch:
-                with self.assertRaisesRegex(RuntimeError,
-                                            "crow_indices is supposed to be a vector, but got \\d+ dimensional tensor"):
-                    t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(RuntimeError,
-                                            "crow_indices is supposed to be a vector, but got \\d+ dimensional tensor"):
-                    explicit_to_sparse(t)
-                continue
             elif (from_layout, to_layout) in {(torch.sparse_bsc, torch.sparse_csr), (torch.sparse_bsc, torch.sparse_csc),
                                               (torch.sparse_bsr, torch.sparse_csr), (torch.sparse_bsr, torch.sparse_csc)}:
                 with self.assertRaisesRegex(
@@ -5117,11 +5061,6 @@ class TestSparseAny(TestCase):
                      torch.Tensor.to_sparse,
                      torch.Tensor.values,
                      ):
-            if layout in sparse_compressed_layouts and func.__name__ == 'values':
-                # FIXME: RuntimeError: indices expected sparse
-                # coordinate tensor layout but got SparseCsr. Likely
-                # works when gh-107126 is fixed.
-                continue
             for x in self.generate_simple_inputs(
                     layout,
                     device=device,

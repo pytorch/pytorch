@@ -18,9 +18,7 @@
 
 #include <vector>
 
-namespace at {
-
-namespace meta {
+namespace at::meta {
 TORCH_PRECOMPUTE_META_FUNC(fractional_max_pool3d)(
   const at::Tensor& input_,
   IntArrayRef pool_size,
@@ -96,9 +94,9 @@ TORCH_PRECOMPUTE_META_FUNC(fractional_max_pool3d)(
                                                          .set_outputT(outputT).set_outputH(outputH).set_outputW(outputW);
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 namespace {
 
 template<typename scalar_t>
@@ -239,7 +237,9 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
   auto input = input_.contiguous();
   auto randomSamples = randomSamples_.contiguous();
 
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    kBFloat16,
+    kHalf,
     input.scalar_type(),
     "fractional_max_pool3d_out_frame",
     [&] {
@@ -373,7 +373,9 @@ void fractional_max_pool3d_backward_out_cpu_template(
   gradInput.zero_();
 
   /* backprop */
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    kBFloat16,
+    kHalf,
     input.scalar_type(),
     "fractional_max_pool3d_backward_out_frame",
     [&]{
@@ -424,5 +426,4 @@ Tensor fractional_max_pool3d_backward_cpu(
   return gradInput;
 }
 
-}// native
-}// at
+} // namespace at::native

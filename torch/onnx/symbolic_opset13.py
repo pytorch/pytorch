@@ -614,21 +614,9 @@ def tile(g: jit_utils.GraphContext, self, dims):
 def repeat_interleave(
     g: jit_utils.GraphContext, self, repeats, dim=None, output_size=None
 ):
-    input = self
-    final_dim = dim
-    # if dim is None flatten
-    # By default, use the flattened input array, and return a flat output array
-    if symbolic_helper._is_none(dim):
-        input = symbolic_helper._reshape_helper(
-            g, self, g.op("Constant", value_t=torch.tensor([-1]))
-        )
-        dim = torch.tensor(0, dtype=torch.int64)
-    else:
-        dim = symbolic_helper._maybe_get_scalar(dim)
-
     repeats_dim = symbolic_helper._get_tensor_rank(repeats)
     repeats_sizes = symbolic_helper._get_tensor_sizes(repeats)
-    input_sizes = symbolic_helper._get_tensor_sizes(input)
+    input_sizes = symbolic_helper._get_tensor_sizes(self)
     if repeats_dim is None:
         raise errors.SymbolicValueError(
             "Unsupported: ONNX export of repeat_interleave for unknown repeats rank.",
@@ -644,6 +632,18 @@ def repeat_interleave(
             "Unsupported: ONNX export of repeat_interleave for unknown input size.",
             self,
         )
+
+    final_dim = dim
+    # if dim is None flatten
+    # By default, use the flattened input array, and return a flat output array
+    if symbolic_helper._is_none(dim):
+        self = symbolic_helper._reshape_helper(
+            g, self, g.op("Constant", value_t=torch.tensor([-1]))
+        )
+        dim = torch.tensor(0, dtype=torch.int64)
+    else:
+        dim = symbolic_helper._maybe_get_scalar(dim)
+
     # Handle cases where dim is negative
     if dim < 0:
         dim += len(input_sizes)
@@ -662,7 +662,7 @@ def repeat_interleave(
     cond_dynamic_repeats = repeats_dim == 1 and repeats_sizes[0] is None
     # If input size is dynamic or repeats vector is dynamic
     if output_sizes[dim] == 0 or cond_dynamic_repeats:
-        reps = symbolic_helper._size_helper(g, input, dim)
+        reps = symbolic_helper._size_helper(g, self, dim)
         reps = opset11.unsqueeze(g, reps, 0)
 
         # Check if repeats is dynamic
@@ -691,7 +691,7 @@ def repeat_interleave(
         value_t=torch.tensor([1], dtype=torch.long),
     )
     r_splits = split(g, repeats, reps_like, 0)
-    i_splits = split(g, input, reps_like, dim)
+    i_splits = split(g, self, reps_like, dim)
 
     output_sizes[dim], input_sizes[dim] = -1, 1
 

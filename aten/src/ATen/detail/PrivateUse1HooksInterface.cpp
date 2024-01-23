@@ -18,4 +18,8 @@ TORCH_API at::PrivateUse1HooksInterface* GetPrivateUse1HooksInterface() {
   return privateuse1_hooks;
 }
 
+TORCH_API bool isPrivateUse1HooksRegistered() {
+  return privateuse1_hooks != nullptr;
+}
+
 }

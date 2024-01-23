@@ -252,6 +252,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.frame_state = frame_state
         self.tensor_weakref_to_sizes_strides = WeakTensorKeyDictionary()
         self.cleanup_hooks: List[Callable[[], Any]] = []
+        # compile_id is an id number for the current torch.compile
+        self.compile_id: int = next(_compile_id_counter)
+        # Set of globals installed via install_global_once
+        self.installed_globals: Set[str] = set()
 
         # TODO: maybe should just pass the entire f_code in here?  Not
         # sure...
@@ -362,6 +366,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # where inlining of a function changes the global state (because of the
         # presence of torch.no_grad) and there is a graph break.
         self.save_global_state()
+
+        # Tracks the original FQNs of the constant tensors from the original graph,
+        # i.e. buffers and parameters.
+        self.dynamo_flat_name_to_original_fqn: Dict[str, str] = {}
 
     # This gets its own helper function so guards DEBUG logs are more
     # informative
@@ -731,7 +739,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             install_guard(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
-                return NNModuleVariable(type(target), module_key, **options)
+                return NNModuleVariable(type(target), module_key, target, **options)
 
         elif isinstance(target, (torch.SymInt, torch.SymFloat)):
             # HACKY CODE REGION BEGIN
@@ -777,6 +785,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                         new_source = ParamBufferSource(source, leaf_name)
                         new_name = f"{name}.{leaf_name}"
                         self.param_name_to_source[new_name] = new_source
+                        if isinstance(source, LocalSource):
+                            self.dynamo_flat_name_to_original_fqn[
+                                OutputGraph.module_key_name(new_source.name())
+                            ] = leaf_name
 
                     # annoying, but there are cases when we do not have parameters
                     # see test_nn_moduledict_contains
@@ -872,7 +884,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.random_values_var = self.new_var("random_values")
             rand_fn_name = unique_id("__gen_rand_values")
             rand_fn = disable(_get_gen_rand_values_fn(tx.random_calls))
-            self.install_global(rand_fn_name, rand_fn)
+            self.install_global_unsafe(rand_fn_name, rand_fn)
             codegen = PyCodegen(tx, root)
             random_calls_instructions.extend(
                 codegen.load_function_name(rand_fn_name, True)
@@ -1052,6 +1064,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             register_finalizer(gm)
 
         gm.compile_subgraph_reason = self.compile_subgraph_reason
+        gm.meta[
+            "dynamo_flat_name_to_original_fqn"
+        ] = self.dynamo_flat_name_to_original_fqn.copy()
 
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
         graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
@@ -1075,7 +1090,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
-        self.install_global(name, compiled_fn)
+        self.install_global_unsafe(name, compiled_fn)
 
         cg = PyCodegen(tx)
         cg.make_call_generated_code(name)
@@ -1355,8 +1370,28 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.output_instructions.extend(prefix)
         self.should_exit = True
 
-    def install_global(self, name, value) -> None:
+    def install_global_unsafe(self, name, value) -> None:
+        """
+        WARNING: prefer the safer `install_global_once`.
+        torch.compile instances should be independent of each other;
+        one footgun is to have one instance depend on the existence of
+        a global installed by another instance. This can happen if we mangle
+        a global the same way across both instances.
+        """
         self.cleanups.append(CleanupHook.create(self.global_scope, name, value))
+
+    def install_global_once(self, name, value) -> str:
+        """
+        Install a global once per output_graph.
+
+        Returns the name of the newly installed global.
+        """
+        name = f"{name}_c{self.compile_id}"
+        if name in self.installed_globals:
+            return name
+        self.install_global_unsafe(name, value)
+        self.installed_globals.add(name)
+        return name
 
     def cleanup(self) -> None:
         # There is a reference cycle between tracer and OutputGraph, causing
@@ -1373,6 +1408,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
         self.register_finalizer_fns.clear()
+        self.dynamo_flat_name_to_original_fqn.clear()
 
     def set_torch_function_state(self, enabled: bool) -> None:
         self.torch_function_enabled = enabled
@@ -1456,6 +1492,9 @@ def check_pt2_compliant_op(output_graph, kind, target, args, kwargs):
             )
 
 
+_compile_id_counter = itertools.count()
+
+
 class SubgraphTracer(fx.Tracer):
     """
     Holds an FX graph that is being traced. OutputGraph owns a SubgraphTracer
@@ -1470,6 +1509,7 @@ class SubgraphTracer(fx.Tracer):
         super().__init__()
         self.output_graph = weakref.proxy(output_graph)
         self.graph = torch.fx.Graph()
+
         # The export is only ever set for the ROOT tracer.  It controls
         # whether or not certain inputs are allowed to be added or not.
         # Look at call sites of create_graph_input to see how it is used.

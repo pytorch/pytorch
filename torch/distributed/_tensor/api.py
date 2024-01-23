@@ -84,15 +84,24 @@ class _ToTorchTensor(torch.autograd.Function):
         grad_placements = ctx.grad_placements
         dtensor_meta = dtensor_spec.tensor_meta
 
+        _, tensor_stride = compute_global_tensor_info(
+            grad_output, mesh, dtensor_spec.placements
+        )
+        tensor_stride = tuple(tensor_stride)
         if grad_placements is not None:
-            grad_spec = DTensorSpec(mesh, grad_placements)
+            grad_spec = DTensorSpec(
+                mesh,
+                grad_placements,
+                tensor_meta=TensorMeta(
+                    shape=dtensor_meta.shape,
+                    stride=tensor_stride,
+                    dtype=dtensor_meta.dtype,
+                ),
+            )
             grad_output = redistribute_local_tensor(
                 grad_output, grad_spec, dtensor_spec
             )
 
-        _, tensor_stride = compute_global_tensor_info(
-            grad_output, mesh, dtensor_spec.placements
-        )
         return (
             DTensor(
                 grad_output,
@@ -101,7 +110,7 @@ class _ToTorchTensor(torch.autograd.Function):
                 shape=dtensor_meta.shape,
                 dtype=dtensor_meta.dtype,
                 requires_grad=grad_output.requires_grad,
-                stride=tuple(tensor_stride),
+                stride=tensor_stride,
             ),
             None,
             None,
@@ -176,10 +185,19 @@ class _FromTorchTensor(torch.autograd.Function):
         # so that the gradient layout matches, and we could return
         # local gradients directly
         if grad_output.placements != previous_placement:
-            # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
-            grad_output = Redistribute.apply(
-                grad_output, previous_device_mesh, previous_placement
+            current_spec = grad_output._spec
+            target_spec = DTensorSpec(
+                previous_device_mesh,
+                previous_placement,
+                tensor_meta=grad_output._spec.tensor_meta,
             )
+            local_tensor = grad_output._local_tensor
+            output = redistribute_local_tensor(
+                local_tensor, current_spec, target_spec, is_backward=True
+            )
+            # TODO: return the redistributed local tensor directly without
+            # differentiable backward. see if this make sense for all cases.
+            return output, None, None, None, None, None
 
         # TODO: backward is also differentiable now, add a test
         # to test higher level gradients.

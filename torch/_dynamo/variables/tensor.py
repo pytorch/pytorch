@@ -109,7 +109,6 @@ class TensorVariable(VariableTracker):
         size=None,
         stride=None,
         is_contiguous=None,
-        specialized_value=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -125,7 +124,6 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
-        self.specialized_value = specialized_value
 
     def as_proxy(self):
         return self.proxy
@@ -158,13 +156,18 @@ class TensorVariable(VariableTracker):
                 [int(s) if is_symbolic(s) else s for s in value.size()]
             )
             props["stride"] = tuple(value.stride())
-            props["is_contiguous"] = tuple(
-                [
-                    x
-                    for x in torch._prims_common._memory_formats
-                    if value.is_contiguous(memory_format=x)
-                ]
-            )
+            if torch._C._functorch.is_batchedtensor(value):
+                # Batched tensors does not support contiguity patterns, so
+                # we refrain from computing the `is_contiguous` property
+                props["is_contiguous"] = None
+            else:
+                props["is_contiguous"] = tuple(
+                    [
+                        x
+                        for x in torch._prims_common._memory_formats
+                        if value.is_contiguous(memory_format=x)
+                    ]
+                )
         return props
 
     def dynamic_getattr(self, tx, name):
@@ -211,7 +214,7 @@ class TensorVariable(VariableTracker):
         return VariableBuilder(tx, attr_source)(real_value)
 
     def var_getattr(self, tx, name):
-        from . import ConstantVariable, TorchVariable
+        from . import ConstantVariable, UserDefinedClassVariable
 
         if tx.strict_checks_enabled:
             if name in self._strict_mode_banned_ops():
@@ -225,7 +228,7 @@ class TensorVariable(VariableTracker):
         elif name == "device" and self.device is not None:
             result = ConstantVariable.create(self.device)
         elif name == "layout" and self.layout is not None:
-            result = TorchVariable(self.layout)
+            result = ConstantVariable.create(self.layout)
         elif name == "is_cuda" and self.device is not None:
             result = ConstantVariable.create(self.device.type == "cuda")
         elif name == "shape" and self.size is not None:
@@ -244,7 +247,7 @@ class TensorVariable(VariableTracker):
         elif name == "data":
             result = self.call_method(tx, "detach", [], {})
         if name == "__class__":
-            return TorchVariable(self.python_type())
+            return UserDefinedClassVariable(self.python_type())
 
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
@@ -346,9 +349,8 @@ class TensorVariable(VariableTracker):
         if tx.strict_checks_enabled:
             if name in self._strict_mode_banned_ops():
                 unimplemented(f"Illegal method invocation {name} in strict mode")
-        from . import ConstantVariable, TorchVariable, TupleVariable
+        from . import ConstantVariable, TorchInGraphFunctionVariable, TupleVariable
         from .builder import wrap_fx_proxy
-        from .user_defined import UserDefinedClassVariable
 
         kwargs = dict(kwargs)
 
@@ -484,7 +486,7 @@ class TensorVariable(VariableTracker):
         elif (
             name == "as_subclass"
             and len(args) == 1
-            and isinstance(args[0], UserDefinedClassVariable)
+            and isinstance(args[0], TensorSubclassVariable)
         ):
             from .builder import VariableBuilder
             from .torch_function import TensorWithTFOverrideVariable
@@ -621,7 +623,7 @@ class TensorVariable(VariableTracker):
         elif (
             name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
         ):
-            result = TorchVariable(torch.mul).call_function(
+            result = TorchInGraphFunctionVariable(torch.mul).call_function(
                 tx, args + [kwargs["alpha"]], {}
             )
             return self.call_method(tx, "add_", [result], {})
@@ -631,8 +633,8 @@ class TensorVariable(VariableTracker):
             and len(kwargs) == 1
             and "value" in kwargs
         ):
-            result = TorchVariable(torch.div).call_function(tx, args, {})
-            result = TorchVariable(torch.mul).call_function(
+            result = TorchInGraphFunctionVariable(torch.div).call_function(tx, args, {})
+            result = TorchInGraphFunctionVariable(torch.mul).call_function(
                 tx, [result, kwargs["value"]], {}
             )
             return self.call_method(tx, "add_", [result], {})
@@ -641,8 +643,12 @@ class TensorVariable(VariableTracker):
             # without dealing with unbacked symbool. Roughly the code we translate is:
             # def __contains__(self, x):
             #     return (x == self).any().item()
-            result = TorchVariable(torch.eq).call_function(tx, [self, args[0]], {})
-            result = TorchVariable(torch.any).call_function(tx, [result], {})
+            result = TorchInGraphFunctionVariable(torch.eq).call_function(
+                tx, [self, args[0]], {}
+            )
+            result = TorchInGraphFunctionVariable(torch.any).call_function(
+                tx, [result], {}
+            )
             return result.call_method(tx, "item", [], {})
         elif name == "redistribute":
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
@@ -674,7 +680,7 @@ class TensorVariable(VariableTracker):
                 (
                     variables.functions.FunctoolsPartialVariable,
                     variables.UserFunctionVariable,
-                    variables.TorchVariable,
+                    variables.TorchInGraphFunctionVariable,
                     variables.NNModuleVariable,
                 ),
             ):
@@ -787,6 +793,8 @@ class SymNodeVariable(VariableTracker):
         proxy.node.meta["example_value"] = sym_num
 
         if isinstance(sym_num, (sympy.Integer, int, bool)):
+            if isinstance(sym_num, sympy.Integer):
+                breakpoint()
             sym_num = int(sym_num) if isinstance(sym_num, sympy.Integer) else sym_num
             return ConstantVariable.create(sym_num)
 

@@ -61,7 +61,7 @@
 
 int register_linear_params();
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -1991,4 +1991,4 @@ TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
 }
 
 } // namespace
-}}  // namespace at::native
+}  // namespace at::native
