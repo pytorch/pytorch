@@ -8,6 +8,8 @@ from torch.distributed._composable import contract
 from torch.distributed._composable_state import _insert_module_state
 
 
+# The decorator adds a state object to `module` that can be accessed via
+# `fully_shard.state(module)`. The state object and module are 1:1.
 @contract()
 def fully_shard(
     module: nn.Module,
