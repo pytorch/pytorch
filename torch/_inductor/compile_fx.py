@@ -360,7 +360,6 @@ def compile_fx_inner(
             compiled_graph.disabled_cudagraphs_reason = has_mutation_str
 
         cudagraph_tests = [
-            (set(compiled_graph.device_types) == {"cuda"}, "non-cuda device in graph"),
             (not has_mutation, "mutated inputs"),
             (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
             (not complex_memory_overlap_inputs, "complex memory overlap"),
@@ -369,13 +368,6 @@ def compile_fx_inner(
                     isinstance(t, (torch.Tensor, torch.SymInt)) for t in example_inputs
                 ),
                 "non-Tensor inputs",
-            ),
-            (
-                (
-                    len(compiled_graph.device_idxs) == 1
-                    or not config.triton.cudagraph_trees
-                ),
-                "multiple device indices with cudagraph_trees",
             ),
         ]
         cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
@@ -563,6 +555,15 @@ def fx_codegen_and_compile(
 
             if V.aot_compilation is True:
                 return compiled_fn
+
+            if cudagraphs and not V.graph.disable_cudagraphs_reason:
+                from torch._inductor.cudagraph_utils import (
+                    check_lowering_cudagraph_checks,
+                )
+
+                V.graph.disable_cudagraphs_reason = check_lowering_cudagraph_checks(
+                    V.graph.device_node_mapping
+                )
 
             compiled_graph = CompiledFxGraph(
                 compiled_fn, graph, output_strides, V.graph.disable_cudagraphs_reason

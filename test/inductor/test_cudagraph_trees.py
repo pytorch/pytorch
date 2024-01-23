@@ -223,6 +223,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_rng_non_trees(self):
             self.check_rng()
 
+        def test_multiple_devices_msg(self):
+            @torch.compile()
+            def foo(x, y):
+                return (x + 1, y + 2)
+
+            with capture_stderr() as captured_output:
+                foo(torch.ones([10], device="cuda"), torch.ones([20]))
+
+            FileCheck().check("skipping cudagraphs due to multiple devices.").check(
+                "y + 2"
+            ).run(captured_output[0])
+
         def test_mutation(self):
             @torch.compile()
             def foo(x):
