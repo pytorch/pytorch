@@ -1289,6 +1289,7 @@ def main():
         "share/cmake/Caffe2/Modules_CUDA_fix/*.cmake",
         "share/cmake/Caffe2/Modules_CUDA_fix/upstream/*.cmake",
         "share/cmake/Caffe2/Modules_CUDA_fix/upstream/FindCUDA/*.cmake",
+        "share/cmake/Caffe2/FindSYCL/*.cmake",
         "share/cmake/Gloo/*.cmake",
         "share/cmake/Tensorpipe/*.cmake",
         "share/cmake/Torch/*.cmake",
