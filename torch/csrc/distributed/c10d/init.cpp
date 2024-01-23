@@ -2389,6 +2389,25 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       "_get_intra_node_comm_usage_counter",
       &::c10d::intra_node_comm::getIntraNodeCommUsageCounter);
 
+  using IntraNodeComm = ::c10d::intra_node_comm::IntraNodeComm;
+  py::class_<IntraNodeComm, c10::intrusive_ptr<IntraNodeComm>>(
+      module, "_IntraNodeComm")
+      .def_static(
+          "rendezvous",
+          &IntraNodeComm::rendezvous,
+          py::arg("store"),
+          py::arg("prefix"),
+          py::arg("rank"),
+          py::arg("world_size"))
+      .def("barrier", &IntraNodeComm::barrier, py::arg("ranks") = py::none())
+      .def("put", &IntraNodeComm::put, py::arg("input"), py::arg("offset") = 0)
+      .def(
+          "get",
+          &IntraNodeComm::get,
+          py::arg("rank"),
+          py::arg("tensor"),
+          py::arg("offset") = 0);
+
 #ifdef NCCL_HAS_COMM_CTA_CGA
   py::class_<ncclConfig_t>(
       processGroupNCCL,

@@ -731,5 +731,73 @@ at::Tensor allReduce(
   }
 }
 
+static __global__ void barrierKernel(
+    P2pState** p2pStates,
+    uint64_t mask,
+    size_t rank,
+    size_t worldSize) {
+  if (threadIdx.x < worldSize && mask & (1ULL << threadIdx.x)) {
+    auto targetRank = threadIdx.x;
+    releaseSignal(&p2pStates[targetRank]->signals0[0][rank]);
+    acquireSignal(&p2pStates[rank]->signals0[0][targetRank]);
+  }
+}
+
+void IntraNodeComm::barrier(c10::optional<std::vector<int64_t>> ranks) {
+  if (!ranks.has_value()) {
+    ranks = std::vector<int64_t>(worldSize_);
+    std::iota(ranks->begin(), ranks->end(), 0);
+  }
+  uint64_t mask = 0;
+  for (const auto& r : ranks.value()) {
+    TORCH_CHECK(r >= 0 && r < static_cast<int64_t>(worldSize_));
+    mask |= (1ULL << r);
+  }
+  barrierKernel<<<1, kWarpSize, 0, at::cuda::getCurrentCUDAStream()>>>(
+      reinterpret_cast<P2pState**>(p2pStatesDev_),
+      mask,
+      rank_,
+      worldSize_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+void IntraNodeComm::put(const at::Tensor& tensor, int64_t offset) {
+  TORCH_CHECK(
+      tensor.is_non_overlapping_and_dense(),
+      "IntraNodeComm::put: tensor must be non-overlapping and dense");
+  size_t sz = tensor.numel() * tensor.element_size();
+  TORCH_CHECK(
+      offset + sz < kMaxIntraNodeSize,
+      "IntraNodeComm::put: offset + tensor size exceeded "
+      "intra node buffer size");
+  // This results in "Memcpy PtoP" which does not use SMs for copying
+  cudaMemcpyAsync(
+      buffers_[rank_],
+      static_cast<char*>(tensor.data_ptr()) + offset,
+      sz,
+      cudaMemcpyDeviceToDevice,
+      at::cuda::getCurrentCUDAStream());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+void IntraNodeComm::get(size_t rank, at::Tensor tensor, int64_t offset) {
+  TORCH_CHECK(
+      tensor.is_non_overlapping_and_dense(),
+      "IntraNodeComm::get: tensor must be non-overlapping and dense");
+  size_t sz = tensor.numel() * tensor.element_size();
+  TORCH_CHECK(
+      offset + sz < kMaxIntraNodeSize,
+      "IntraNodeComm::get: offset + tensor size exceeded "
+      "intra node buffer size");
+  // This results in "Memcpy PtoP" which does not use SMs for copying
+  cudaMemcpyAsync(
+      static_cast<char*>(tensor.data_ptr()) + offset,
+      buffers_[rank],
+      sz,
+      cudaMemcpyDeviceToDevice,
+      at::cuda::getCurrentCUDAStream());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
 } // namespace intra_node_comm
 } // namespace c10d

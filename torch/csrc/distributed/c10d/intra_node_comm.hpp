@@ -10,7 +10,8 @@ namespace c10d {
 namespace intra_node_comm {
 
 constexpr size_t kMaxDevices = 8;
-constexpr size_t kMaxIntraNodeSize = 10 * 1024 * 1024;
+// TODO(yifu): make this tunable
+constexpr size_t kMaxIntraNodeSize = 64 * 1024 * 1024;
 
 using NvlMesh = std::array<std::array<size_t, kMaxDevices>, kMaxDevices>;
 using HybridCubeMesh = std::array<std::array<int, 4>, kMaxDevices>;
@@ -44,6 +45,10 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
       size_t rank,
       size_t worldSize);
 
+  size_t intraNodeBufferSize() {
+    return kMaxIntraNodeSize;
+  }
+
   /**
    * Selects a AllReduceAlgo that we think will outperform nccl.
    * Returns AllReduceAlgo::NONE if we don't think we can outperform nccl.
@@ -51,6 +56,24 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   AllReduceAlgo selectAllReduceAlgo(const at::Tensor& input);
 
   at::Tensor allReduce(const at::Tensor& input, AllReduceAlgo algo);
+
+  /**
+   * Perform a barrier among the specified ranks.
+   */
+  TORCH_API void barrier(
+      c10::optional<std::vector<int64_t>> ranks = c10::nullopt);
+
+  /**
+   * Puts the given tensor into the intra-node buffer of the current rank at
+   * the specified offset.
+   */
+  TORCH_API void put(const at::Tensor& tensor, int64_t offset = 0);
+
+  /**
+   * Fills the given tensor with the data from the specified rank's intra-node
+   * buffer at the specified offset.
+   */
+  TORCH_API void get(size_t rank, at::Tensor tensor, int64_t offset = 0);
 
  private:
   Topology topology_;
