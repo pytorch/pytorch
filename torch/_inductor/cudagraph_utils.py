@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch._inductor.codecache import CompiledFxGraph
@@ -84,5 +84,77 @@ def check_multiple_devices(
 
 def check_lowering_disable_cudagraph(
     device_node_mapping: Dict[torch.device, torch.fx.Node]
-):
+) -> Optional[str]:
     return check_multiple_devices(device_node_mapping)
+
+
+def check_for_incompatible_cudagraph_ops(gm) -> Optional[str]:
+    forbidden_set = {
+        "aten._fused_moving_avg_obs_fq_helper.default",
+        "aten._fused_moving_avg_obs_fq_helper_functional.default",
+        "aten.multinomial.default",
+        "fbgemm.dense_to_jagged.default",
+        "fbgemm.jagged_to_padded_dense.default",
+        "run_and_save_rng_state",
+        "run_with_rng_state",
+        "aten._local_scalar_dense",
+    }
+    if torch.are_deterministic_algorithms_enabled():
+        forbidden_set.update(
+            {
+                "aten._unsafe_index_put.default",
+                "aten.index_put.default",
+                "aten.index_put_.default",
+                "aten.scatter.src",
+                "aten.scatter.reduce",
+                "aten.scatter.value_reduce",
+                "aten.scatter_add_",
+                "aten.scatter_add.default",
+                "aten.scatter_reduce.two",
+                "aten.scatter_reduce_.two",
+                "aten.scatter_reduce.two_out",
+            }
+        )
+
+    for node in gm.graph.nodes:
+        if str(node.target) in forbidden_set:
+            if stack_trace := node.meta.get("stack_trace", None):
+                return format_default_skip_message(
+                    f"incompatible ops. Found from {stack_trace}"
+                )
+
+            return format_default_skip_message("incompatible ops")
+
+    return None
+
+
+def check_post_lowering_disable_cudagraph(
+    example_inputs: List[Any],
+    gm: torch.fx.GraphModule,
+    compiled_graph: CompiledFxGraph,
+    num_fixed: int,
+) -> Optional[str]:
+    if has_mutation_str := check_for_mutation(gm, compiled_graph, num_fixed):
+        return has_mutation_str
+
+    if incompat_op_str := check_for_incompatible_cudagraph_ops(gm):
+        return incompat_op_str
+
+    complex_memory_overlap_inputs = any(
+        torch._inductor.compile_fx.complex_memory_overlap(t)
+        for t in example_inputs
+        if isinstance(t, torch.Tensor)
+    )
+
+    # TODO - add stack traces. they almost never (never?) occur now.
+    if complex_memory_overlap_inputs:
+        return "skipping cudagraphs due to complex memory overlap"
+
+    non_tensor_inputs = not all(
+        isinstance(t, (torch.Tensor, torch.SymInt)) for t in example_inputs
+    )
+
+    if non_tensor_inputs:
+        return "skipping cudagraphs due to non-Tensor inputs"
+
+    return None

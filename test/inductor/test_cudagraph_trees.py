@@ -223,6 +223,19 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_rng_non_trees(self):
             self.check_rng()
 
+        @torch._inductor.config.patch(implicit_fallbacks=True)
+        def test_incompatible_op(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(weights):
+                return torch.multinomial(weights, 2)
+
+            with capture_stderr() as captured_output:
+                out = foo(torch.rand([20, 20], device="cuda"))
+
+            FileCheck().check("skipping cudagraphs due to incompatible.").check(
+                "torch.multinomial"
+            ).run(captured_output[0])
+
         def test_mutation_reinplaced(self):
             import torch.nn as nn
 
