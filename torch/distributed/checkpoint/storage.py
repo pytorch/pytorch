@@ -38,19 +38,20 @@ class StorageWriter(abc.ABC):
     """
 
     @abc.abstractmethod
-    def set_checkpoint_id(self, checkpoint_id: Union[str, os.PathLike]) -> None:
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None]) -> None:
         """
-        Pass the checkpoint_id set by the user if checkpoint_id is set by the
-        user. This API also indicates a new checkpoint write is going to happen.
-        The StorageWriter must clear the internal states if the StorageWriter
-        has any internal states. Note that this API may not be called if user
-        does not pass any checkpiont_id.
+        Calls to indicates a brand new checkpoint write is going to happen.
+        A checkpoint_id may be present if users set the checkpoint_id for
+        this checkpoint write. The meaning of the checkpiont_id is
+        storage-dependent. It can be a path to a folder/file or a key for
+        a key-value storage.
 
         Args:
-            checkpoint_id (Union[str, os.PathLike]): the checkpoint_id the user
-                specifies. The meaning of the checkpoint_id depends on the
-                storage. It can be a path to a folder or to a file. It can also
-                be a key if the storage is more like a key-value store.
+            checkpoint_id (Union[str, os.PathLike, None]): the checkpoint_id
+                the user specifies. The meaning of the checkpoint_id depends
+                on the storage. It can be a path to a folder or to a file.
+                It can also be a key if the storage is more like a key-value
+                store.
         """
         ...
 
@@ -162,19 +163,20 @@ class StorageReader(abc.ABC):
     """
 
     @abc.abstractmethod
-    def set_checkpoint_id(self, checkpoint_id: Union[str, os.PathLike]) -> None:
+    def reset(self, checkpoint_id: Union[str, os.PathLike]) -> None:
         """
-        Pass the checkpoint_id set by the user if checkpoint_id is set by the
-        user. This API also indicates a new checkpoint read is going to happen.
-        The StorageReader must clear the internal states if the StorageReader
-        has any internal states. Note that this API may not be called if user
-        does not pass any checkpiont_id.
+        Calls to indicates a brand new checkpoint read is going to happen.
+        A checkpoint_id may be present if users set the checkpoint_id for
+        this checkpoint read. The meaning of the checkpiont_id is
+        storage-dependent. It can be a path to a folder/file or a key for
+        a key-value storage.
 
         Args:
-            checkpoint_id (Union[str, os.PathLike]): the checkpoint_id the user
-                specifies. The meaning of the checkpoint_id depends on the
-                storage. It can be a path to a folder or to a file. It can also
-                be a key if the storage is more like a key-value store.
+            checkpoint_id (Union[str, os.PathLike, None]): the checkpoint_id
+                the user specifies. The meaning of the checkpoint_id depends
+                on the storage. It can be a path to a folder or to a file.
+                It can also be a key if the storage is more like a key-value
+                store.
         """
         ...
 

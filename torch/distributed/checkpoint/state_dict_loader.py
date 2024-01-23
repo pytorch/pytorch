@@ -126,10 +126,11 @@ def load(
                     "`checkpoint_id` must be specificed if storage_reader is None."
                 )
             # TODO: automatically decide whether to use FSSpecFileSystem
+            # https://github.com/pytorch/pytorch/issues/118033 and
+            # https://github.com/pytorch/pytorch/issues/118036
             storage_reader = FileSystemReader(checkpoint_id)
 
-        if not checkpoint_id:
-            storage_reader.set_checkpoint_id(checkpoint_id)
+        storage_reader.reset(checkpoint_id)
 
         if no_dist:
             keys = list(state_dict.keys())
