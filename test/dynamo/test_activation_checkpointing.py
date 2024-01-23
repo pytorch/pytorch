@@ -949,7 +949,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 bw_compiler=bw_compiler,
                 partition_fn=min_cut_rematerialization_partition,
             )
->>>>>>> 13d2cdffa29803c73cf6a4282894d5c4ee42cf1b
 
             # NOTE: when `preserve_rng_state` is False, gradient will mismatch between torch.compile and eager,
             # because eager version doesn't preserve RNG state while torch.compile still does.
