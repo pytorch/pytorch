@@ -208,6 +208,8 @@ dtype_abbrs = {
     torch.float16: 'f16',
     torch.float8_e4m3fn: 'f8e4m3fn',
     torch.float8_e5m2: 'f8e5m2',
+    torch.float8_e4m3fnuz: 'f8e4m3fnuz',
+    torch.float8_e5m2fnuz: 'f8e5m2fnuz',
     torch.complex32: 'c32',
     torch.complex64: 'c64',
     torch.complex128: 'c128',
