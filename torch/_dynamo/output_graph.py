@@ -392,6 +392,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
 
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.CONFIG_HASH_MATCH))
+
     def add_cleanup_hook(self, fn: Callable[[], Any]):
         self.cleanup_hooks.append(fn)
 

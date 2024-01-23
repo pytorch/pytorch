@@ -2761,12 +2761,12 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             supress_errors = torch._dynamo.config.suppress_errors
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", supress_errors):
             if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
-                super_run = torch._dynamo.optimize("inductor")(super_run)
+                super_run = torch._dynamo.optimize("inductor", save_config=False)(super_run)
             elif TEST_WITH_AOT_EAGER:  # noqa: F821
-                super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
+                super_run = torch._dynamo.optimize("aot_eager_decomp_partition", save_config=False)(super_run)
             elif TEST_WITH_TORCHDYNAMO:  # noqa: F821
                 # TorchDynamo optimize annotation
-                super_run = torch._dynamo.optimize("eager", nopython=nopython)(super_run)
+                super_run = torch._dynamo.optimize("eager", nopython=nopython, save_config=False)(super_run)
                 key = f"{self.__class__.__name__}.{self._testMethodName}"
 
                 def expect_failure(f):

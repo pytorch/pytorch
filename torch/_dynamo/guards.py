@@ -109,6 +109,9 @@ CLOSURE_VARS = {
     "___skip_backend_check": (
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
     ),
+    "___compile_config_hash": (
+        lambda: torch._dynamo.eval_frame.get_saved_else_current_config_hash().hex()
+    ),
     "___odict_getitem": collections.OrderedDict.__getitem__,
     "___key_to_id": key_to_id,
     "___dict_version": dict_version,
@@ -602,6 +605,15 @@ class GuardBuilder(GuardBuilderBase):
         )
         code = [
             f"(___skip_backend_check() or ___current_backend() == ___lookup_backend({backend_id}))"
+        ]
+        self._produce_guard_code(guard, code)
+
+    def CONFIG_HASH_MATCH(self, guard: Guard):
+        """Guard on the hash of the compiled function's dynamo config"""
+
+        assert guard.source is GuardSource.GLOBAL
+        code = [
+            f"___compile_config_hash() == '{torch._dynamo.eval_frame.get_saved_else_current_config_hash().hex()}'"
         ]
         self._produce_guard_code(guard, code)
 
