@@ -82,23 +82,8 @@ using bool_constant = std::bool_constant<B>;
 template <class B>
 using negation = std::negation<B>;
 
-#ifdef __cpp_lib_void_t
-
 template <class T>
 using void_t = std::void_t<T>;
-
-#else
-
-// Implementation taken from http://en.cppreference.com/w/cpp/types/void_t
-// (it takes CWG1558 into account and also works for older compilers)
-template <typename... Ts>
-struct make_void {
-  typedef void type;
-};
-template <typename... Ts>
-using void_t = typename make_void<Ts...>::type;
-
-#endif
 
 #if defined(USE_ROCM)
 // rocm doesn't like the C10_HOST_DEVICE
@@ -183,21 +168,12 @@ struct _identity final {
 
 template <class Func, class Enable = void>
 struct function_takes_identity_argument : std::false_type {};
-#if defined(_MSC_VER)
-// For some weird reason, MSVC shows a compiler error when using guts::void_t
-// instead of std::void_t. But we're only building on MSVC versions that have
-// std::void_t, so let's just use that one.
+
 template <class Func>
 struct function_takes_identity_argument<
     Func,
     std::void_t<decltype(std::declval<Func>()(_identity()))>> : std::true_type {
 };
-#else
-template <class Func>
-struct function_takes_identity_argument<
-    Func,
-    void_t<decltype(std::declval<Func>()(_identity()))>> : std::true_type {};
-#endif
 } // namespace detail
 
 } // namespace guts
