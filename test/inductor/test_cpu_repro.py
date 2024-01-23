@@ -2798,6 +2798,22 @@ class CPUReproTests(TestCase):
         x = torch.rand(*shape, device="cpu", dtype=dtype)
         self.common(fp8_cast, (x,))
 
+    def test_logical_op_store_to_lowp_data_dtype(self):
+        # https://github.com/pytorch/pytorch/issues/117624
+        # https://github.com/pytorch/pytorch/issues/117627
+        def fn(out1, out2, input, other):
+            o1 = torch.logical_or(out=out1, input=input, other=other)
+            o2 = torch.logical_xor(out=out2, input=input, other=other)
+            return o1, o2
+
+        x = torch.rand([3, 3, 2, 8, 9, 2], dtype=torch.float)
+        y = torch.rand([3, 3, 2, 8, 9, 2], dtype=torch.float)
+        for dtype in _lowp_fp_dtypes:
+            o1 = torch.rand([3, 3, 2, 8, 9, 2], dtype=dtype)
+            o2 = torch.rand([3, 3, 2, 8, 9, 2], dtype=dtype)
+            with torch.no_grad():
+                self.common(fn, (o1, o2, x, y))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
