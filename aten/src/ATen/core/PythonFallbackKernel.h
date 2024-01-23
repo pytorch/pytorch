@@ -24,9 +24,5 @@ private:
   bool value_set_;
 };
 
-TORCH_API void set_nested_tensor_cls(std::shared_ptr<c10::SafePyObject> t);
-
-TORCH_API std::shared_ptr<c10::SafePyObject> get_nested_tensor_cls();
-
 } // namespace impl
 } // namespace at

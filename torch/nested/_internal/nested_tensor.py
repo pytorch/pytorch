@@ -253,14 +253,6 @@ class NestedTensor(torch.Tensor):
             return func(*args, **kwargs)
 
 
-# Let dispatcher associate singleton ints with NestedTensor class. This is
-# so that if the dispatcher sees singleton ints in the arguments, it will know
-# to dispatch to NestedTensor's __torch_dispatch__. This is important in the
-# case where there are no NestedTensor arguments to that function, e.g.
-# factory functions like zeros, and views like expand.
-torch._C._set_nested_tensor_cls(NestedTensor)
-
-
 # Not actually a view!
 class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod

@@ -1,6 +1,7 @@
 #include <ATen/core/PythonFallbackKernel.h>
 
 #include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/core/SafePyObject.h>
 #include <ATen/core/SingletonSymNodeImpl.h>
@@ -96,10 +97,8 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
           continue;
         }
         auto x = nv.toSymInt();
-        if (x.is_heap_allocated() && x.toSymNode()->is_singleton()) {
-          const auto& nt_cls = at::impl::get_nested_tensor_cls();
-          TORCH_INTERNAL_ASSERT(nt_cls);
-          nt_cls->pyinterpreter()->dispatch(op, stack);
+        if (x.is_heap_allocated() && x.toSymNode()->key_set_.has(c10::DispatchKey::Python)) {
+          (*c10::impl::get_global_pyinterpreter())->dispatch(op, stack);
           return;
         }
       }
@@ -160,24 +159,6 @@ MaybeSetTLSOnEntryGuard::~MaybeSetTLSOnEntryGuard() {
     TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
     tls_on_entry = c10::nullopt;
   }
-}
-
-namespace {
-  // This is bound to python and set at module import time by the NestedTensor
-  // class.
-  //
-  // This is going to get clobbered in the multipy case, but we're okay with
-  // that because whether the PyInterpreter matches will be validated when
-  // we dispatch to a concrete interpreter.
-  std::shared_ptr<c10::SafePyObject> nested_tensor_cls = nullptr;
-}
-
-void set_nested_tensor_cls(std::shared_ptr<c10::SafePyObject> t) {
-  nested_tensor_cls = std::move(t);
-}
-
-std::shared_ptr<c10::SafePyObject> get_nested_tensor_cls() {
-  return nested_tensor_cls;
 }
 
 } // namespace impl

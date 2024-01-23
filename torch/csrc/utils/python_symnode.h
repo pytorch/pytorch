@@ -34,8 +34,13 @@ namespace impl {
 class PythonSymNodeImpl : public c10::SymNodeImpl {
  public:
   PythonSymNodeImpl(py::object pyobj) : c10::SymNodeImpl() {
+    py::gil_scoped_acquire acquire;
+    // As an optimization, you can explicitly pass in is_singleton in the cases
+    // where you know it is definitely false (most cases today).
+    is_singleton_ = pyobj.attr("is_singleton")().is(py::handle(Py_True));
     pyobj_ = std::make_shared<c10::SafePyObject>(
         pyobj.release().ptr(), getPyInterpreter());
+    key_set_ = is_singleton_ ? c10::py_singleton_ks : c10::DispatchKeySet();
   };
 
   c10::SymNode wrap_int(int64_t num) override {
@@ -97,11 +102,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   }
 
   bool is_singleton() override {
-    if (!is_singleton_.has_value()) {
-      py::gil_scoped_acquire acquire;
-      is_singleton_ = getPyObj().attr("is_singleton")().is(py::handle(Py_True));
-    }
-    return *is_singleton_;
+    return is_singleton_;
   }
 
   c10::TensorImpl* singleton_vec() override {
@@ -115,14 +116,6 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   int64_t singleton_sum_vec() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("singleton_sum_vec")().cast<int64_t>();
-  }
-
-  c10::DispatchKeySet key_set() override {
-    py::gil_scoped_acquire acquire;
-    if (is_singleton()) {
-      return c10::py_singleton_ks;
-    }
-    return c10::DispatchKeySet();
   }
 
   bool has_hint() override {
@@ -299,10 +292,10 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   }
 
   py::handle getPyObj() {
-    return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
+    return py::handle(pyobj_->ptr(getPyInterpreter()));
   }
+  bool is_singleton_;
   std::shared_ptr<c10::SafePyObject> pyobj_ = nullptr;
-  c10::optional<bool> is_singleton_ = c10::nullopt;
 };
 
 } // namespace impl
