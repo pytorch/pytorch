@@ -18,7 +18,10 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
-from torch._export.passes.lift_constants_pass import lift_constants_pass
+from torch._export.passes.lift_constants_pass import (
+    lift_constants_pass,
+    rewrite_script_object_meta,
+)
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module, GraphSignature
 from torch._guards import detect_fake_mode
@@ -452,9 +455,10 @@ def _export_non_strict(
         input_specs=input_specs, output_specs=output_specs
     )
 
-    constants: Dict[
-        str, Union[torch.Tensor, torch._C.ScriptObject]
-    ] = lift_constants_pass(gm, export_graph_signature)
+    constants = rewrite_script_object_meta(gm)
+    more_constants = lift_constants_pass(gm, export_graph_signature)
+    for k, v in more_constants.items():
+        constants[k] = v
 
     @dataclasses.dataclass
     class _ExportedProgramNonStrict:
