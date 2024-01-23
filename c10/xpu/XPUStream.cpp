@@ -246,7 +246,7 @@ std::ostream& operator<<(std::ostream& stream, const XPUStream& s) {
 
 // Note: when called the first time on a device, this will create the stream
 // pools for that device.
-void device_synchronize(DeviceIndex device) {
+void streams_synchronize_on_device(DeviceIndex device) {
   initXPUStreamsOnce();
   if (device == -1) {
     device = c10::xpu::current_device();
