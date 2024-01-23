@@ -135,7 +135,7 @@ getStreamFromPool(const int priority, DeviceIndex device = -1);
  * Get the current XPU stream, for the passed XPU device, or for the current
  * device if no device index is passed.
  */
-C10_XPU_API XPUStream getCurrentXPUStream(DeviceIndex device_index = -1);
+C10_XPU_API XPUStream getCurrentXPUStream(DeviceIndex device = -1);
 
 /**
  * Set the current stream on the device of the passed in stream to be the passed
