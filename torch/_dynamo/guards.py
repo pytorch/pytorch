@@ -30,8 +30,8 @@ except ModuleNotFoundError:
 import torch
 import torch.utils._device
 from torch._dynamo.source import (
-    is_from_local_source,
     ConstDictKeySource,
+    is_from_local_source,
     TensorProperty,
     TensorPropertySource,
 )
@@ -1024,23 +1024,30 @@ class CheckFunctionManager:
     @staticmethod
     def fuse_dict_guards(builder, guards):
         # Rather than creating n contant guards, each of them costing O(n)
-        # (ConstDictKeySource.reconstruct is O(n), we just place a guard
+        # (ConstDictKeySource.reconstruct is O(n)), we just place a guard
         # on all the keys and their types
         dicts: Dict[Source, Tuple[Guard, int, Set[Guard]]] = {}
         for guard in sorted(guards or [], key=Guard.sort_key):
-            if guard.create_fn == GuardBuilder.LIST_LENGTH and isinstance(d := builder.get(guard.name), dict):
+            if guard.create_fn == GuardBuilder.LIST_LENGTH and isinstance(
+                d := builder.get(guard.name), dict
+            ):
                 dicts[guard.originating_source] = (guard, len(d), set())
-            elif isinstance(guard.originating_source, ConstDictKeySource) and guard.create_fn ==  GuardBuilder.CONSTANT_MATCH:
+            elif (
+                isinstance(guard.originating_source, ConstDictKeySource)
+                and guard.create_fn == GuardBuilder.CONSTANT_MATCH
+            ):
                 # TODO CONSTANT_MATCH can be relaxed
                 dict_source = guard.originating_source.base
                 assert dict_source in dicts
                 dicts[dict_source][2].add(guard)
         remove_guards = set()
         add_guards = set()
-        for (guard, l, elem_guards) in dicts.values():
+        for guard, n_elem, elem_guards in dicts.values():
             # TODO This condition can be relaxed generalizing DICT_KEYS
-            if len(elem_guards) == l:
-                add_guards.add(guard.originating_source.make_guard(GuardBuilder.DICT_KEYS))
+            if len(elem_guards) == n_elem:
+                add_guards.add(
+                    guard.originating_source.make_guard(GuardBuilder.DICT_KEYS)
+                )
                 remove_guards.update(elem_guards)
                 remove_guards.add(guard)
         ret = GuardsSet(guards.inner - remove_guards)
