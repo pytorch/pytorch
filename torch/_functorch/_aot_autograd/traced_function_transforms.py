@@ -593,7 +593,9 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         result = super().run_node(n)
         # TODO: handle Tensor returns
         if "example_value" in n.meta:
-            if isinstance(result, torch.SymInt) and isinstance(result.node.expr, sympy.Symbol):
+            if isinstance(result, torch.SymInt) and isinstance(
+                result.node.expr, sympy.Symbol
+            ):
                 torch._check(result == n.meta["example_value"])
 
         return result

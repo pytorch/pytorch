@@ -5,6 +5,7 @@ import logging
 import re
 import typing
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from unittest.mock import patch
 
 import sympy
 
@@ -487,8 +488,14 @@ def _typecheck_FreeUnbackedSymbolsOpsHandler(
 
 
 def extract_free_unbacked_symbols(fn: Callable[..., Any], index, rindex=None):
+    from .ir import FlexibleLayout
+
     args = [index, rindex] if rindex is not None else [index]
     handler = FreeUnbackedSymbolsOpsHandler()
-    with V.set_ops_handler(handler):
+    # NB: I cargo culted the allow_indexing patch here, I don't understand why
+    # people do this all over
+    with V.set_ops_handler(handler), patch.object(
+        FlexibleLayout, "allow_indexing", True
+    ):
         fn(*args)
     return handler.symbols

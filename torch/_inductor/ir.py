@@ -346,10 +346,6 @@ class Loops(IRNode):
             self.inner_fn_free_unbacked_symbols(),
         )
 
-    def inner_fn_free_unbacked_symbols(self):
-        index = self._index(self.ranges)
-        return extract_free_unbacked_symbols(self.inner_fn, index)
-
     def __str__(self, names=("ranges",)):
         return self.str_helper(
             [
@@ -410,6 +406,10 @@ class Loops(IRNode):
     def inner_fn_str(self):
         index = self._index(self.ranges)
         return V.KernelFormatterHandler.ir_to_string(self.inner_fn, index)
+
+    def inner_fn_free_unbacked_symbols(self):
+        index = self._index(self.ranges)
+        return extract_free_unbacked_symbols(self.inner_fn, index)
 
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
@@ -1608,16 +1608,17 @@ class Scan(Loops):
     def inner_fn_str(self):
         index = self._index(self.ranges)
         rindex = self._index(self.scan_ranges, "r")
+        idx = self.reindex(index, rindex)
         return V.KernelFormatterHandler.ir_to_string(
             self.inner_fn,
-            index,
-            rindex,
+            idx,
         )
 
     def inner_fn_free_unbacked_symbols(self):
         index = self._index(self.ranges)
         rindex = self._index(self.scan_ranges, "r")
-        return extract_free_unbacked_symbols(self.inner_fn, index, rindex)
+        idx = self.reindex(index, rindex)
+        return extract_free_unbacked_symbols(self.inner_fn, idx)
 
     @classmethod
     def create(
