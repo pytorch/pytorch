@@ -42,7 +42,11 @@ class LazyGraphModule(GraphModule):
         return cls.forward is cls._lazy_forward
 
     def _lazy_forward(self, *args, **kwargs):
-        self._real_recompile()
+        # Call self.real_recompile() rather than self._real_recompile() here.
+        # The _lazy_forward method may be saved and call repeatedly.
+        # Calling self.real_recompile can make sure we skip recompilation if
+        # we have already done so.
+        self.real_recompile()
         assert not self._needs_recompile()
 
         # call `__call__` rather than 'forward' since recompilation may

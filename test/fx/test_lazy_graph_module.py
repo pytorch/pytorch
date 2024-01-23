@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: fx"]
 
 import contextlib
+from unittest.mock import patch
 
 import torch
 import torch._export
@@ -164,6 +165,34 @@ class TestLazyRecompile(TestCase):
         # dynamo calls gm.forward with eval hook installed. That will trigger
         # the real recompilation.
         self.assertFalse(gm._needs_recompile())
+
+    def test_save_lazy_foward(self):
+        """
+        Save the lazy forward method and call it repeatly. Make sure we
+        don't recompile for each such call.
+        """
+
+        def f(x):
+            return x.sin()
+
+        orig_gm_recompile = fx.GraphModule.recompile
+        recompile_count = 0
+
+        def mock_gm_recompile(self):
+            nonlocal recompile_count
+            recompile_count += 1
+            return orig_gm_recompile(self)
+
+        with patch.object(fx.GraphModule, "recompile", mock_gm_recompile):
+            gm = fx.symbolic_trace(f)
+            self.assertTrue(isinstance(gm, LazyGraphModule))
+            saved_fwd = gm.forward
+
+            x = torch.rand(2, 3)
+            for _ in range(10):
+                saved_fwd(x)
+
+        self.assertEqual(recompile_count, 1)
 
 
 if __name__ == "__main__":

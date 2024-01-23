@@ -286,6 +286,10 @@ def compile_fx_inner(
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
+        # trigger the real recompilation for LazyGraphModule before returning
+        # the forward method.
+        if hasattr(gm, "real_recompile"):
+            gm.real_recompile()
         return make_boxed_func(gm.forward)
 
     assert isinstance(
