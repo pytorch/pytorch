@@ -1,5 +1,6 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
+#include <sys/stat.h> // for calling stat()
 
 #if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
     !__has_include("ext/stdio_filebuf.h")
@@ -340,6 +341,26 @@ struct Symbolizer {
   }
   static Symbolizer& get() {
     static Symbolizer singleton;
+    if (addr2line_binary == nullptr) {
+        auto envar = std::getenv("TORCH_ADDR2LINE_BINARY");
+        if (envar != nullptr) {
+          // we require users to specify the full path to binary when using this
+          // flag for simplicity currently
+          struct stat buffer;
+          if(stat(envar, &buffer) == 0) {
+            addr2line_binary = envar;
+          } else {
+            TORCH_WARN(
+              "ignoring invalid value for TORCH_ADDR2LINE_BINARY: '",
+              envar,
+              "', valid value needs to be a full path to the binary,",
+              " use default binary addr2line instead.");
+              addr2line_binary = "addr2line"; // default
+          }
+        } else {
+          addr2line_binary = "addr2line"; // default
+        }
+    }
     return singleton;
   }
   void request(void* addr) {
@@ -352,7 +373,7 @@ struct Symbolizer {
       return;
     }
     has_pending_results_ = true;
-    auto& entry = getOrCreate(maybe_library->first);
+    auto& entry = getOrCreate(maybe_library->first, addr2line_binary);
     entry.queried.push_back(addr);
     auto libaddress = maybe_library->second - 1;
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -382,6 +403,7 @@ struct Symbolizer {
 
  private:
   static constexpr int BLOCK = 1024;
+  static const char* addr2line_binary;
   struct Entry {
     std::unique_ptr<Communicate> comm;
     std::vector<void*> queried;
@@ -391,16 +413,16 @@ struct Symbolizer {
   ska::flat_hash_map<void*, Frame> frame_map_;
   bool has_pending_results_ = true;
 
-  Entry& getOrCreate(const std::string& name) {
+  Entry& getOrCreate(const std::string& name, const char* addr2line_bin) {
     auto it = entries_.find(name);
     if (it == entries_.end()) {
       // NOLINTNEXTLINE(*-c-arrays*)
       const char* args[] = {
-          "addr2line", "-C", "-f", "-e", name.c_str(), nullptr};
+        addr2line_bin, "-C", "-f", "-e", name.c_str(), nullptr};
       it = entries_
                .insert_or_assign(
                    name,
-                   Entry{std::make_unique<Communicate>("addr2line", args), {}})
+                   Entry{std::make_unique<Communicate>(addr2line_bin, args), {}})
                .first;
     }
     return it->second;
@@ -420,6 +442,8 @@ struct Symbolizer {
     }
   }
 };
+
+const char* Symbolizer::addr2line_binary = nullptr;
 
 #ifndef FBCODE_CAFFE2
 std::vector<Frame> symbolize(const std::vector<void*>& frames) {
