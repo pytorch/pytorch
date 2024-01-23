@@ -1047,7 +1047,8 @@ def handle_log_file(
         return
     # otherwise: print entire file and then remove it
     print_to_stderr(f"\nPRINTING LOG FILE of {test} ({file_path})")
-    print_to_stderr(full_text)
+    for line in full_text.splitlines():
+        print_to_stderr(line.strip())
     print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})\n")
     os.remove(file_path)
 
