@@ -1,4 +1,4 @@
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["oncall: export"]
 import unittest
 from unittest.mock import patch
 
