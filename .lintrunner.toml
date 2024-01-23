@@ -38,7 +38,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'flake8==6.0.0',
+    'flake8==6.1.0',
     'flake8-bugbear==23.3.23',
     'flake8-comprehensions==3.12.0',
     'flake8-executable==2.1.3',
@@ -46,8 +46,8 @@ init_command = [
     'flake8-pyi==23.3.1',
     'flake8-simplify==0.19.3',
     'mccabe==0.7.0',
-    'pycodestyle==2.10.0',
-    'pyflakes==3.0.1',
+    'pycodestyle==2.11.1',
+    'pyflakes==3.1.0',
     'torchfix==0.2.0',
 ]
 
@@ -57,11 +57,15 @@ code = 'CLANGFORMAT'
 include_patterns = [
     'aten/src/ATen/*.h',
     'aten/src/ATen/mps/**/*.mm',
+    'aten/src/ATen/xpu/**/*.h',
+    'aten/src/ATen/xpu/**/*.cpp',
     'aten/src/ATen/native/mps/**/*.mm',
     'aten/src/ATen/native/vulkan/**/*.h',
     'aten/src/ATen/native/vulkan/**/*.cpp',
     'aten/src/ATen/native/cuda/MultiTensorApply.cuh',
     'aten/src/ATen/native/**/Foreach*.*',
+    'aten/src/ATen/native/cuda/fused*.*',
+    'aten/src/ATen/native/cuda/Fused*.cu',
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',
@@ -242,6 +246,10 @@ code = 'CLANGTIDY'
 include_patterns = [
     'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
+    'c10/**/*.h',
+    # Enable coverage of headers in torch/csrc and excluding sub-directories for now.
+    'torch/csrc/*.h',
+    'torch/csrc/autograd/**/*.h',
     'torch/csrc/**/*.cpp',
 ]
 exclude_patterns = [
@@ -250,8 +258,21 @@ exclude_patterns = [
     # CUDA files are also excluded.
     '**/fb/**',
     '**/*pb.h',
-    '**/*CUDA*',
     '**/cuda/*pp',
+    '**/*XPU*',
+    '**/xpu/*pp',
+    'c10/cuda/CUDAAlgorithm.h',
+    'c10/util/complex_math.h',
+    'c10/util/complex_utils.h',
+    'c10/util/flat_hash_map.h',
+    'c10/util/Float8*.h',
+    'c10/util/logging*.h',
+    'c10/util/hash.h',
+    'c10/util/strong_type.h',
+    'c10/util/SmallVector.h',
+    'c10/util/win32-headers.h',
+    'c10/util/*inl.h',
+    'c10/test/**/*.h',
     'aten/src/ATen/core/TensorImpl_test.cpp',
     'third_party/**/*',
     'torch/csrc/api/**',
@@ -867,6 +888,7 @@ exclude_patterns = [
     'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
     'test/fx/**',  # should be run through test/test_fx.py
     'test/bottleneck_test/**',  # excluded by test/run_test.py
+    'test/package/**',  # excluded by test/run_test.py
     'test/distributed/argparse_util_test.py',
     'test/distributed/bin/test_script.py',
     'test/distributed/elastic/agent/server/test/local_elastic_agent_test.py',
@@ -899,9 +921,6 @@ exclude_patterns = [
     'test/distributed/test_c10d_spawn.py',
     'test/distributed/test_collective_utils.py',
     'test/distributions/test_distributions.py',
-    'test/dynamo/test_compile.py',
-    'test/dynamo/test_sources.py',
-    'test/functorch/test_logging.py',
     'test/inductor/test_aot_inductor_utils.py',
     'test/lazy/test_bindings.py',
     'test/lazy/test_extract_compiled_graph.py',
@@ -914,10 +933,6 @@ exclude_patterns = [
     'test/optim/test_lrscheduler.py',
     'test/optim/test_optim.py',
     'test/optim/test_swa_utils.py',
-    'test/package/package_a/test_all_leaf_modules_tracer.py',
-    'test/package/package_a/test_module.py',
-    'test/package/package_a/test_nn_module.py',
-    'test/package/package_c/test_module.py',
     'test/run_test.py',
     'test/test_bundled_images.py',
     'test/test_cuda_expandable_segments.py',
@@ -2119,7 +2134,6 @@ exclude_patterns = [
     'torch/futures/__init__.py',
     'torch/fx/__init__.py',
     'torch/fx/_compatibility.py',
-    'torch/fx/_pytree.py',
     'torch/fx/_symbolic_trace.py',
     'torch/fx/annotate.py',
     'torch/fx/config.py',
@@ -2164,7 +2178,6 @@ exclude_patterns = [
     'torch/fx/experimental/validator.py',
     'torch/fx/graph.py',
     'torch/fx/graph_module.py',
-    'torch/fx/immutable_collections.py',
     'torch/fx/interpreter.py',
     'torch/fx/node.py',
     'torch/fx/operator_schemas.py',
@@ -2549,7 +2562,6 @@ exclude_patterns = [
     'torch/utils/data/datapipes/utils/common.py',
     'torch/utils/data/datapipes/utils/decoder.py',
     'torch/utils/data/datapipes/utils/snapshot.py',
-    'torch/utils/data/dataset.py',
     'torch/utils/data/distributed.py',
     'torch/utils/data/graph.py',
     'torch/utils/data/graph_settings.py',
@@ -2591,7 +2603,7 @@ init_command = [
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
     '--no-black-binary',
-    'black==23.3.0',
+    'black==23.12.1',
     'ufmt==2.1.0',
     'usort==1.0.6',
 ]
@@ -2677,7 +2689,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.1.7',
+    'ruff==0.1.11',
 ]
 is_formatter = true
 

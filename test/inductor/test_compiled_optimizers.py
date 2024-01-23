@@ -5,25 +5,143 @@ import unittest
 import weakref
 
 from copy import deepcopy
+from typing import NamedTuple
 
 import torch
 
 import torch._inductor
 
-# The rest of the optimizers not yet imported: Adamax, LBFGS, RAdam, SGD, SparseAdam
-from torch.optim import Adadelta, Adagrad, Adam, AdamW, ASGD, NAdam, RMSprop, Rprop
+# The rest of the optimizers not yet imported: LBFGS, RAdam, SparseAdam
+from torch.optim import (
+    Adadelta,
+    Adagrad,
+    Adam,
+    Adamax,
+    AdamW,
+    ASGD,
+    NAdam,
+    RMSprop,
+    Rprop,
+    SGD,
+)
+
+from torch.testing._internal.common_optimizers import optim_db
 
 from torch.testing._internal.common_utils import TestCase
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
+from torch.testing._internal.triton_utils import requires_cuda
+
+
+class KernelCounts(NamedTuple):
+    multitensor: int
+    singletensor: int
+
+
+# With different settings for certain
+# tests you can get different kernel counts
+# This maps the test name to the
+# expected kernel count
+KERNEL_COUNT_OVERRIDES = {
+    "test_rmsprop_foreach_weight_decay_cpu": 12,
+    "test_nadam_foreach_weight_decay_momentum_decay_cpu": 20,
+    "test_adamw_foreach_amsgrad_capturable_cuda": 3,
+    "test_adamw_amsgrad_capturable_cuda": 6,
+    "test_adam_amsgrad_capturable_cuda": 6,
+    "test_adadelta_foreach_weight_decay_maximize_cpu": 12,
+    "test_adadelta_foreach_rho_weight_decay_cpu": 12,
+    "test_adadelta_foreach_weight_decay_cpu": 12,
+    "test_sgd_foreach_momentum_weight_decay_cpu": 16,
+    "test_sgd_foreach_momentum_nesterov_weight_decay_cpu": 16,
+    "test_sgd_foreach_momentum_dampening_cuda": 5,
+    "test_sgd_foreach_momentum_cuda": 5,
+}
+
+# also tracks currently supported optimizers
+KERNEL_COUNTS = {
+    Adam: KernelCounts(multitensor=2, singletensor=8),
+    AdamW: KernelCounts(multitensor=2, singletensor=8),
+    NAdam: KernelCounts(multitensor=2, singletensor=12),
+    Rprop: KernelCounts(multitensor=1, singletensor=4),
+    RMSprop: KernelCounts(multitensor=1, singletensor=4),
+    Adadelta: KernelCounts(multitensor=1, singletensor=4),
+    Adagrad: KernelCounts(multitensor=5, singletensor=8),
+    ASGD: KernelCounts(multitensor=2, singletensor=12),
+    SGD: KernelCounts(multitensor=2, singletensor=8),
+    Adamax: KernelCounts(
+        multitensor=2, singletensor=None
+    ),  # Single tensor eager needs to be refactored to enable tracing
+}
+
+
+def build_compiled_opt_kwarg_db():
+    compiled_opt_db = []
+    for optim_info in optim_db:
+        if optim_info.optim_cls not in KERNEL_COUNTS:
+            continue
+
+        for optim_inputs in optim_info.optim_inputs_func():
+            for device in ["cpu", "cuda"]:
+                for foreach in [True, False]:
+                    if device == "cpu" and "capturable" in optim_inputs.kwargs:
+                        continue
+
+                    kwargs = dict(optim_inputs.kwargs)
+                    name = (
+                        f"test_{optim_info.optim_cls.__name__.lower()}"
+                        f"{'_foreach' if foreach else ''}"
+                    )
+
+                    for key in optim_inputs.kwargs:
+                        if key == "lr":
+                            continue
+                        name += "_" + key
+
+                    name += f"_{device}"
+
+                    # Eager for-loop impl doesn't support capturable ASGD
+                    if name == "test_asgd_capturable_cuda":
+                        continue
+
+                    kwargs["foreach"] = foreach
+                    kwargs["device"] = device
+                    if name in KERNEL_COUNT_OVERRIDES:
+                        kwargs["kernel_count"] = KERNEL_COUNT_OVERRIDES[name]
+                    else:
+                        kwargs["kernel_count"] = (
+                            KERNEL_COUNTS[optim_info.optim_cls].multitensor
+                            if foreach and device == "cuda"
+                            else KERNEL_COUNTS[optim_info.optim_cls].singletensor
+                        )
+
+                    if kwargs["kernel_count"] is None:
+                        continue
+
+                    # Note on tolerances:
+                    # test_adadelta_foreach_rho_weight_decay_cuda
+                    # Mismatched elements: 1 / 100 (1.0%)
+                    # Greatest absolute difference: 2.0936131477355957e-05 at index (2, 7) (up to 2e-05 allowed)
+                    # Greatest relative difference: 8.520411211065948e-05 at index (2, 7) (up to 1e-06 allowed)
+                    if optim_info.optim_cls is Adadelta:
+                        kwargs["rtol"] = 2e-5
+                        kwargs["atol"] = 2e-5
+
+                    compiled_opt_db.append((optim_info.optim_cls, name, kwargs))
+
+    return compiled_opt_db
+
+
+COMPILED_OPT_KWARG_DB = build_compiled_opt_kwarg_db()
+
 aten = torch.ops.aten
+
 
 try:
     try:
-        from .test_torchinductor import check_model, check_model_cuda, requires_cuda
+        from .test_torchinductor import check_model, check_model_cuda
     except ImportError:
-        from test_torchinductor import check_model, check_model_cuda, requires_cuda
+        from test_torchinductor import check_model, check_model_cuda
 except (unittest.SkipTest, ImportError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
@@ -55,18 +173,25 @@ def compile_opt(opt_compiled, closure=None):
     return torch.compile(fn, backend="inductor", fullgraph=True)
 
 
-def make_test(optim_cls, closure=None, kernel_count=2, **kwargs):
-    @requires_cuda()
+def make_test(
+    optim_cls,
+    closure=None,
+    kernel_count=2,
+    device="cuda",
+    atol=None,
+    rtol=None,
+    **kwargs,
+):
     def test_fn(self):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
-        input = torch.ones([10, 10], device="cuda:0")
+        input = torch.ones([10, 10], device=device)
         model_eager = torch.nn.Sequential(
-            *[torch.nn.Linear(10, 10, device="cuda:0") for _ in range(2)]
+            *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
         )
         model_eager(input).sum().backward()
 
-        input = torch.ones([10, 10], device="cuda:0")
+        input = torch.ones([10, 10], device=device)
         model_compiled = deepcopy(model_eager)
         model_compiled(input).sum().backward()
 
@@ -81,8 +206,24 @@ def make_test(optim_cls, closure=None, kernel_count=2, **kwargs):
             opt_eager.step()
 
         self.assertEqual(
-            list(model_eager.parameters()), list(model_compiled.parameters())
+            list(model_eager.parameters()),
+            list(model_compiled.parameters()),
+            atol=atol,
+            rtol=rtol,
         )
+
+        # currently we don't mutate step properly until we resolve
+        # https://github.com/pytorch/pytorch/issues/115679
+        if optim_cls not in (Adadelta, Rprop, RMSprop):
+            for p_eager, p_compiled in zip(
+                model_eager.parameters(), model_compiled.parameters()
+            ):
+                self.assertEqual(
+                    opt_eager.state[p_eager],
+                    opt_compiled.state[p_compiled],
+                    atol=atol,
+                    rtol=rtol,
+                )
 
         if self.check_kernel_count:
             # currently, we compile the step and the rest of the computation
@@ -92,6 +233,9 @@ def make_test(optim_cls, closure=None, kernel_count=2, **kwargs):
                 torch._inductor.metrics.generated_kernel_count, kernel_count
             )
 
+    if device == "cuda":
+        test_fn = requires_cuda()(test_fn)
+
     return test_fn
 
 
@@ -100,9 +244,9 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
     def test_fn(self):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
-        input = torch.ones([10, 10], device="cuda:0")
+        input = torch.ones([10, 10], device="cuda")
         model = torch.nn.Sequential(
-            *[torch.nn.Linear(10, 10, device="cuda:0") for _ in range(2)]
+            *[torch.nn.Linear(10, 10, device="cuda") for _ in range(2)]
         )
         model(input).sum().backward()
 
@@ -111,9 +255,8 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
         # check no recompile here
         with torch.set_grad_enabled(False):
-            compiled_step()
-
-            compiled_step()
+            for _ in range(4):
+                compiled_step()
 
             # perturb state to force recompile
             # Adagrad doesn't reinitialize state on each step
@@ -125,12 +268,20 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
             compiled_step()
 
         if self.check_kernel_count:
-            # currently, we compile the step and the rest of the computation
-            # separately because the step is a single element tensor
-            # hence, the usual kernel count is 2
-            # multiply by 2 to account for the recompile
+            if optim_cls is SGD:
+                # SGD triggers an additional recompile
+                # because of momentum buffer list mutation in step()
+                multiplier = 3
+            else:
+                # currently, we compile the step and the rest of the computation
+                # separately because the step is a single element tensor
+                # hence, the usual kernel count is 2
+                # multiply by 2 to account for the recompile
+                multiplier = 2
+
             self.assertEqual(
-                torch._inductor.metrics.generated_kernel_count, 2 * kernel_count
+                torch._inductor.metrics.generated_kernel_count,
+                multiplier * kernel_count,
             )
 
     return test_fn
@@ -149,35 +300,6 @@ class CompiledOptimizerTests(TestCase):
         super().tearDown()
         torch._inductor.metrics.reset()
 
-    test_adam = make_test(Adam, lr=0.01)
-    test_adam_weight_decay = make_test(Adam, lr=0.01, weight_decay=0.01)
-    test_adam_amsgrad = make_test(Adam, lr=0.01, amsgrad=True)
-    test_adam_maximize = make_test(Adam, lr=0.01, maximize=True)
-    test_adam_weight_decay_and_maximize = make_test(
-        Adam, lr=0.01, weight_decay=0.01, maximize=True
-    )
-    test_adam_everything = make_test(
-        Adam, lr=0.01, weight_decay=1.0, amsgrad=True, capturable=True, maximize=True
-    )
-
-    test_adamw = make_test(AdamW, lr=0.01)
-    # Need to an impl which does not use python scalars
-    # test_adamax = make_test(Adamax, lr=0.01)
-    test_nadam = make_test(NAdam, lr=0.01)
-    test_nadam_weight_decay = make_test(NAdam, lr=0.01, weight_decay=0.01)
-    test_nadam_momentum_decay = make_test(NAdam, lr=0.01, momentum_decay=6e-3)
-    test_nadam_weight_momentum_decay = make_test(
-        NAdam, lr=0.01, weight_decay=0.01, momentum_decay=6e-3
-    )
-    test_rprop = make_test(Rprop, kernel_count=1, lr=0.01)
-    test_rmsprop = make_test(RMSprop, kernel_count=1, lr=0.01)
-    test_adadelta = make_test(Adadelta, kernel_count=1, lr=0.01)
-    test_adagrad = make_test(Adagrad, kernel_count=5, lr=0.01)
-    test_asgd_default = make_test(ASGD, kernel_count=2, lr=0.1)
-    test_asgd_single = make_test(ASGD, kernel_count=12, lr=0.1, foreach=False)
-    test_asgd_foreach = make_test(ASGD, kernel_count=2, lr=0.1, foreach=True)
-    # test_sgd = make_test(SGD, kernel_count=1, lr=0.01)
-
     test_adam_recompile = make_recompile_test(Adam, lr=0.01)
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
     # Need an impl which does not use python scalars
@@ -194,7 +316,12 @@ class CompiledOptimizerTests(TestCase):
     test_asgd_recompile_foreach = make_recompile_test(
         ASGD, kernel_count=2, lr=0.01, foreach=True
     )
-    # test_sgd_recompile = make_recompile_test(SGD, kernel_count=1, lr=0.01)
+    test_sgd_recompile_single = make_recompile_test(
+        SGD, kernel_count=4, lr=0.01, foreach=False
+    )
+    test_sgd_recompile_foreach = make_recompile_test(
+        SGD, kernel_count=1, lr=0.01, foreach=True
+    )
 
     @requires_cuda()
     def test_static_address_finalizer(self):
@@ -221,6 +348,9 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertTrue(p_ref() is None)
 
+
+for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
+    setattr(CompiledOptimizerTests, name, make_test(optim_cls, **kwargs))
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

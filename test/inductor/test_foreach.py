@@ -15,14 +15,15 @@ from torch.testing._internal.common_utils import (
 )
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.triton_utils import requires_cuda
 
 aten = torch.ops.aten
 
 try:
     try:
-        from .test_torchinductor import check_model, check_model_cuda, requires_cuda
+        from .test_torchinductor import check_model, check_model_cuda
     except ImportError:
-        from test_torchinductor import check_model, check_model_cuda, requires_cuda
+        from test_torchinductor import check_model, check_model_cuda
 except (unittest.SkipTest, ImportError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
@@ -139,9 +140,9 @@ class ForeachTests(TestCase):
             ),
         )
 
-    # called in test_cpp_wrapper.py
+    # called in test_cuda_cpp_wrapper.py
     @requires_cuda()
-    def test_foreach_cpp_wrapper(self):
+    def test_foreach_cpp_wrapper_cuda(self):
         self._test_single_list(op=torch._foreach_add)
 
     @requires_cuda()
@@ -678,6 +679,24 @@ class ForeachTests(TestCase):
         self.check_model_cuda(fn, inputs, check_lowp=False)
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda()
+    def test_multi_device(self):
+        def test_foreach_add(a0, a1, b0, b1):
+            return torch._foreach_add([a0, a1], [b0, b1])
+
+        inps = [
+            torch.ones(10, 10, device="cuda"),
+            torch.ones(20, 20, device="cpu"),
+            torch.zeros(10, 10, device="cuda"),
+            torch.zeros(20, 20, device="cpu"),
+        ]
+
+        out_eager = test_foreach_add(*inps)
+        out_compiled = torch.compile(test_foreach_add)(*inps)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
 
 if __name__ == "__main__":

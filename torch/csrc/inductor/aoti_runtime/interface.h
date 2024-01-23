@@ -43,13 +43,25 @@ using AOTInductorStreamHandle = AOTInductorStreamOpaque*;
 struct AOTInductorConstantMap;
 using AOTInductorConstantMapHandle = AOTInductorConstantMap*;
 
-// Creates an AOTInductor model container. The parameter num_models
-// specifies the number of model instances that may be run concurrently for
-// the same input model.
+// TODO: Deprecate this API. This was kept for BC compatibility.
+// Please use AOTInductorModelContainerCreateWithDevice instead.
 AOTIRuntimeError AOTInductorModelContainerCreate(
     AOTInductorModelContainerHandle* container_handle,
     size_t num_models,
     bool is_cpu,
+    const char* cubin_dir);
+
+// Creates an AOTInductor model container. The parameter num_models
+// specifies the number of model instances that may be run concurrently for
+// the same input model.
+// `device_str` MUST NOT be nullptr. It must be a valid device string, e.g.
+// "cpu", "cuda", "cuda:0", etc. If the device index is not specified for CUDA
+// device, runtime will use the device index returned by
+// "cudaGetDevice(&device_idx)"
+AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
+    AOTInductorModelContainerHandle* container_handle,
+    size_t num_models,
+    const char* device_str,
     const char* cubin_dir);
 
 // Deletes the AOTInductor model container.
@@ -69,6 +81,38 @@ AOTIRuntimeError AOTInductorModelContainerRun(
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
     AOTIProxyExecutorHandle proxy_executor_handle);
+
+// Retrieves the number of constants for the model.
+AOTIRuntimeError AOTInductorModelContainerGetNumConstants(
+    AOTInductorModelContainerHandle container_handle,
+    size_t* num_constants);
+
+// Retrieves a constant's name.
+AOTIRuntimeError AOTInductorModelContainerGetConstantName(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    const char** name);
+
+// Retrieves a constant's original FQN.
+AOTIRuntimeError AOTInductorModelContainerGetConstantOriginalFQN(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    const char** original_fqn);
+
+// Retrieves a constant's dtype.
+AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    int32_t* dtype);
+
+// Setup the constant buffer in model container with provided ConstantMap
+// use_inactive should be set as true if the inactive buffer is to be updated.
+// validate_full_update checks if all constants are included in the ConstantMap
+AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive,
+    bool validate_full_update);
 
 // Setup the inactive constant buffer in model container with provided
 // ConstantMap

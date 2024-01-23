@@ -19,7 +19,7 @@ class AOTInductorModelContainer {
  public:
   AOTInductorModelContainer(
       size_t num_models,
-      bool is_cpu = false,
+      const std::string& device_str,
       std::optional<std::string> cubin_dir = std::nullopt) {
     constants_map_ = std::make_shared<ConstantMap>();
     constants_array_ = std::make_shared<std::vector<ConstantHandle>>();
@@ -28,7 +28,7 @@ class AOTInductorModelContainer {
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
       models_.push_back(AOTInductorModel::Create(
-          constants_map_, constants_array_, cubin_dir));
+          constants_map_, constants_array_, device_str, cubin_dir));
       available_models_.push_back(models_.back().get());
     }
 
@@ -53,7 +53,7 @@ class AOTInductorModelContainer {
       output_names_.push_back(model->output_name(i));
     }
 
-    model->load_constants(is_cpu);
+    model->load_constants();
 #ifdef USE_CUDA
     constant_blob_ = model->release_constant_blob();
     constants_internal_offset_.resize(model->num_constants());
@@ -95,28 +95,67 @@ class AOTInductorModelContainer {
     pending_models_available_.notify_one();
   }
 
-  // This function updates the inactive buffer for storing constants.
+  size_t num_constants() const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->num_constants();
+  }
+
+  const char* constant_name(size_t idx) const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->constant_name(idx);
+  }
+
+  const char* constant_original_fqn(size_t idx) const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->constant_original_fqn(idx);
+  }
+
+  int32_t constant_dtype(size_t idx) const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->constant_dtype(idx);
+  }
+
+  // This function updates the buffer for storing constants.
   // It will update the buffer, the mapping and the array mapping.
-  // We can later change the inactive buffer to active with corresponding
-  // function calls (swap_constant_buffer)
-  void update_inactive_constant_buffer(
-      const std::unordered_map<std::string, AtenTensorHandle>& constants_map) {
+  void update_constant_buffer(
+      const std::unordered_map<std::string, AtenTensorHandle>& constants_map,
+      bool use_inactive,
+      bool validate_full_update) {
 #ifdef USE_CUDA
     if (this->num_models() == 0) {
       throw std::runtime_error("No model available in container!");
     }
     auto num_constants = models_[0]->num_constants();
 
-    auto* constants_blob_ptr = static_cast<uint8_t*>(get_inactive_blob_ptr());
-    auto inactive_constants_map = get_inactive_map();
+    auto* constants_blob_ptr =
+        static_cast<uint8_t*>(get_constant_blob_ptr(use_inactive));
+    auto constants_map_to_update = get_constants_map(use_inactive);
+
+    if (validate_full_update) {
+      for (size_t idx = 0; idx < num_constants; idx++) {
+        auto constant_name = std::string(models_[0]->constant_name(idx));
+        auto it = constants_map.find(constant_name);
+        if (it == constants_map.end()) {
+          throw std::runtime_error(
+              std::string("Cannot find constants ") + constant_name +
+              std::string(" in constants_map!"));
+        }
+      }
+    }
 
     for (size_t idx = 0; idx < num_constants; idx++) {
       auto constant_name = std::string(models_[0]->constant_name(idx));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end()) {
-        throw std::runtime_error(
-            std::string("Cannot find constants ") + constant_name +
-            std::string(" in constants_map!"));
+        continue;
       }
 
       // Move the data to container handled blob.
@@ -150,18 +189,19 @@ class AOTInductorModelContainer {
           models_[0]->constant_shape(idx),
           stride,
           offset,
-          models_[0]->constant_type(idx),
+          models_[0]->constant_dtype(idx),
           aoti_torch_device_type_cuda(),
           device_idx,
           &tensor_handle));
 
       // Now place the tensor to constants_map. Note at this point the ownership
       // of the tensor_handle will be taken over.
-      inactive_constants_map->emplace(constant_name, tensor_handle);
+      constants_map_to_update->emplace(constant_name, tensor_handle);
     }
 
     // Update the inactive constant array.
-    update_array_from_map(get_inactive_array(), inactive_constants_map);
+    update_array_from_map(
+        get_constants_array(use_inactive), constants_map_to_update);
 #endif // USE_CUDA
   }
 
@@ -178,8 +218,8 @@ class AOTInductorModelContainer {
   void swap_constant_buffer() {
     std::lock_guard unique_lk(model_exec_mutex_);
 
-    auto constants_map = get_inactive_map();
-    auto constants_array = get_inactive_array();
+    auto constants_map = get_constants_map(/* get_inactive= */ true);
+    auto constants_array = get_constants_array(/* get_inactive= */ true);
 
     for (auto& model : models_) {
       model->update_constants_map(
@@ -286,8 +326,9 @@ class AOTInductorModelContainer {
   std::shared_mutex model_exec_mutex_;
 
 #ifdef USE_CUDA
-  void* get_inactive_blob_ptr() {
-    if (use_secondary_) {
+  void* get_constant_blob_ptr(bool get_inactive) {
+    if ((get_inactive && use_secondary_) ||
+        (!get_inactive && !use_secondary_)) {
       return constant_blob_.get();
     } else {
       if (!constant_blob_secondary_) {
@@ -298,8 +339,9 @@ class AOTInductorModelContainer {
   }
 #endif // USE_CUDA
 
-  std::shared_ptr<ConstantMap> get_inactive_map() {
-    if (use_secondary_) {
+  std::shared_ptr<ConstantMap> get_constants_map(bool get_inactive) {
+    if ((get_inactive && use_secondary_) ||
+        (!get_inactive && !use_secondary_)) {
       return constants_map_;
     } else {
       if (!constants_map_secondary_) {
@@ -309,8 +351,10 @@ class AOTInductorModelContainer {
     }
   }
 
-  std::shared_ptr<std::vector<ConstantHandle>> get_inactive_array() {
-    if (use_secondary_) {
+  std::shared_ptr<std::vector<ConstantHandle>> get_constants_array(
+      bool get_inactive) {
+    if ((get_inactive && use_secondary_) ||
+        (!get_inactive && !use_secondary_)) {
       return constants_array_;
     } else {
       if (!constants_array_secondary_) {

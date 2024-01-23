@@ -7,8 +7,10 @@ from typing import Any, Dict, final, List, Optional, Tuple, Type
 import torch
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.export.custom_obj import ScriptObjectMeta
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
+    CustomObjArgument,
     ExportGraphSignature,
     InputKind,
     SymIntArgument,
@@ -42,6 +44,8 @@ def _check_val(node: torch.fx.Node) -> None:
         elif isinstance(val, (FakeTensor, torch.Tensor)):  # TODO(zhxchen17) Remove Tensor.
             return True
         elif isinstance(val, (SymInt, SymFloat, SymBool)):
+            return True
+        elif isinstance(val, ScriptObjectMeta):
             return True
         elif isinstance(val, Iterable):
             return all(_check_correct_val(x) for x in val)
@@ -130,14 +134,7 @@ class Verifier(metaclass=_VerifierMeta):
             # TODO Enforce type checking in the constructor.
             return
         self._check_graph_module(ep.graph_module)
-        try:
-            _verify_exported_program_signature(ep)
-        except SpecViolationError as e:
-            # TODO Remove this branch.
-            if ep.dialect == "EDGE":  # !!! Don't change this allowlist. !!!
-                pass
-            else:
-                raise e
+        _verify_exported_program_signature(ep)
 
     @final
     def _check_graph_module(self, gm: torch.fx.GraphModule) -> None:
@@ -158,7 +155,20 @@ class Verifier(metaclass=_VerifierMeta):
                 return ret
 
             # TODO Remove this allowlist.
-            _allowed_torch_functions = (torch.autograd.grad_mode.set_grad_enabled,)
+            _allowed_torch_functions = (
+                torch.autograd.grad_mode.set_grad_enabled,
+                torch.sym_int,
+                torch.sym_ite,
+                torch.sym_max,
+                torch.sym_min,
+                torch.sym_not,
+                torch.sym_sqrt,
+                # TODO (tmanlaibaatar)
+                # Predispatch export is able to contain autograd ops.
+                # These will be modeled as HOO later
+                torch._C._set_grad_enabled
+
+            )
 
             if not isinstance(op, _allowed_op_types()):
                 if op not in _allowed_builtin_ops() and op not in _allowed_torch_functions:
@@ -307,9 +317,24 @@ def _verify_exported_program_signature(exported_program) -> None:
                 )
 
             tensor_const = input_spec.target
-            if tensor_const not in exported_program.tensor_constants:
+            if tensor_const not in exported_program.constants:
                 raise SpecViolationError(
-                    f"Constant tensor {tensor_const} is not in the tensor constants dictionary."
+                    f"Constant tensor {tensor_const} is not in the constants dictionary."
+                )
+        elif input_spec.kind == InputKind.CUSTOM_OBJ:
+            if not isinstance(input_spec.arg, CustomObjArgument):
+                raise SpecViolationError(
+                    f"Custom object {input_spec.name} is not a custom object argument. Found {input_spec.arg} instead."
+                )
+            if input_spec.target is None:
+                raise SpecViolationError(
+                    f"InputSpec for {input_spec.name} has no target."
+                )
+
+            custom_obj = input_spec.target
+            if custom_obj not in exported_program.constants:
+                raise SpecViolationError(
+                    f"Custom object {custom_obj} is not in the constants dictionary."
                 )
         else:
             raise SpecViolationError(

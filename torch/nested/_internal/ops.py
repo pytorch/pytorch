@@ -1,5 +1,6 @@
 import functools
 import math
+import operator
 
 import torch
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
@@ -20,7 +21,7 @@ def _outer_to_inner_dim(ndim, dim):
     return 0 if dim < 2 else dim - 1
 
 
-def _wrap_jagged_dim(ndim, dim, op_name):
+def _wrap_jagged_dim(ndim, dim, op_name, convert_to_inner_dim=True):
     from torch._prims_common import canonicalize_dims
 
     wrapped = canonicalize_dims(ndim, dim)
@@ -28,7 +29,7 @@ def _wrap_jagged_dim(ndim, dim, op_name):
         raise RuntimeError(
             f"{op_name}(): not supported for NestedTensor on dim=0 or dim=1"
         )
-    return _outer_to_inner_dim(ndim, wrapped)
+    return _outer_to_inner_dim(ndim, wrapped) if convert_to_inner_dim else wrapped
 
 
 def _wrap_jagged_dims(ndim, dims, op_name):
@@ -123,7 +124,11 @@ def check_ragged_dim_same(
 # match those of the specified size
 def raggedness_matches(nt, size):
     end = nt._ragged_idx + 1
-    return list(nt._size[:end]) == list(size[:end])
+    nt_ragged = nt._size[:end]
+    size_ragged = size[:end]
+    return len(nt_ragged) == len(size_ragged) and (
+        all(ns == s or s == -1 for ns, s in zip(nt_ragged, size_ragged))
+    )
 
 
 def squeeze_leading_ones(t):
@@ -286,14 +291,22 @@ def jagged_torch_function(func, *args, **kwargs):
         )
 
         inp = new_kwargs.pop("input")
-        new_kwargs["start_dim"] = _wrap_jagged_dim(
-            inp.dim(), new_kwargs["start_dim"], "flatten"
+
+        # NB: stay in outer dim space because we're going to redispatch on a NT input
+        start_dim = _wrap_jagged_dim(
+            inp.dim(), new_kwargs["start_dim"], "flatten", convert_to_inner_dim=False
         )
-        new_kwargs["end_dim"] = _wrap_jagged_dim(
-            inp.dim(), new_kwargs["end_dim"], "flatten"
+        end_dim = _wrap_jagged_dim(
+            inp.dim(), new_kwargs["end_dim"], "flatten", convert_to_inner_dim=False
         )
 
-        return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+        if start_dim == end_dim:
+            return inp
+
+        product = functools.reduce(operator.mul, inp.shape[start_dim : end_dim + 1])
+        new_shape = (*inp.shape[:start_dim], product, *inp.shape[end_dim + 1 :])
+
+        return inp.reshape(*new_shape)
 
     raise NotImplementedError(func)
 
@@ -378,70 +391,6 @@ register_jagged_func(
 )(is_contiguous_general)
 
 
-@register_jagged_func(
-    torch.ops.aten._to_copy.default,
-    "input: jt_all, dtype: any?, layout: any?, device: any?, pin_memory: any?, non_blocking: any, memory_format: any?",
-)
-def _to_copy_default(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    inp: NestedTensor = new_kwargs.pop("input")
-    new_dtype = new_kwargs.pop("dtype", inp.dtype)
-    new_layout = new_kwargs.pop("layout", torch.jagged)
-    new_device: torch.device = new_kwargs.pop("device", inp.device)
-    new_pin_memory = new_kwargs.pop("pin_memory", inp.is_pinned())
-    non_blocking = new_kwargs.pop("non_blocking")
-    new_memory_format = new_kwargs.pop("memory_format", torch.preserve_format)
-    pin_out = non_blocking and inp.is_cuda and new_device.type == "cpu"
-
-    if new_layout not in [torch.strided, torch.jagged]:
-        raise ValueError("Nested Tensors can only have jagged and strided layouts")
-
-    new_values = torch.empty_like(
-        inp.values(),
-        dtype=new_dtype,
-        device=new_device,
-        pin_memory=pin_out,
-        memory_format=new_memory_format,
-    )
-    new_values.copy_(inp.values())
-
-    if new_layout == torch.jagged:
-        # Copy to a new Python subclass NestedTensor
-        return NestedTensor(
-            new_values,
-            lengths=inp.lengths(),
-            _ragged_idx=inp._ragged_idx,
-            **extract_kwargs(inp),
-        )
-
-    # Create a new C++ NT from the Python NestedTensor
-    # Start by creating metadata needed by C++ NT
-    ragged_source = inp.lengths() if inp.lengths() is not None else inp.offsets().diff()
-    nested_sizes = torch.empty(
-        (inp.offsets().shape[0] - 1, new_values.dim() + 1), dtype=torch.int64
-    )
-    nested_sizes[
-        :, [i for i in range(new_values.dim() + 1) if i != inp._ragged_idx]
-    ] = torch.tensor(inp._size[0 : inp._ragged_idx] + inp._size[inp._ragged_idx + 1 :])
-    nested_sizes[:, inp._ragged_idx] = ragged_source
-    nested_strides = torch.empty_like(nested_sizes)
-    nested_strides[:, 1:] = torch.tensor(inp._strides[1:])
-    nested_strides[:, 0] = ragged_source * new_values.stride()[inp._ragged_idx - 1]
-    Ds = new_values.shape[: inp._ragged_idx - 1] + new_values.shape[inp._ragged_idx :]
-    nested_offsets = inp.offsets() * functools.reduce(
-        lambda a, b: a * b, new_values.size()
-    )
-    return torch._nested_view_from_buffer(
-        new_values.view(-1),
-        nested_size=nested_sizes,
-        nested_strides=nested_strides,
-        offsets=nested_offsets,
-    )
-
-
 @register_jagged_func(torch.ops.aten.linear.default, "input: jt, weight: t, bias: t?")
 def linear_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -475,19 +424,60 @@ def linear_backward_default(func, *args, **kwargs):
     return (ds, dw, db)
 
 
-@register_jagged_func(torch.ops.aten._to_copy.default, "self: jt")
-def to_copy_default(func, *args, **kwargs):
+@register_jagged_func(
+    torch.ops.aten._to_copy.default,
+    "input: jt_all, dtype: any?, layout: any?, device: any?, pin_memory: any?, non_blocking: any?, memory_format: any?",
+)
+def _to_copy_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    inp = new_kwargs.pop("input")
-    # don't change layout
-    new_kwargs.pop("layout")
+    inp: NestedTensor = new_kwargs.pop("input")
+    new_layout = new_kwargs.pop("layout")
+    if new_layout is None:
+        new_layout = inp.layout
+
+    if new_layout not in [torch.strided, torch.jagged]:
+        raise ValueError("Nested Tensors can only have jagged and strided layouts")
 
     new_values = func(inp._values, **new_kwargs)
-    # NB: Purposefully keep offsets on the old device.
-    return NestedTensor(new_values, **extract_kwargs(inp))
+
+    if new_layout == torch.jagged:
+        # Copy to a new Python subclass NestedTensor
+        return NestedTensor(
+            new_values,
+            lengths=inp.lengths(),
+            _ragged_idx=inp._ragged_idx,
+            **extract_kwargs(inp),
+        )
+
+    # Create a new C++ NT from the Python NestedTensor
+    # Start by creating metadata needed by C++ NT
+    ragged_source = inp.lengths() if inp.lengths() is not None else inp.offsets().diff()
+    nested_sizes = torch.empty(
+        (inp.offsets().shape[0] - 1, new_values.dim()), dtype=torch.int64
+    )
+    non_ragged_dims = list(range(new_values.dim()))
+    non_ragged_dims = (
+        non_ragged_dims[: inp._ragged_idx - 1] + non_ragged_dims[inp._ragged_idx :]
+    )
+    nested_sizes[:, non_ragged_dims] = torch.tensor(
+        inp._size[1 : inp._ragged_idx] + inp._size[inp._ragged_idx + 1 :]
+    )
+    nested_sizes[:, inp._ragged_idx - 1] = ragged_source
+    nested_strides = torch.empty_like(nested_sizes)
+    nested_strides[:, :] = torch.tensor(inp._strides[1:])
+    nested_offsets = inp.offsets() * functools.reduce(
+        lambda a, b: a * b, new_values.shape[1:]
+    )
+    nested_offsets = nested_offsets[:-1]
+    return torch._nested_view_from_buffer(
+        new_values.view(-1),
+        nested_size=nested_sizes,
+        nested_strides=nested_strides,
+        offsets=nested_offsets,
+    )
 
 
 register_jagged_func(
@@ -593,6 +583,22 @@ def split_with_sizes_default(func, *args, **kwargs):
     ]
 
 
+@register_jagged_func(torch.ops.aten.chunk.default, "self: jt, chunks: any, dim: any?")
+def chunk_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    new_kwargs["dim"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "chunk")
+
+    return [
+        NestedTensor(values=x, **extract_kwargs(inp))
+        for x in func(inp._values, **new_kwargs)
+    ]
+
+
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt_all, dim: any?")
 def unbind_int(func, *args, **kwargs):
     # Note that this specializes on the length of the offsets
@@ -619,6 +625,19 @@ def unbind_int(func, *args, **kwargs):
     return [
         values[offsets[i] : (offsets[i] + lengths[i])] for i in range(lengths.shape[0])
     ]
+
+
+@register_jagged_func(torch.ops.aten.squeeze.dim, "self: jt, dim: any")
+def squeeze_dim(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    values = inp._values
+
+    new_kwargs["dim"] = _wrap_jagged_dim(len(inp._size), new_kwargs["dim"], "squeeze")
+    return NestedTensor(func(values, **new_kwargs), **extract_kwargs(inp))
 
 
 @register_jagged_func(torch.ops.aten.unsqueeze.default, "self: jt, dim: any")

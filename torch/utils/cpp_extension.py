@@ -237,6 +237,9 @@ COMMON_HIP_FLAGS = [
     '-DUSE_ROCM=1',
 ]
 
+if ROCM_VERSION is not None and ROCM_VERSION >= (6, 0):
+    COMMON_HIP_FLAGS.append('-DHIPBLAS_V2')
+
 COMMON_HIPCC_FLAGS = [
     '-DCUDA_HAS_FP16=1',
     '-D__HIP_NO_HALF_OPERATORS__=1',
@@ -445,10 +448,6 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
                 f'than the maximum required version by CUDA {cuda_str_version}. '
                 f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
             )
-
-
-# See below for why we inherit BuildExtension from object.
-# https://stackoverflow.com/questions/1713038/super-fails-with-error-typeerror-argument-1-must-be-type-not-classobj-when
 
 
 class BuildExtension(build_ext):

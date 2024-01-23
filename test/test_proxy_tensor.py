@@ -6,9 +6,11 @@ import unittest
 import warnings
 import operator
 from collections.abc import Iterable
+from torch.nn.utils import stateless
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db, skip, xfail, skipOps
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import (
     eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
@@ -442,6 +444,58 @@ def forward(self, x_1):
                 for node in traced.graph.nodes
             )
         )
+
+    def test_pre_dispatch_functionalization(self):
+        def f(x):
+            a = FunctionalTensorMode(pre_dispatch=True)
+            with a:
+                x_unwrapped = FunctionalTensor.to_functional(x)
+                y = torch.matmul(x_unwrapped, x_unwrapped)
+                y = y + x_unwrapped
+                y.mul_(5)
+                y_unwrapped = torch._from_functional_tensor(y.elem)
+                return y_unwrapped
+
+        from torch._dispatch.python import enable_python_dispatcher
+
+        with enable_python_dispatcher():
+            inp = torch.randn(4, 4)
+            gm = make_fx(f, pre_dispatch=True)(inp)
+
+        # TODO actually not decompose
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    matmul = torch.ops.aten.matmul.default(x_1, x_1)
+    add = torch.ops.aten.add.Tensor(matmul, x_1);  matmul = x_1 = None
+    mul = torch.ops.aten.mul.Tensor(add, 5);  add = None
+    return mul""")
+
+    def test_pre_dispatch_functionalization_view_op(self):
+        def f(x):
+            a = FunctionalTensorMode(pre_dispatch=True)
+            with a:
+                x_unwrapped = FunctionalTensor.to_functional(x)
+                y = torch.matmul(x_unwrapped, x_unwrapped)
+                x_unwrapped = x_unwrapped.transpose(1, 0)
+                y = y + x_unwrapped
+                y = y.view(2, 8)
+                y_unwrapped = torch._from_functional_tensor(y.elem)
+                return y_unwrapped
+
+        from torch._dispatch.python import enable_python_dispatcher
+
+        with enable_python_dispatcher():
+            inp = torch.randn(4, 4)
+            gm = make_fx(f, pre_dispatch=True)(inp)
+
+        # TODO actually not decompose
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    matmul = torch.ops.aten.matmul.default(x_1, x_1)
+    transpose = torch.ops.aten.transpose.int(x_1, 1, 0);  x_1 = None
+    add = torch.ops.aten.add.Tensor(matmul, transpose);  matmul = transpose = None
+    view = torch.ops.aten.view.default(add, [2, 8]);  add = None
+    return view""")
 
     def test_val_metadata_mutation(self):
         def f(x):
@@ -965,6 +1019,25 @@ def forward(self, x_1, y_1):
     sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0);  y_1 = None
     return (sym_size_int, sym_size_int_1)""")
 
+    def test_deduped_shape(self):
+        def f(s0, s1, x, y):
+            return torch.functional.broadcast_shapes(x.size(), y.size()[0]), torch.empty(x.shape[0])
+
+        x = torch.empty(3, 1)
+        y = torch.empty(5)
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        shape_env = ShapeEnv()
+
+        with FakeTensorMode(shape_env=shape_env, static_shapes=False) as fake_mode:
+            x = fake_mode.from_tensor(x)
+            y = fake_mode.from_tensor(y)
+            r = str(make_fx(f, tracing_mode="real")(x.shape[0], y.shape[0], x, y).code).strip()
+            self.assertExpectedInline(r, """\
+def forward(self, s0_1, s1_1, x_1, y_1):
+    empty = torch.ops.aten.empty.memory_format([s0_1], device = device(type='cpu'), pin_memory = False)
+    return ((s0_1, s1_1), empty)""")
+
+
     def test_unary(self):
         def f(x):
             assert x.shape[0] < 20
@@ -1403,6 +1476,54 @@ def forward(self, a_1):
     div = torch.ops.aten.div.Tensor(a_1, pow_1);  a_1 = pow_1 = None
     return div""")
 
+    def test_make_fx_with_custom_tracer_preserving_nn_module_stack(self):
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                return x + self.bar(x)
+
+        gm = make_fx(Foo())(torch.randn(4, 4))
+        for node in gm.graph.nodes:
+            self.assertTrue("nn_module_stack" not in node.meta)
+
+        foo = Foo()
+
+        def functional_call(*args, **kwargs):
+            with stateless._reparametrize_module(foo, {}):
+                return foo(*args, **kwargs)
+
+        functional_call._orig_mod = foo
+
+        gm_with_stack = make_fx(functional_call, record_module_stack=True)(torch.randn(4, 4))
+        found = False
+        for node in gm_with_stack.graph.nodes:
+            if "nn_module_stack" in node.meta:
+                if len(node.meta["nn_module_stack"]) == 1:
+                    self.assertTrue("custom_tracer_preserving_nn_module_stack.<locals>.Foo" in str(node.meta["nn_module_stack"]))
+                    found = True
+                elif len(node.meta["nn_module_stack"]) == 2:
+                    self.assertTrue("preserving_nn_module_stack.<locals>.Bar" in str(node.meta["nn_module_stack"]))
+                    found = True
+                else:
+                    # there can be at most 2 level
+                    self.assertTrue(False)
+
+        self.assertTrue(found)
+
+        gm_without_stack = make_fx(functional_call)(torch.randn(4, 4))
+        for node in gm_without_stack.graph.nodes:
+            self.assertTrue("nn_module_stack" not in node.meta)
 
     def test_symint_to_tensor(self):
         def f(a):
@@ -1457,6 +1578,18 @@ def forward(self, a_1):
         a = torch.randn(3, 800, 1199)
         f(a)
         make_fx(f, tracing_mode="symbolic")(a)
+
+    def test_fake_tensor_as_size(self):
+        def f(x):
+            r = torch.zeros([x])
+            return r
+
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.tensor(4))
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, x_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return zeros""")  # noqa: B950
 
     def test_expand(self):
         def f(a):

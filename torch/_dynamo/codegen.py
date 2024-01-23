@@ -120,13 +120,15 @@ class PyCodegen:
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
             graph_outputs_key = self.add_graph_output(value)
+
+            self.load_import_from(utils.__name__, "to_subclass")
+            self.load_graph_output(graph_outputs[graph_outputs_key].index)
             output.append(
                 self.create_load_global(
-                    value.global_mangled_class_name(), True, add=True
+                    value.global_mangled_class_name(), False, add=True
                 )
             )
-            self.load_graph_output(graph_outputs[graph_outputs_key].index)
-            output.extend(create_call_function(1, True))
+            output.extend(create_call_function(2, True))
         elif isinstance(
             value,
             (
@@ -238,7 +240,7 @@ class PyCodegen:
         assert name in self.code_options["co_varnames"]
         return create_instruction("STORE_FAST", argval=name)
 
-    def create_load_global(self, name, push_null, add=False):
+    def create_load_global(self, name, push_null, add=False) -> Instruction:
         if add:
             self.tx.output.update_co_names(name)
         assert name in self.code_options["co_names"], f"{name} not in co_names"
@@ -319,18 +321,18 @@ class PyCodegen:
         output.extend(self.rot_n(num_on_stack + 1))
         self.clear_tos()
 
-    def create_load_python_module(self, mod, push_null):
+    def create_load_python_module(self, mod, push_null) -> Instruction:
         """
         Generate a LOAD_GLOBAL instruction to fetch a given python module.
         """
-        global_scope = self.tx.output.global_scope
+        output = self.tx.output
+        global_scope = output.global_scope
         name = re.sub(r"^.*[.]", "", mod.__name__)
         if global_scope.get(name, None) is mod:
             return self.create_load_global(name, push_null, add=True)
         mangled_name = f"___module_{name}_{id(mod)}"
-        if mangled_name not in global_scope:
-            self.tx.output.install_global(mangled_name, mod)
-        return self.create_load_global(mangled_name, push_null, add=True)
+        global_name = self.tx.output.install_global_once(mangled_name, mod)
+        return self.create_load_global(global_name, push_null, add=True)
 
     def make_call_generated_code(self, fn_name: str) -> None:
         """Call the generated code function stored in fn_name"""
@@ -352,12 +354,13 @@ class PyCodegen:
 
         self.extend_output(create_call_function(len(graphargs), False))
 
-    def load_import_from(self, module_name, object_name) -> None:
-        self.extend_output(
-            AttrSource(self.tx.import_source(module_name), object_name).reconstruct(
-                self
-            )
+    def create_load_import_from(self, module_name, object_name) -> List[Instruction]:
+        return AttrSource(self.tx.import_source(module_name), object_name).reconstruct(
+            self
         )
+
+    def load_import_from(self, module_name, object_name) -> None:
+        self.extend_output(self.create_load_import_from(module_name, object_name))
 
     def create_call_function_kw(self, nargs, kw_names, push_null) -> List[Instruction]:
         if sys.version_info >= (3, 11):

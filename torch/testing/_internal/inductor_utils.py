@@ -1,6 +1,7 @@
 import torch
 import re
 import unittest
+import functools
 from subprocess import CalledProcessError
 
 from torch._inductor.codecache import CppCodeCache
@@ -27,7 +28,21 @@ def test_cpu():
 
 HAS_CPU = LazyVal(test_cpu)
 
-HAS_CUDA = has_triton()
+HAS_CUDA = torch.cuda.is_available() and has_triton()
+
+HAS_GPU = HAS_CUDA
+
+GPUS = ["cuda"]
+
+HAS_MULTIGPU = any(
+    getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
+    for gpu in GPUS
+)
+
+tmp_gpus = [x for x in GPUS if getattr(torch, x).is_available()]
+assert len(tmp_gpus) <= 1
+GPU_TYPE = "cuda" if len(tmp_gpus) == 0 else tmp_gpus.pop()
+del tmp_gpus
 
 @register_backend
 def count_bytes_inductor(gm, example_inputs):
@@ -52,11 +67,11 @@ def _check_has_dynamic_shape(
     self.assertTrue(for_loop_found, f"Failed to find for loop\n{code}")
 
 
-def skipCUDAIf(cond, msg):
+def skipDeviceIf(cond, msg, *, device):
     if cond:
         def decorate_fn(fn):
             def inner(self, *args, **kwargs):
-                if self.device == "cuda":
+                if self.device == device:
                     raise unittest.SkipTest(msg)
                 return fn(self, *args, **kwargs)
             return inner
@@ -65,3 +80,6 @@ def skipCUDAIf(cond, msg):
             return fn
 
     return decorate_fn
+
+skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
+skipCPUIf = functools.partial(skipDeviceIf, device="cpu")

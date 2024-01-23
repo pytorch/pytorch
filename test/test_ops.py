@@ -15,7 +15,7 @@ import os
 from collections import defaultdict
 from importlib import import_module
 from torch.utils._pytree import tree_map
-from typing import Dict
+from typing import Dict, List
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfTorchInductor,
     slowTest,
+    unMarkDynamoStrictTest,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -107,7 +108,7 @@ _ref_test_ops = tuple(
 )
 
 def reduction_dtype_filter(op):
-    if(not isinstance(op, ReductionPythonRefInfo) or not op.supports_out
+    if (not isinstance(op, ReductionPythonRefInfo) or not op.supports_out
        or torch.int16 not in op.dtypes):
         return False
 
@@ -125,6 +126,7 @@ aten = torch.ops.aten
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
+@unMarkDynamoStrictTest
 class TestCommon(TestCase):
     exact_dtype = True
 
@@ -1470,6 +1472,7 @@ class TestCommon(TestCase):
                 )
 
 
+@unMarkDynamoStrictTest
 class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most
     # backends and Tensor subclasses. See "CompositeImplicitAutograd Compliance"
@@ -1525,7 +1528,48 @@ class TestCompositeCompliance(TestCase):
             composite_compliance.check_forward_ad_formula(
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual)
 
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_view_replay(self, device, dtype, op):
+        def _assert_match_metadata(a, b):
+            self.assertEqual(a.size(), b.size())
+            self.assertEqual(a.stride(), b.stride())
+            self.assertEqual(a.storage_offset(), b.storage_offset())
+            self.assertEqual(a.device, b.device)
+            self.assertEqual(a.dtype, b.dtype)
 
+        # ensure view replay is enabled
+        with torch.autograd._force_original_view_tracking(True):
+            for sample in op.sample_inputs(device, dtype, requires_grad=False):
+                inp = sample.input
+                outs = op(inp, *sample.args, **sample.kwargs)
+                if not isinstance(outs, (tuple, List)):
+                    outs = [outs]
+
+                # for all outputs that are views of the input, we should be able to replay the
+                # forward and reverse views via a functioning view_func() / rev_view_func().
+                for out in outs:
+                    if not (
+                        isinstance(out, torch.Tensor) and
+                        out._is_view() and
+                        out._base is inp
+                    ):
+                        continue
+
+                    # forward view_func
+                    new_inp = inp.clone()
+                    _assert_match_metadata(new_inp, inp)
+                    new_out = out._view_func_unsafe(new_inp)
+                    _assert_match_metadata(new_out, out)
+
+                    # reverse view_func
+                    new_out = out.detach()
+                    new_inp = out._rev_view_func_unsafe(new_out)
+                    _assert_match_metadata(new_inp, inp)
+                    self.assertTrue(new_inp._is_view())
+                    self.assertTrue(new_inp._base is new_out)
+
+
+@unMarkDynamoStrictTest
 class TestMathBits(TestCase):
     # Tests that
     # 1. The operator's output for physically conjugated/negated tensors and conjugate/negative view tensors
@@ -1747,6 +1791,7 @@ class TestTagsMode(TorchDispatchMode):
         return rs
 
 # Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
+@unMarkDynamoStrictTest
 class TestTags(TestCase):
     @onlyCPU
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
@@ -1765,7 +1810,15 @@ class TestTags(TestCase):
                 opoverloadpacket = getattr(torch.ops.aten, aten_name, None)
                 check_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
 
+class TestSelfKwarg(TestCase):
+    def test_self_kwargs(self):
+        """Verify that we can call the aten ops with all kwargs even if the
+        argument's name is "self"
+        """
+        torch.ops.aten.reshape.default(self=torch.rand(1, 2), shape=[2])
+        torch.ops.aten.min.default(self=torch.rand(100))
 
+@unMarkDynamoStrictTest
 class TestRefsOpsInfo(TestCase):
 
     import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft", "_refs._conversions"]
@@ -2040,7 +2093,22 @@ fake_autocast_backward_xfails = {
     skip('pinverse'),
 }
 
+@unMarkDynamoStrictTest
 class TestFakeTensor(TestCase):
+    def setUp(self):
+        # Turn on FakeTensor caching and cross-checking for these tests:
+        cache_enabled = unittest.mock.patch(
+            "torch._dynamo.config.fake_tensor_cache_enabled", True
+        )
+        cache_enabled.start()
+        self.addCleanup(cache_enabled.stop)
+
+        cache_crosscheck = unittest.mock.patch(
+            "torch._dynamo.config.fake_tensor_cache_crosscheck_enabled", True
+        )
+        cache_crosscheck.start()
+        self.addCleanup(cache_crosscheck.stop)
+
     def _test_fake_helper(self, device, dtype, op, context):
         name = op.name
         if op.variant_test_name:

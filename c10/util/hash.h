@@ -1,8 +1,15 @@
 #pragma once
 
+#include <c10/util/Exception.h>
+#include <cstddef>
 #include <functional>
 #include <iomanip>
+#include <ios>
 #include <sstream>
+#include <string>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <c10/util/ArrayRef.h>
@@ -212,11 +219,11 @@ struct sha1 {
     process_byte_impl(
         static_cast<unsigned char>((bit_count_high >> 16) & 0xFF));
     process_byte_impl(static_cast<unsigned char>((bit_count_high >> 8) & 0xFF));
-    process_byte_impl(static_cast<unsigned char>((bit_count_high)&0xFF));
+    process_byte_impl(static_cast<unsigned char>((bit_count_high) & 0xFF));
     process_byte_impl(static_cast<unsigned char>((bit_count_low >> 24) & 0xFF));
     process_byte_impl(static_cast<unsigned char>((bit_count_low >> 16) & 0xFF));
     process_byte_impl(static_cast<unsigned char>((bit_count_low >> 8) & 0xFF));
-    process_byte_impl(static_cast<unsigned char>((bit_count_low)&0xFF));
+    process_byte_impl(static_cast<unsigned char>((bit_count_low) & 0xFF));
 
     // get final digest
     digest[0] = h_[0];
@@ -244,8 +251,7 @@ template <typename T>
 size_t simple_get_hash(const T& o);
 
 template <typename T, typename V>
-using type_if_not_enum =
-    typename std::enable_if<!std::is_enum<T>::value, V>::type;
+using type_if_not_enum = std::enable_if_t<!std::is_enum_v<T>, V>;
 
 // Use SFINAE to dispatch to std::hash if possible, cast enum types to int
 // automatically, and fall back to T::hash otherwise. NOTE: C++14 added support
@@ -259,9 +265,8 @@ auto dispatch_hash(const T& o)
 }
 
 template <typename T>
-typename std::enable_if<std::is_enum<T>::value, size_t>::type dispatch_hash(
-    const T& o) {
-  using R = typename std::underlying_type<T>::type;
+std::enable_if_t<std::is_enum_v<T>, size_t> dispatch_hash(const T& o) {
+  using R = std::underlying_type_t<T>;
   return std::hash<R>()(static_cast<R>(o));
 }
 
