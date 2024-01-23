@@ -1149,7 +1149,7 @@ def export_aot_inductor(model, example_inputs, device):
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        return optimized(example_args, example_kwargs)
+        return optimized(*example_args, **example_kwargs)
 
     return opt_aot_inductor
 
