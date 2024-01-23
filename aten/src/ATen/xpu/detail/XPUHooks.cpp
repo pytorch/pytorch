@@ -31,7 +31,7 @@ int XPUHooks::getNumGPUs() const {
 }
 
 void XPUHooks::deviceSynchronize(DeviceIndex device_index) const {
-  c10::xpu::device_synchronize(device_index);
+  c10::xpu::streams_synchronize_on_device(device_index);
 }
 
 REGISTER_XPU_HOOKS(XPUHooks);
