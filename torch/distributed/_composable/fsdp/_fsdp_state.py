@@ -37,6 +37,8 @@ class FSDPState(_State):
         self._training_state: TrainingState = TrainingState.IDLE
         self._pre_forward_hook_handle: Optional[RemovableHandle] = None
         self._pre_backward_hook_handles: List[RemovableHandle] = []
+        # Shared post-forward order for explicit backward prefetching
+        self._post_forward_order: List[FSDPParamGroup] = []  # will cause ref cycles
 
         # Attributes only used on the root state:
         self._all_states: List[FSDPState] = []
@@ -109,6 +111,7 @@ class FSDPState(_State):
                 fsdp_param_group.all_gather_stream = self._all_gather_stream
                 fsdp_param_group.reduce_scatter_stream = self._reduce_scatter_stream
                 fsdp_param_group.all_gather_state = self._all_gather_state
+                fsdp_param_group.post_forward_order = self._post_forward_order
 
     def _init_fqns(self) -> None:
         """Sets module and parameter FQN attributes for debugging."""
@@ -163,6 +166,7 @@ class FSDPState(_State):
             for handle in self._pre_backward_hook_handles:
                 handle.remove()
             self._pre_backward_hook_handles.clear()
+            self._post_forward_order.clear()
 
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
@@ -173,6 +177,8 @@ class FSDPState(_State):
         if tensors:
             handle = register_multi_grad_hook(tensors, self._pre_backward, mode="any")
             self._pre_backward_hook_handles.append(handle)
+            if self._fsdp_param_group:
+                self._fsdp_param_group.expected_backward_unshard_count += 1
         return output
 
     def _register_root_post_backward_final_callback(self):
