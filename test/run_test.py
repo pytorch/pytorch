@@ -303,6 +303,14 @@ ROCM_BLOCKLIST = [
     "test_jit_cuda_fuser",
 ]
 
+XPU_BLOCKLIST = [
+    "test_autograd",
+]
+
+XPU_TEST = [
+    "test_xpu",
+]
+
 # The tests inside these files should never be run in parallel with each other
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
@@ -1154,6 +1162,12 @@ def parse_args():
         help=("If this flag is present, we will only run test_mps and test_metal"),
     )
     parser.add_argument(
+        "--xpu",
+        "--xpu",
+        action="store_true",
+        help=("If this flag is present, we will run xpu tests except XPU_BLOCK_LIST"),
+    )
+    parser.add_argument(
         "--cpp",
         "--cpp",
         action="store_true",
@@ -1365,6 +1379,12 @@ def get_selected_tests(options) -> List[str]:
     else:
         # Exclude all mps tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
+
+    if options.xpu:
+        selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
+    else:
+        # Exclude all xpu specifc tests otherwise
+        options.exclude.extend(XPU_TEST)
 
     # Filter to only run onnx tests when --onnx option is specified
     onnx_tests = [tname for tname in selected_tests if tname in ONNX_TESTS]
