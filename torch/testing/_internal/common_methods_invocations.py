@@ -16456,6 +16456,8 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_inplace_autograd=False,
            supports_scripting=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs__unsafe_masked_index),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
