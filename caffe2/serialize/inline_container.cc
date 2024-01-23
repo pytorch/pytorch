@@ -97,7 +97,7 @@ static std::string parentdir(const std::string& name) {
     return "";
   }
 
-  #ifdef _WIN32
+  #ifdef WIN32
   // when trying to save file directly under a driver folder the slashes
   // get removed and the directory check from the setup method will fail
   // https://stackoverflow.com/questions/43922213/is-there-a-difference-between-c-and-c
