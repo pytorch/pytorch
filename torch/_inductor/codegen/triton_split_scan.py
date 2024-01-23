@@ -2,7 +2,6 @@ import functools
 
 from typing import Optional, Set
 
-from torch._prims_common import prod
 from torch._inductor import ir
 
 from torch._inductor.codegen.triton import (
@@ -11,6 +10,8 @@ from torch._inductor.codegen.triton import (
     TritonKernel,
     TritonKernelOverrides,
 )
+
+from torch._prims_common import prod
 
 
 class TritonSplitScanKernel(TritonKernel):
@@ -33,24 +34,28 @@ class TritonSplitScanKernel(TritonKernel):
         self.no_x_dim = True
 
     def initialize_range_tree(self, pid_cache):
-        names = list(
-            reversed(["rindex", "xindex", "yindex", "zindex"][: len(self.numels)])
-        )
-        for name, numel in zip(names, self.numels):
-            prefix = name[0]
+        prefixes = "yxr"
+        assert len(self.numels) <= len(
+            prefixes
+        ), "z dimension not supported for split scan"
+        active_prefixes = prefixes[len(prefixes) - len(self.numels) :]
+
+        grid_dims = "rxy"
+        for numel, prefix in zip(self.numels, active_prefixes):
             is_reduction = prefix == "r"
-            pid_idx = "rxyz".find(prefix)
+            tensor_dim = 0 if is_reduction else None
+            grid_dim = grid_dims.find(prefix)
             self.range_trees.append(
                 IterationRangesRoot(
-                    name,
+                    f"{prefix}index",
                     numel,
                     prefix,
-                    pid_idx,
+                    grid_dim,
                     self,
-                    is_loop=False,
-                    is_tensor_dim=is_reduction,
-                    is_grid_dim=True,
                     pid_cache=pid_cache,
+                    is_loop=False,
+                    tensor_dim=tensor_dim,
+                    grid_dim=grid_dim,
                 )
             )
         for tree in self.range_trees:
@@ -70,7 +75,9 @@ class TritonSplitScanKernel(TritonKernel):
         scratch_type = "tl.uint32" if element_nbits <= 16 else "tl.uint64"
         scratch_type_triton = getattr(tl, scratch_type[3:])
         scratch_elems_per_block = 3 if element_nbits == 64 else 1
-        scratch_nbytes_per_block = scratch_elems_per_block * (scratch_type_triton.primitive_bitwidth // 8)
+        scratch_nbytes_per_block = scratch_elems_per_block * (
+            scratch_type_triton.primitive_bitwidth // 8
+        )
 
         cse_load = functools.partial(self.cse.generate, self.loads)
         cse_compute = functools.partial(self.cse.generate, self.compute)
@@ -78,7 +85,9 @@ class TritonSplitScanKernel(TritonKernel):
         assert len(self.numels) == 2, "Unexpected tiling"
         # TODO: Enforce this in split_scan heuristic
         min_rblock = 256
-        max_blocks = prod(self.numels[:-1]) * (self.numels[-1] + min_rblock - 1) // min_rblock
+        max_blocks = (
+            prod(self.numels[:-1]) * (self.numels[-1] + min_rblock - 1) // min_rblock
+        )
         nbytes = scratch_nbytes_per_block * max_blocks
         scratch_base, offset = self.args.workspace(nbytes=nbytes, zero_fill=True)
         if offset != 0:

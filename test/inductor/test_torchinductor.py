@@ -116,7 +116,20 @@ skip_if_x86_mac = functools.partial(
 )
 vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
-libfoo = None
+libtest = torch.library.Library("test", "FRAGMENT")
+ids = set()
+
+
+def define_custom_op_for_test(id_, fn_cpu, fn_cuda, fn_meta, tags=()):
+    global libtest
+    global ids
+    if id_ not in ids:
+        libtest.define(f"{id_}(Tensor self) -> Tensor", tags=tags)
+        libtest.impl(id_, fn_cpu, "CPU")
+        libtest.impl(id_, fn_cuda, "CUDA")
+        libtest.impl(id_, fn_meta, "Meta")
+        ids.add(id_)
+
 
 f32 = torch.float32
 
@@ -1145,7 +1158,12 @@ class CommonTemplate:
         def fn(a):
             return torch.cumsum(a, -1)
 
-        for dtype in get_all_dtypes(include_half=False, include_bfloat16=False, include_bool=True):
+        for dtype in get_all_dtypes(
+            include_bfloat16=False,
+            include_bool=True,
+            include_complex=False,
+            include_half=False,
+        ):
             # Use low=0 since when the mean value is 0, cumsum at all points
             # tends towards zero which makes the relative error term blow up
             inp = make_tensor(10, 3, 352, 352, low=0, dtype=dtype, device=self.device)
@@ -1182,7 +1200,9 @@ class CommonTemplate:
 
         for dtype in [torch.float32, torch.float64]:
             # Keep exponent small so products don't blow up to infinity
-            inp = make_tensor(10, 10000, low=0.9, high=1.1, dtype=dtype, device=self.device)
+            inp = make_tensor(
+                10, 10000, low=0.9, high=1.1, dtype=dtype, device=self.device
+            )
             self.common(fn, (inp.view(-1),), rtol=1e-5, atol=1e-5)
             self.common(fn, (inp.view(10, -1),), rtol=1e-5, atol=1e-5)
 
@@ -1213,8 +1233,12 @@ class CommonTemplate:
             return torch.cumprod(a, 0) + torch.cumprod(b, 0)
 
         for dtype in [torch.float32, torch.float64]:
-            a = make_tensor(10, 3, 352, 352, exclude_zero=True, dtype=dtype, device=self.device)
-            b = make_tensor(10, 3, 352, 352, exclude_zero=True, dtype=dtype, device=self.device)
+            a = make_tensor(
+                10, 3, 352, 352, exclude_zero=True, dtype=dtype, device=self.device
+            )
+            b = make_tensor(
+                10, 3, 352, 352, exclude_zero=True, dtype=dtype, device=self.device
+            )
             self.common(fn, (a, b), rtol=1e5, atol=1e-5)
 
     def test_embedding_bag_byte_unpack(self):
@@ -1230,7 +1254,6 @@ class CommonTemplate:
         data = torch.randint(0, 255, (M, N), dtype=torch.uint8)
         packed = torch.cat([data, scales, offsets], dim=-1)
         self.common(fn, [packed])
-
 
     def test_expanded_reduction(self):
         if self.device == "cpu":
@@ -1312,6 +1335,20 @@ class CommonTemplate:
 
         # Non-persistent reduction
         self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
+
+    def test_cumsum_zero_dim(self):
+        def fn(x):
+            return x.cumsum(0), x.cumsum(-1)
+
+        a = torch.rand(())
+        self.common(fn, (a,))
+
+    def test_cumprod_zero_dim(self):
+        def fn(x):
+            return x.cumprod(0), x.cumprod(-1)
+
+        a = torch.rand(())
+        self.common(fn, (a,))
 
     def test_clamp(self):
         def fn(a, b):
@@ -8066,21 +8103,107 @@ class CommonTemplate:
         def foo_meta(x):
             return torch.empty_like(x)
 
-        global libfoo
-        if libfoo is None:
-            libfoo = torch.library.Library("foo", "DEF")
-            libfoo.define("custom(Tensor self) -> Tensor")
-            libfoo.impl("custom", foo_cpu, "CPU")
-            libfoo.impl("custom", foo_cuda, "CUDA")
-            libfoo.impl("custom", foo_meta, "Meta")
+        define_custom_op_for_test("foo", foo_cpu, foo_cuda, foo_meta)
 
         def fn(x):
             a = torch.nn.functional.relu(x)
-            b = torch.ops.foo.custom(a)
+            b = torch.ops.test.foo(a)
             c = torch.cos(b)
             return c
 
         self.common(fn, (torch.randn((16, 32)),), check_lowp=False)
+
+    @requires_gpu()
+    @torch._inductor.config.patch("layout_optimization", True)
+    @torch._inductor.config.patch("keep_output_stride", False)
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_fixed_layout_sequential(self):
+        import torch.library
+
+        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).cuda()
+        inp = torch.rand(2, 3, 128, 128, device="cuda")
+        expected_stride = mod(inp).stride()
+
+        def bar_cpu(x):
+            self.assertEqual(x.stride(), expected_stride)
+            return x.clone()
+
+        def bar_cuda(x):
+            self.assertEqual(x.stride(), expected_stride)
+            return x.clone()
+
+        def bar_meta(x):
+            return torch.empty_like(x)
+
+        define_custom_op_for_test(
+            "bar",
+            bar_cpu,
+            bar_cuda,
+            bar_meta,
+            tags=[torch._C.Tag.needs_fixed_stride_order],
+        )
+
+        def fn(x):
+            z = mod(x)
+            output = torch.ops.test.bar(z)
+            return output
+
+        with torch.no_grad():
+            # With keep_output_stride False, inductor would normally have different layout from eager execution
+            # But because our custom op needs fixed layout, the assertions in the custom op will pass
+            self.common(fn, (inp,), check_lowp=False)
+
+    @requires_gpu()
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_fixed_layout_channels_last(self):
+        class Block(nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+
+                self.in_layers = nn.Sequential(
+                    nn.Dropout(p=0.1),
+                )
+
+            def helper(self, x):
+                out = F.gelu(x)
+                out = self.in_layers(out)
+                return out
+
+            def forward(self, x):
+                out = self.helper(x)
+                out = torch.ops.test.baz(out)
+                return out
+
+        model = Block()
+        model = model.to("cuda").to(memory_format=torch.channels_last)
+        input_t = torch.randn([1, 320, 128, 128], dtype=torch.float32, device="cuda")
+        input_t = input_t.to(memory_format=torch.channels_last)
+        expected_strides = model.helper(input_t).stride()
+
+        def baz_cpu(x):
+            self.assertEqual(expected_strides, x.stride())
+            return x.clone()
+
+        def baz_cuda(x):
+            self.assertEqual(expected_strides, x.stride())
+            return x.clone()
+
+        def baz_meta(x):
+            return torch.empty_like(x)
+
+        define_custom_op_for_test(
+            "baz",
+            baz_cpu,
+            baz_cuda,
+            baz_meta,
+            tags=[torch._C.Tag.needs_fixed_stride_order],
+        )
+
+        with torch.no_grad():
+            net = torch.compile(model)
+            out = net(input_t)
 
     def test_buffer_use_after_remove(self):
         # https://github.com/pytorch/pytorch/issues/102857

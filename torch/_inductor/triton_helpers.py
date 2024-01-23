@@ -279,7 +279,9 @@ def exclusive_scan_decoupled_lookback(
 
 
 @triton.jit
-def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combine_fn, init):
+def exclusive_scan_decoupled_lookback_64(
+    scratch_base, block_value, index, combine_fn, init
+):
     """Compute exclusive scan of a scalar value between blocks
 
     Ref: https://research.nvidia.com/publication/2016-03_single-pass-parallel-prefix-scan-decoupled-look-back
