@@ -82,7 +82,7 @@ def check_multiple_devices(
     return format_default_skip_message(f"multiple devices: {', '.join(keys_repr)}")
 
 
-def check_lowering_cudagraph_checks(
+def check_lowering_disable_cudagraph(
     device_node_mapping: Dict[torch.device, torch.fx.Node]
 ):
     return check_multiple_devices(device_node_mapping)

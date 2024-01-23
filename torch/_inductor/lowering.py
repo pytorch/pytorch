@@ -2986,7 +2986,6 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 def index_put_fallback(self, indices, values, accumulate):
     deterministic = torch.are_deterministic_algorithms_enabled()
     if is_triton(values) and (accumulate or deterministic):
-        V.graph.disable_cudagraphs = True
         msg = (
             "index put with accumulate."
             if not deterministic
