@@ -786,7 +786,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref[1][param], res[1][param]))
 
     def test_dict_tuple_lazy_guard(self):
-        @torch.compile(backend="eager")
+        @torch.compile(backend=self.backend)
         def fn(x, y):
             return torch.sin(x) * y[1]
 
@@ -1476,7 +1476,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return torch.pow(a, b)
 
         x = torch.ones(2, 2)
-        opt_fn = torch.compile(fullgraph=True, backend="eager", dynamic=True)(fn)
+        opt_fn = torch.compile(fullgraph=True, backend=self.backend, dynamic=True)(fn)
         self.assertEqual(opt_fn(x, 2), fn(x, 2))
 
     def test_tensor_size_indexed_by_symint(self):
@@ -1486,7 +1486,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         x = torch.rand(10, 2)
         y = torch.rand(10, 8, 6)
-        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        opt_fn = torch.compile(backend=self.backend, fullgraph=True)(fn)
         self.assertEqual(opt_fn(x, y), fn(x, y))
 
     def test_partials_as_input_partials_lambda(self):
@@ -1609,7 +1609,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         def bar(x, **kwargs):
             return x + x
 
-        @torch.compile(backend="eager", dynamic=True)
+        @torch.compile(backend=self.backend, dynamic=True)
         def foo(x, i):
             def inner():
                 print("this is a graph_break")
@@ -1932,7 +1932,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             l = Derived(1, 2)
             return l.outer_a * x
 
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend=self.backend, fullgraph=True)
         x = torch.randn(4)
         res = fn(x)
         ref = opt_fn(x)
@@ -1947,7 +1947,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 res = 1 in s
                 return res
 
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            opt_fn = torch.compile(fn, backend=self.backend, fullgraph=True)
             x = torch.randn(1)
             ref = opt_fn(x)
             res = fn(x)
@@ -1969,7 +1969,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                     return t(x)
 
                 opt_fn = torch.compile(
-                    fn, backend="eager", fullgraph=True, dynamic=False
+                    fn, backend=self.backend, fullgraph=True, dynamic=False
                 )
                 x = torch.tensor([val])
                 res = fn(x)
@@ -1989,7 +1989,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             s.add(y)
             return len(s)
 
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend=self.backend, fullgraph=True)
         x = torch.randn(4)
         res = fn(x)
         ref = opt_fn(x)
@@ -2002,7 +2002,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             else:
                 return x + y
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend=self.backend, fullgraph=True, dynamic=True)(fn)
 
         x = torch.zeros(2)
         y = torch.ones(2)
@@ -2015,7 +2015,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             y = x.add_(1)
             return x is y
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend=self.backend, fullgraph=True, dynamic=True)(fn)
 
         z = torch.ones(4)
 
@@ -2032,7 +2032,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             x.add_(1)
             return x is y, cond
 
-        fn_opt = torch.compile(backend="eager", dynamic=True)(fn)
+        fn_opt = torch.compile(backend=self.backend, dynamic=True)(fn)
 
         z = torch.ones(4)
 
@@ -2043,7 +2043,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             y = x.add_(1)
             return y is x
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend=self.backend, fullgraph=True, dynamic=True)(fn)
 
         z = torch.ones(4, 1)
 
@@ -2055,7 +2055,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             y = z.add_(1)
             return y is z
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend=self.backend, fullgraph=True, dynamic=True)(fn)
 
         z = torch.ones(4, 1)
 
@@ -2069,7 +2069,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             _ = y is z
             return y is x
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend=self.backend, fullgraph=True, dynamic=True)(fn)
 
         z = torch.ones(4, 1)
 
@@ -2081,7 +2081,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             y = torch.vmap(torch.Tensor.acos_)(x)
             return y is x
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend=self.backend, fullgraph=True, dynamic=True)(fn)
 
         z = torch.ones(4, 1)
 
@@ -2099,7 +2099,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             c, d = torch.vmap(g)(a, b)
             return a is c is b is d
 
-        fn_opt = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
+        fn_opt = torch.compile(backend=self.backend, fullgraph=True, dynamic=True)(fn)
 
         y = torch.ones(4, 2)
         z = torch.ones(4, 10)
@@ -2161,8 +2161,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 x += y * z
             return x
 
-        opt_fn = torch._dynamo.optimize(backend="eager")(fn)
-        nopython_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        opt_fn = torch._dynamo.optimize(backend=self.backend)(fn)
+        nopython_fn = torch._dynamo.optimize(backend=self.backend, nopython=True)(fn)
 
         x = torch.ones(3)
         ys = [1.0, 2.0, 3.0]

@@ -59,6 +59,10 @@ class TestCase(TorchTestCase):
             ),
         )
 
+    @property
+    def backend(self):
+        return torch._dynamo.config._test_backend_override
+
     def setUp(self):
         self._prior_is_grad_enabled = torch.is_grad_enabled()
         super().setUp()
