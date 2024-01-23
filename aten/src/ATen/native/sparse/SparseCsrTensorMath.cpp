@@ -147,20 +147,17 @@ TORCH_META_FUNC(_convert_indices_from_csr_to_coo)
  const bool out_int32,
  const bool transpose) {
   TORCH_CHECK(
-    crow_indices.dim() == 1, "crow_indices is supposed to be a vector, but got ",
-    crow_indices.dim(), " dimensional tensor.");
-  TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector, but got ",
-              col_indices.dim(), " dimensional tensor.");
+    crow_indices.dim() == col_indices.dim(), "crow_indices and col_indices are supposed to have"
+    " the same dimensionality, but got ", crow_indices.dim(), " and ",
+    crow_indices.dim(), " dimensional tensors, respectively.");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = crow_indices.options().dtype(scalar_type);
-  set_output_raw_strided(0, {2, col_indices.numel()}, {}, options, {});
+  set_output_raw_strided(0, {col_indices.dim() + 1, col_indices.numel()}, {}, options, {});
 }
 
 } // namespace meta
 
 namespace {
-
-constexpr int64_t GRAIN_SIZE = at::internal::GRAIN_SIZE;
 
 template <typename F>
 Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
@@ -192,34 +189,6 @@ Tensor& unary_op_inplace(Tensor& self, const F& op_inplace, Args&&... args) {
   auto self_values = self.values();
   (self_values.*op_inplace)(std::forward<Args>(args)...);
   return self;
-}
-
-template <typename input_t, typename output_t>
-void convert_indices_from_csr_to_coo_cpu(
-    const Tensor& indices,
-    const Tensor& crow_indices,
-    const Tensor& col_indices,
-    const bool transpose = false) {
-  int64_t nrows = crow_indices.numel() - 1;
-  if (nrows == 0) {
-    indices.zero_();
-    return;
-  }
-  auto crow_indices_ = crow_indices.expect_contiguous();
-  const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
-  TORCH_INTERNAL_ASSERT(indices.is_contiguous());
-  auto row0 = indices.select(0, transpose ? 1 : 0);
-  auto row1 = indices.select(0, transpose ? 0 : 1);
-  output_t* data_out = row0.data_ptr<output_t>();
-  row1.copy_(*col_indices.expect_contiguous());
-  at::parallel_for(0, nrows, GRAIN_SIZE, [&](int64_t start, int64_t end) {
-    for (const auto i : c10::irange(start, end)) {
-      std::fill(
-          &data_out[crow_indices_data_in[i]],
-          &data_out[crow_indices_data_in[i + 1]],
-          static_cast<output_t>(i));
-    }
-  });
 }
 
 } // end anonymous namespace
