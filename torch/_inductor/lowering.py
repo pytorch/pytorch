@@ -2611,6 +2611,8 @@ def tensor_constructor(fill_value):
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
             size = tuple(size[0])
+        for s in size:
+            assert not isinstance(s, torch.SymInt)
         size = [sympy.expand(s) for s in size]
         return _full(fill_value, device, dtype, size)
 

@@ -4419,6 +4419,7 @@ class DynamicScalar(ExternKernel):
 
     # TODO: handle bools carefully
     def __init__(self, sym, data):
+        data.realize()
         super().__init__(None, NoneLayout(torch.device("cpu")), self.unwrap_storage([data]))  # type: ignore[arg-type]
         if isinstance(sym, sympy.Symbol):
             self.sym = sym

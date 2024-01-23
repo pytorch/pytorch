@@ -187,6 +187,20 @@ class TestInductorDynamic(TestCase):
         opt_r = opt_f(x, y)
         self.assertEqual(r, opt_r)
 
+    @expectedFailure
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unwrap_storage_didnt_work_repro(self, device):
+        def f():
+            full = torch.full((), 11)
+            i0 = full.item()
+            torch._check_is_size(i0)
+            return torch.full((i0,), 0)
+
+        opt_f = torch.compile(f, fullgraph=True)
+        r = f()
+        opt_r = opt_f()
+        self.assertEqual(r, opt_r)
+
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_size_factory_nobreak(self, device):
         def f(x, b):
