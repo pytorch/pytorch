@@ -231,6 +231,7 @@ def softmax_rule(op_schema: OpSchema) -> OutputSharding:
     dim_map = input_spec.dim_map
     if softmax_dim < len(dim_map) and dim_map[softmax_dim] >= 0:
         raise RuntimeError("Cannot run softmax on sharding dimension!")
+    print("Hello test, do NOT merge")
     return OutputSharding(input_spec)
 
 
