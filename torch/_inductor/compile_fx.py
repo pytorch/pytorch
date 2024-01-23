@@ -241,19 +241,6 @@ def fake_tensor_prop(
     return fake_mode
 
 
-def get_mutating_use_stack_trace(placeholder_node) -> Optional[str]:
-    # reinplaced uses might have a single, non-copy_ use
-    if len(placeholder_node.users) == 1:
-        return next(iter(placeholder_node.users)).meta.get("stack_trace", None)
-
-    for use in placeholder_node.users:
-        if use.target == torch.ops.aten.copy_.default:
-            if stack_trace := use.meta.get("stack_trace", None):
-                return stack_trace
-
-    return None
-
-
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
 @time_and_log(attr="compilation time (in seconds)")
@@ -364,30 +351,13 @@ def compile_fx_inner(
             if isinstance(t, torch.Tensor)
         )
 
-        # doesnt work for non-trees because the warmup run would apply mutation twice
-        if config.triton.cudagraph_trees:
-            # checking if mutation is only on parameters/static inputs
-            mutation_indices = [
-                idx for idx in compiled_graph.mutated_input_idxs if idx >= num_fixed
-            ]
-            has_mutation = len(mutation_indices) != 0
-            if has_mutation:
-                stack_trace: Optional[str] = ""
-                placeholders = [
-                    node for node in gm.graph.nodes if node.op == "placeholder"
-                ]
+        from torch._inductor.cudagraph_utils import check_for_mutation
 
-                for idx in mutation_indices:
-                    placeholder = placeholders[idx]
-                    if stack_trace := get_mutating_use_stack_trace(placeholder):
-                        break
+        has_mutation_str = check_for_mutation(gm, compiled_graph, num_fixed)
+        has_mutation = has_mutation_str is not None
 
-                if stack_trace:
-                    msg = f"skipping cudagraphs due to mutaton on input. Found from : \n {stack_trace}"
-                    compiled_graph.disabled_cudagraphs_reason = msg
-
-        else:
-            has_mutation = len(compiled_graph.mutated_inputs) != 0
+        if has_mutation:
+            compiled_graph.disabled_cudagraphs_reason = has_mutation_str
 
         cudagraph_tests = [
             (set(compiled_graph.device_types) == {"cuda"}, "non-cuda device in graph"),
