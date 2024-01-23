@@ -6,7 +6,6 @@ import torch.nn as nn
 from torch._prims_common import DeviceLikeType
 
 from torch.distributed._composable import contract
-from torch.distributed._composable_state import _insert_module_state
 from torch.distributed._tensor import DeviceMesh
 
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
@@ -21,6 +20,8 @@ from ._fsdp_param_group import FSDPParamGroup
 from ._fsdp_state import FSDPState
 
 
+# The decorator adds a state object to `module` that can be accessed via
+# `fully_shard.state(module)`. The state object and module are 1:1.
 @contract(state_cls=FSDPState)
 def fully_shard(
     module: nn.Module,
@@ -47,12 +48,7 @@ def fully_shard(
         )
 
     state = fully_shard.state(module)
-    _insert_module_state(module, state)
-    state._module = module
-    state._device = device
-    state._pre_forward_hook_handle = state._module.register_forward_pre_hook(
-        state._pre_forward, prepend=True, with_kwargs=True
-    )
+    state.init(module, device)
 
     managed_modules = _get_managed_modules(module)
     params, buffers = _get_managed_states(managed_modules)
