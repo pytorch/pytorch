@@ -47,6 +47,7 @@ from .ir import (
     TensorBox,
 )
 from .lowering import (
+    constrain_to_fx_strides,
     FALLBACK_ALLOW_LIST,
     fallback_handler,
     fallback_node_due_to_unsupported_type,
@@ -90,6 +91,8 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
     if cuda:
         supported_dtype.add(torch.float8_e4m3fn)
         supported_dtype.add(torch.float8_e5m2)
+        supported_dtype.add(torch.float8_e4m3fnuz)
+        supported_dtype.add(torch.float8_e5m2fnuz)
 
     return dtype in supported_dtype
 
@@ -258,6 +261,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.disable_cudagraphs = False
         self.disable_cudagraphs_reason = ""
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
+        self.dynamo_flat_name_to_original_fqn = self.module.meta.get(
+            "dynamo_flat_name_to_original_fqn", {}
+        )
         self.init_backend_registration()
 
     @staticmethod
@@ -278,10 +284,6 @@ class GraphLowering(torch.fx.Interpreter):
         nconv = len(conv_nodes)
 
         if nconv == 0:
-            return False
-
-        # NHWC perf issue on ROCm5.7 first noted here https://github.com/pytorch/pytorch/pull/110319
-        if torch.version.hip and torch.cuda.is_available():
             return False
 
         # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
@@ -672,6 +674,23 @@ class GraphLowering(torch.fx.Interpreter):
             # passthrough lowerings from .pattern_matcher
             return target(*args, **kwargs)
 
+        def get_custom_op_layout_constraints(target, args, kwargs):
+            # Custom operations that require preserving stride order
+            # which run through implicit fallback must constrain their
+            # arguments' fx strides
+            layout_constraint = None
+            if torch._C.Tag.needs_fixed_stride_order in target.tags:
+                # We have to set the current args because call_function will immediately
+                # evaluate this lowering after creating the fallback, without evaluating
+                # the layout constraint
+                args, kwargs = constrain_to_fx_strides(
+                    self.current_node, *args, **kwargs
+                )
+                # Also register the layout constraint so when the fallback
+                # is used again, we can constrain the args to the same layout
+                layout_constraint = constrain_to_fx_strides
+            return layout_constraint, args, kwargs
+
         if target not in lowerings:
             assert isinstance(
                 target, torch._ops.OpOverload
@@ -680,6 +699,9 @@ class GraphLowering(torch.fx.Interpreter):
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target)
             elif config.implicit_fallbacks:
+                layout_constraint, args, kwargs = get_custom_op_layout_constraints(
+                    target, args, kwargs
+                )
                 error = (
                     MissingOperatorWithDecomp
                     if get_decompositions([target])
@@ -689,7 +711,8 @@ class GraphLowering(torch.fx.Interpreter):
                     "Creating implicit fallback for:\n%s",
                     error.operator_str(target, args, kwargs),
                 )
-                make_fallback(target)
+                make_fallback(target, layout_constraint)
+
             elif get_decompositions([target]):
                 # There isn't a good way to dynamically patch this in
                 # since AOT Autograd already ran.  The error message tells
@@ -1126,7 +1149,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def compile_to_fn(self):
         if self.aot_mode:
-            from .codecache import AotCodeCache
+            from .codecache import AotCodeCompiler
 
             assert self.cpp_wrapper, "AOT mode only supports C++ wrapper"
             code, linemap = self.codegen_with_cpp_wrapper()
@@ -1147,7 +1170,7 @@ class GraphLowering(torch.fx.Interpreter):
                 )
 
             # Directly return the file path with the compiled code
-            return AotCodeCache.compile(
+            return AotCodeCompiler.compile(
                 self, code, serialized_extern_kernel_nodes, cuda=self.cuda
             )
         else:
