@@ -340,7 +340,9 @@ class GuardBuilder(GuardBuilderBase):
             if isinstance(source, LocalSource):
                 return root_guard_mananger.dict_get_item_manager(source.local_name)
             elif isinstance(source, GlobalSource):
-                return root_guard_mananger.dict_get_item_manager(source.global_name)
+                return root_guard_mananger.globals_dict_manager(
+                    self.scope["G"]
+                ).dict_get_item_manager(source.global_name)
             elif isinstance(source, NNModuleSource):
                 return build(source.base)
             elif isinstance(source, AttrSource):
@@ -360,7 +362,6 @@ class GuardBuilder(GuardBuilderBase):
         mgr = build(guard.originating_source)
         return mgr
 
-
     def get_guard_str(self, guard, code):
         guard_strs = []
         for c in code:
@@ -368,8 +369,9 @@ class GuardBuilder(GuardBuilderBase):
             guard_strs.append(f"{c:<60}{extra}")
         return "\n".join(guard_strs)
 
-
-    def add_python_lambda_leaf_guard_to_root(self, code, guard_str, closure_vars=CLOSURE_VARS):
+    def add_python_lambda_leaf_guard_to_root(
+        self, code, guard_str, closure_vars=CLOSURE_VARS
+    ):
         make_guard_fn_args = ", ".join(closure_vars.keys())
         guard_body, pycode = build_guard_function(
             code, make_guard_fn_args, run_cse=False
@@ -551,7 +553,9 @@ class GuardBuilder(GuardBuilderBase):
         # and NaN tests
         code.append(f"{ref} == {val!r}")
 
-        self.get_guard_manager(guard).add_equals_match_guard(val, self.get_guard_str(guard, code))
+        self.get_guard_manager(guard).add_equals_match_guard(
+            val, self.get_guard_str(guard, code)
+        )
         self._produce_guard_code(guard, code)
 
     def CONSTANT_MATCH(self, guard: Guard):
@@ -871,7 +875,9 @@ class GuardBuilder(GuardBuilderBase):
                         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
                     )
             if len(code) > 0:
-                self.add_python_lambda_leaf_guard_to_root(code, self.get_guard_str(guard, code))
+                self.add_python_lambda_leaf_guard_to_root(
+                    code, self.get_guard_str(guard, code)
+                )
                 self._produce_guard_code(guard, code)
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
@@ -1134,7 +1140,9 @@ class CheckFunctionManager:
         # Check that the check_fn is True for this frame
         assert self.check_fn(output_graph.local_scope)
         print(self.guard_manager)
-        debug_guard_check = self.guard_manager.root.check_verbose(output_graph.local_scope)
+        debug_guard_check = self.guard_manager.root.check_verbose(
+            output_graph.local_scope
+        )
         assert debug_guard_check.result
 
         self._weakrefs.clear()
@@ -1277,7 +1285,9 @@ class CheckFunctionManager:
                 "tensor_check_names": tensor_check_names,
                 **CLOSURE_VARS,
             }
-            builder.add_python_lambda_leaf_guard_to_root([code_parts_tensor], "\n".join(guard_strs), closure_vars=closure_vars)
+            builder.add_python_lambda_leaf_guard_to_root(
+                [code_parts_tensor], "\n".join(guard_strs), closure_vars=closure_vars
+            )
 
         aotautograd_guards: List[GuardEnvExpr] = (
             self.output_graph.tracing_context.guards_context.aotautograd_guards
