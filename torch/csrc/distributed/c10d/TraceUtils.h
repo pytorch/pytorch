@@ -556,6 +556,8 @@ struct NCCLTraceBuffer {
   std::string dump() {
     auto result = dump_entries();
     auto entries = new_list();
+    c10::IValue entries_key = "entries";
+
     c10::IValue pg_id_key = "pg_id";
     c10::IValue seq_id_key = "seq_id";
     c10::IValue profiling_name_key = "profiling_name";
@@ -623,7 +625,11 @@ struct NCCLTraceBuffer {
       dict.insert(frames_key, frames);
       entries.push_back(dict);
     }
-    return pickle_str(entries);
+
+    auto dict = new_dict();
+    dict.insert(entries_key, entries);
+
+    return pickle_str(dict);
   }
 };
 
