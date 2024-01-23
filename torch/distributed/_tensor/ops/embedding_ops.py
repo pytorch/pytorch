@@ -44,7 +44,7 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     output_emd_dim = len(indices_shape)
 
     # guard rowwise sharding not implemented for now
-    weight_spec = weight_strategy.strategies[0].output_spec
+    weight_spec = weight_strategy.strategies[0].out_spec
     if any(placement.is_shard(0) for placement in weight_spec.placements):
         raise NotImplementedError(
             "DTensor does not support row-wise sharded embedding operation yet!"
