@@ -10,6 +10,7 @@ from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
 from torch.fx.immutable_collections import immutable_dict
+from torch.fx.passes.reinplace import _is_view_op
 
 
 aten = torch.ops.aten
@@ -42,6 +43,15 @@ for outplace_op, inplace_op in inplaceable_foreach_ops_lowerings.items():
 
 
 inplaceable_triton_ops = {triton_kernel_wrapper_functional}
+
+
+# Operators that don't depend on the tensor data
+META_ONLY_OPS = {
+    aten.sym_size.int,
+    aten.sym_stride.int,
+    aten.sym_numel.default,
+    aten.sym_storage_offset.default,
+}
 
 
 def reinplace_inplaceable_ops(graph):
@@ -86,6 +96,12 @@ def reinplace_inplaceable_ops(graph):
 
     def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
         node_loc = node_order[node]
+
+        def is_meta_only_user(node):
+            if _is_view_op(node.target):
+                return all(is_meta_only_user(u) for u in node.users)
+            return node.target in META_ONLY_OPS
+
         for view in shared_view_nodes:
             for user in view.users:
                 # Skip all users before node
@@ -93,6 +109,9 @@ def reinplace_inplaceable_ops(graph):
                     continue
                 # Skip over the copy_ epilogue node that could get reinplaced
                 if copy_node == user:
+                    continue
+                # Reinplacing does not change shape metadata
+                if is_meta_only_user(user):
                     continue
                 return True
         return False
