@@ -498,3 +498,5 @@ macro(SYCL_ADD_EXECUTABLE sycl_target)
     LINKER_LANGUAGE ${SYCL_C_OR_CXX})
 
 endmacro()
+
+set(SYCL_FOUND True)

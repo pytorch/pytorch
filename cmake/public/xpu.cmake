@@ -72,7 +72,11 @@ if(OCLOC_EXEC)
   endif()
 endif()
 
-include(${CMAKE_CURRENT_LIST_DIR}/../Modules/FindSYCL.cmake)
+find_package(SYCL REQUIRED)
+if(NOT SYCL_FOUND)
+  message("Cannot find SYCL cmake helpers module!")
+  return()
+endif()
 
 set(PYTORCH_FOUND_XPU TRUE)
 
