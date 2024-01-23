@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import os
 from typing import Tuple, TYPE_CHECKING, Union
 
@@ -10,6 +11,8 @@ from torch.onnx._internal import _beartype
 
 if TYPE_CHECKING:
     import onnx
+
+log = logging.getLogger(__name__)
 
 
 @_beartype.beartype
@@ -80,12 +83,13 @@ def _create_tensor_proto_with_external_data(
     return tensor_proto
 
 
+# TODO: generalize to allow more checkpoints formats (torch or gguf)
 @_beartype.beartype
 def save_model_with_external_data(
     basepath: str,
     model_location: str,
     initializer_location: str,
-    torch_load_paths: Tuple[Union[str, io.BytesIO], ...],
+    torch_state_dicts: Tuple[Union[dict, str, io.BytesIO], ...],
     onnx_model: onnx.ModelProto,  # type: ignore[name-defined]
     rename_initializer: bool = False,
 ) -> None:
@@ -100,18 +104,18 @@ def save_model_with_external_data(
     to execute the model.
 
     Arguments:
-        basepath: Base path of the external data file (e.g., "/tmp/large-onnx-model").
+        basepath: Base path of the ONNX external data file (e.g., "/path/to/large_model/").
         model_location: Relative location of the ONNX model file.
             E.g., "model.onnx" so that the model file is saved to
-            "<model_location>/model.onnx".
+            "<basepath>/model.onnx".
         initializer_location: Relative location of the ONNX initializer folder.
             E.g., "initializers" so that the initializers are saved to
-            "<model_location>/initializers".
+            "<basepath>/initializers/".
             Note: When initializers are >2GB, must be the same as `model_location`.
-        torch_load_paths: Files which containing serialized PyTorch tensors to be saved
-            as ONNX initializers. They are loaded by torch.load.
+        torch_state_dicts: Dictionaries or files which contain PyTorch tensors to be saved
+            as ONNX initializers. For non-dict arguments, `torch.load` will be used to load them from file-like objects.
         onnx_model: ONNX model to be saved with external initializers.
-            If an input name matches a tensor loaded from "torch_load_paths",
+            If an input name matches a tensor loaded from "torch_state_dicts",
             the tensor will be saved as that input's external initializer.
         rename_initializer: Replaces "." by "_" for all ONNX initializer names.
             Not needed by the official torch.onnx.dynamo_export. This is a hack
@@ -125,9 +129,29 @@ def save_model_with_external_data(
     onnx_model_with_initializers = onnx.ModelProto()  # type: ignore[attr-defined]
     onnx_model_with_initializers.CopyFrom(onnx_model)
     onnx_input_names = {input.name for input in onnx_model.graph.input}
-
-    for path in torch_load_paths:
-        state_dict = torch.load(path)
+    for el in torch_state_dicts:
+        if isinstance(el, dict):
+            # Useful for when state_dict is loaded with torch.load(..., mmap=True, map_location="cpu") by the user
+            # Using torch.save wouldn't leverage mmap, leading to higher memory usage
+            state_dict = el
+        else:
+            try:
+                # Loads checkpoint using memory-map on CPU to support really large models
+                # The underlying torch.UntypedStorage is memory mapped, so state_dict is lazy loaded
+                state_dict = torch.load(el, map_location="cpu", mmap=True)
+            except (RuntimeError, ValueError) as e:
+                if "mmap can only be used with files saved with" in str(
+                    e
+                ) or isinstance(el, io.BytesIO):
+                    log.warning(
+                        "Failed to load the checkpoint with memory-map enabled, retrying without memory-map."
+                        "Consider updating the checkpoint with mmap by using torch.save() on PyTorch version >= 1.6."
+                    )
+                    if isinstance(el, io.BytesIO):
+                        el.seek(0)  # torch.load from `try:` has read the file.
+                    state_dict = torch.load(el, map_location="cpu")
+                else:
+                    raise e
         for name, tensor in state_dict.items():
             if rename_initializer:
                 # Basically, "transformer.attention.self.query.weight" is mapped
