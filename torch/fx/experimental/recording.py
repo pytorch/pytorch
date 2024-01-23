@@ -115,6 +115,7 @@ class ShapeEnvEvent:
             if not isinstance(x, torch.fx.Node):
                 # Don't do anything to x if it's not an FX node.
                 return x
+
             # If, at some point, we created an FX node, it means that translation validation is on.
             # It also means we are building an FX graph for symbolic shapes at shape_env.graph, and
             # we are tracking node names at shape_env.name_to_node.
