@@ -824,12 +824,6 @@ void initDispatchBindings(PyObject* module) {
                 data, coeff, vec, sum_vec, c10::SingletonVariant::PYTHON)));
       });
 
-  m.def("_set_nested_tensor_cls", [](py::object cls) {
-    auto nt_cls = std::make_shared<c10::SafePyObject>(
-        cls.release().ptr(), getPyInterpreter());
-    return at::impl::set_nested_tensor_cls(std::move(nt_cls));
-  });
-
   m.def("_get_constant_bool_symnode", [](int64_t data) {
     return c10::SymNode(
         c10::make_intrusive<c10::ConstantSymNodeImpl<bool>>(data));

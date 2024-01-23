@@ -125,5 +125,17 @@ void PyInterpreter::disarm() noexcept {
   vtable_ = &noop_vtable;
 }
 
+namespace {
+  c10::impl::PyInterpreter* _global_pyinterpreter = nullptr;
+}
+
+void set_global_pyinterpreter(c10::impl::PyInterpreter* interp) {
+  _global_pyinterpreter = interp;
+}
+
+c10::impl::PyInterpreter* get_global_pyinterpreter() {
+  return _global_pyinterpreter;
+}
+
 } // namespace impl
 } // namespace c10

@@ -197,10 +197,6 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
     return false;
   }
 
-  c10::DispatchKeySet key_set() override {
-    return key_set_;
-  }
-
 #define DEFINE_BINARY_NOT_SUPPORTED(name)                           \
   c10::SymNode name(const c10::SymNode& other) override {           \
     TORCH_CHECK(false, #name " not supported by SingletonSymNode"); \
@@ -239,7 +235,6 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
   at::Tensor vec_;
   int64_t sum_vec_;
   SingletonVariant type_;
-  c10::DispatchKeySet key_set_;
 };
 
 TORCH_API at::Tensor get_singleton_vec(const c10::SymNode& node);
