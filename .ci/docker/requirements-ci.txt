@@ -162,11 +162,6 @@ pytest-xdist==3.3.1
 #Pinned versions:
 #test that import:
 
-pytest-shard==0.1.2
-#Description: plugin spliting up tests in pytest
-#Pinned versions:
-#test that import:
-
 pytest-flakefinder==1.1.0
 #Description: plugin for rerunning tests a fixed number of times in pytest
 #Pinned versions: 1.1.0

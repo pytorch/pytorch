@@ -47,17 +47,24 @@ def tensor_parallel_transformation(
     .. warning::
         This API is experimental and subject to change.
     """
-    # TODO Migrate this to plain function call.
-    return exported_program._transform_do_not_use(
-        TensorParallelTransformPass(
+
+    gm = exported_program.graph_module
+    sig = copy.deepcopy(exported_program.graph_signature)
+    state_dict = copy.copy(exported_program.state_dict)
+
+    with gm._set_replace_hook(sig.get_replace_hook()):
+        res = TensorParallelTransformPass(
             rank,
             world_size,
             device_type,
-            exported_program.state_dict,
+            state_dict,
             exported_program.graph_signature,
             parallel_strategies,
-        )
-    )
+        )(gm)
+        assert res is not None
+        gm = res.graph_module
+
+    return exported_program._update(gm, sig, state_dict)
 
 
 class TensorParallelTransformPass(PassBase):
