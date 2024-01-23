@@ -1434,6 +1434,16 @@ void install_no_tensor_aliasing_guard(
 
 } // namespace
 
+static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
+  if (C10_UNLIKELY(
+          obj == nullptr ||
+          (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)))) {
+    throw std::runtime_error(
+        "_torchinductor_pyobject_tensor_data_ptr: non-tensor input");
+  }
+  return THPVariable_Unpack(obj).data_ptr();
+}
+
 PyObject* torch_c_dynamo_guards_init() {
   // initialize TensorGuardsType
   TensorGuardsType.tp_name = "torch._C._dynamo.guards.TensorGuards";
@@ -1480,6 +1490,17 @@ PyObject* torch_c_dynamo_guards_init() {
     return nullptr;
   }
 
+  // We expose the address of _torchinductor_pyobject_tensor_data_ptr in order
+  // to allow manual linking in our generated TorchInductor Python bindings.
+  // While regular linking works in most cases, it does not work properly in
+  // fbcode due to janky build setup there.
+  if (PyModule_AddObject(
+          m,
+          "_torchinductor_pyobject_tensor_data_ptr",
+          PyLong_FromVoidPtr(reinterpret_cast<void*>(
+              &_torchinductor_pyobject_tensor_data_ptr))) < 0) {
+    return nullptr;
+  }
   auto py_m = py::handle(m).cast<py::module>();
   py::class_<GuardDebugInfo, std::unique_ptr<GuardDebugInfo>>(
       py_m, "GuardDebugInfo")
@@ -1650,14 +1671,4 @@ PyObject* torch_c_dynamo_guards_init() {
       "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);
 
   return m;
-}
-
-extern "C" void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
-  if (C10_UNLIKELY(
-          obj == nullptr ||
-          (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)))) {
-    throw std::runtime_error(
-        "_torchinductor_pyobject_tensor_data_ptr: non-tensor input");
-  }
-  return THPVariable_Unpack(obj).data_ptr();
 }
