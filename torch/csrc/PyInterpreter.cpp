@@ -339,8 +339,7 @@ void ConcretePyInterpreterVTable::dispatch(
         if (nv.isSymInt()) {
           const auto& x = nv.toSymInt();
           if (x.is_heap_allocated() && x.toSymNode()->is_singleton()) {
-            append_overloaded_type(
-                &overloaded_args, _get_nested_tensor_cls());
+            append_overloaded_type(&overloaded_args, _get_nested_tensor_cls());
           }
         }
       }

@@ -33,7 +33,10 @@ namespace impl {
 // this is just an adapter so C++ calls can get to the object.
 class PythonSymNodeImpl : public c10::SymNodeImpl {
  public:
-  PythonSymNodeImpl(py::object pyobj, c10::optional<bool> is_singleton=c10::nullopt) : c10::SymNodeImpl() {
+  PythonSymNodeImpl(
+      py::object pyobj,
+      c10::optional<bool> is_singleton = c10::nullopt)
+      : c10::SymNodeImpl() {
     py::gil_scoped_acquire acquire;
     if (is_singleton.has_value()) {
       is_singleton_ = is_singleton.value();
@@ -48,19 +51,19 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   c10::SymNode wrap_int(int64_t num) override {
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr("wrap_int")(num);
-    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));
+    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r), false);
   }
 
   c10::SymNode wrap_float(double num) override {
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr("wrap_float")(num);
-    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));
+    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r), false);
   }
 
   c10::SymNode wrap_bool(bool num) override {
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr("wrap_bool")(num);
-    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));
+    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r), false);
   }
 
 #define TORCH_SYMNODE_SIZES_STRIDES(n)                                        \
@@ -183,7 +186,10 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return c10::make_intrusive<PythonSymNodeImpl>(r, false);
   }
 
-  c10::SymNode dispatch_common_(const char* fname, const c10::SymNode& other, bool mb_singleton=false) {
+  c10::SymNode dispatch_common_(
+      const char* fname,
+      const c10::SymNode& other,
+      bool mb_singleton = false) {
     auto pother = dynamic_cast<PythonSymNodeImpl*>(other.get());
     TORCH_CHECK(pother);
     py::gil_scoped_acquire acquire;
@@ -195,7 +201,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     }
   }
 
-  c10::SymNode dispatch_common_(const char* fname, bool mb_singleton=false) {
+  c10::SymNode dispatch_common_(const char* fname, bool mb_singleton = false) {
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr(fname)();
     if (mb_singleton) {

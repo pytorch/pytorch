@@ -601,7 +601,7 @@ struct TORCH_API IValue final {
   c10::SymInt toSymInt() &&;
   c10::SymInt toSymInt() const&;
 
-  c10::SymNodeImpl* toSymNode() {
+  const c10::SymNodeImpl* toSymNodeImpl() const {
     AT_ASSERT(isSymInt() || isSymFloat() || isSymBool());
     return static_cast<c10::SymNodeImpl*>(payload.u.as_intrusive_ptr);
   }
