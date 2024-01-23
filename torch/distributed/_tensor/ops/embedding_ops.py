@@ -1,9 +1,11 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
 import itertools
-from typing import cast, List
+from dataclasses import dataclass, field
+from typing import cast, List, Optional
 
 import torch
+import torch.distributed._functional_collectives as funcol
 from torch.distributed._tensor.op_schema import (
     OpSchema,
     OpStrategy,
@@ -29,6 +31,124 @@ from torch.distributed.device_mesh import DeviceMesh
 aten = torch.ops.aten
 
 
+@dataclass
+class MaskBuffer:
+    data: Optional[torch.Tensor] = None
+
+    def materialize_mask(self, mask):
+        if self.data is not None:
+            raise RuntimeError("MaskBuffer has already been materialized")
+        self.data = mask
+
+    def release_mask(self):
+        # TODO: evaluate if we need to release the mask buffer or the buffer
+        # can just have the same lifetime as the _Partial placement
+        if self.data is None:
+            raise RuntimeError("MaskBuffer has not been materialized")
+        self.data = None
+
+
+@dataclass(frozen=True)
+class _MaskPartial(_Partial):
+    """
+    A partial mask placement devised for rowwise sharded embedding op, where we need
+    to mask and adjust the indices to the local embedding shard, embedding masking
+    is a special type of the Partial placement
+
+    NOTE: the lifecycle of this MaskPartial placement follows the corresponding DTensor
+    lifecycle, i.e. the indices_mask would only be alive during the lifetime of the DTensor.
+    """
+
+    logical_dim_size: int = -1
+    mask_buffer: MaskBuffer = field(default_factory=MaskBuffer)
+
+    def _partition_value(
+        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
+    ) -> torch.Tensor:
+        # override parent logic to perform partial mask for embedding
+        num_chunks = mesh.size(mesh_dim)
+        # get local shard size and offset on the embedding_dim
+        local_shard_size, local_offset_on_dim = Shard._local_shard_size_on_dim(
+            self.logical_dim_size,
+            num_chunks,
+            mesh.get_local_rank(mesh_dim),
+            return_offset=True,
+        )
+        # Build the input mask and save it for the current partial placement
+        # this is so that the output of embedding op can reuse the same partial
+        # placement saved mask to perform mask + reduction
+        mask = (tensor < local_offset_on_dim) | (
+            tensor >= local_offset_on_dim + local_shard_size
+        )
+        # mask the input tensor
+        masked_tensor = tensor.clone() - local_offset_on_dim
+        masked_tensor[mask] = 0
+        # materialize the mask buffer to be used for reduction
+        self.mask_buffer.materialize_mask(mask)
+        return masked_tensor
+
+    def _reduce_value(
+        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
+    ) -> torch.Tensor:
+        # by the time we ned reduction, we should have already saved the mask
+        assert self.mask_buffer.data is not None
+
+        # apply the mask to the tensor that pending reduction
+        tensor[self.mask_buffer.data, :] = 0.0
+
+        # clear the mask buffer
+        self.mask_buffer.release_mask()
+
+        # perform sum reduction
+        return funcol.all_reduce(tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim))
+
+    def _reduce_shard_value(
+        self,
+        tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        shard_spec: Placement,
+    ) -> torch.Tensor:
+        # by the time we ned reduction, we should have already saved the mask
+        assert self.mask_buffer.data is not None
+
+        # apply the mask to the tensor that pending reduction
+        tensor[self.mask_buffer.data, :] = 0.0
+
+        # clear the mask buffer
+        self.mask_buffer.release_mask()
+
+        # call reduce_shard_tensor of the shard_spec.
+        shard_spec = cast(Shard, shard_spec)
+        return shard_spec._reduce_shard_tensor(tensor, mesh, self.reduce_op, mesh_dim)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _MaskPartial):
+            return False
+        return (
+            self.logical_dim_size == other.logical_dim_size
+            and self.mask_buffer.data == other.mask_buffer.data
+            and self.reduce_op == other.reduce_op
+        )
+
+    def __hash__(self) -> int:
+        return 1 + hash(
+            (self.logical_dim_size, self.mask_buffer.data, self.reduce_op)
+        )
+
+    def __repr__(self) -> str:
+        """
+        machine readable representation of the MaskPartial placement
+        """
+        return f"_MaskPartial(logical_dim_size={self.logical_dim_size})"
+
+    def __str__(self) -> str:
+        """
+        human readable representation of the MaskPartial placement
+        """
+        return "MaskP"
+
+
 @register_op_strategy(aten.embedding.default)
 def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     """
@@ -43,12 +163,7 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     indices_shape = indices_strategy.output_shape
     output_emd_dim = len(indices_shape)
 
-    # guard rowwise sharding not implemented for now
     weight_spec = weight_strategy.strategies[0].output_spec
-    if any(placement.is_shard(0) for placement in weight_spec.placements):
-        raise NotImplementedError(
-            "DTensor does not support row-wise sharded embedding operation yet!"
-        )
 
     all_mesh_dim_strategies = []
 
@@ -63,6 +178,18 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         # colwise sharding, output shard on last dim, weight shard on dim 1, input replicate
         colwise_sharding = [Shard(output_emd_dim), Shard(1), Replicate()]
         single_mesh_dim_strategies.append(colwise_sharding)
+
+        # rowwise sharding, output is embedding partial, weight shard on dim 0, input accepts embedding partial
+        embedding_partial_placement = _MaskPartial(logical_dim_size=weight_shape[0])
+
+        # NOTE we want to reuse the same mask partial placement so that we can reuse the same mask that generates
+        # from the input indices and use it for output reduction
+        rowwise_sharding = [
+            embedding_partial_placement,
+            Shard(0),
+            embedding_partial_placement,
+        ]
+        single_mesh_dim_strategies.append(rowwise_sharding)
 
         # batch dim sharding, weight replicated, input can shard on any dim, output follows input
         for input_dim in range(len(indices_shape)):

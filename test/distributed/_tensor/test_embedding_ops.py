@@ -26,8 +26,23 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestEmbeddingOp(DTensorTestBase):
+    def _apply_sharding(self, embedding_mod, shard_dim, device_mesh):
+        def shard_embedding_fn(name, module, device_mesh):
+            for name, param in module.named_parameters():
+                dist_param = torch.nn.Parameter(
+                    distribute_tensor(param, device_mesh, [Shard(shard_dim)])
+                )
+                module.register_parameter(name, dist_param)
+
+        sharded_embedding = distribute_module(
+            embedding_mod, device_mesh, shard_embedding_fn
+        )
+        return sharded_embedding
+
+
     def _run_embedding_op_test(
         self,
+        device_mesh,
         shard_dim,
         input_size,
         num_embeddings,
@@ -35,7 +50,6 @@ class TestEmbeddingOp(DTensorTestBase):
         **kwargs,
     ):
         # Use same seed.
-        device_mesh = self.build_device_mesh()
         torch.manual_seed(0)
         local_embedding = torch.nn.Embedding(
             num_embeddings,
@@ -55,15 +69,8 @@ class TestEmbeddingOp(DTensorTestBase):
             local_embedding.weight.clone().detach()
         )
 
-        def shard_embedding_fn(name, module, device_mesh):
-            for name, param in module.named_parameters():
-                dist_param = torch.nn.Parameter(
-                    distribute_tensor(param, device_mesh, [Shard(shard_dim)])
-                )
-                module.register_parameter(name, dist_param)
-
-        sharded_embedding = distribute_module(
-            sharded_embedding, device_mesh, shard_embedding_fn
+        sharded_embedding = self._apply_sharding(
+            sharded_embedding, shard_dim, device_mesh
         )
 
         # Run sharded computation
@@ -121,7 +128,7 @@ class TestEmbeddingOp(DTensorTestBase):
             **kwargs,
         )
         sharded_output = torch.nn.functional.embedding(
-            DTensor.from_local(inp, device_mesh, [Replicate()]),
+            DTensor.from_local(inp, device_mesh, [Replicate()], run_check=False),
             sharded_embedding.weight,
             **kwargs,
         )
@@ -129,13 +136,14 @@ class TestEmbeddingOp(DTensorTestBase):
 
     @with_comms
     def test_sharded_embedding_colwise(self):
-        self._run_embedding_op_test(1, [5, 4], 17, 12)
-        self._run_embedding_op_test(1, [6, 7, 6], 21, 11)
-        self._run_embedding_op_test(1, [8, 6, 5, 4], 23, 13)
-        self._run_embedding_op_test(1, [8, 6, 5, 4, 7], 23, 16)
-        self._run_embedding_op_test(1, [4], 15, 14)
-        self._run_embedding_op_test(1, [34], 15, 14, padding_idx=10)
-        self._run_embedding_op_test(1, [8, 6, 5, 4], 23, 13, padding_idx=12)
+        mesh = self.build_device_mesh()
+        self._run_embedding_op_test(mesh, 1, [5, 4], 17, 12)
+        self._run_embedding_op_test(mesh, 1, [6, 7, 6], 21, 11)
+        self._run_embedding_op_test(mesh, 1, [8, 6, 5, 4], 23, 13)
+        self._run_embedding_op_test(mesh, 1, [8, 6, 5, 4, 7], 23, 16)
+        self._run_embedding_op_test(mesh, 1, [4], 15, 14)
+        self._run_embedding_op_test(mesh, 1, [34], 15, 14, padding_idx=10)
+        self._run_embedding_op_test(mesh, 1, [8, 6, 5, 4], 23, 13, padding_idx=12)
 
     @with_comms
     def test_sharded_embedding_colwise_max_norm_errors(self):
@@ -144,16 +152,28 @@ class TestEmbeddingOp(DTensorTestBase):
             "does not have a sharding strategy registered.",
         ):
             self._run_embedding_op_test(
-                1, [8, 6, 5, 4], 23, 13, padding_idx=12, max_norm=2.0
+                mesh, 1, [8, 6, 5, 4], 23, 13, padding_idx=12, max_norm=2.0
             )
 
     @with_comms
     def test_sharded_embedding_rowwise(self):
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            "row-wise sharded embedding operation yet",
-        ):
-            self._run_embedding_op_test(0, [5, 12], 16, 22)
+        mesh = self.build_device_mesh()
+        # test correctness
+        self._run_embedding_op_test(mesh, 0, [5, 12], 16, 22)
+        self._run_embedding_op_test(mesh, 0, [6, 7, 6], 13, 22)
+        self._run_embedding_op_test(mesh, 0, [34], 15, 14, padding_idx=10)
+
+        # test collectives
+        embedding_mod = torch.nn.Embedding(10, 20, device=self.device_type)
+        sharded_embedding = self._apply_sharding(embedding_mod, 0, mesh)
+        inp = torch.randint(
+            0, 10, (8, 8), device=self.device_type
+        )
+        replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
+        output = sharded_embedding(replicated_inp)
+        print(output._spec)
+
+
 
 
 if __name__ == "__main__":
