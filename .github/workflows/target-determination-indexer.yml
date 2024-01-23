@@ -13,11 +13,7 @@ jobs:
       options: '--gpus all'
     steps:
       - name: Clone PyTorch
-        uses: actions/checkout@v4
-        with:
-          repository: pytorch/pytorch
-          ref: main
-          path: pytorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Clone CodeLlama
         uses: actions/checkout@v4
