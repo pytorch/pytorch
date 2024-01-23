@@ -387,7 +387,7 @@ class NNModuleVariable(VariableTracker):
                     create_functional_call,
                 )
                 from .builtin import BuiltinVariable
-                from .torch import decompose_and_inline_function_with_makefx
+                from .inline_helper import decompose_and_inline_function_with_makefx
 
                 # For single step graph we want to use make_fx to extract the fx graph
                 # representing the fwd and inline that fx graph.
