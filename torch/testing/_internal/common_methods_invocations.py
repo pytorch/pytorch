@@ -16455,6 +16455,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            supports_inplace_autograd=False,
+           supports_scripting=False,
            sample_inputs_func=sample_inputs__unsafe_masked_index),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
