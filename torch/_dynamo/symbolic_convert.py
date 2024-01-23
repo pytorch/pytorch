@@ -881,8 +881,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 )
             else:
                 mangled_name = f"___unnamed_scope_{id(self.f_globals)}"
-                if mangled_name not in self.output.global_scope:
-                    self.output.install_global_unsafe(mangled_name, self.f_globals)
+                mangled_name = self.output.install_global_once(
+                    mangled_name, self.f_globals
+                )
                 source = GetItemSource(GlobalSource(mangled_name), name)
         return source
 
@@ -1891,7 +1892,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def store_global_weakref(self, name, value):
         new_name = self.output.install_global_once(name, weakref.ref(value))
-        install_guard(GlobalWeakRefSource(new_name).make_guard(GuardBuilder.WEAKREF_ALIVE))
+        install_guard(
+            GlobalWeakRefSource(new_name).make_guard(GuardBuilder.WEAKREF_ALIVE)
+        )
         return new_name
 
     @property
@@ -2187,6 +2190,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         if new_code.co_freevars:
             cg.make_function_with_closure(name, new_code, True, stack_len)
         else:
+            # This is safe: we pre-generate a unique name
             self.output.install_global_unsafe(
                 name, types.FunctionType(new_code, self.f_globals, name)
             )

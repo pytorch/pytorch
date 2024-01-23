@@ -176,10 +176,10 @@ class OptimizerVariable(UserDefinedObjectVariable):
             # mark these tensors as static for cudagraphs
             mark_static_address(tensor_value, guard=False)
 
-            global_name = tx.store_global_weakref(global_key_name(tensor_value), tensor_value)
-            builder = VariableBuilder(
-                tx, GlobalWeakRefSource(global_name)
+            global_name = tx.store_global_weakref(
+                global_key_name(tensor_value), tensor_value
             )
+            builder = VariableBuilder(tx, GlobalWeakRefSource(global_name))
             self.static_tensor_names.add(tx.output.module_key_name(builder.name))
 
         result = builder(tensor_value)
