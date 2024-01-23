@@ -856,7 +856,7 @@ class TestModule(TestCase):
     @modules([module for module in module_db if not module.is_lazy])
     @parametrize('swap', [True, False])
     @parametrize('set_grad', [True, False])
-    @wrapSwapTensorsTest
+    @wrapSwapTensorsTest(swap=None)
     def test_to(self, device, dtype, module_info, training, swap, set_grad):
         module_cls = module_info.module_cls
         devices = ['cpu']

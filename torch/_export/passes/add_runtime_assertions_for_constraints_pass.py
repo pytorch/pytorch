@@ -2,14 +2,15 @@ import math
 import operator
 import traceback
 from functools import partial
-from typing import Callable, Dict, List, NamedTuple, Set, Tuple
+from typing import Callable, Dict, List, NamedTuple, Set
 
 import sympy
 
 import torch
 import torch.fx
-from torch._export.pass_base import _ExportPassBase, ProxyValue, PassResult
+from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse, ProxyValue, PassResult
 from torch.utils._sympy.value_ranges import ValueRanges
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
 
 __all__ = ["InputDim"]
@@ -40,15 +41,13 @@ def _convert_range_to_int(range: ValueRanges):
     return min_val, max_val
 
 
-class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
+class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBaseDeprecatedDoNotUse):
     def __init__(
         self,
         range_constraints: Dict[sympy.Symbol, ValueRanges],
-        equality_constraints: List[Tuple[InputDim, InputDim]],
     ):
         super().__init__()
         self.range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
-        self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
         self._asserts_generated_unbacked_symbols: Set[sympy.Symbol] = set()
         self.counter = 0
 
@@ -97,11 +96,11 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
                 symbol = val.node._expr
                 if symbol in self.existing_inline_assertions:
                     return call_backs, messages
-                if isinstance(symbol, sympy.Symbol) and symbol.name.startswith("i"):
+                if isinstance(symbol, sympy.Symbol) and free_unbacked_symbols(symbol):
                     if symbol in self._asserts_generated_unbacked_symbols:
                         return call_backs, messages
                     # We only care about unbacked symints for these inline
-                    # constraints, which are prefixed with 'i'
+                    # constraints, which are prefixed with 'u'
                     constraint = self.range_constraints[symbol]
                     min_val, max_val = _convert_range_to_int(constraint)
                     assert_msg = f" is outside of inline constraint [{min_val}, {max_val}]."
