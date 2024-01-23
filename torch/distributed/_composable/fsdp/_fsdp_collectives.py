@@ -178,7 +178,7 @@ def foreach_reduce_scatter(
             new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(new_sharded_grad)
             if to_accumulate_grad:
                 fsdp_param.sharded_param.grad += new_sharded_dtensor_grad
-            elif new_sharded_dtensor_grad._local_tensor.numel() > 0:
+            else:
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
             flat_grad_offset += padded_sharded_numel
         reduce_scatter_view_out_event = torch.cuda.Event()
@@ -233,6 +233,11 @@ def _div_if_needed(tensor: torch.Tensor, div_factor: float) -> None:
         tensor.div_(div_factor)
 
 
+# We need this context for the backward all-gather, which would otherwise
+# raise an error when writing to the all-gather output tensors in-place, e.g.:
+# RuntimeError: one of the variables needed for gradient computation has been
+# modified by an inplace operation: [torch.cuda.FloatTensor [15, 3]], which is
+# output 0 of AsStridedBackward0, is at version 3; expected version 2 instead.
 class _unsafe_preserve_version_counters(_DecoratorContextManager):
     # Same as `_unsafe_preserve_version_counter` but only entering/exiting the
     # context manager once for a list of tensors to reduce CPU overhead
