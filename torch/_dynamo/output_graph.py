@@ -1366,19 +1366,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                         # assert and also explicitly refine the range
                         # (refinement should not be necessary once runtime
                         # asserts cause refinement, but that's NYI)
-                        def convert(s):
-                            try:
-                                return int(s)
-                            except TypeError:
-                                return None
-
                         self.graph.call_function(
                             torch._constrain_as_value,
-                            # TODO: this could choke if it's sympy.oo
                             (
                                 symbol_to_proxy[i0].node,
-                                convert(runtime_vr.lower),
-                                convert(runtime_vr.upper),
+                                None if runtime_vr.lower == -sympy.oo else int(runtime_vr.lower),
+                                None if runtime_vr.upper == sympy.oo else int(runtime_vr.lower),
                             ),
                         )
 
