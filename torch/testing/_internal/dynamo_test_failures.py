@@ -1841,7 +1841,6 @@ dynamo_expected_failures = {
     "TestSubclass.test_parametrization_non_wrapper_tensor_leave_parametrized_True",  # test_subclass
     "TestSubclass.test_module_optimization_non_wrapper_tensor",  # test_subclass
     "TestSubclass.test_serialization_non_wrapper_tensor_as_param_True",  # test_subclass
-    "TestSubclass.test_module_optimization_sparse_tensor",  # test_subclass
     "TestSubclass.test_param_invariants_non_wrapper_tensor_tensor_requires_grad_False",  # test_subclass
     "TestSubclass.test_param_invariants_sparse_tensor_tensor_requires_grad_True",  # test_subclass
     "TestSubclass.test_param_invariants_diag_tensor_below_tensor_requires_grad_True",  # test_subclass
@@ -1849,7 +1848,6 @@ dynamo_expected_failures = {
     "TestSubclass.test_param_invariants_non_wrapper_tensor_tensor_requires_grad_True",  # test_subclass
     "TestSubclass.test_parametrization_non_wrapper_tensor_leave_parametrized_False",  # test_subclass
     "TestSubclass.test_type_propagation_non_wrapper_tensor_as_param_False",  # test_subclass
-    "TestSubclass.test_module_optimization_diag_tensor_below",  # test_subclass
     "TestSubclass.test_parametrization_base_tensor_leave_parametrized_True",  # test_subclass
     "TestSubclass.test_type_propagation_non_wrapper_tensor_as_param_True",  # test_subclass
     "TestSubclass.test_parametrization_base_tensor_leave_parametrized_False",  # test_subclass
@@ -8030,26 +8028,8 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_elu_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cat_cpu_float32",  # known py38 fail
     "TestRefsCPU.test_infinite_loop_from_py_dispatcher_cpu",  # known py38 fail
-    "TestReductions.test_all",  # known py38 fail
-    "TestReductions.test_mean_grad_case_1d",  # known py38 fail
-    "TestBasicsCPU.test_contiguous_cpu",  # known py38 fail
-    "TestReductions.test_mean",  # known py38 fail
-    "TestBasicsCPU.test_softmax_cpu",  # known py38 fail
-    "TestReductions.test_mean_dim_grad",  # known py38 fail
-    "TestReductions.test_amin_grad",  # known py38 fail
     "TestBasicsCPU.test_invalid_sparse_csr_values_cpu",  # known py38 fail
-    "TestReductions.test_sum",  # known py38 fail
-    "TestReductions.test_mean_grad_case_1e",  # known py38 fail
-    "TestReductions.test_mean_grad_case_1f",  # known py38 fail
-    "TestBasicsCPU.test_where_cpu",  # known py38 fail
-    "TestReductions.test_prod_grad",  # known py38 fail
     "TestBasicsCPU.test_invalid_sparse_coo_values_cpu",  # known py38 fail
-    "TestReductions.test_amax_grad",  # known py38 fail
-    "TestReductions.test_sum_grad",  # known py38 fail
-    "TestReductions.test_mean_grad_case_1b",  # known py38 fail
-    "TestReductions.test_prod",  # known py38 fail
-    "TestReductions.test_amax",  # known py38 fail
-    "TestReductions.test_amin",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_uint8_uint8",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_int64",  # known py38 fail
     "TestBinaryUfuncsCPU.test_xlogy_xlog1py_cpu_int8_int16",  # known py38 fail

@@ -787,6 +787,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and type(value).__module__.startswith("torch.")
             and "torch.optim" not in type(value).__module__
             and not callable(value)
+            and not isinstance(subobj, types.MethodDescriptorType)
         ):
             if not source:
                 assert getattr(
