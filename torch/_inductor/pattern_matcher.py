@@ -813,17 +813,13 @@ class ReplacementPatternEntry(PatternEntry):
             ]
             last_node = min(indices, key=lambda tup: tup[0])[1]
 
-        def percolate_tags(node, recompute_tag, input_stops):
+        def percolate_tags(node, recompute_tag):
             queue = [node]
             visited = set()
 
             while queue:
                 arg = queue.pop()
-                if (
-                    arg not in visited
-                    and arg not in input_stops
-                    and hasattr(arg, "meta")
-                ):
+                if arg not in visited and hasattr(arg, "meta"):
                     visited.add(arg)
                     arg.meta["recompute"] = recompute_tag
                     queue.extend(arg.all_input_nodes)
@@ -845,13 +841,13 @@ class ReplacementPatternEntry(PatternEntry):
                     # Preserve the recompute tags in the replacement graph. We
                     # look at the recompute tags of the original output node to
                     # propagate the tag from the output all the way to the input
-                    # args (named as args in the replace_with_graph).
+                    # args in the replacement graph.
                     # Note that this is best effort. Since patterns are from
                     # many to many, there is no easy way to correctly map the
                     # recomputable tags. It is possible in some scenarios that we
                     # incorrectly tag some nodes as recomputables.
                     if "recompute" in old.meta:
-                        percolate_tags(new, old.meta["recompute"], args)
+                        percolate_tags(new, old.meta["recompute"])
 
                     old.replace_all_uses_with(new)
 

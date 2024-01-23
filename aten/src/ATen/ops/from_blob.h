@@ -83,7 +83,7 @@ class TORCH_API TensorMaker {
 
   std::size_t computeStorageSize() const noexcept;
 
-  DataPtr makeDataPtrFromDeleter() noexcept;
+  DataPtr makeDataPtrFromDeleter() const;
 
   DataPtr makeDataPtrFromContext() noexcept;
 
