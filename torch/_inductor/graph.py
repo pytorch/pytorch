@@ -258,8 +258,10 @@ class GraphLowering(torch.fx.Interpreter):
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
-        self.disable_cudagraphs = False
-        self.disable_cudagraphs_reason = ""
+        self.disable_cudagraphs_reason: Optional[str] = None
+
+        # only keeping one node per device for stack trace purposes
+        self.device_node_mapping: Dict[torch.device, torch.fx.Node] = {}
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
         self.dynamo_flat_name_to_original_fqn = self.module.meta.get(
             "dynamo_flat_name_to_original_fqn", {}
@@ -488,6 +490,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_types.add(device.type)
         if device.index is not None:
             self.device_idxs.add(device.index)
+        if V.graph.current_node and device not in self.device_node_mapping:
+            self.device_node_mapping[device] = V.graph.current_node
 
     @property
     def fake_mode(self):
