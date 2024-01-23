@@ -125,8 +125,8 @@ def tuned_mm(mat1, mat2, *, layout=None):
     from torch._inductor.ir import FixedLayout, FlexibleLayout
 
     choices: List[ChoiceCaller] = []
-
-    if m * n != 0 and use_triton_template(layout):
+    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    if is_nonzero and use_triton_template(layout):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
@@ -135,7 +135,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 **mm_options(config, m, n, k, layout),
             )
 
-    if m * n != 0 and use_cutlass_template(layout, m, n, k):
+    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         out_layout = FlexibleLayout(
             device=layout.device, dtype=layout.dtype, size=layout.size
         )
@@ -172,6 +172,31 @@ def tuned_mm(mat1, mat2, *, layout=None):
             return aten_mm.bind((mat1, mat2), layout).output_node()
 
 
+def _is_static_problem(inputs_tensors, layout):
+    # checks whether all input tensors and the output layout
+    # have a static shape by attempting to convert the dimensions
+    # to int
+    static_shape = True
+    nonzero = True
+    for dim in layout.size:
+        try:
+            a = int(dim)
+            if a == 0:
+                nonzero = False
+        except TypeError:
+            static_shape = False
+        for mat in inputs_tensors:
+            if mat is not None:
+                for dim in mat.get_size():
+                    try:
+                        a = int(dim)
+                        if a == 0:
+                            nonzero = False
+                    except TypeError:
+                        static_shape = False
+    return static_shape, nonzero
+
+
 @register_lowering(aten._int_mm, type_promotion_kind=None)
 def tuned_int_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
@@ -198,7 +223,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
     choices = []
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
-    if m * n == 0 or not use_max_autotune():
+    static_shape, is_nonzero = _is_static_problem([inp, mat1, mat2], layout)
+    if (not is_nonzero) or (not use_max_autotune()):
         choices = (
             [
                 aten_addmm.bind(
@@ -213,7 +239,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             else []
         )
         return autotune_select_algorithm("addmm", choices, [inp, mat1, mat2], layout)
-    if use_triton_template(layout):
+    if is_nonzero and use_triton_template(layout):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
@@ -224,7 +250,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
             )
 
-    if use_cutlass_template(layout, m, n, k):
+    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         # Note: Do not use FlexibleLayout for the output here, as it will
         # lead to runtime errors if the output layout is made incompatible with
         # the bias layout later.

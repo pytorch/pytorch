@@ -16,6 +16,7 @@ from ..utils import (
     use_cutlass_template,
     use_triton_template,
 )
+from .mm import _is_static_problem
 
 from .mm_common import addmm_epilogue, mm_args, mm_configs, mm_options
 
@@ -109,7 +110,8 @@ def tuned_bmm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
-    if m * n != 0 and use_cutlass_template(layout, m, n, k):
+    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
@@ -130,6 +132,7 @@ def tuned_bmm(mat1, mat2, *, layout=None):
 # @register_lowering(aten.baddbmm)
 def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
+    static_shape, is_nonzero = _is_static_problem([inp, mat1, mat2], layout)
     choices = []
     # options to tune from
     choices = (
@@ -137,7 +140,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         if use_aten_gemm_kernels()
         else []
     )
-    if use_triton_template(layout):
+    if is_nonzero and use_triton_template(layout):
         for config in mm_configs(m, n, k):
             bmm_template.maybe_append_choice(
                 choices,
@@ -148,7 +151,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
             )
 
-    if use_cutlass_template(layout, m, n, k):
+    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
