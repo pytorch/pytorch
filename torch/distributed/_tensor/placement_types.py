@@ -114,8 +114,8 @@ class Shard(Placement):
             length=tensor.size(self.dim) - pad_size,
         )
 
+    @staticmethod
     def _local_shard_size_on_dim(
-        self,
         size_on_dim: int,
         num_chunks: int,
         rank: int,
