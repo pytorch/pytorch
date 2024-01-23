@@ -197,9 +197,16 @@ class FSDPParamGroup:
 def _get_param_module_infos(
     params: List[nn.Parameter], module: nn.Module
 ) -> List[ParamModuleInfo]:
+    """
+    Shared parameter:
+        lin1.weight = lin2.weight
+    Shared module:
+        mlp.lin1 = mlp.lin2
+    We do not remove duplicates when traversing both modules and parameters to
+    find shared modules' parameters and shared parameters within a module.
+    """
     params_set = set(params)
     param_to_module_info: Dict[nn.Parameter, ParamModuleInfo] = {}
-    # Do not remove duplicates to find parameters from shared modules
     for _, submodule in module.named_modules(remove_duplicate=False):
         for param_name, param in _named_parameters_with_duplicates(
             submodule, recurse=False
