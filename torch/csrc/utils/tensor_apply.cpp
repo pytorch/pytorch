@@ -67,27 +67,26 @@ const Tensor& apply_(const Tensor& self, PyObject* fn) {
   if (self.is_meta()) {
     return self; // Just skip
   }
-  if (!self.device().is_cpu()) {
-    throw TypeError("apply_ is only implemented on CPU tensors");
-  }
+  TORCH_CHECK_TYPE(
+      self.device().is_cpu(), "apply_ is only implemented on CPU tensors");
   auto scalarType = self.scalar_type();
   recursive_apply<1>(self.sizes(), scalarType, 0, fn, {{self}});
   return self;
 }
 
 const Tensor& map_(const Tensor& self, const Tensor& other_, PyObject* fn) {
-  if (!other_.options().type_equal(self.options())) {
-    throw TypeError(
-        "map_: expected %s for 'other' (got %s)",
-        self.toString().c_str(),
-        other_.toString().c_str());
-  }
+  TORCH_CHECK_TYPE(
+      other_.options().type_equal(self.options()),
+      "map_: expected ",
+      self.toString(),
+      " for 'other' (got ",
+      other_.toString(),
+      ")");
   if (self.is_meta()) {
     return self; // Just skip
   }
-  if (!self.device().is_cpu()) {
-    throw TypeError("map_ is only implemented on CPU tensors");
-  }
+  TORCH_CHECK_TYPE(
+      self.device().is_cpu(), "map_ is only implemented on CPU tensors");
   c10::MaybeOwned<Tensor> other = expand_inplace(self, other_, "map_");
   auto scalarType = self.scalar_type();
   recursive_apply<2>(self.sizes(), scalarType, 0, fn, {{self, *other}});
@@ -99,25 +98,26 @@ const Tensor& map2_(
     const Tensor& x_,
     const Tensor& y_,
     PyObject* fn) {
-  if (!x_.options().type_equal(self.options())) {
-    throw TypeError(
-        "map2_: expected %s for argument 'x' (got %s)",
-        self.toString().c_str(),
-        x_.toString().c_str());
-  }
-  if (!y_.options().type_equal(self.options())) {
-    throw TypeError(
-        "map2_: expected %s for argument 'y' (got %s)",
-        self.toString().c_str(),
-        y_.toString().c_str());
-  }
+  TORCH_CHECK_TYPE(
+      x_.options().type_equal(self.options()),
+      "map2_: expected ",
+      self.toString(),
+      " for argument 'x' (got ",
+      x_.toString(),
+      ")");
+  TORCH_CHECK_TYPE(
+      y_.options().type_equal(self.options()),
+      "map2_: expected ",
+      self.toString(),
+      " for argument 'y' (got ",
+      y_.toString(),
+      ")");
   if (self.is_meta()) {
     return self; // Just skip
   }
-  if (!self.device().is_cpu() || !x_.device().is_cpu() ||
-      !y_.device().is_cpu()) {
-    throw TypeError("map2_ is only implemented on CPU tensors");
-  }
+  TORCH_CHECK_TYPE(
+      (self.device().is_cpu() && x_.device().is_cpu() && y_.device().is_cpu()),
+      "map2_ is only implemented on CPU tensors");
   auto others = expand_inplace(self, x_, y_, "map2_");
   auto scalarType = self.scalar_type();
   recursive_apply<3>(
