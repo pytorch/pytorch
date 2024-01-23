@@ -6,7 +6,7 @@ import weakref
 
 import torch
 from torch._prims_common import DeviceLikeType
-from torch.overrides import has_torch_function
+from torch.overrides import has_torch_function, has_torch_function_unary
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
@@ -1056,12 +1056,12 @@ class Module:
         return self._apply(lambda t: torch.empty_like(t, device=device), recurse=recurse)
 
     @overload
-    def to(self, device: Optional[DeviceLikeType] = ..., dtype: Optional[Union[dtype, str]] = ...,
+    def to(self, device: Optional[DeviceLikeType] = ..., dtype: Optional[dtype] = ...,
            non_blocking: bool = ...) -> Self:
         ...
 
     @overload
-    def to(self, dtype: Union[dtype, str], non_blocking: bool = ...) -> Self:
+    def to(self, dtype: dtype, non_blocking: bool = ...) -> Self:
         ...
 
     @overload
@@ -2061,15 +2061,16 @@ class Module:
                                 setattr(self, name, torch.nn.Parameter(input_param))
                             else:
                                 setattr(self, name, input_param)
-                        elif use_swap_tensors:
-                            uses_torch_function = has_torch_function((param, input_param))
-                            new_input_param = param.module_load(input_param)
-                            if uses_torch_function:
-                                if (isinstance(param, torch.nn.Parameter) and
-                                        not isinstance(new_input_param, torch.nn.Parameter)):
-                                    new_input_param = torch.nn.Parameter(new_input_param, requires_grad=param.requires_grad)
-                                torch.utils.swap_tensors(param, new_input_param)
-                            # otherwise default module_load has already handled the param.copy_(input_param)
+                        elif use_swap_tensors and has_torch_function({param, input_param}):
+                            param_requires_grad = param.requires_grad
+                            if has_torch_function_unary(param):
+                                new_input_param = param.module_load_from(input_param)
+                            elif has_torch_function_unary(input_param):
+                                new_input_param = input_param.module_load_to(param)
+                            if (isinstance(param, torch.nn.Parameter) and
+                                    not isinstance(new_input_param, torch.nn.Parameter)):
+                                new_input_param = torch.nn.Parameter(new_input_param, requires_grad=param_requires_grad)
+                            torch.utils.swap_tensors(param, new_input_param)
                         else:
                             param.copy_(input_param)
                 except Exception as ex:

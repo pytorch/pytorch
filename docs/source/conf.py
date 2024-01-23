@@ -896,7 +896,7 @@ coverage_ignore_functions = [
     "extract_val",
     "fake_signature",
     "fetch_sym_proxy",
-    "fetch_tensor_proxy",
+    "fetch_object_proxy",
     "get_innermost_proxy_mode",
     "get_isolated_graphmodule",
     "get_proxy_slot",
@@ -974,6 +974,7 @@ coverage_ignore_functions = [
     "is_symbolic",
     "parallel_and",
     "parallel_or",
+    "statically_known_true",
     "sym_eq",
     "canonicalize_bool_expr",
     # torch.fx.experimental.unification.core

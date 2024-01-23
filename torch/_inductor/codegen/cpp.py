@@ -16,7 +16,7 @@ import torch.fx
 from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import codecache, config, ir, metrics
@@ -59,6 +59,9 @@ DTYPE_TO_CPP = {
     torch.int32: "int",
     torch.int16: "short",
     torch.int8: "signed char",
+    torch.uint64: "unsigned long",
+    torch.uint32: "unsigned int",
+    torch.uint16: "unsigned short",
     torch.uint8: "unsigned char",
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
@@ -73,12 +76,17 @@ DTYPE_TO_ATEN = {
     torch.int32: "at::kInt",
     torch.int16: "at::kShort",
     torch.int8: "at::kChar",
+    torch.uint64: "at::kUInt64",
+    torch.uint32: "at::kUInt32",
+    torch.uint16: "at::kUInt16",
     torch.uint8: "at::kByte",
     torch.bool: "at::kBool",
     torch.bfloat16: "at::kBFloat16",
     torch.complex64: "at::kComplexFloat",
     torch.float8_e4m3fn: "at::kFloat8_e4m3fn",
     torch.float8_e5m2: "at::kFloat8_e5m2",
+    torch.float8_e4m3fnuz: "at::kFloat8_e4m3fnuz",
+    torch.float8_e5m2fnuz: "at::kFloat8_e5m2fnuz",
 }
 
 DEVICE_TO_ATEN = {
@@ -305,10 +313,79 @@ def parallel_num_threads():
 
 
 @functools.lru_cache
-def stride_at(var: sympy.Symbol, index: sympy.Expr):
+def stride_at(index: sympy.Expr, var: sympy.Symbol):
     replacement = {var: var + 1}
     new_index = sympy_subs(index, replacement)
     return sympy.simplify(new_index - index)
+
+
+@functools.lru_cache
+def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: int):
+    """
+    Simplifies the index expression within the range of a vectorized loop.
+    Given a vectorized loop variable `var` in the range of a loop with `vec_length`,
+    this function transforms the `index` into an equivalent form. It handles
+    simplifications for cases where `var` can be expressed as `vec_length * a + b`,
+    where `b` ranges from 0 to `vec_length - 1`. The function reduces occurrences
+    of `FloorDiv` and `ModularIndexing` in the `index` with best-effort optimizations.
+
+    NOTE:
+    The simplified index expression is intended for analysis purposes only, not
+    for code generation. It replaces `FloorDiv` and `ModularIndexing` with free variables
+    which are not dependent on the loop variable `var` in the vectorized range. Check
+    https://github.com/pytorch/pytorch/pull/117221#discussion_r1449746217 for more details.
+
+    Examples:
+    1. If `var` is `x3` and `vec_length` is 16, and `x3 = 16*a + b`, then
+       `FloorDiv(x3, div)` or `ModularIndexing(x3, div, mod)` becomes a free variable
+       when `div` is divisible by 16.
+    2. `ModularIndexing(x3, 1, mod)` can be simplified to `x3 + c` where `c` is a free
+       variable when `mod` is divisible by 16.
+    """
+
+    div_freevar_id = 0
+    mod_freevar_id = 0
+
+    def visit_indexing_div(divisor):
+        nonlocal div_freevar_id
+        result = FloorDiv(var, divisor)
+        if sympy.gcd(divisor, vec_length) == vec_length:
+            result = sympy.Symbol(f"{var}_div_c{div_freevar_id}")
+            div_freevar_id += 1
+        return result
+
+    def visit_modular_indexing(divisor, modulus):
+        nonlocal mod_freevar_id
+        result = ModularIndexing(var, divisor, modulus)
+        if sympy.gcd(divisor, vec_length) == vec_length:
+            result = sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
+            mod_freevar_id += 1
+        elif divisor == 1 and sympy.gcd(modulus, vec_length) == vec_length:
+            result = var + sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
+            mod_freevar_id += 1
+        return result
+
+    original_index = index
+
+    div = sympy.Wild("divisor")
+    if index.has(FloorDiv):
+        index = index.replace(FloorDiv(var, div), visit_indexing_div)
+
+    mod = sympy.Wild("modulus")
+    if index.has(ModularIndexing):
+        index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
+
+    index = sympy.simplify(index)
+    if index != original_index:
+        return simplify_index_in_vec_range(index, var, vec_length)
+
+    return index
+
+
+@functools.lru_cache
+def stride_at_vec_range(index: sympy.Expr, var: sympy.Symbol, vec_length: int):
+    index_vec_simplified = simplify_index_in_vec_range(index, var, vec_length)
+    return stride_at(index_vec_simplified, var)
 
 
 class CppPrinter(ExprPrinter):
@@ -398,6 +475,42 @@ class CppPrinter(ExprPrinter):
     def _print_Abs(self, expr):
         assert len(expr.args) == 1
         return f"std::abs({self._print(expr.args[0])})"
+
+    def _print_cos(self, expr):
+        assert len(expr.args) == 1
+        return f"std::cos({self._print(expr.args[0])})"
+
+    def _print_cosh(self, expr):
+        assert len(expr.args) == 1
+        return f"std::cosh({self._print(expr.args[0])})"
+
+    def _print_acos(self, expr):
+        assert len(expr.args) == 1
+        return f"std::acos({self._print(expr.args[0])})"
+
+    def _print_sin(self, expr):
+        assert len(expr.args) == 1
+        return f"std::sin({self._print(expr.args[0])})"
+
+    def _print_sinh(self, expr):
+        assert len(expr.args) == 1
+        return f"std::sinh({self._print(expr.args[0])})"
+
+    def _print_asin(self, expr):
+        assert len(expr.args) == 1
+        return f"std::asin({self._print(expr.args[0])})"
+
+    def _print_tan(self, expr):
+        assert len(expr.args) == 1
+        return f"std::tan({self._print(expr.args[0])})"
+
+    def _print_tanh(self, expr):
+        assert len(expr.args) == 1
+        return f"std::tanh({self._print(expr.args[0])})"
+
+    def _print_atan(self, expr):
+        assert len(expr.args) == 1
+        return f"std::atan({self._print(expr.args[0])})"
 
     def _print_Round(self, expr):
         assert len(expr.args) == 1
@@ -744,7 +857,7 @@ class CppOverrides(OpOverrides):
         elif bug == "accuracy":
             return f"{x} + decltype({x})(1)"
         elif bug is None:
-            return f"{x} * ({x}>0)"
+            return f"std::max({x}, decltype({x})(0))"
         else:
             raise AssertionError(
                 f"unrecognized config cpp.inject_relu_bug_TESTING_ONLY = {bug!r}"
@@ -1319,12 +1432,12 @@ class CppVecOverrides(CppOverrides):
         assert isinstance(V.kernel, CppVecKernel)
         index = V.kernel.rename_indexing(expr)
         tiling_var = V.kernel.itervars[V.kernel.tiling_idx]
-        if V.kernel.index_is_vector_invariant(index):
-            return CppOverrides.index_expr(expr, dtype)
-        if stride_at(
-            tiling_var, index
-        ).is_number and not V.kernel.index_indirect_depends_on(index, tiling_var):
-            stride = stride_at(tiling_var, index)
+        stride = stride_at_vec_range(index, tiling_var, V.kernel.tiling_factor)
+        if stride.is_number and not V.kernel.index_indirect_depends_on(
+            index, tiling_var
+        ):
+            if stride == 0:
+                return CppOverrides.index_expr(expr, dtype)
             value = ops.to_dtype(cexpr(index), dtype)
             if isinstance(value, OpsValue):
                 value = value.value
@@ -1675,18 +1788,6 @@ class CppVecKernel(CppKernel):
         self.tiling_idx = tiling_idx
         metrics.generated_cpp_vec_kernel_count += 1
 
-    def index_is_vector_invariant(self, index: sympy.Expr):
-        """`index` is either independent from the tiling itervar or unchanged in the vector range"""
-        tiling_var = self.itervars[self.tiling_idx]
-        if not self.index_depends_on(index, tiling_var):
-            return True
-        if not self.index_indirect_depends_on(index, tiling_var):
-            vec_range = [
-                sympy_subs(index, {tiling_var: i}) for i in range(self.tiling_factor)
-            ]
-            return all(expr == vec_range[0] for expr in vec_range)
-        return False
-
     def _get_vec_load_line(
         self,
         var: str,
@@ -1847,12 +1948,13 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         dtype = V.graph.get_dtype(name)
         tiling_var = self.itervars[self.tiling_idx]
-        if self.index_is_vector_invariant(index):
+        stride = stride_at_vec_range(index, tiling_var, self.tiling_factor)
+        if stride == 0:
             # load scalar and lazily broadcast it on demand
             return super().load(name, index)
-        non_contiguous = stride_at(
-            tiling_var, index
-        ) != 1 or self.index_indirect_depends_on(index, tiling_var)
+        non_contiguous = stride != 1 or self.index_indirect_depends_on(
+            index, tiling_var
+        )
         if non_contiguous:
             csevar = self.load_non_contiguous(var, index, dtype)
         else:
@@ -1884,7 +1986,10 @@ class CppVecKernel(CppKernel):
         tiling_var = self.itervars[self.tiling_idx]
         assert index.has(tiling_var)
         var_expr = f"{var} + {cexpr_index(index)}"
-        non_contiguous = stride_at(tiling_var, index) != 1 or "tmp" in f"{index}"
+        stride = stride_at_vec_range(index, tiling_var, self.tiling_factor)
+        non_contiguous = stride != 1 or self.index_indirect_depends_on(
+            index, tiling_var
+        )
         if non_contiguous:
             var_expr = "tmpbuf"
         if dtype == torch.float:
@@ -2132,16 +2237,16 @@ class CppTile2DKernel(CppVecKernel):
         return sympy_symbol(f"{self.itervars[self.outer_idx]}_inner")
 
     def need_vec_transpose(self, index):
+        outer_var = self.itervars[self.outer_idx]
+        inner_var = self.itervars[self.tiling_idx]
+        outer_stride = stride_at_vec_range(index, outer_var, self.tiling_factor)
+        inner_stride = stride_at_vec_range(index, inner_var, self.tiling_factor)
         return (
             self._load_mask is None  # TODO: support transposition with mask
-            and stride_at(self.itervars[self.outer_idx], index) == 1
-            and index.has(self.itervars[self.tiling_idx])
-            and not stride_at(self.itervars[self.tiling_idx], index).has(
-                self.itervars[self.tiling_idx]
-            )
-            and not stride_at(self.itervars[self.tiling_idx], index).has(
-                self.itervars[self.outer_idx]
-            )
+            and outer_stride == 1
+            and index.has(inner_var)
+            and not inner_stride.has(inner_var)
+            and not inner_stride.has(outer_var)
         )
 
     def gen_transposed_tile_load_store(self, name, var, index, is_store):
@@ -2150,7 +2255,7 @@ class CppTile2DKernel(CppVecKernel):
         factor = self.tiling_factor
         src = f"{var} + {cexpr_index(index)}"
         dst = "__place_holder__"
-        ld_src = f"{cexpr_index(stride_at(self.itervars[self.tiling_idx], index))}"
+        ld_src = f"{cexpr_index(stride_at_vec_range(index, self.itervars[self.tiling_idx], self.tiling_factor))}"
         ld_dst = f"{factor}"
         if is_store:
             src, dst = dst, src
@@ -3039,7 +3144,7 @@ class CppKernelProxy(CppKernel):
         if not self.picked_vec_isa:
             return
 
-        def select_tiling_indices():
+        def select_tiling_indices(tiling_factor):
             all_index = []
             for node in nodes:
                 rw = dependencies.extract_read_writes(node._body, *node._sizes)
@@ -3052,8 +3157,10 @@ class CppKernelProxy(CppKernel):
                 for var in index.free_symbols:
                     if not re.search(r"^d\d+$", var.name):
                         continue
-                    stride = stride_at(var, index)
-                    if stride == 1:
+                    stride = stride_at_vec_range(index, var, tiling_factor)
+                    if stride == 0:
+                        continue
+                    elif stride == 1:
                         contig_vars.add(int(var.name[1:]))
                         contig_vars_list.append(int(var.name[1:]))
                     elif all(s.name.startswith("s") for s in stride.free_symbols):
@@ -3083,7 +3190,7 @@ class CppKernelProxy(CppKernel):
         def select_tiling(dtype: torch.dtype = torch.float):
             # TODO(jgong5): support alternative tiling factors and data types
             tiling_factor = self.picked_vec_isa.nelements(dtype=dtype)
-            tiling_indices = select_tiling_indices()
+            tiling_indices = select_tiling_indices(tiling_factor)
             if tiling_indices:
                 could_vec = True
                 for tiling_indice in tiling_indices:
@@ -3271,7 +3378,6 @@ class KernelGroup:
         kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
         arg_defs, call_args, arg_types = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
-        arg_types = ",".join(arg_types)
         code = BracesBuffer()
         # TODO: support kernel profile on other platforms
         enable_kernel_profile = (
@@ -3298,7 +3404,7 @@ class KernelGroup:
 
         codecache_def = IndentedBuffer()
         if not V.graph.cpp_wrapper:
-            codecache_def.writeline("async_compile.cpp('''")
+            codecache_def.writeline(f"async_compile.cpp_pybinding({arg_types!r}, '''")
         codecache_def.splice(code)
         if not V.graph.cpp_wrapper:
             codecache_def.writeline("''')")
