@@ -226,9 +226,11 @@ def redistribute_local_tensor(
             if current.is_replicate():
                 partial_spec = cast(_Partial, target)
                 # skip the replicate to partial transformation when we are in backward pass
-                new_local_tensor = partial_spec._partition_value(
-                    local_tensor, device_mesh, i
-                ) if not is_backward else local_tensor
+                new_local_tensor = (
+                    partial_spec._partition_value(local_tensor, device_mesh, i)
+                    if not is_backward
+                    else local_tensor
+                )
             else:
                 raise RuntimeError(
                     f"redistribute from {current} to {target} not supported yet"
