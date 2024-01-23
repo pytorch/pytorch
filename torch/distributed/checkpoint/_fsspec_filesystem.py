@@ -341,7 +341,7 @@ class FsspecWriter(StorageWriter):
         self.path = path
         self.fs, _ = url_to_fs(path)
 
-    def reset(self, checkpoint_id: Union[str, os.PathLike, None]) -> None:
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         if checkpoint_id:
             self._init_path(checkpoint_id)
 
@@ -449,7 +449,7 @@ class FsspecReader(StorageReader):
         self.path = path
         self.fs, _ = url_to_fs(path)
 
-    def reset(self, checkpoint_id: Union[str, os.PathLike, None]) -> None:
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         self.storage_data = dict()
         if checkpoint_id:
             self._init_path(checkpoint_id)

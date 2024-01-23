@@ -106,7 +106,9 @@ def run(rank, world_size):
             if epoch % SAVE_PERIOD == 0:
                 if f is not None:
                     f.result()
-                f = dcp._async_save(state_dict, checkpoint_id=CHECKPOINT_DIR)
+                f = dcp.state_dict_saver._async_save(
+                    state_dict, checkpoint_id=CHECKPOINT_DIR
+                )
 
             if FAULT_PERIOD > 0 and epoch % FAULT_PERIOD == 0:
                 raise InjectedException("Fault injection!")
@@ -120,7 +122,7 @@ def run(rank, world_size):
             _print("Reloading model from last checkpoint!")
             if f is not None:
                 f.result()
-            checkpointer.load(state_dict)
+            dcp.load(state_dict)
 
 
 if __name__ == "__main__":

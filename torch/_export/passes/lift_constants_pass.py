@@ -101,3 +101,27 @@ def lift_constants_pass(
                 first_user_input_loc += 1
 
     return all_constants
+
+
+def rewrite_script_object_meta(
+    gm: torch.fx.GraphModule,
+) -> Dict[str, Union[torch.Tensor, torch.ScriptObject]]:
+    """When tracing, we produce a graph with an actual ScriptObject in the
+    meta["val"]. Eventually we want to change this behavior, when FakeMode infra
+    for ScriptObjects lands.
+
+    For now, we rewrie meta["val"] to be a placeholder ScriptObjectMeta.
+    """
+    constants: Dict[str, Union[torch.Tensor, torch._C.ScriptObject]] = {}
+    for node in gm.graph.nodes:
+        if "val" not in node.meta or not isinstance(
+            node.meta["val"], torch.ScriptObject
+        ):
+            continue
+
+        old_meta = node.meta["val"]
+        new_meta = ScriptObjectMeta(node.name)
+        constants[node.name] = old_meta
+        node.meta["val"] = new_meta
+
+    return constants
