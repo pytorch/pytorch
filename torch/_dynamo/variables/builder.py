@@ -149,7 +149,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import TorchInGraphFunctionVariable
+from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
@@ -697,7 +697,10 @@ class VariableBuilder:
                 ],
                 source=self.source,
             )
-        elif trace_rules.lookup(value) is not None:
+        elif TorchCtxManagerClassVariable.is_matching_cls(value):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return TorchCtxManagerClassVariable(value, source=self.source)
+        elif is_function(value) and trace_rules.lookup(value) is not None:
             if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup(value).create_with_source(

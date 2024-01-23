@@ -29,6 +29,7 @@ from ..utils import (
     check_unspec_python_args,
     guard_if_dyn,
     has_torch_function,
+    hashable,
     product,
     proxy_args_kwargs,
 )
@@ -44,6 +45,21 @@ from .lists import ListVariable, TupleVariable
 from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
 log = logging.getLogger(__name__)
+
+supported_ctx_manager_classes = {
+    torch.profiler.profiler.profile,
+    torch.autograd.profiler.profile,
+    torch.autograd.profiler.record_function,
+    torch._C.DisableTorchFunctionSubclass,
+    torch._functorch.vmap.vmap_increment_nesting,
+    torch.amp.autocast_mode.autocast,
+    torch.autograd.grad_mode.enable_grad,
+    torch.autograd.grad_mode.inference_mode,
+    torch.autograd.grad_mode.no_grad,
+    torch.autograd.grad_mode.set_grad_enabled,
+    torch.cpu.amp.autocast_mode.autocast,
+    torch.cuda.amp.autocast_mode.autocast,
+}
 
 
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = [
@@ -137,6 +153,10 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
 
     def __repr__(self):
         return f"TorchCtxManagerClassVariable({self.value})"
+
+    @staticmethod
+    def is_matching_cls(value):
+        return hashable(value) and value in supported_ctx_manager_classes
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
