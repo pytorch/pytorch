@@ -1,8 +1,6 @@
 #pragma once
 #include <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
 
-@interface MPSGraph (SonomaOps)
-
 #if !defined(__MAC_14_0) && \
     (!defined(MAC_OS_X_VERSION_14_0) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_14_0))
 
@@ -12,7 +10,18 @@ typedef NS_ENUM(NSUInteger, MPSGraphFFTScalingMode)
     MPSGraphFFTScalingModeSize          = 1L,
     MPSGraphFFTScalingModeUnitary       = 2L,
 };
+
+@interface FakeMPSGraphFFTDescriptor : NSObject<NSCopying> 
+@property (readwrite, nonatomic) BOOL inverse;
+@property (readwrite, nonatomic) MPSGraphFFTScalingMode scalingMode;
+@property (readwrite, nonatomic) BOOL roundToOddHermitean;
++(nullable instancetype) descriptor;
+@end
+
+@compatibility_alias MPSGraphFFTDescriptor FakeMPSGraphFFTDescriptor
 #endif
+
+@interface MPSGraph (SonomaOps)
 
 -(MPSGraphTensor * _Nonnull) fastFourierTransformWithTensor:(MPSGraphTensor * _Nonnull) tensor
                                                       axes:(NSArray<NSNumber *> * _Nonnull) axes
