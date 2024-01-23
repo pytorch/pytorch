@@ -1400,7 +1400,7 @@ class DistributedDataParallelTest(
             with self.assertRaises(dist.DistBackendError):
                 pg.allreduce([inp]).wait(timedelta(seconds=5))
 
-            # Now when nonzero rank attempts to use communicator, original failure reason should be logged.j
+            # Now when nonzero rank attempts to use communicator, original failure reason should be logged.
             try:
                 pg.allreduce([torch.ones(2).cuda(self.rank)]).wait()
             except dist.DistBackendError as e:
@@ -3972,6 +3972,7 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
             self.assertTrue(os.path.exists(self._trace_name(rank=0)))
             with open(self._trace_name(rank=0), 'rb') as f:
                 t = pickle.load(f)
+                t = t['entries']
                 self.assertEqual(len(t), 2)
             with open(self._trace_name(rank=1), 'rb') as f:
                 t = pickle.load(f)
