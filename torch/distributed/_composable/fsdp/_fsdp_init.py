@@ -29,12 +29,10 @@ def _normalize_device(device: DeviceLikeType) -> torch.device:
 
 def _init_default_fully_shard_mesh(device_type: str) -> DeviceMesh:
     """The default fully-shard mesh shards over the global mesh."""
+    if not dist.distributed_c10d.is_initialized():
+        dist.distributed_c10d.init_process_group()
     default_pg = dist.distributed_c10d._get_default_group()
-    mesh = init_device_mesh(
-        device_type=device_type,
-        mesh_shape=(default_pg.size(),),
-        mesh_dim_names=("dp_shard",),
-    )
+    mesh = init_device_mesh(device_type=device_type, mesh_shape=(default_pg.size(),))
     return mesh
 
 
