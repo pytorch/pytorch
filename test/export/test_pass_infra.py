@@ -1,11 +1,13 @@
 # Owner(s): ["oncall: export"]
+import copy
 import unittest
 
 import torch
 from functorch.experimental import control_flow
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch.export import export
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
+from torch.export import export
+from torch.fx.passes.infra.pass_base import PassResult
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -141,6 +143,45 @@ class TestPassInfra(TestCase):
         old_signature = ep_before.graph_signature
         self.assertNotEqual(new_signature.user_outputs, old_signature.user_outputs)
 
+    def test_replace_hook_basic(self) -> None:
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                self.my_parameter = torch.nn.Parameter(torch.tensor(2.0))
+
+                self.register_buffer("my_buffer1", torch.tensor(3.0))
+                self.register_buffer("my_buffer2", torch.tensor(4.0))
+
+            def forward(self, x1, x2):
+                # Use the parameter, buffers, and both inputs in the forward method
+                output = (
+                    x1 + self.my_parameter
+                ) * self.my_buffer1 + x2 * self.my_buffer2
+                return output
+
+        my_module = CustomModule()
+        inputs = (torch.tensor(6.0), torch.tensor(7.0))
+        ep_before = export(my_module, inputs)
+
+        def replace_pass(gm):
+            for node in gm.graph.nodes:
+                if node.op == "call_function":
+                    node.name = node.name + "_modified"
+            gm.recompile()
+            return PassResult(gm, True)
+
+        gm = copy.deepcopy(ep_before.graph_module)
+        sig = copy.deepcopy(ep_before.graph_signature)
+
+        with gm._set_replace_hook(sig.get_replace_hook()):
+            replace_pass(gm)
+
+        for node_name in sig.user_outputs:
+            self.assertTrue("_modified" in node_name)
+
+        old_signature = ep_before.graph_signature
+        self.assertNotEqual(sig.user_outputs, old_signature.user_outputs)
 
 if __name__ == '__main__':
     run_tests()

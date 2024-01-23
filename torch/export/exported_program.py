@@ -579,6 +579,22 @@ class ExportedProgram:
     def _validate(self):
         self.verifier().check(self)
 
+    # TODO(zhxchen17) Formalize this.
+    def _update(
+        self, graph_module, graph_signature, state_dict=None
+    ) -> "ExportedProgram":
+        return ExportedProgram(
+            root=graph_module,
+            graph=graph_module.graph,
+            graph_signature=graph_signature,
+            state_dict=state_dict or self.state_dict,
+            range_constraints=copy.deepcopy(self.range_constraints),
+            module_call_graph=copy.deepcopy(self._module_call_graph),
+            example_inputs=self.example_inputs,
+            verifier=self.verifier,
+            tensor_constants=self.tensor_constants,
+        )
+
 
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
