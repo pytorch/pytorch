@@ -84,8 +84,6 @@ class FSDPState(_State):
             if module in module_to_fsdp_param_group:
                 module_to_fsdp_param_group[module]._module_fqn = module_name
 
-<<<<<<< HEAD
-=======
     def _pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
@@ -93,7 +91,6 @@ class FSDPState(_State):
         args, kwargs = self._root_pre_forward(module, args, kwargs)
         return args, kwargs
 
->>>>>>> 6d31c3babb0 ([FSDP2] Added `_to_kwargs` root forward input cast)
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[FSDPState]:
     state = _get_module_state(module)
