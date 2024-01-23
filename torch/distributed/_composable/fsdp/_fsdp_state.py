@@ -125,6 +125,10 @@ class FSDPState(_State):
         if self._fsdp_param_group:
             output = self._fsdp_param_group.post_forward(module, input, output)
         self._training_state = TrainingState.IDLE
+        if self._is_root and (all_gather_state := self._all_gather_state.pop()):
+            self._all_gather_copy_in_stream.wait_event(all_gather_state.event)
+            self._all_gather_stream.wait_event(all_gather_state.event)
+            del all_gather_state  # free
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[FSDPState]:
