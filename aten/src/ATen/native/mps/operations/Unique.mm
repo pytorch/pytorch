@@ -101,21 +101,39 @@ static std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self,
   } else if (dimOpt.has_value()) {
     inputTensor = (dim != 0) ? [graph transposeTensor:inputTensor dimension:dim withDimension:0 name:nil] : inputTensor;
 
-    NSMutableArray* axes = [NSMutableArray arrayWithCapacity:[shape count] - 1];
-    NSMutableArray* dims = [NSMutableArray arrayWithCapacity:[shape count] - 1];
-
+    NSUInteger collapsedSize = 1;
     for (const auto axis : c10::irange(1, [shape count])) {
-      [dims addObject:[inputTensor shape][axis]];
-      [axes addObject:@(axis)];
+      collapsedSize *= [[inputTensor shape][axis] unsignedIntValue];
     }
 
-    MPSGraphTensor* randomTensor = [graph randomUniformTensorWithShape:dims seed:42 name:nil];
-    MPSGraphTensor* tensor = [graph multiplicationWithPrimaryTensor:inputTensor secondaryTensor:randomTensor name:nil];
-    tensor = [graph reductionSumWithTensor:tensor axes:axes name:nil];
-    tensor = [graph squeezeTensor:tensor axes:axes name:nil];
+    MPSGraphTensor* randomTensor = [graph randomUniformTensorWithShape:@[ @(collapsedSize) ] seed:42 name:nil];
+    MPSGraphTensor* tensor = [graph reshapeTensor:inputTensor
+                                        withShape:@[ @([[inputTensor shape][0] unsignedIntValue]), @(collapsedSize) ]
+                                             name:@"reshapedTensor"];
+
+    tensor = [graph multiplicationWithPrimaryTensor:tensor secondaryTensor:randomTensor name:@"productTensor"];
+    tensor = [graph reductionSumWithTensor:tensor axis:1 name:@"reducedTensor"];
+    tensor = [graph squeezeTensor:tensor axis:1 name:@"squeezedTensor"];
+
+    //    NSMutableArray* axes = [NSMutableArray arrayWithCapacity:[shape count] - 1];
+    //    NSMutableArray* dims = [NSMutableArray arrayWithCapacity:[shape count] - 1];
+    //
+    //    for (const auto axis : c10::irange(1, [shape count])) {
+    //      [dims addObject:[inputTensor shape][axis]];
+    //      [axes addObject:@(axis)];
+    //    }
+    //
+    //    MPSGraphTensor* randomTensor = [graph randomUniformTensorWithShape:dims seed:42 name:nil];
+    //    MPSGraphTensor* tensor = [graph multiplicationWithPrimaryTensor:inputTensor secondaryTensor:randomTensor
+    //    name:nil]; tensor = [graph reductionSumWithTensor:tensor axes:axes name:nil]; tensor = [graph
+    //    squeezeTensor:tensor axes:axes name:nil];
 
     argSortedInput = [graph argSortWithTensor:tensor axis:0 name:nil];
-    sortedInput = [graph gatherWithUpdatesTensor:inputTensor indicesTensor:argSortedInput axis:0 batchDimensions:0 name:nil];
+    sortedInput = [graph gatherWithUpdatesTensor:inputTensor
+                                   indicesTensor:argSortedInput
+                                            axis:0
+                                 batchDimensions:0
+                                            name:nil];
 
     if (dim != 0)
       sortedInput = [graph transposeTensor:sortedInput dimension:0 withDimension:dim name:nil];
@@ -177,7 +195,7 @@ static std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self,
                                         withShape:@[ [NSNumber numberWithUnsignedInteger:length] ]
                                              name:nil];
     else if (!dimOpt.has_value())
-        argSortedInput = [graph argSortWithTensor:inputTensor axis:0 name:nil];
+      argSortedInput = [graph argSortWithTensor:inputTensor axis:0 name:nil];
 
     inverseIndicesTensor = [graph scatterWithUpdatesTensor:scannedIndicesWithHead
                                              indicesTensor:argSortedInput
