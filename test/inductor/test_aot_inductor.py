@@ -1833,7 +1833,10 @@ copy_tests(
 )
 
 
-@unittest.skipIf(IS_FBCODE or sys.platform == "darwin", "NonABI mode should not be used in fbcode nor on MacOS")
+@unittest.skipIf(
+    IS_FBCODE or sys.platform == "darwin",
+    "NonABI mode should not be used in fbcode nor on MacOS",
+)
 class AOTInductorTestNonABICompatibleCpu(TestCase):
     device = "cpu"
     abi_compatible = False
@@ -1861,7 +1864,10 @@ copy_tests(
 )
 
 
-@unittest.skipIf(IS_FBCODE or sys.platform == "darwin", "NonABI mode should not be used in fbcode nor on MacOS")
+@unittest.skipIf(
+    IS_FBCODE or sys.platform == "darwin",
+    "NonABI mode should not be used in fbcode nor on MacOS",
+)
 class AOTInductorTestNonABICompatibleCuda(TestCase):
     device = "cuda"
     abi_compatible = False
