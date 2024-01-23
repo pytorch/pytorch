@@ -110,7 +110,7 @@ def check_current_backend(backend_obj_id: int):
     try:
         current_backend = guarded_backend_cache.current_backend
     except AttributeError:
-        return False
+        current_backend = None
     return (
         # Avoid the dict lookup in case of exact same object
         id(current_backend) == backend_obj_id
