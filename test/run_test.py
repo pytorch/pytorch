@@ -303,6 +303,14 @@ ROCM_BLOCKLIST = [
     "test_jit_cuda_fuser",
 ]
 
+XPU_BLOCKLIST = [
+    "test_autograd",
+]
+
+XPU_TEST = [
+    "test_xpu",
+]
+
 # The tests inside these files should never be run in parallel with each other
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
@@ -361,6 +369,9 @@ CI_SERIAL_LIST = [
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
     "inductor/test_max_autotune",  # Testing, probably revert later
+    "inductor/test_torchinductor",  # OOM on test_large_block_sizes
+    "inductor/test_torchinductor_dynamic_shapes",  # OOM on test_large_block_sizes
+    "inductor/test_torchinductor_codegen_dynamic_shapes",  # OOM on test_large_block_sizes
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
@@ -440,6 +451,7 @@ JIT_EXECUTOR_TESTS = [
 
 INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
+TORCH_EXPORT_TESTS = [test for test in TESTS if test.startswith("export")]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 CPP_TESTS = [test for test in TESTS if test.startswith(CPP_TEST_PREFIX)]
@@ -1150,6 +1162,12 @@ def parse_args():
         help=("If this flag is present, we will only run test_mps and test_metal"),
     )
     parser.add_argument(
+        "--xpu",
+        "--xpu",
+        action="store_true",
+        help=("If this flag is present, we will run xpu tests except XPU_BLOCK_LIST"),
+    )
+    parser.add_argument(
         "--cpp",
         "--cpp",
         action="store_true",
@@ -1240,6 +1258,11 @@ def parse_args():
         help="exclude tests that are run for a specific jit config",
     )
     parser.add_argument(
+        "--exclude-torch-export-tests",
+        action="store_true",
+        help="exclude torch export tests",
+    )
+    parser.add_argument(
         "--exclude-distributed-tests",
         action="store_true",
         help="exclude distributed tests",
@@ -1312,6 +1335,7 @@ def must_serial(file: Union[str, ShardedTest]) -> bool:
         or file in CI_SERIAL_LIST
         or file in JIT_EXECUTOR_TESTS
         or file in ONNX_SERIAL_LIST
+        or NUM_PROCS == 1
     )
 
 
@@ -1356,6 +1380,12 @@ def get_selected_tests(options) -> List[str]:
         # Exclude all mps tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
 
+    if options.xpu:
+        selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
+    else:
+        # Exclude all xpu specifc tests otherwise
+        options.exclude.extend(XPU_TEST)
+
     # Filter to only run onnx tests when --onnx option is specified
     onnx_tests = [tname for tname in selected_tests if tname in ONNX_TESTS]
     if options.onnx:
@@ -1373,6 +1403,9 @@ def get_selected_tests(options) -> List[str]:
 
     if options.exclude_inductor_tests:
         options.exclude.extend(INDUCTOR_TESTS)
+
+    if options.exclude_torch_export_tests:
+        options.exclude.extend(TORCH_EXPORT_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:

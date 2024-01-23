@@ -69,7 +69,7 @@ def check_multiple_devices(
     if cpu_node := device_node_mapping.get(torch.device("cpu")):
         if stack_trace := get_use_stack_trace(cpu_node):
             return format_default_skip_message(
-                f"multiple devices. Found from : \n {stack_trace}"
+                f"cpu device. Found from : \n {stack_trace}"
             )
 
     if (
@@ -78,7 +78,8 @@ def check_multiple_devices(
     ):
         return None
 
-    return format_default_skip_message("multiple devices")
+    keys_repr = (repr(key) for key in device_node_mapping.keys())
+    return format_default_skip_message(f"multiple devices: {', '.join(keys_repr)}")
 
 
 def check_lowering_cudagraph_checks(

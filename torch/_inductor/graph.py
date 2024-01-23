@@ -47,6 +47,7 @@ from .ir import (
     TensorBox,
 )
 from .lowering import (
+    constrain_to_fx_strides,
     FALLBACK_ALLOW_LIST,
     fallback_handler,
     fallback_node_due_to_unsupported_type,
@@ -90,6 +91,8 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
     if cuda:
         supported_dtype.add(torch.float8_e4m3fn)
         supported_dtype.add(torch.float8_e5m2)
+        supported_dtype.add(torch.float8_e4m3fnuz)
+        supported_dtype.add(torch.float8_e5m2fnuz)
 
     return dtype in supported_dtype
 
@@ -675,6 +678,23 @@ class GraphLowering(torch.fx.Interpreter):
             # passthrough lowerings from .pattern_matcher
             return target(*args, **kwargs)
 
+        def get_custom_op_layout_constraints(target, args, kwargs):
+            # Custom operations that require preserving stride order
+            # which run through implicit fallback must constrain their
+            # arguments' fx strides
+            layout_constraint = None
+            if torch._C.Tag.needs_fixed_stride_order in target.tags:
+                # We have to set the current args because call_function will immediately
+                # evaluate this lowering after creating the fallback, without evaluating
+                # the layout constraint
+                args, kwargs = constrain_to_fx_strides(
+                    self.current_node, *args, **kwargs
+                )
+                # Also register the layout constraint so when the fallback
+                # is used again, we can constrain the args to the same layout
+                layout_constraint = constrain_to_fx_strides
+            return layout_constraint, args, kwargs
+
         if target not in lowerings:
             assert isinstance(
                 target, torch._ops.OpOverload
@@ -683,6 +703,9 @@ class GraphLowering(torch.fx.Interpreter):
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target)
             elif config.implicit_fallbacks:
+                layout_constraint, args, kwargs = get_custom_op_layout_constraints(
+                    target, args, kwargs
+                )
                 error = (
                     MissingOperatorWithDecomp
                     if get_decompositions([target])
@@ -692,7 +715,8 @@ class GraphLowering(torch.fx.Interpreter):
                     "Creating implicit fallback for:\n%s",
                     error.operator_str(target, args, kwargs),
                 )
-                make_fallback(target)
+                make_fallback(target, layout_constraint)
+
             elif get_decompositions([target]):
                 # There isn't a good way to dynamically patch this in
                 # since AOT Autograd already ran.  The error message tells
