@@ -21,7 +21,6 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
   - [Extensions Without Pain](#extensions-without-pain)
 - [Installation](#installation)
   - [Binaries](#binaries)
-    - [CPU Platforms](#cpu-platforms)
     - [NVIDIA Jetson Platforms](#nvidia-jetson-platforms)
   - [From Source](#from-source)
     - [Prerequisites](#prerequisites)
@@ -146,8 +145,6 @@ No wrapper code needs to be written. You can see [a tutorial here](https://pytor
 ### Binaries
 Commands to install binaries via Conda or pip wheels are on our website: [https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)
 
-#### CPU Platforms
-We only support CPUs with SSE4.1+, and all CPUs released in the last decade support it.
 
 #### NVIDIA Jetson Platforms
 
