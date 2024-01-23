@@ -320,11 +320,11 @@ class _TorchDynamoContext:
         self.export = export
         self.compiler_config = compiler_config
         self.cleanup_fns: List[Callable[[], Any]] = []
-        self.enter_exit_hooks = []
+        self.enter_exit_hooks = [backend_cache_manager(self.callback)]
         patch_fn()
 
-        if callback is not None:
-            self.enter_exit_hooks.append(backend_cache_manager(self.callback))
+        if dynamic is not None:
+            self.enter_exit_hooks.append(make_set_enable_dynamic(dynamic))
 
         if on_enter is not nothing:
             # this case is not common
@@ -334,9 +334,6 @@ class _TorchDynamoContext:
 
             self.enter_exit_hooks.append(call_on_enter)
 
-        if dynamic is not None:
-            self.enter_exit_hooks.append(make_set_enable_dynamic(dynamic))
-
         if backend_ctx_ctor is not contextlib.nullcontext:
             # this case is not common
             def call_backend_ctx():
@@ -345,7 +342,6 @@ class _TorchDynamoContext:
                 return functools.partial(ctx.__exit__, None, None, None)
 
             self.enter_exit_hooks.append(call_backend_ctx)
-
 
     def __enter__(self):
         if config.raise_on_ctx_manager_usage:

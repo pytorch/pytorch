@@ -443,6 +443,7 @@ JIT_EXECUTOR_TESTS = [
 
 INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
+TORCH_EXPORT_TESTS = [test for test in TESTS if test.startswith("export")]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 CPP_TESTS = [test for test in TESTS if test.startswith(CPP_TEST_PREFIX)]
@@ -1243,6 +1244,11 @@ def parse_args():
         help="exclude tests that are run for a specific jit config",
     )
     parser.add_argument(
+        "--exclude-torch-export-tests",
+        action="store_true",
+        help="exclude torch export tests",
+    )
+    parser.add_argument(
         "--exclude-distributed-tests",
         action="store_true",
         help="exclude distributed tests",
@@ -1315,6 +1321,7 @@ def must_serial(file: Union[str, ShardedTest]) -> bool:
         or file in CI_SERIAL_LIST
         or file in JIT_EXECUTOR_TESTS
         or file in ONNX_SERIAL_LIST
+        or NUM_PROCS == 1
     )
 
 
@@ -1376,6 +1383,9 @@ def get_selected_tests(options) -> List[str]:
 
     if options.exclude_inductor_tests:
         options.exclude.extend(INDUCTOR_TESTS)
+
+    if options.exclude_torch_export_tests:
+        options.exclude.extend(TORCH_EXPORT_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:

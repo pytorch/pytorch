@@ -4566,15 +4566,15 @@ def fn():
                 cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
                 # Run opt_f multiple times to make sure dynamo doesn't recompile.
                 # Specifically, frame_count doesn't increase
-                # the number of cached backends is i + 2 because we have the optimizing backend
+                # the number of cached backends is i + 2 because we have the optimizing backend + None
                 self._optimize_then_check_exp(
-                    foo, (x,), cnt, eager_result, exp_frame_count, i + 1
+                    foo, (x,), cnt, eager_result, exp_frame_count, i + 2
                 )
                 self._optimize_then_check_exp(
-                    foo, (x,), cnt, eager_result, exp_frame_count, i + 1
+                    foo, (x,), cnt, eager_result, exp_frame_count, i + 2
                 )
                 self._optimize_then_check_exp(
-                    foo, (x,), cnt, eager_result, exp_frame_count, i + 1
+                    foo, (x,), cnt, eager_result, exp_frame_count, i + 2
                 )
 
         test_recompile(foo, exp_frame_count=1)
@@ -4622,10 +4622,10 @@ def fn():
         for thread in threads:
             thread.join()
 
-        # Threads are sharing the backend cache.
+        # Threads are sharing the backend cache. We see two cnt backends and one None backend
         self.assertEqual(
             len(torch._dynamo.eval_frame.cached_backends),
-            2,
+            3,
         )
 
         self.assertEqual(len(thread_success), len(threads))
