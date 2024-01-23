@@ -398,6 +398,123 @@ class TestOptimRenewed(TestCase):
             optimizer.step()
 
 
+    @onlyCUDA
+    @parametrize("impl", ["fused", "capturable"])
+    @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float32])
+    def test_cpu_load_state_dict(self, device, dtype, impl, optim_info):
+        # NOTE: This SIMULATES a fused/capturable optimizer with state moved to CPU, issue 103256
+        # How do we get there? Users typically create CUDA models on fused optimizers and then
+        # store checkpoints on CPU as CUDA memory is limited with torch.load(...map_location="cpu").
+        # Since this is a unit test, it is more expedient to simulate what the state_dict
+        # would look like, which is basically CPU tensors with fused/capturable flag = True.
+        optim_cls = optim_info.optim_cls
+        if optim_cls.__name__ == "SGD" and impl == "capturable":
+            # Capturable SGD does not exist
+            self.skipTest("SGD does not currently support capturable")
+
+        cpu_optim_inputs = optim_info.optim_inputs_func(device="cpu")
+        for optim_input in cpu_optim_inputs:
+            param = torch.tensor([0.1, 0.2], dtype=dtype, device="cpu")
+            optimizer = optim_cls([param], **optim_input.kwargs)
+            param.grad = torch.rand_like(param)
+            optimizer.step()
+            optim_state_dict_cpu = deepcopy(optimizer.state_dict())
+            optim_state_dict_cpu["param_groups"][0][impl] = True
+
+            # load
+            optim_input.kwargs[impl] = True
+            param_cuda = param.clone().detach().to(device="cuda")
+            optimizer_cuda = optim_cls([param_cuda], **optim_input.kwargs)
+            optimizer_cuda.load_state_dict(optim_state_dict_cpu)
+            optimizer_cuda.zero_grad()
+            param_cuda.grad = torch.rand_like(param_cuda)
+            optimizer_cuda.step()
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_param_groups_weight_decay(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
+        for optim_input in all_optim_inputs:
+            weight_kwargs = optim_input.kwargs
+            bias_kwargs = deepcopy(optim_input.kwargs)
+            bias_kwargs["weight_decay"] = 0.0
+
+            weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
+            bias = Parameter(torch.randn((10), device=device, dtype=dtype))
+            input = torch.randn(5, device=device, dtype=dtype)
+
+            optimizer = optim_cls([dict(params=[weight], **weight_kwargs), dict(params=[bias], **bias_kwargs)])
+
+            loss = (weight.mv(input) + bias).pow(2).sum()
+            initial_value = loss.item()
+            for _ in range(20):
+                optimizer.zero_grad()
+                loss = (weight.mv(input) + bias).pow(2).sum()
+                loss.backward()
+                if optim_cls.__name__ == "SparseAdam":
+                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
+                    # which we know does NOT represent the expected use case!
+                    weight.grad = weight.grad.to_sparse()
+                    bias.grad = bias.grad.to_sparse()
+                optimizer.step()
+
+            # Test that the direction of loss moved appropriately
+            if optim_input.kwargs.get("maximize", False):
+                self.assertGreater(loss.item(), initial_value)
+            else:
+                self.assertLess(loss.item(), initial_value)
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_param_groups_lr(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
+        for optim_input in all_optim_inputs:
+            # optim_input.kwargs will be the param group kwargs, which should have >0 lr
+            if "lr" not in optim_input.kwargs or optim_input.kwargs["lr"] == 0:
+                optim_input.kwargs["lr"] = 1e-3
+            outer_kwargs = {"lr": 1e-28}
+            if optim_cls.__name__ == "Rprop":
+                # Allow min step size to be 0
+                outer_kwargs["step_sizes"] = (0, 50)
+
+            weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
+            bias = Parameter(torch.randn((10), device=device, dtype=dtype))
+            irrelevant = Parameter(torch.randn(2, device=device, dtype=dtype))
+            irrelevant_clone = irrelevant.clone()
+            input = torch.randn(5, device=device, dtype=dtype)
+            optimizer = optim_cls(
+                [dict(params=[weight, bias], **optim_input.kwargs), dict(params=[irrelevant])],
+                **outer_kwargs)
+
+            loss = (weight.mv(input) + bias).pow(2).sum()
+            initial_value = loss.item()
+            for _ in range(20):
+                optimizer.zero_grad()
+                loss = (weight.mv(input) + bias).pow(2).sum()
+                loss.backward()
+                irrelevant.grad = torch.rand_like(irrelevant)
+                if optim_cls.__name__ == "SparseAdam":
+                    # SparseAdam requires sparse gradients. For this test, we convert the Tensor layout,
+                    # which we know does NOT represent the expected use case!
+                    weight.grad = weight.grad.to_sparse()
+                    bias.grad = bias.grad.to_sparse()
+                    irrelevant.grad = irrelevant.grad.to_sparse()
+                optimizer.step()
+
+            # Test that the direction of loss moved appropriately
+            if optim_input.kwargs.get("maximize", False):
+                self.assertGreater(loss.item(), initial_value)
+            else:
+                self.assertLess(loss.item(), initial_value)
+
+            # Test that irrelevant parameters were not updated since lr was almost 0
+            self.assertEqual(irrelevant, irrelevant_clone)
+
+
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_is_noop_when_params_have_no_grad(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls

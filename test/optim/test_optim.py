@@ -311,39 +311,7 @@ class TestOptim(TestCase):
     def _build_params_dict(self, weight, bias, **kwargs):
         return [{"params": [weight]}, dict(params=[bias], **kwargs)]
 
-    def _build_params_dict_single(self, weight, bias, **kwargs):
-        return [dict(params=bias, **kwargs)]
-
     def test_sgd(self):
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: SGD(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3,
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: SGD(
-                self._build_params_dict_single(weight, bias, lr=1e-2),
-                lr=1e-3,
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: SGD(
-                self._build_params_dict_single(weight, bias, lr=1e-2),
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
         self._test_basic_cases(
             lambda weight, bias, maximize, foreach: SGD(
                 [weight, bias], lr=1e-3, maximize=maximize, foreach=foreach
@@ -473,27 +441,6 @@ class TestOptim(TestCase):
                 maximize=maximize,
                 foreach=foreach,
             ),
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: Adam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3,
-                amsgrad=True,
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: Adam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3,
-                maximize=maximize,
-                foreach=foreach,
-            ),
             [lambda opt: ExponentialLR(opt, gamma=0.9)],
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
@@ -603,16 +550,6 @@ class TestOptim(TestCase):
     def test_adamw(self):
         self._test_basic_cases(
             lambda weight, bias, maximize, foreach: AdamW(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3,
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: AdamW(
                 [weight, bias],
                 lr=torch.tensor(1e-3),
                 weight_decay=1,
@@ -679,12 +616,6 @@ class TestOptim(TestCase):
     def test_nadam(self):
         self._test_basic_cases(
             lambda weight, bias, foreach: NAdam(
-                self._build_params_dict(weight, bias, lr=1e-2), lr=1e-3, foreach=foreach
-            ),
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, foreach: NAdam(
                 [weight, bias],
                 lr=1e-3,
                 weight_decay=0.1,
@@ -732,16 +663,6 @@ class TestOptim(TestCase):
             )
 
     def test_adagrad(self):
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: Adagrad(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-1,
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
         self._test_basic_cases(
             lambda weight, bias, maximize, foreach: Adagrad(
                 self._build_params_dict(weight, bias, lr=1e-2),
@@ -799,27 +720,11 @@ class TestOptim(TestCase):
             )
 
     def test_adamax(self):
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: Adamax(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-1,
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
         self._test_complex_2d(Adamax)
         self._test_complex_2d(functools.partial(Adamax, foreach=True))
 
 
     def test_radam(self):
-        self._test_basic_cases(
-            lambda weight, bias, foreach: RAdam(
-                self._build_params_dict(weight, bias, lr=1e-2), lr=1e-3, foreach=foreach
-            ),
-            constructor_accepts_foreach=True,
-        )
         self._test_basic_cases(
             lambda weight, bias, foreach: RAdam(
                 [weight, bias], lr=1e-3, foreach=foreach
@@ -868,62 +773,6 @@ class TestOptim(TestCase):
 
     def test_rmsprop(self):
         for foreach in (False, True):
-            self._test_basic_cases(
-                lambda weight, bias, maximize, foreach: RMSprop(
-                    self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2,
-                    maximize=maximize,
-                    foreach=foreach,
-                ),
-                constructor_accepts_maximize=True,
-                constructor_accepts_foreach=True,
-            )
-            self._test_basic_cases(
-                lambda weight, bias, maximize, foreach: RMSprop(
-                    self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2,
-                    centered=True,
-                    maximize=maximize,
-                    foreach=foreach,
-                ),
-                constructor_accepts_maximize=True,
-                constructor_accepts_foreach=True,
-            )
-            self._test_basic_cases(
-                lambda weight, bias, maximize, foreach: RMSprop(
-                    self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2,
-                    centered=True,
-                    momentum=0.1,
-                    maximize=maximize,
-                    foreach=foreach,
-                ),
-                constructor_accepts_maximize=True,
-                constructor_accepts_foreach=True,
-            )
-            self._test_basic_cases(
-                lambda weight, bias, maximize, foreach: RMSprop(
-                    self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2,
-                    momentum=0.1,
-                    maximize=maximize,
-                    foreach=foreach,
-                ),
-                constructor_accepts_maximize=True,
-                constructor_accepts_foreach=True,
-            )
-            self._test_basic_cases(
-                lambda weight, bias, maximize, foreach: RMSprop(
-                    self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2,
-                    momentum=0.1,
-                    weight_decay=1,
-                    maximize=maximize,
-                    foreach=foreach,
-                ),
-                constructor_accepts_maximize=True,
-                constructor_accepts_foreach=True,
-            )
             self._test_complex_2d(lambda param: RMSprop(param, foreach=foreach))
             self._test_complex_2d(
                 lambda param: RMSprop(param, centered=True, foreach=foreach)
@@ -950,28 +799,6 @@ class TestOptim(TestCase):
 
     def test_asgd(self):
         for foreach in (False, True):
-            self._test_basic_cases(
-                lambda weight, bias, maximize, foreach: ASGD(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3,
-                    t0=100,
-                    maximize=maximize,
-                    foreach=foreach,
-                ),
-                constructor_accepts_maximize=True,
-                constructor_accepts_foreach=True,
-            )
-            self._test_basic_cases(
-                lambda weight, bias, maximize, foreach: ASGD(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3,
-                    weight_decay=1,
-                    maximize=maximize,
-                    foreach=foreach,
-                ),
-                constructor_accepts_maximize=True,
-                constructor_accepts_foreach=True,
-            )
             # Ref: https://github.com/pytorch/pytorch/issues/84560
             # self._test_complex_2d(optimizer)
             self._test_complex_optimizer(
@@ -996,16 +823,6 @@ class TestOptim(TestCase):
     @skipIfTorchDynamo()
     def test_rprop(self):
         for foreach in (False, True):
-            self._test_basic_cases(
-                lambda weight, bias, maximize, foreach: Rprop(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=2e-4,
-                    maximize=maximize,
-                    foreach=foreach,
-                ),
-                constructor_accepts_maximize=True,
-                constructor_accepts_foreach=True,
-            )
             self._test_complex_2d(lambda param: Rprop(param, foreach=foreach))
             self._test_complex_optimizer(
                 lambda param: Rprop([param], lr=0.001, foreach=foreach)
@@ -1100,32 +917,6 @@ class TestOptim(TestCase):
                     nesterov=False,
                     maximize=False,
                 )
-
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required.")
-    def test_fused_optimizer_load_state_dict(self):
-        # NOTE: This SIMULATES a fused/capturable optimizer with state moved to CPU, issue 103256
-        # How do we get there? Users typically create CUDA models on fused optimizers and then
-        # store checkpoints on CPU as CUDA memory is limited with torch.load(...map_location="cpu").
-        # Since this is a unit test, it is more expedient to simulate what the state_dict
-        # would look like, which is basically CPU tensors with fused/capturable flag = True.
-        for optimC, kwarg in list(itertools.product((Adam, AdamW), ("fused", "capturable"))) + [(SGD, "fused")]:
-            input = torch.tensor([0.1, 0.2], dtype=torch.float32, device="cpu")
-            optimizer = optimC([input])
-            optimizer.zero_grad()
-            input.grad = torch.rand_like(input)
-            optimizer.step()
-            optim_state_dict_cpu = deepcopy(optimizer.state_dict())
-            optim_state_dict_cpu["param_groups"][0][kwarg] = True
-
-            # load
-            input_cuda = input.clone().detach().to(device="cuda")
-            defaults = {kwarg: True}
-            optimizer_cuda = optimC([input_cuda], **defaults)
-            optimizer_cuda.load_state_dict(optim_state_dict_cpu)
-            optimizer_cuda.zero_grad()
-            input_cuda.grad = torch.rand_like(input_cuda)
-            optimizer_cuda.step()
 
 
     @skipIfTorchDynamo()

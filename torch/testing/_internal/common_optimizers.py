@@ -1298,6 +1298,16 @@ optim_db: List[OptimizerInfo] = [
                 "test_deepcopy_copies_all_public_attrs",
             ),
             DecorateInfo(
+                unittest.skip("Does not support param groups"),
+                "TestOptimRenewed",
+                "test_param_groups_lr",
+            ),
+            DecorateInfo(
+                unittest.skip("Does not support param groups"),
+                "TestOptimRenewed",
+                "test_param_groups_weight_decay",
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
@@ -1647,6 +1657,22 @@ optim_db: List[OptimizerInfo] = [
                     "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
                 ),
                 "TestOptimRenewed",
+                "test_param_groups_weight_decay",
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
+                ),
+                "TestOptimRenewed",
+                "test_param_groups_lr",
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
+                ),
+                "TestOptimRenewed",
                 "test_load_nontensor_step",
                 device_type="cpu",
             ),
@@ -1683,6 +1709,11 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
+                "TestOptimRenewed",
+                "test_param_groups_lr",
             ),
             DecorateInfo(
                 unittest.skip(
