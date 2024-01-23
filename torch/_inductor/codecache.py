@@ -419,11 +419,11 @@ def _reduce_tensor(t):
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     """
-    # If we see tensors, we know they're contstants stored as attributes on
+    # If we see tensors, we know they're constants stored as attributes on
     # the GraphModule. See tensor lowering; small constants are inlined. If
     # we see a small tensor, therefore, no reference will ultimately remain
     # in the generated code. So we need to include its value in the cache key.
-    # Large constannts are effectively treated as inputs and we consider only
+    # Large constants are effectively treated as inputs and we consider only
     # their metadata.
     metadata = extract_tensor_metadata(t)
     if len(t.shape) == 0 or torch._inductor.graph.GraphLowering.can_inline_constant(t):
