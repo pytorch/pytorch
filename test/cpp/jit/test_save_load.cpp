@@ -265,13 +265,10 @@ TEST(SerializationTest, ParentDirNotExist) {
 
 TEST(SerializationTest, SaveLoadTest) {
   std::stringstream ss;
-  
   torch::Tensor to_save = torch::ones(5);
   torch::save(to_save, ss);
-  
   torch::Tensor to_load;
   torch::load(to_load, ss);
-
   ASSERT_TRUE(to_save.equal(to_load));
 }
 
