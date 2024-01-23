@@ -21,8 +21,6 @@ class TestFullyShardOverlap(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_training_overlap(self):
-        # NOTE: This test can be flaky when run with other tests. We do not
-        # have a good solution at the moment.
         class LinearWithSleep(nn.Module):
             def __init__(self, dim: int, sleep_ms: int):
                 super().__init__()
