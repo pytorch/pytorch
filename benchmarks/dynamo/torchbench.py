@@ -7,10 +7,10 @@ import os
 import re
 import sys
 import warnings
-import yaml
 from os.path import abspath, exists
 
 import torch
+import yaml
 
 try:
     from .common import BenchmarkRunner, main
@@ -201,8 +201,8 @@ def load_skip_file():
     skip_file_name = "torchbench_skip_models.yaml"
     skip_file_path = os.path.join(os.path.dirname(__file__), skip_file_name)
 
-    with open(skip_file_path, "r") as f:
-        data = yaml.load(f)
+    with open(skip_file_path) as f:
+        data = yaml.safe_load(f)
 
     def maybe_list_to_set(obj):
         if isinstance(obj, dict):
