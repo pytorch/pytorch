@@ -17,7 +17,7 @@ class AOTIRunnerUtil:
         model,
         example_inputs,
         options=None,
-        constraints=None,
+        dynamic_shapes=None,
         disable_constraint_solver=False,
     ):
         # The exact API is subject to change
@@ -25,7 +25,7 @@ class AOTIRunnerUtil:
             model,
             example_inputs,
             options=options,
-            constraints=constraints,
+            dynamic_shapes=dynamic_shapes,
             remove_runtime_assertions=True,
             disable_constraint_solver=disable_constraint_solver,
         )
@@ -43,22 +43,26 @@ class AOTIRunnerUtil:
             return (
                 torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
                 if device == "cpu"
-                else torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1)
+                else torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
             )
 
     @classmethod
     def load(cls, device, so_path):
-        runner = AOTIRunnerUtil.load_runner(device, so_path)
+        # TODO: unify fbcode and oss behavior to only use torch._export.aot_load
+        if IS_FBCODE:
+            runner = AOTIRunnerUtil.load_runner(device, so_path)
 
-        def optimized(*args):
-            call_spec = runner.get_call_spec()
-            in_spec = pytree.treespec_loads(call_spec[0])
-            out_spec = pytree.treespec_loads(call_spec[1])
-            flat_inputs = fx_pytree.tree_flatten_spec((*args, {}), in_spec)
-            flat_outputs = runner.run(flat_inputs)
-            return pytree.tree_unflatten(flat_outputs, out_spec)
+            def optimized(*args):
+                call_spec = runner.get_call_spec()
+                in_spec = pytree.treespec_loads(call_spec[0])
+                out_spec = pytree.treespec_loads(call_spec[1])
+                flat_inputs = fx_pytree.tree_flatten_spec((*args, {}), in_spec)
+                flat_outputs = runner.run(flat_inputs)
+                return pytree.tree_unflatten(flat_outputs, out_spec)
 
-        return optimized
+            return optimized
+        else:
+            return torch._export.aot_load(so_path, device)
 
     @classmethod
     def run(
@@ -67,14 +71,14 @@ class AOTIRunnerUtil:
         model,
         example_inputs,
         options=None,
-        constraints=None,
+        dynamic_shapes=None,
         disable_constraint_solver=False,
     ):
         so_path = AOTIRunnerUtil.compile(
             model,
             example_inputs,
             options=options,
-            constraints=constraints,
+            dynamic_shapes=dynamic_shapes,
             disable_constraint_solver=disable_constraint_solver,
         )
         optimized = AOTIRunnerUtil.load(device, so_path)
@@ -87,13 +91,13 @@ class AOTIRunnerUtil:
         model,
         list_example_inputs,
         options=None,
-        constraints=None,
+        dynamic_shapes=None,
     ):
         so_path = AOTIRunnerUtil.compile(
             model,
             list_example_inputs[0],
             options=options,
-            constraints=constraints,
+            dynamic_shapes=dynamic_shapes,
         )
         optimized = AOTIRunnerUtil.load(device, so_path)
         list_output_tensors = []
