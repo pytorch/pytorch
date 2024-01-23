@@ -213,13 +213,11 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual bool is_symbolic() {
     return true;
   }
-  virtual c10::DispatchKeySet key_set() {
-    return c10::DispatchKeySet();
-  }
   std::ostream& operator<<(std::ostream& os) {
     os << str();
     return os;
   }
+  c10::DispatchKeySet key_set_;
 };
 
 } // namespace c10
