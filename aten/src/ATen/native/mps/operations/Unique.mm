@@ -101,32 +101,25 @@ static std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self,
   } else if (dimOpt.has_value()) {
     inputTensor = (dim != 0) ? [graph transposeTensor:inputTensor dimension:dim withDimension:0 name:nil] : inputTensor;
 
-    NSUInteger collapsedSize = 1;
+    NSMutableArray* axes = [NSMutableArray arrayWithCapacity:[shape count] - 1];
+    NSMutableArray* dims = [NSMutableArray arrayWithCapacity:[shape count] - 1];
+
     for (const auto axis : c10::irange(1, [shape count])) {
-      collapsedSize *= [[inputTensor shape][axis] unsignedIntValue];
+      [dims addObject:[inputTensor shape][axis]];
+      [axes addObject:@(axis)];
     }
 
-    MPSGraphTensor* randomTensor = [graph randomUniformTensorWithShape:@[ @(collapsedSize) ] seed:42 name:nil];
-    MPSGraphTensor* tensor = [graph reshapeTensor:inputTensor
-                                        withShape:@[ @([[inputTensor shape][0] unsignedIntValue]), @(collapsedSize) ]
-                                             name:@"reshapedTensor"];
+    MPSGraphTensor* randomTensor = [graph randomUniformTensorWithShape:dims name:nil];
+    randomTensor = (dataType == MPSDataTypeFloat16) ? [graph castTensor:randomTensor toType:MPSDataTypeFloat16 name:nil]
+                                                    : randomTensor;
 
-    tensor = [graph multiplicationWithPrimaryTensor:tensor secondaryTensor:randomTensor name:@"productTensor"];
-    tensor = [graph reductionSumWithTensor:tensor axis:1 name:@"reducedTensor"];
-    tensor = [graph squeezeTensor:tensor axis:1 name:@"squeezedTensor"];
+    MPSGraphTensor* tensor = (dataType == MPSDataTypeInt32)
+        ? [graph castTensor:inputTensor toType:MPSDataTypeFloat32 name:@"castTensor"]
+        : inputTensor;
 
-    //    NSMutableArray* axes = [NSMutableArray arrayWithCapacity:[shape count] - 1];
-    //    NSMutableArray* dims = [NSMutableArray arrayWithCapacity:[shape count] - 1];
-    //
-    //    for (const auto axis : c10::irange(1, [shape count])) {
-    //      [dims addObject:[inputTensor shape][axis]];
-    //      [axes addObject:@(axis)];
-    //    }
-    //
-    //    MPSGraphTensor* randomTensor = [graph randomUniformTensorWithShape:dims seed:42 name:nil];
-    //    MPSGraphTensor* tensor = [graph multiplicationWithPrimaryTensor:inputTensor secondaryTensor:randomTensor
-    //    name:nil]; tensor = [graph reductionSumWithTensor:tensor axes:axes name:nil]; tensor = [graph
-    //    squeezeTensor:tensor axes:axes name:nil];
+    tensor = [graph multiplicationWithPrimaryTensor:tensor secondaryTensor:randomTensor name:nil];
+    tensor = [graph reductionSumWithTensor:tensor axes:axes name:nil];
+    tensor = [graph squeezeTensor:tensor axes:axes name:nil];
 
     argSortedInput = [graph argSortWithTensor:tensor axis:0 name:nil];
     sortedInput = [graph gatherWithUpdatesTensor:inputTensor
@@ -382,7 +375,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_mps(const Tensor& self,
     return castToMPS(at::unique_dim(self.to("cpu"), dim, sorted, return_inverse, return_counts));
   }
 
-  return _unique_impl_mps(self, return_inverse, return_counts, false, dim);
+  return _unique_impl_mps(self, return_inverse, return_counts, false, c10::make_optional((int64_t)dim));
 }
 
 } // namespace at::native
