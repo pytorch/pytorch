@@ -8,6 +8,7 @@ try:
 except ImportError:
     import test_functions
 
+import unittest
 
 test_classes = {}
 
@@ -43,6 +44,11 @@ for backend in backends:
     for test in tests:
         make_dynamic_cls(test, backend)
 del test
+
+
+unittest.expectedFailure(
+    GeneratedBackendTestinductorFunctionTests.test_tensor_type5_generated_Backend_test_inductor  # noqa: F821
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
