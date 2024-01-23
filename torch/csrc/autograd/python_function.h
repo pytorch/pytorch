@@ -14,7 +14,6 @@
 
 #include <memory>
 #include <optional>
-#include <utility>
 #include <vector>
 
 namespace torch::jit {
@@ -57,6 +56,7 @@ struct PyNode : public Node {
   // The AutogradCompilerCall::hooks idx corresponding to this node's backward
   std::optional<int> _backward_idx;
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~PyNode() override {
     // Can't use THPObjectPtr as a field in this class; destructor won't take
     // out GIL!  When I forgot to do this by hand
