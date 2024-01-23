@@ -2830,7 +2830,6 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             )
 
     def setUp(self):
-        check_if_enable(self)
         set_rng_seed(SEED)
 
         # Save global check sparse tensor invariants state that can be
