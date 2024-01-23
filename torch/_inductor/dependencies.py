@@ -468,6 +468,8 @@ class FreeUnbackedSymbolsOpsHandler:
         return inner
 
     def indirect_indexing(self, index_var, size, check=True) -> sympy.Symbol:
+        assert not isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean))
+        self.symbols |= free_unbacked_symbols(size)
         return sympy_symbol(f"({str(index_var)})")
 
     def reduction(
