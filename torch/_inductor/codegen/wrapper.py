@@ -2256,7 +2256,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         dtype_str = str(dtype).split(".")[-1]
         self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
         self.wrapper_call.writeline(
-            f"aoti_torch_value_to_tensor_{dtype_str}({expr}, &{name}_handle);"
+            f"aoti_torch_scalar_to_tensor_{dtype_str}({expr}, &{name}_handle);"
         )
         self.wrapper_call.writeline(f"RAIIAtenTensorHandle {name}({name}_handle);")
         return name

@@ -1,3 +1,4 @@
+#include <ATen/ScalarOps.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/ScalarType.h>
@@ -28,9 +29,9 @@
 #include <ATen/ops/index_put.h>
 #include <ATen/ops/mm.h>
 #include <ATen/ops/nonzero.h>
+#include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/scatter.h>
 #include <ATen/ops/scatter_reduce.h>
-#include <ATen/ops/tensor.h>
 
 #endif
 
@@ -140,31 +141,29 @@ AOTI_TORCH_ITEM_IMPL(int16, int16_t)
 AOTI_TORCH_ITEM_IMPL(int32, int32_t)
 AOTI_TORCH_ITEM_IMPL(int64, int64_t)
 AOTI_TORCH_ITEM_IMPL(bool, bool)
+#undef AOTI_TORCH_ITEM_IMPL
 
-#define AOTI_TORCH_VALUE_TO_TENSOR_IMPL(dtype, ctype, ttype)              \
-  AOTITorchError aoti_torch_value_to_tensor_##dtype(                      \
-      ctype value, AtenTensorHandle* ret_new_tensor) {                    \
-    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({                          \
-      *ret_new_tensor =                                                   \
-          new_tensor_handle(at::tensor({value}, c10::ScalarType::ttype)); \
-    });                                                                   \
+#define AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(dtype, ctype, ttype)                  \
+  AOTITorchError aoti_torch_scalar_to_tensor_##dtype(                           \
+      ctype value, AtenTensorHandle* ret_new_tensor) {                         \
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({                               \
+      *ret_new_tensor =                                                        \
+          new_tensor_handle(at::scalar_tensor(value, c10::ScalarType::ttype)); \
+    });                                                                        \
   }
 
-AOTI_TORCH_VALUE_TO_TENSOR_IMPL(float32, float, Float)
-AOTI_TORCH_VALUE_TO_TENSOR_IMPL(float64, double, Double)
-AOTI_TORCH_VALUE_TO_TENSOR_IMPL(uint8, uint8_t, Byte)
-AOTI_TORCH_VALUE_TO_TENSOR_IMPL(uint16, uint16_t, UInt16)
-// error: conversion from ‘uint32_t’ {aka ‘unsigned int’} to
-// ‘torch::detail::TensorDataContainer’ is ambiguous
-// AOTI_TORCH_VALUE_TO_TENSOR_IMPL(uint32, uint32_t, UInt32)
-// error: conversion from ‘uint64_t’ {aka ‘long unsigned int’} to
-// ‘torch::detail::TensorDataContainer’ is ambiguous
-// AOTI_TORCH_VALUE_TO_TENSOR_IMPL(uint64, uint64_t, UInt64)
-AOTI_TORCH_VALUE_TO_TENSOR_IMPL(int8, int8_t, Char)
-AOTI_TORCH_VALUE_TO_TENSOR_IMPL(int16, int16_t, Short)
-AOTI_TORCH_VALUE_TO_TENSOR_IMPL(int32, int32_t, Int)
-AOTI_TORCH_VALUE_TO_TENSOR_IMPL(int64, int64_t, Long)
-AOTI_TORCH_VALUE_TO_TENSOR_IMPL(bool, bool, Bool)
+AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(float32, float, Float)
+AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(float64, double, Double)
+AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(uint8, uint8_t, Byte)
+AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(uint16, uint16_t, UInt16)
+AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(uint32, uint32_t, UInt32)
+AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(uint64, uint64_t, UInt64)
+AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int8, int8_t, Char)
+AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int16, int16_t, Short)
+AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int32, int32_t, Int)
+AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(int64, int64_t, Long)
+AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(bool, bool, Bool)
+#undef AOTI_TORCH_SCALAR_TO_TENSOR_IMPL
 
 bool aoti_torch_grad_mode_is_enabled() {
   return c10::GradMode::is_enabled();
