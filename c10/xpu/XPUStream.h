@@ -81,6 +81,11 @@ class C10_XPU_API XPUStream {
     return stream_.id();
   }
 
+  bool query() const {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "The query method of Stream on XPU backend is not implemented.");
+  }
+
   void synchronize() const {
     queue().wait_and_throw();
   }
@@ -145,7 +150,7 @@ C10_XPU_API std::ostream& operator<<(std::ostream& stream, const XPUStream& s);
  * emulate the semantics via a loop through the queue pools of the specified
  * device and make each command queue synchronization sequentially.
  */
-C10_XPU_API void device_synchronize(DeviceIndex device_index = -1);
+C10_XPU_API void streams_synchronize_on_device(DeviceIndex device_index = -1);
 
 } // namespace c10::xpu
 
