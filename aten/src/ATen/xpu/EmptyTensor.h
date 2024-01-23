@@ -3,7 +3,7 @@
 
 namespace at::detail {
 
-//XXX: add TORCH_XPU_API
+// XXX: add TORCH_XPU_API
 TensorBase empty_xpu(
     IntArrayRef size,
     ScalarType dtype,
@@ -18,9 +18,7 @@ TensorBase empty_xpu(
     c10::optional<bool> pin_memory_opt,
     c10::optional<c10::MemoryFormat> memory_format_opt);
 
-TensorBase empty_xpu(
-    IntArrayRef size,
-    const TensorOptions &options);
+TensorBase empty_xpu(IntArrayRef size, const TensorOptions& options);
 
 TensorBase empty_strided_xpu(
     IntArrayRef size,
@@ -39,7 +37,6 @@ TensorBase empty_strided_xpu(
 TensorBase empty_strided_xpu(
     IntArrayRef size,
     IntArrayRef stride,
-    const TensorOptions &options);
+    const TensorOptions& options);
 
-
-}  // namespace at::detail
+} // namespace at::detail
