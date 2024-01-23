@@ -339,13 +339,13 @@ def compile_fx_inner(
         ]
 
         from torch._inductor.cudagraph_utils import (
-            check_post_lowering_cudagraph_disable_reason,
+            check_post_lowering_disable_cudagraph,
         )
 
         disabled_cudagraphs_reason = (
             compiled_graph.disabled_cudagraphs_reason
             if compiled_graph.disabled_cudagraphs_reason
-            else check_post_lowering_cudagraph_disable_reason(
+            else check_post_lowering_disable_cudagraph(
                 example_inputs, gm, compiled_graph, num_fixed
             )
         )
@@ -530,10 +530,10 @@ def fx_codegen_and_compile(
 
             if cudagraphs and not V.graph.disable_cudagraphs_reason:
                 from torch._inductor.cudagraph_utils import (
-                    check_lowering_cudagraph_checks,
+                    check_lowering_disable_cudagraph,
                 )
 
-                V.graph.disable_cudagraphs_reason = check_lowering_cudagraph_checks(
+                V.graph.disable_cudagraphs_reason = check_lowering_disable_cudagraph(
                     V.graph.device_node_mapping
                 )
 

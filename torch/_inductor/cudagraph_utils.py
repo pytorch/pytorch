@@ -82,13 +82,13 @@ def check_multiple_devices(
     return format_default_skip_message(f"multiple devices: {', '.join(keys_repr)}")
 
 
-def check_lowering_cudagraph_checks(
+def check_lowering_disable_cudagraph(
     device_node_mapping: Dict[torch.device, torch.fx.Node]
 ) -> Optional[str]:
     return check_multiple_devices(device_node_mapping)
 
 
-def check_for_incompatible_cudagraph_ops(gm):
+def check_for_incompatible_cudagraph_ops(gm) -> Optional[str]:
     forbidden_set = {
         "aten._fused_moving_avg_obs_fq_helper.default",
         "aten._fused_moving_avg_obs_fq_helper_functional.default",
@@ -128,12 +128,12 @@ def check_for_incompatible_cudagraph_ops(gm):
     return None
 
 
-def check_post_lowering_cudagraph_disable_reason(
+def check_post_lowering_disable_cudagraph(
     example_inputs: List[Any],
     gm: torch.fx.GraphModule,
     compiled_graph: CompiledFxGraph,
     num_fixed: int,
-):
+) -> Optional[str]:
     if has_mutation_str := check_for_mutation(gm, compiled_graph, num_fixed):
         return has_mutation_str
 
@@ -146,6 +146,7 @@ def check_post_lowering_cudagraph_disable_reason(
         if isinstance(t, torch.Tensor)
     )
 
+    # TODO - add stack traces. they almost never (never?) occur now.
     if complex_memory_overlap_inputs:
         return "skipping cudagraphs due to complex memory overlap"
 
