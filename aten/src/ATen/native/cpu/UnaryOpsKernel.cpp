@@ -18,7 +18,6 @@
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/OpMathType.h>
 
-#include <c10/util/math_compat.h>
 #include <c10/util/MathConstants.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/TypeSafeSignMath.h>
