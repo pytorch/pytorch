@@ -117,9 +117,7 @@ class GuardManager:
         subtree = self._debug_print(self.root, "|  ")
         epilogue_guards = ""
         for guard in self.root.get_epilogue_lambda_guards():
-            epilogue_guards += self.pretty_print_leaf_guard_str(
-                "|  ", guard.repr()
-            )
+            epilogue_guards += self.pretty_print_leaf_guard_str("|  ", guard.repr())
         return first_line + subtree + epilogue_guards
 
     def __call__(self, x):
@@ -389,7 +387,9 @@ class GuardBuilder(GuardBuilderBase):
         obj_id = self.id_ref(t)
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._produce_guard_code(guard, [code])
-        self.get_guard_manager(guard).add_type_match_guard(obj_id, self.get_guard_str(guard, [code]))
+        self.get_guard_manager(guard).add_type_match_guard(
+            obj_id, self.get_guard_str(guard, [code])
+        )
 
     def DICT_VERSION(self, guard: Guard):
         # ___check_dict_version is same as `dict_version(x) == y`
@@ -434,6 +434,9 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         code = f"___check_obj_id({ref}, {self.id_ref(val)})"
         self._produce_guard_code(guard, [code])
+        self.get_guard_manager(guard).add_id_match_guard(
+            self.id_ref(val), self.get_guard_str(guard, [code])
+        )
 
         # Keep track of ID_MATCH'd objects. This will be used to modify the
         # cache size logic
@@ -598,10 +601,17 @@ class GuardBuilder(GuardBuilderBase):
             # Strictly only want user-defined functions
             if type(val) == types.FunctionType and hasattr(val, "__code__"):
                 ref = self.arg_ref(guard)
+                obj_id = self.id_ref(val.__code__)
                 code = [
-                    f"___check_obj_id(getattr({ref}, '__code__', None), {self.id_ref(val.__code__)})",
+                    f"___check_obj_id(getattr({ref}, '__code__', None), {obj_id})",
                 ]
                 self._produce_guard_code(guard, code)
+
+                # TODO(janimesh) Check if the guard installation can be modified
+                # to move the getattr __code__ to the installation.
+                self.get_guard_manager(guard).__code__.add_id_match_guard(
+                    obj_id, self.get_guard_str(guard, code)
+                )
             else:
                 self.FUNCTION_MATCH(guard)
 
@@ -1171,7 +1181,8 @@ class CheckFunctionManager:
         }
         self.guard_manager.closure_vars = CLOSURE_VARS
         self.guard_manager.guard_fail_fn = guard_fail_fn
-        self.check_fn = self.guard_manager
+        if config.enable_cpp_guard_manager:
+            self.check_fn = self.guard_manager
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
@@ -1446,7 +1457,7 @@ def get_guard_fail_reason(
     """
 
     # TODO - Use a config flag for guard manager
-    if True:
+    if config.enable_cpp_guard_manager:
         guard_manager = guard_fn
         guard_debug_info = guard_manager.check_verbose(f_locals)
         assert not guard_debug_info.result
