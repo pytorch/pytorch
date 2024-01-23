@@ -28,6 +28,7 @@ def load_state_dict(
         "'load_state_dict' is deprecated and will be removed in future versions. "
         "Please use 'load' instead."
     )
+    storage_reader.reset()
     with _profile():
         # TODO: test returning `load` here instead.
         return _load_state_dict(
