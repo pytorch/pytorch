@@ -1013,12 +1013,10 @@ void ProcessGroupNCCL::waitForDumpOrTimeout(
 
   auto futStatus = fut.wait_for(std::chrono::seconds(timeout_sec));
   TORCH_CHECK(
-      futStatus != std::future_status::deferred,
-      "Expected the dump future to have been launched eagerly.");
+      futStatus != std::future_status::deferred, "Expected eager launch.");
   if (futStatus == std::future_status::ready) {
-    // Calling .get() will raise any exception stored in the promise associated
-    // with the future. (but we can ignore the return value, which will be false
-    // if dumping is not enabled)
+    // Calling .get() will re-raise any exception from the future, and we don't
+    // care about the retval
     try {
       fut.get();
       std::this_thread::sleep_until(wakeUpTime);
@@ -1036,10 +1034,9 @@ void ProcessGroupNCCL::waitForDumpOrTimeout(
         << " This may be due to slow ADDR2LINE performance processing stacktraces."
         << " Try TORCH_DISABLE_ADDR2LINE=1 and TORCH_NCCL_TRACE_CPP_STACK=0 to work around.";
   }
-  // Ensure we sleep at least until wakeUpTime regardless of whether the future
-  // ran quickly or took the full timeout.
+  // Ensure we sleep at least until wakeUpTime regardless of future execution
+  // time
   std::this_thread::sleep_until(wakeUpTime);
-  return;
 }
 
 void ProcessGroupNCCL::abortCommsFromMap(
