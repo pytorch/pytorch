@@ -885,7 +885,7 @@ def triton_config(
     x,
     y=None,
     z=None,
-    num_stages=config.default_num_stages,
+    num_stages=config.triton.default_num_stages,
     num_elements_per_warp=256,
     min_elem_per_thread=0,
 ) -> Config:
@@ -975,7 +975,7 @@ def triton_config(
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_reduction(size_hints, x, r, num_stages=config.default_num_stages, num_warps=None) -> Config:
+def triton_config_reduction(size_hints, x, r, num_stages=config.triton.default_num_stages, num_warps=None) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
@@ -1004,7 +1004,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=config.default_num_stag
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=config.default_num_stages):
+def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=config.triton.default_num_stages):
     """
     Construct a tile reduction triton config with some adjustment
     heuristics based on size_hints. Size_hints is a tuple of numels in
@@ -1321,7 +1321,7 @@ def foreach(triton_meta, num_warps, filename=None, inductor_meta=None):
     """
     return cached_autotune(
         None,
-        [triton.Config({}, num_stages=config.default_num_stages, num_warps=num_warps)],
+        [triton.Config({}, num_stages=config.triton.default_num_stages, num_warps=num_warps)],
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,

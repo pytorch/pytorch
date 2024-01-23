@@ -67,7 +67,7 @@ platform_configs = tuple(
 # On ROCm convert num_stages to 0 to enable stream pipelining
 if torch.version.hip:
     platform_configs = tuple(
-        (config[0], config[1], config[2], config.default_num_stages, config[4]) for config in platform_configs
+        (c[0], c[1], c[2], config.triton.default_num_stages, config[4]) for c in platform_configs
     )
 
 conv_configs = functools.partial(
