@@ -1,33 +1,12 @@
 # Owner(s): ["module: dynamo"]
-import unittest
-import warnings
 
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
-from torch.fx.experimental import _config as fx_config
 
 try:
-    from . import (
-        test_ctx_manager,
-        test_export,
-        test_functions,
-        test_higher_order_ops,
-        test_misc,
-        test_modules,
-        test_repros,
-        test_sdpa,
-        test_subgraphs,
-    )
+    from . import test_functions
 except ImportError:
-    import test_ctx_manager
-    import test_export
     import test_functions
-    import test_higher_order_ops
-    import test_misc
-    import test_modules
-    import test_repros
-    import test_sdpa
-    import test_subgraphs
 
 
 test_classes = {}
@@ -55,7 +34,12 @@ def make_dynamic_cls(cls, backend):
 tests = [
     test_functions.FunctionTests,
 ]
-for backend in ["aot_eager", "inductor"]:
+backends = ["aot_eager"]
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
+if HAS_CPU or HAS_CUDA:
+    backends.append("inductor")
+for backend in backends:
     for test in tests:
         make_dynamic_cls(test, backend)
 del test
