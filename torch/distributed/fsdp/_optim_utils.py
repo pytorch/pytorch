@@ -471,7 +471,6 @@ def _flatten_optim_state_dict(
     unflat_osd_state = unflat_osd["state"]
     all_state_keys = set(unflat_osd_state.keys())
 
-    sync_threshold = 200
     for param, fqns in param_to_fqns.items():
         fqn = fqns[0]
         if fqn not in unflat_osd_state:
@@ -496,7 +495,6 @@ def _flatten_optim_state_dict(
                         fqn,
                         unflat_osd_state[fqn],
                     )
-
             else:
                 flat_state = _flatten_optim_state(
                     fsdp_param_info,
@@ -527,7 +525,6 @@ def _flatten_optim_state_dict(
                     f"The state of {key} is empty. This should happen when "
                     "use_orig_params=True."
                 )
-
         else:  # do not flatten non-FSDP parameters' states
             assert len(fqns) == 1
             key = _OptimStateKey(tuple(fqns), False)
