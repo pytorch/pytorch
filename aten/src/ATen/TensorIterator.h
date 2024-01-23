@@ -386,7 +386,8 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
       TORCH_INTERNAL_ASSERT(
           original_tensor_base.scalar_type() != common_dtype());
       return c10::fetch_and_cast<T>(
-          original_tensor_base.scalar_type(), original_tensor_base.const_data_ptr());
+          original_tensor_base.scalar_type(),
+          original_tensor_base.const_data_ptr());
     } else {
       return scalar_value<T>(arg);
     }
