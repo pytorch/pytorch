@@ -96,8 +96,8 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
         if (nv.isNone()) {
           continue;
         }
-        auto x = nv.toSymInt();
-        if (x.is_heap_allocated() && x.toSymNode()->key_set_.has(c10::DispatchKey::Python)) {
+        // IValues tagged SymInt are guaranteed to be heap_allocated
+        if (nv.isSymInt() && nv.toSymNodeImpl()->key_set_.has(c10::DispatchKey::Python)) {
           (*c10::impl::get_global_pyinterpreter())->dispatch(op, stack);
           return;
         }
