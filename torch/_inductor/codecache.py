@@ -1623,7 +1623,7 @@ class AotCodeCompiler:
                     f.seek(0)
                     hdr = f.read(1024)
                     # Search for magic number and write the actual data over it
-                    start_idx = hdr.find(b'\xef\xcd\xab\x99\x78\x56\x34\x12')
+                    start_idx = hdr.find(b"\xef\xcd\xab\x99\x78\x56\x34\x12")
                     assert start_idx != -1
                     f.seek(start_idx)
                     pos = 0
@@ -1631,7 +1631,6 @@ class AotCodeCompiler:
                         rc = f.write(consts[pos:])
                         pos += rc
             return consts_o
-
 
         from filelock import FileLock
 
@@ -1687,7 +1686,10 @@ class AotCodeCompiler:
             aot_constants = b"".join(
                 _to_bytes(tensor) for tensor in graph.constants.values()
             )
-            consts_o  = {"linux": _compile_consts_linux, "darwin": _compile_consts_darwin}[sys.platform](aot_constants)
+            consts_o = {
+                "linux": _compile_consts_linux,
+                "darwin": _compile_consts_darwin,
+            }[sys.platform](aot_constants)
 
             cmd = cpp_compile_command(
                 input=[output_o, consts_o],
