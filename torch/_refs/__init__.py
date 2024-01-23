@@ -5504,6 +5504,7 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
     # cast value to correct type before passing to `where`
     value = _maybe_convert_to_dtype(value, a.dtype)
     r = torch.where(mask, value, a)  # type: ignore[arg-type]
+
     if a.size() == r.size() and a.stride() != r.stride():
         out = torch.empty_like(a)
         out.copy_(r)
