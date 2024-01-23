@@ -139,8 +139,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_uint32(
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_uint64(
     uint64_t value,
     AtenTensorHandle* ret_new_tensor);
-AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_scalar_to_tensor_int8(int8_t value, AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_int8(
+    int8_t value,
+    AtenTensorHandle* ret_new_tensor);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_int16(
     int16_t value,
     AtenTensorHandle* ret_new_tensor);

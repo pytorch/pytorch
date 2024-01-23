@@ -144,7 +144,7 @@ AOTI_TORCH_ITEM_IMPL(bool, bool)
 #undef AOTI_TORCH_ITEM_IMPL
 
 #define AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(dtype, ctype, ttype)                  \
-  AOTITorchError aoti_torch_scalar_to_tensor_##dtype(                           \
+  AOTITorchError aoti_torch_scalar_to_tensor_##dtype(                          \
       ctype value, AtenTensorHandle* ret_new_tensor) {                         \
     AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({                               \
       *ret_new_tensor =                                                        \
