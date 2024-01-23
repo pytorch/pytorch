@@ -126,7 +126,7 @@ void PyInterpreter::disarm() noexcept {
 }
 
 namespace {
-  c10::impl::PyInterpreter* _global_pyinterpreter = nullptr;
+c10::impl::PyInterpreter* _global_pyinterpreter = nullptr;
 }
 
 void set_global_pyinterpreter(c10::impl::PyInterpreter* interp) {
