@@ -1608,8 +1608,17 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
         ):
+            op = cause.func
+            import_suggestion = ""
+            if isinstance(op, torch._ops.OpOverload):
+                maybe_pystub = torch._C._dispatch_pystub(
+                    op._schema.name, op._schema.overload_name
+                )
+                if maybe_pystub is not None:
+                    module, ctx = maybe_pystub
+                    import_suggestion = f"you may need to `import {module}` ({ctx}) for support, otherwise "
             unimplemented(
-                f"unsupported operator: {cause.func} (see "
+                f"unsupported operator: {cause.func} ({import_suggestion}see "
                 "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
                 " for how to fix)"
             )
