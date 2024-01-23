@@ -1,5 +1,3 @@
-import weakref
-
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -41,7 +39,7 @@ class FSDPState(_State):
         self._pre_backward_hook_handles: List[RemovableHandle] = []
 
         # Attributes only used on the root state:
-        self._all_state_refs: List[weakref.ReferenceType[FSDPState]] = []
+        self._all_states: List[FSDPState] = []
         self._root_post_backward_final_callback_queued: Optional[bool] = None
 
     # Define a separate init since `__init__` is called in the contract
@@ -80,12 +78,11 @@ class FSDPState(_State):
             return  # no-op: already initialized
         self._is_root = True
         root_module = self._module
-        # Each module owns the reference to the state object
         for module in root_module.modules():
             if (state := _get_module_fsdp_state(module)) is not None:
                 if module is not root_module:
                     state._is_root = False
-                self._all_state_refs.append(weakref.ref(state))
+                self._all_states.append(state)
         if self._fsdp_param_group:
             # For the root, do not reshard after forward since for training,
             # the parameters would be freed and all-gathered immediately
@@ -103,9 +100,7 @@ class FSDPState(_State):
         self._all_gather_stream = torch.cuda.Stream(priority=high_priority)
         self._reduce_scatter_stream = torch.cuda.Stream(priority=high_priority)
         self._all_gather_state = AllGatherStateHolder()
-        for state_ref in self._all_state_refs:
-            state = state_ref()
-            assert state is not None, "FSDPState deallocated"
+        for state in self._all_states:
             if fsdp_param_group := state._fsdp_param_group:
                 fsdp_param_group.default_stream = self._default_stream
                 fsdp_param_group.all_gather_copy_in_stream = (
@@ -121,9 +116,7 @@ class FSDPState(_State):
         root_module = self._module
         param_to_fsdp_param: Dict[nn.Parameter, FSDPParam] = {}
         module_to_fsdp_param_group: Dict[nn.Module, FSDPParamGroup] = {}
-        for state_ref in self._all_state_refs:
-            state = state_ref()
-            assert state is not None, "FSDPState deallocated"
+        for state in self._all_states:
             if fsdp_param_group := state._fsdp_param_group:
                 for fsdp_param in fsdp_param_group.fsdp_params:
                     param_to_fsdp_param[fsdp_param.sharded_param] = fsdp_param
@@ -162,9 +155,7 @@ class FSDPState(_State):
             return
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             self._training_state = TrainingState.IDLE
-            for state_ref in self._all_state_refs:
-                state = state_ref()
-                assert state is not None, "FSDPState deallocated"
+            for state in self._all_states:
                 state._training_state = TrainingState.IDLE
                 if state._fsdp_param_group:
                     state._fsdp_param_group.finalize_backward()
