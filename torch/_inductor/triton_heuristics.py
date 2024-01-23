@@ -146,6 +146,7 @@ class CachingAutotuner(KernelInterface):
     ):
         super().__init__()
 
+        assert len(configs) > 0, "Non-empty TritonConfig list required for compiling"
         self.fn = fn
         self.triton_meta = triton_meta
         self.inductor_meta = {} if inductor_meta is None else inductor_meta
@@ -366,9 +367,10 @@ class CachingAutotuner(KernelInterface):
 
         scope["runner"] = get_first_attr(binary, "run", "c_wrapper")
         scope["function"] = get_first_attr(binary, "function", "cu_function")
-        cluster_dims = get_first_attr(binary, "cluster_dims", "clusterDims")
         scope["cta_args"] = (
-            (binary.num_ctas, *cluster_dims) if hasattr(binary, "num_ctas") else ()
+            (binary.num_ctas, *get_first_attr(binary, "cluster_dims", "clusterDims"))
+            if hasattr(binary, "num_ctas")
+            else ()
         )
 
         exec(
@@ -1161,6 +1163,7 @@ def reduction(
 ):
     """args to @triton.heuristics()"""
     inductor_meta = {} if inductor_meta is None else inductor_meta
+    inductor_meta["reduction_hint"] = reduction_hint
     if inductor_meta.get("no_x_dim"):
         size_hints = [1, *size_hints[1:]]
 
@@ -1240,14 +1243,17 @@ def persistent_reduction(
     filename=None,
     inductor_meta=None,
 ):
-    if inductor_meta and inductor_meta.get("no_x_dim"):
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    inductor_meta["reduction_hint"] = reduction_hint
+    if inductor_meta.get("no_x_dim"):
         size_hints = [1, *size_hints[1:]]
+
     xnumel, rnumel = size_hints
 
     configs = [
         triton_config_reduction(size_hints, xblock, rnumel)
         for xblock in (1, 8, 32, 128)
-        if rnumel * xblock <= 4096 and xblock <= xnumel
+        if xblock == 1 or (rnumel * xblock <= 4096 and xblock <= xnumel)
     ]
 
     # TODO(jansel): we should be able to improve these heuristics
