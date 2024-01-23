@@ -560,14 +560,14 @@ struct NCCLTraceBuffer {
     c10::IValue version_key = "version";
     // Update whenever changing contents or formatting of the dump
     // (minor when adding fields, major when changing existing fields)
-    c10::IValue version_val = "0.1";
+    c10::IValue version_val = "1.0";
 
     c10::IValue pg_id_key = "pg_id";
     c10::IValue seq_id_key = "seq_id";
     c10::IValue profiling_name_key = "profiling_name";
     c10::IValue input_sizes_key = "input_sizes";
     c10::IValue output_sizes_key = "output_sizes";
-    c10::IValue time_created_key = "time_created_us";
+    c10::IValue time_created_key = "time_created_ns";
     c10::IValue duration_key = "duration_ms";
 
     c10::IValue frames_key = "frames";
@@ -598,7 +598,7 @@ struct NCCLTraceBuffer {
       dict.insert(pg_id_key, int64_t(e.pg_id_));
       dict.insert(seq_id_key, int64_t(e.seq_id_));
       dict.insert(profiling_name_key, e.profiling_name_);
-      dict.insert(time_created_key, int64_t(e.time_created_ / 1000));
+      dict.insert(time_created_key, int64_t(e.time_created_));
       if (e.duration_) {
         dict.insert(duration_key, *e.duration_);
       }
