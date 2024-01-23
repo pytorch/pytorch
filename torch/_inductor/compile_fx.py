@@ -51,7 +51,7 @@ from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import ExternKernelNode
-from .utils import get_dtype_size, has_incompatible_cudagraph_ops
+from .utils import get_dtype_size
 from .virtualized import V
 
 if config.is_fbcode():
@@ -320,13 +320,6 @@ def compile_fx_inner(
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
-    # check cudagraph disabling reasons from inductor lowering
-    if cudagraphs and compiled_graph.disabled_cudagraphs_reason:
-        perf_hint_log.warning(
-            "skipping cudagraphs due to %s", compiled_graph.disabled_cudagraphs_reason
-        )
-        BoxedBool.disable(cudagraphs)
-
     # Return the output strides to the caller via TracingContext
     context = torch._guards.TracingContext.try_get()
     if context is not None and context.output_strides is not None:
@@ -345,34 +338,19 @@ def compile_fx_inner(
             for arg in output.args[0]
         ]
 
-        complex_memory_overlap_inputs = any(
-            complex_memory_overlap(t)
-            for t in example_inputs
-            if isinstance(t, torch.Tensor)
+        from torch._inductor.cudagraph_utils import (
+            check_post_lowering_cudagraph_disable_reason,
         )
 
-        from torch._inductor.cudagraph_utils import check_for_mutation
+        disabled_cudagraphs_reason = (
+            compiled_graph.disabled_cudagraphs_reason
+            if compiled_graph.disabled_cudagraphs_reason
+            else check_post_lowering_cudagraph_disable_reason(
+                example_inputs, gm, compiled_graph, num_fixed
+            )
+        )
 
-        has_mutation_str = check_for_mutation(gm, compiled_graph, num_fixed)
-        has_mutation = has_mutation_str is not None
-
-        if has_mutation:
-            compiled_graph.disabled_cudagraphs_reason = has_mutation_str
-
-        cudagraph_tests = [
-            (not has_mutation, "mutated inputs"),
-            (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
-            (not complex_memory_overlap_inputs, "complex memory overlap"),
-            (
-                all(
-                    isinstance(t, (torch.Tensor, torch.SymInt)) for t in example_inputs
-                ),
-                "non-Tensor inputs",
-            ),
-        ]
-        cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
-
-        if not cudagraph_fail_reasons:
+        if not disabled_cudagraphs_reason:
             if not config.triton.cudagraph_trees:
                 # Force specialize all inputs so that CUDA graphs will work
                 for t in example_inputs:
@@ -420,14 +398,8 @@ def compile_fx_inner(
                 compiled_graph.current_callable = compiled_artifact
 
             if "cuda" in compiled_graph.device_types:
-                # prefer better disable_cudagraphs_reason bc stack trace
-                # TODO: migrate all disable reasons to stack trace, refactor
-                if compiled_graph.disabled_cudagraphs_reason:
-                    perf_hint_log.warning(compiled_graph.disabled_cudagraphs_reason)
-                else:
-                    perf_hint_log.warning(
-                        "skipping cudagraphs due to %s", cudagraph_fail_reasons
-                    )
+                assert disabled_cudagraphs_reason
+                perf_hint_log.warning(disabled_cudagraphs_reason)
 
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
