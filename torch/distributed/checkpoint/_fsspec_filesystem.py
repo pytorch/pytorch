@@ -451,7 +451,7 @@ class FsspecReader(StorageReader):
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None]) -> None:
         self.storage_data = dict()
-        if checkpiont_id:
+        if checkpoint_id:
             self._init_path(checkpoint_id)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:

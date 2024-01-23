@@ -33,6 +33,8 @@ def save_state_dict(
         "Please use 'save' instead."
     )
 
+    storage_writer.reset()
+
     # TODO: test returning `save` here instead.
     with _profile():
         return _save_state_dict(
@@ -130,8 +132,7 @@ def save(
             # https://github.com/pytorch/pytorch/issues/118036
             storage_writer = FileSystemWriter(checkpoint_id)
 
-        if not checkpoint_id:
-            storage_writer.set_checkpoint_id(checkpoint_id)
+        storage_writer.reset(checkpoint_id)
 
         return _save_state_dict(
             _stateful_to_state_dict(state_dict),

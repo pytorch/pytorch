@@ -22,7 +22,6 @@ from typing import (
 )
 
 import torch
-import torch.distributed as dist
 from torch import Tensor
 from torch._utils import _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
