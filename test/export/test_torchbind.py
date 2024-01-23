@@ -103,6 +103,23 @@ class TestExportTorchbind(TestCase):
             MyModule(), (torch.ones(2, 3), cc), strict=False
         )
 
+    def test_unlift_custom_obj(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                return x + torch.ops._TorchScriptTesting.takes_foo(self.attr, x)
+
+        m = MyModule()
+        input = torch.ones(2, 3)
+        with enable_torchbind_tracing():
+            ep = torch.export.export(m, (input,), strict=False)
+
+        unlifted = ep.module()
+        self.assertEqual(m(input), unlifted(input))
+
 
 if __name__ == "__main__":
     run_tests()
