@@ -1018,6 +1018,12 @@ static PyObject* _custom_eval_frame(
     // reference seems wrong. Therefore, we directly access the
     // extra->cache_entry. extra wont be NULL here.
     extra->cache_entry = create_cache_entry(extra->cache_entry, result);
+
+    // Check that the cache_entry->check_fn evaluates to True. This path is
+    // triggered when there is a (re)compilation. So, this is not on the
+    // critical path and we can have this check always on.
+    CHECK(PyObject_CallOneArg(extra->cache_entry->check_fn, frame->f_locals) == Py_True);
+
     Py_DECREF(result);
     // Update the existing cache_entry on the extra object. This extra object is
     // sitting on the extra scratch space, we are just changing the cache_entry
