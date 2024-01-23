@@ -258,9 +258,9 @@ class GraphLowering(torch.fx.Interpreter):
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
-        # self.disable_cudagraphs_reason: Optional[str] = None
-        # only keeping one node per device for stack trace purposes
         self.disable_cudagraphs_reason: Optional[str] = None
+
+        # only keeping one node per device for stack trace purposes
         self.device_node_mapping: Dict[torch.device, torch.fx.Node] = {}
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
         self.dynamo_flat_name_to_original_fqn = self.module.meta.get(
