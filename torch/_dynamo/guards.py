@@ -360,6 +360,15 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, [code], provided_guarded_object=self.get(base))
 
+    def FUNCTORCH_CURRENT_LEVEL_MATCH(self, guard: Guard):
+        # Invalidate the graph if a call to vmap has been made prior to this
+        # This is super conservative as the interpreter stack may not contain
+        # vmap
+        code = [
+            "torch._C._functorch.maybe_current_level() is None",
+        ]
+        self._produce_guard_code(guard, code)
+
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
