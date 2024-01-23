@@ -5,7 +5,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 
-from torch.distributed._composable_state import _get_module_state, _State
+from torch.distributed._composable_state import (
+    _get_module_state,
+    _insert_module_state,
+    _State,
+)
 from ._fsdp_common import TrainingState
 from ._fsdp_param import FSDPParam
 
@@ -24,6 +28,12 @@ class FSDPState(_State):
 
         # Attributes only used on the root state:
         self._all_state_refs: List[weakref.ReferenceType[FSDPState]] = []
+
+    # Define a separate init since `__init__` is called in the contract
+    def init(self, module: nn.Module, device: torch.device) -> None:
+        _insert_module_state(module, self)
+        self._module = module
+        self._device = device
 
     def _root_pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
