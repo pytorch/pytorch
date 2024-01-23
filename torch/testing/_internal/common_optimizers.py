@@ -961,6 +961,12 @@ optim_db: List[OptimizerInfo] = [
         supports_sparse_on=("cpu"),
         skips=(
             DecorateInfo(
+                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+                active_if=lambda kwargs: not kwargs["contiguous"],
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
@@ -1018,6 +1024,12 @@ optim_db: List[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable", "fused"),
         skips=(
             DecorateInfo(
+                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+                active_if=lambda kwargs: not kwargs["contiguous"],
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
@@ -1074,6 +1086,12 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_adamax,
         supported_impls=("foreach", "differentiable"),
         skips=(
+            DecorateInfo(
+                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+                active_if=lambda kwargs: not kwargs["contiguous"],
+            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
@@ -1136,6 +1154,12 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_adamw,
         supported_impls=("foreach", "differentiable", "fused"),
         skips=(
+            DecorateInfo(
+                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+                active_if=lambda kwargs: not kwargs["contiguous"],
+            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
@@ -1294,6 +1318,12 @@ optim_db: List[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         skips=(
             DecorateInfo(
+                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+                active_if=lambda kwargs: not kwargs["contiguous"],
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
@@ -1409,6 +1439,12 @@ optim_db: List[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         skips=(
             DecorateInfo(
+                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+                active_if=lambda kwargs: not kwargs["contiguous"],
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
@@ -1482,6 +1518,12 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_rprop,
         supported_impls=("foreach", "differentiable"),
         skips=(
+            DecorateInfo(
+                skipIfMps,  # Rprop doesn't update for non-contiguous, see #118117
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction",
+                active_if=lambda kwargs: not kwargs["contiguous"],
+            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
