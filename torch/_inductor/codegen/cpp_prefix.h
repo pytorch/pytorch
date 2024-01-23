@@ -11,6 +11,8 @@
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <ATen/native/Math.h>
 
+#include <c10/util/Float8_e4m3fn.h>
+#include <c10/util/Float8_e5m2.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/generic_math.h>
@@ -30,6 +32,9 @@
 
 typedef at::Half half;
 typedef at::BFloat16 bfloat16;
+
+typedef at::Float8_e4m3fn float8_e4m3fn;
+typedef at::Float8_e5m2 float8_e5m2;
 
 template <typename T>
 struct Welford {
@@ -144,7 +149,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
 #endif
 
 
-template <typename T> inline T mod(T a, T b) { return a % b; }
+template <typename T, typename U> inline typename std::common_type<T, U>::type mod(T a, U b) { return a % b; }
 template <> inline float mod(float a, float b) { return std::fmod(a, b); }
 template <> inline double mod(double a, double b) { return std::fmod(a, b); }
 
@@ -179,12 +184,12 @@ float randn_cpu(uint32_t seed, uint32_t offset) {
   return engine.randn(10);
 }
 
-uint64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high) {
+int64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high) {
   auto gen = at::Philox4_32(seed, 0, offset);
   uint64_t r0 = gen();
   uint64_t r1 = gen();
   uint64_t result = r0 | (r1 << 32);
-  return (result % static_cast<uint64_t>(high - low)) + low;
+  return static_cast<int64_t>(result % (high - low)) + low;
 }
 
 template <typename T> struct AsIntegerType { typedef T type; };
