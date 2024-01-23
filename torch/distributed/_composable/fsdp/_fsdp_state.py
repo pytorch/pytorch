@@ -1,5 +1,3 @@
-import weakref
-
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -27,7 +25,7 @@ class FSDPState(_State):
         self._training_state: TrainingState = TrainingState.IDLE
 
         # Attributes only used on the root state:
-        self._all_state_refs: List[weakref.ReferenceType[FSDPState]] = []
+        self._all_states: List[FSDPState] = []
 
     # Define a separate init since `__init__` is called in the contract
     def init(self, module: nn.Module, device: torch.device) -> None:
@@ -48,12 +46,11 @@ class FSDPState(_State):
             return  # no-op: already initialized
         self._is_root = True
         root_module = self._module
-        # Each module owns the reference to the state object
         for module in root_module.modules():
             if (state := _get_module_fsdp_state(module)) is not None:
                 if module is not root_module:
                     state._is_root = False
-                self._all_state_refs.append(weakref.ref(state))
+                self._all_states.append(state)
         self._init_fqns()
 
     def _init_fqns(self) -> None:
@@ -62,9 +59,7 @@ class FSDPState(_State):
         root_module = self._module
         param_to_fsdp_param: Dict[nn.Parameter, FSDPParam] = {}
         module_to_fsdp_param_group: Dict[nn.Module, FSDPParamGroup] = {}
-        for state_ref in self._all_state_refs:
-            state = state_ref()
-            assert state is not None, "FSDPState deallocated"
+        for state in self._all_states:
             if fsdp_param_group := state._fsdp_param_group:
                 for fsdp_param in fsdp_param_group.fsdp_params:
                     param_to_fsdp_param[fsdp_param.sharded_param] = fsdp_param
