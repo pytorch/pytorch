@@ -419,7 +419,6 @@ class TestGradTransform(TestCase):
         expected = -y * x.sin()
         self.assertEqual(result, expected)
 
-    @xfailIfTorchDynamo
     def test_grad_of_vjp_of_grad_composition(self, device):
         x = torch.randn([], device=device)
         y = torch.randn([], device=device)
@@ -2670,7 +2669,6 @@ class TestJvp(TestCase):
         _, y = jvp(lambda x: jvp(f, (x,), (t,))[1], (x,), (t,))
         self.assertEqual(y, 2)
 
-    @xfailIfTorchDynamo
     def test_disable_fwd_grad_mixed(self, device):
         def f(x):
             with fwAD._set_fwd_grad_enabled(False):
