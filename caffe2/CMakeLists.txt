@@ -87,6 +87,8 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_MPS_SRCS ${ATen_MPS_SRCS})
   list(APPEND Caffe2_XPU_SRCS ${ATen_XPU_SRCS})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS_W_SORT_BY_KEY})
+  list(APPEND Caffe2_XPU_SYCL_SRCS ${ATen_XPU_SYCL_SRCS})
+  list(APPEND Caffe2_XPU_CPP_SRCS ${ATen_XPU_CPP_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
   list(APPEND Caffe2_MPS_TEST_SRCS ${ATen_MPS_TEST_SRCS})
   list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
@@ -1075,7 +1077,13 @@ elseif(USE_CUDA)
 endif()
 
 if(USE_XPU)
-  add_library(torch_xpu ${Caffe2_XPU_SRCS})
+  set(SYCL_LINK_LIBRARIES_KEYWORD PRIVATE)
+  sycl_add_library(
+    torch_xpu
+    SHARED
+    SYCL_SOURCES ${Caffe2_XPU_SYCL_SRCS}
+    CXX_SOURCES ${Caffe2_XPU_CPP_SRCS})
+  set(SYCL_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
   target_compile_options_if_supported(torch_xpu "-Wno-deprecated-copy")  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
@@ -1700,6 +1708,19 @@ if(USE_ROCM)
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
+endif()
+
+# ---[ Caffe2 XPU sources.
+if(USE_XPU)
+  get_directory_property(Caffe2_XPU_DEFINITIONS COMPILE_DEFINITIONS)
+  target_compile_definitions(torch_xpu PRIVATE ${Caffe2_XPU_DEFINITIONS})
+
+  # XXX
+  # target_link_libraries(torch_xpu PUBLIC c10_xpu)
+  target_link_libraries(torch_xpu PUBLIC torch_cpu_library ${Caffe2_PUBLIC_XPU_DEPENDENCY_LIBS})
+
+  target_include_directories(torch_xpu PRIVATE ${Caffe2_XPU_INCLUDE})
+  target_include_directories(torch_xpu INTERFACE $<INSTALL_INTERFACE:include>)
 endif()
 
 if(BUILD_STATIC_RUNTIME_BENCHMARK)

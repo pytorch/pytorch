@@ -162,6 +162,11 @@ file(GLOB native_transformers_hip_cpp "native/transformers/hip/*.cpp")
 file(GLOB native_quantized_cudnn_hip_cpp "native/quantized/cudnn/hip/*.cpp")
 file(GLOB native_utils_cpp "native/utils/*.cpp")
 
+file(GLOB native_xpu_cpp "native/xpu/*.cpp")
+file(GLOB native_xpu_sycl "native/xpu/sycl/*.cpp")
+file(GLOB native_xpu_h "native/xpu/*.h")
+file(GLOB native_xpu_sycl_h "native/xpu/sycl/*.h")
+
 # flash_attention sources
 file(GLOB flash_attention_cuda_cu "native/transformers/cuda/flash_attn/*.cu")
 file(GLOB flash_attention_cuda_kernels_cu "native/transformers/cuda/flash_attn/kernels/*.cu")
@@ -326,7 +331,8 @@ endif()
 
 if(USE_XPU)
   list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/xpu)
-  list(APPEND ATen_XPU_SRCS ${xpu_cpp})
+  list(APPEND ATen_XPU_SYCL_SRCS ${native_xpu_sycl})
+  list(APPEND ATen_XPU_CPP_SRCS ${xpu_cpp} ${native_xpu_cpp})
 endif()
 
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)
@@ -551,6 +557,7 @@ endif()
 list(APPEND ATen_CUDA_INCLUDE ${ATen_CPU_INCLUDE})
 list(APPEND ATen_HIP_INCLUDE ${ATen_CPU_INCLUDE})
 list(APPEND ATen_VULKAN_INCLUDE ${ATen_CPU_INCLUDE})
+list(APPEND ATen_XPU_INCLUDE ${ATen_CPU_INCLUDE})
 
 # We have two libraries: libATen_cpu.so and libATen_cuda.so,
 # with libATen_cuda.so depending on libATen_cpu.so.  The CPU library
@@ -587,7 +594,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
-  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${xpu_h} ${mps_h} ${native_mps_h} ${native_utils_h} ${miopen_h})
+  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${native_xpu_h} ${native_xpu_sycl_h} ${cudnn_h} ${hip_h} ${xpu_h} ${mps_h} ${native_mps_h} ${native_utils_h} ${miopen_h})
   # Metal
   if(USE_PYTORCH_METAL_EXPORT)
     # Add files needed from exporting metal models(optimized_for_mobile)
@@ -657,7 +664,8 @@ set(ATen_CUDA_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY} PARENT_SC
 set(ATen_NVRTC_STUB_SRCS ${ATen_NVRTC_STUB_SRCS} PARENT_SCOPE)
 set(ATen_HIP_SRCS ${ATen_HIP_SRCS} PARENT_SCOPE)
 set(ATen_MPS_SRCS ${ATen_MPS_SRCS} PARENT_SCOPE)
-set(ATen_XPU_SRCS ${ATen_XPU_SRCS} PARENT_SCOPE)
+set(ATen_XPU_SYCL_SRCS ${ATen_XPU_SYCL_SRCS} PARENT_SCOPE)
+set(ATen_XPU_CPP_SRCS ${ATen_XPU_CPP_SRCS} PARENT_SCOPE)
 set(ATen_QUANTIZED_SRCS ${ATen_QUANTIZED_SRCS} PARENT_SCOPE)
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)

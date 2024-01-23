@@ -1373,6 +1373,10 @@ if(USE_XPU)
     if(BUILD_TEST)
       add_subdirectory(${PROJECT_SOURCE_DIR}/test/cpp/sycl ${CMAKE_BINARY_DIR}/test_sycl)
     endif()
+
+    set(Caffe2_XPU_INCLUDE
+       $<INSTALL_INTERFACE:include> ${Caffe2_XPU_INCLUDE})
+    set(Caffe2_PUBLIC_XPU_DEPENDENCY_LIBS ${PYTORCH_SYCL_LIBRARIES})
   else()
     if(NOT PYTORCH_FOUND_XPU)
       message(WARNING "Not compiling with XPU. Could NOT find SYCL."
