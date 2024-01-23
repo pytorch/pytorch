@@ -124,7 +124,6 @@ BUILTIN_SKIPLIST = (
 # third party libraries skiplist is defined by str, because users may not use these libraries.
 # we should use lazy import & skip in the future.
 THIRDPARTY_SKIPLIST = (
-    "functorch",
     "fx2trt_oss",
     "networkx",
     "numpy",
@@ -201,12 +200,14 @@ MOD_INLINELIST = {
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfill",
+    "torch._functorch.vmap",
     "torch._inductor.test_operators",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
     "torch.autograd.function",
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
+    "torch.export.wrapper",
     "torch.fx._pytree",
     "torch.fx.passes.shape_prop",
     "torch.nn",
@@ -218,6 +219,7 @@ MOD_INLINELIST = {
     "torch.utils._foreach_utils",
     "torch.utils._pytree",
     "torch._tensor",
+    "torch._higher_order_ops.strict_mode",
 }
 
 

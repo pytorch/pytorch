@@ -12,7 +12,7 @@ const api::ShaderInfo& get_shader_info(const std::string& shader_name) {
   const ShaderListing::const_iterator shader_infos_iterator =
       get_shader_infos().find(shader_name);
 
-  TORCH_CHECK(
+  VK_CHECK_COND(
       shader_infos_iterator != get_shader_infos().end(),
       "Could not get ShaderInfo named ",
       shader_name);
@@ -24,7 +24,7 @@ const api::ShaderInfo& look_up_shader_info(const std::string& op_name) {
   const ShaderRegistry::iterator registry_iterator =
       get_shader_registry().find(op_name);
 
-  TORCH_CHECK(
+  VK_CHECK_COND(
       registry_iterator != get_shader_registry().end(),
       "Could not look up ShaderInfo for ",
       op_name,
@@ -40,7 +40,7 @@ const api::ShaderInfo& look_up_shader_info(const std::string& op_name) {
       const ShaderListing::const_iterator shader_infos_iterator =
           get_shader_infos().find(registry_key_iterator->second);
 
-      TORCH_CHECK(
+      VK_CHECK_COND(
           shader_infos_iterator != get_shader_infos().end(),
           "Could not get ShaderInfo named ",
           registry_key_iterator->second,
@@ -54,7 +54,7 @@ const api::ShaderInfo& look_up_shader_info(const std::string& op_name) {
     }
   }
 
-  TORCH_CHECK(
+  VK_CHECK_COND(
       false,
       "Could not look up ShaderInfo for ",
       op_name,
@@ -67,13 +67,13 @@ void set_registry_override(
   const ShaderRegistry::iterator registry_iterator =
       get_shader_registry().find(op_name);
 
-  TORCH_CHECK(
+  VK_CHECK_COND(
       registry_iterator != get_shader_registry().end(),
       "Could not look up ShaderInfo for ",
       op_name,
       " in shader registry");
 
-  TORCH_CHECK(
+  VK_CHECK_COND(
       get_shader_infos().find(shader_name) != get_shader_infos().end(),
       "Could not get ShaderInfo named ",
       shader_name);

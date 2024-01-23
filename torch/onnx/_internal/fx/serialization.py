@@ -103,10 +103,11 @@ def save_model_with_external_data(
         basepath: Base path of the external data file (e.g., "/tmp/large-onnx-model").
         model_location: Relative location of the ONNX model file.
             E.g., "model.onnx" so that the model file is saved to
-            "/tmp/large-onnx-model/model.onnx".
+            "<model_location>/model.onnx".
         initializer_location: Relative location of the ONNX initializer folder.
             E.g., "initializers" so that the initializers are saved to
-            "/tmp/large-onnx-model/initializers".
+            "<model_location>/initializers".
+            Note: When initializers are >2GB, must be the same as `model_location`.
         torch_load_paths: Files which containing serialized PyTorch tensors to be saved
             as ONNX initializers. They are loaded by torch.load.
         onnx_model: ONNX model to be saved with external initializers.
