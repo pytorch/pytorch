@@ -6,7 +6,6 @@
 #include <ATen/native/mps/OperationUtils.h>
 
 #include <MetalPerformanceShadersGraph/MPSGraph.h>
-#include <MetalPerformanceShadersGraph/MPSGraphFourierTransformOps.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

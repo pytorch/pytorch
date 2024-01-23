@@ -1,6 +1,5 @@
 #pragma once
 #include <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
-#include <MetalPerformanceShadersGraph/MPSGraphFourierTransformOps.h>
 
 @interface MPSGraph (SonomaOps)
 
