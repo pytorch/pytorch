@@ -642,14 +642,14 @@ void PyTorchStreamWriter::setup(const string& file_name) {
     if (!dir_name.empty()) {
       struct stat st;
       bool dir_exists = (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR));
-      #ifdef _WIN32
+      #ifdef WIN32
       // when trying to save file directly under a driver folder the slashes
       // get removed and the directory check from the setup method will fail
       // https://stackoverflow.com/questions/43922213/is-there-a-difference-between-c-and-c
-      dir_exists |=
+      dir_exists = dir_exists ||
           (dir_name.length() == 2 &&
            dir_name.back() == ':' && isalpha(dir_name.front()));
-      #endif // _WIN32
+      #endif // WIN32
       TORCH_CHECK(dir_exists, "Parent directory ", dir_name, " does not exist.");
     }
     TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
