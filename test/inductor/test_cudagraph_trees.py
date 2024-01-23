@@ -231,7 +231,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with capture_stderr() as captured_output:
                 foo(torch.ones([10], device="cuda"), torch.ones([20]))
 
-            FileCheck().check("skipping cudagraphs due to multiple devices.").check(
+            FileCheck().check("skipping cudagraphs due to cpu device.").check(
                 "y + 2"
             ).run(captured_output[0])
 
