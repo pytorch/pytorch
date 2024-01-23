@@ -207,7 +207,7 @@ inline void tinygemm_kernel(
   constexpr int ROWS = BLOCK_M;
   constexpr int COLS = BLOCK_N / 8;
 
-  const int PREFETCH_SIZE_K = 8 * 4;
+  const int PREFETCH_SIZE_K = 16 * 4;
   const int PREFETCH_SIZE_KB = (PREFETCH_SIZE_K + BLOCK_K - 1) / BLOCK_K;
 
   // number of blocks on K
@@ -247,6 +247,9 @@ inline void tinygemm_kernel(
     b = _mm256_permutevar8x32_ps(b, idx1);
     scale[i] = _mm256_permute2f128_ps(a, b, 0b0100000);
     zero[i] = _mm256_permute2f128_ps(a, b, 0b0110001);
+
+    // zero = -8 * scale + zero
+    zero[i] = _mm256_fmadd_ps(scale[i], offset, zero[i]);
   };
 
   auto loadc = [&](auto i) {
@@ -254,7 +257,7 @@ inline void tinygemm_kernel(
   };
   compile_time_for<ROWS * COLS>::op(loadc);
 
-  auto compute = [&](auto i, int k) {
+  auto compute = [&, COLS](auto i, int k) {
     constexpr int row = i / COLS;
     constexpr int col = i % COLS;
 
@@ -267,23 +270,42 @@ inline void tinygemm_kernel(
     }
 
     if constexpr (row == 0) {
-      if constexpr (col % 2 == 0) {
-        // de-quantize per 2x 64 bits (16x int4)
-        __m128i b8 = conver_int4_to_int8(B + k * ldb + col * 4);
-        __m128i b8_val0 = _mm_set1_epi64x(_mm_extract_epi64(b8, 0));
-        __m128i b8_val1 = _mm_set1_epi64x(_mm_extract_epi64(b8, 1));
-        if (k + PREFETCH_SIZE_K < K) {
-          _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb + col * 4, _MM_HINT_T0);
-        }
+      if constexpr (COLS == 4) {
+        // when BLOCK_N = 32, handle each row at a time
+        if constexpr (col == 0) {
+          __m256i mask = _mm256_set1_epi32(0xF);
+          __m128i b4 = _mm_load_si128((__m128i*)(B + k * ldb));
+          if (k + PREFETCH_SIZE_K < K) {
+            _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb, _MM_HINT_T0);
+          }
 
-        vb[col] = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(b8_val0));
-        vb[col] = _mm256_add_ps(vb[col], offset);
-        vb[col] = _mm256_mul_ps(vb[col], scale[col]);
-        vb[col] = _mm256_add_ps(vb[col], zero[col]);
-        vb[col + 1] = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(b8_val1));
-        vb[col + 1] = _mm256_add_ps(vb[col + 1], offset);
-        vb[col + 1] = _mm256_mul_ps(vb[col + 1], scale[col + 1]);
-        vb[col + 1] = _mm256_add_ps(vb[col + 1], zero[col + 1]);
+          __m256i b32 = _mm256_cvtepu8_epi32(b4);
+          vb[0] = _mm256_cvtepi32_ps(_mm256_and_si256(b32, mask));
+          vb[0] = _mm256_fmadd_ps(vb[0], scale[0], zero[0]);
+          vb[2] = _mm256_cvtepi32_ps(_mm256_srli_epi32(b32, 4));
+          vb[2] = _mm256_fmadd_ps(vb[2], scale[2], zero[2]);
+
+          b32 = _mm256_cvtepu8_epi32(_mm_shuffle_epi32(b4, _MM_SHUFFLE(3, 2, 3, 2)));
+          vb[1] = _mm256_cvtepi32_ps(_mm256_and_si256(b32, mask));
+          vb[1] = _mm256_fmadd_ps(vb[1], scale[1], zero[1]);
+          vb[3] = _mm256_cvtepi32_ps(_mm256_srli_epi32(b32, 4));
+          vb[3] = _mm256_fmadd_ps(vb[3], scale[3], zero[3]);
+        }
+      } else {
+        if constexpr (col % 2 == 0) {
+          // de-quantize per 64 bits (16x int4)
+          __m128i b8 = conver_int4_to_int8(B + k * ldb + col * 4);
+          __m128i b8_val0 = _mm_set1_epi64x(_mm_extract_epi64(b8, 0));
+          __m128i b8_val1 = _mm_set1_epi64x(_mm_extract_epi64(b8, 1));
+          if (k + PREFETCH_SIZE_K < K) {
+            _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb + col * 4, _MM_HINT_T0);
+          }
+
+          vb[col] = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(b8_val0));
+          vb[col] = _mm256_fmadd_ps(vb[col], scale[col], zero[col]);
+          vb[col + 1] = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(b8_val1));
+          vb[col + 1] = _mm256_fmadd_ps(vb[col + 1], scale[col + 1], zero[col + 1]);
+        }
       }
     }
 
@@ -400,9 +422,21 @@ inline void tinygemm_kernel(
 //     [Lane02] N0...31:  {a20|a00, a21|a01, a22|a02, ...}
 //     [Lane13] N32...63: {a30|a10, a31|a11, a32|a12, ...}
 //
-//  Note: when N is 16, 32 or 48, pack with 64-bit format (same as below).
+//  Note: when N is 16, 32 or 48, pack with 64-bit format.
 //
-// 2. avx2 or default packed format:
+// 2. avx2 packed format:
+//   When N is 32, to do 128-bit unpacking at a time.
+//
+//   weight:
+//     [Lane0] N0...15:  { a0,  a1,  a2, ...}
+//     [Lane1] N16...32: {a16, a17, a18, ...}
+//
+//  packed:
+//    [Lane01] N0...32: {a16|a0, a17|a1, a18|a2, ...}
+//
+//  Note: When N is 16, pack with 64-bit format
+//
+// 3 non-vectorized packed format:
 //   Do 64-bit unpacking at a time.
 //
 //   weight: {a0, a1, a2, a3, ..., a14, a15}
@@ -446,6 +480,26 @@ void weight_to_int4pack_kernel(
           }
         } else {
           // for nb_size 16, 32, 48
+          for (int n = 0; n < nb_size; n += 2) {
+            int32_t val0 = src[n * K + k];
+            int32_t val1 = src[n * K + K + k];
+
+            uint8_t packed = (((uint8_t)(val1) << 4)) | ((uint8_t)(val0));
+            dst[k * nb_size / 2 + n / 2] = packed;
+          }
+        }
+#elif defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+        if (nb_size == BLOCK_N) {
+          // for nb_size 32
+          for (int d = 0; d < 16; d++) {
+            int32_t val0 = src[(d + 0) * K + k];
+            int32_t val1 = src[(d + 16) * K + k];
+
+            uint8_t packed01 = (((uint8_t)(val1) << 4)) | ((uint8_t)(val0));
+            dst[k * 16 + d] = packed01;
+          }
+        } else {
+          // for nb_size 16
           for (int n = 0; n < nb_size; n += 2) {
             int32_t val0 = src[n * K + k];
             int32_t val1 = src[n * K + K + k];
