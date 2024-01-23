@@ -217,7 +217,7 @@ TEST(TensorIteratorTest, FailNonPromotingBinaryOp) {
   ASSERT_ANY_THROW(config.build());
 }
 
-TEST(TensorIteratorTest, ForEachMutableInput) {
+TEST(TensorIteratorTest, ForEachConstInput) {
   at::Tensor out = at::zeros({10});
   at::Tensor a = at::_lazy_clone(at::arange({10}).to(at::kFloat));
   EXPECT_TRUE(c10::impl::cow::is_cow_data_ptr(a.storage().data_ptr()));
