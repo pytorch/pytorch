@@ -10,6 +10,7 @@
 #else
 #include <ATen/ops/_convert_weight_to_int4pack_native.h>
 #include <ATen/ops/_weight_int4pack_mm_native.h>
+#include <ATen/ops/_weight_int8pack_mm_native.h>
 #include <ATen/ops/empty.h>
 #endif
 
@@ -17,6 +18,7 @@ namespace at::native {
 
 DEFINE_DISPATCH(weight_to_int4pack_stub);
 DEFINE_DISPATCH(int4pack_mm_stub);
+DEFINE_DISPATCH(int8pack_mm_stub);
 
 Tensor _convert_weight_to_int4pack_cpu(
     const Tensor& in,
@@ -74,6 +76,37 @@ Tensor _weight_int4pack_mm_cpu(
 
   auto C = at::empty({M, N}, A.options());
   int4pack_mm_stub(kCPU, C, A, B, qGroupSize, qScaleAndZeros);
+
+  return C;
+}
+
+Tensor _weight_int8pack_mm_cpu(
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& scales) {
+
+  auto M = A.size(0);
+  auto N = B.size(0);
+  auto K = A.size(1);
+
+  TORCH_CHECK(A.dtype() == kBFloat16,
+      "_weight_int8pack_mm: expect A to be bfloat16 tensor.");
+  TORCH_CHECK(A.is_contiguous(),
+      "_weight_int8pack_mm: expect A to be contiguous.");
+  TORCH_CHECK(A.dim() == 2,
+      "_weight_int8pack_mm: expect A to be 2D tensor.");
+
+  TORCH_CHECK(B.dtype() == kChar,
+      "_weight_int8pack_mm: expect B to be int8 tensor.");
+  TORCH_CHECK(B.is_contiguous(),
+      "_weight_int8pack_mm: expect B to be contiguous.");
+  TORCH_CHECK(B.size(1) == K);
+
+  TORCH_CHECK(scales.dim() == 1);
+  TORCH_CHECK(scales.size(0) == N);
+
+  auto C = at::empty({M, N}, A.options());
+  int8pack_mm_stub(kCPU, C, A, B, scales);
 
   return C;
 }
