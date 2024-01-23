@@ -142,6 +142,10 @@ class FSDPState(_State):
             output = self._fsdp_param_group.post_forward(module, input, output)
         output = self._register_pre_backward_hook(output)
         self._training_state = TrainingState.IDLE
+        if self._is_root and (all_gather_state := self._all_gather_state.pop()):
+            self._all_gather_copy_in_stream.wait_event(all_gather_state.event)
+            self._all_gather_stream.wait_event(all_gather_state.event)
+            del all_gather_state  # free
 
     def _pre_backward(self, *unused: Any) -> None:
         self._training_state = TrainingState.PRE_BACKWARD
