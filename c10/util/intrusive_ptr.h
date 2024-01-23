@@ -415,7 +415,7 @@ class intrusive_ptr final {
 
   intrusive_ptr& operator=(intrusive_ptr&& rhs) & noexcept {
     // NOLINTNEXTLINE(*assign*)
-    return operator=<TTarget, NullType>(std::move(rhs));
+    return operator= <TTarget, NullType>(std::move(rhs));
   }
 
   template <class From, class FromNullType>
@@ -433,7 +433,7 @@ class intrusive_ptr final {
       return *this;
     }
     // NOLINTNEXTLINE(*assign-operator, *assignment-signature)
-    return operator=<TTarget, NullType>(rhs);
+    return operator= <TTarget, NullType>(rhs);
   }
 
   template <class From, class FromNullType>
@@ -805,7 +805,7 @@ class weak_intrusive_ptr final {
 
   weak_intrusive_ptr& operator=(weak_intrusive_ptr&& rhs) & noexcept {
     // NOLINTNEXTLINE(*assign*)
-    return operator=<TTarget, NullType>(std::move(rhs));
+    return operator= <TTarget, NullType>(std::move(rhs));
   }
 
   template <class From, class FromNullType>
@@ -824,7 +824,7 @@ class weak_intrusive_ptr final {
       return *this;
     }
     // NOLINTNEXTLINE(*assign*)
-    return operator=<TTarget, NullType>(rhs);
+    return operator= <TTarget, NullType>(rhs);
   }
 
   weak_intrusive_ptr& operator=(
