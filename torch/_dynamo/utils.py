@@ -898,10 +898,12 @@ def rot_n_helper(n):
 common_constant_types = {
     int,
     float,
+    complex,
     bool,
     str,
     bytes,
     type(None),
+    Ellipsis.__class__,
     types.CodeType,
     torch.device,
     torch.dtype,
