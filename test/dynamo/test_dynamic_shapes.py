@@ -5,7 +5,7 @@ import warnings
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch.fx.experimental import _config as fx_config
-from torch.testing._internal.common_utils import TEST_Z3
+from torch.testing._internal.common_utils import slowTest, TEST_Z3
 
 try:
     from . import (
@@ -88,6 +88,11 @@ if TEST_Z3:
 unittest.expectedFailure(
     # Test is only valid without dynamic shapes
     DynamicShapesReproTests.test_many_views_with_mutation_dynamic_shapes  # noqa: F821
+)
+
+# Test takes too long ~700s as of 414a1fd29f04d06e41b7f895368dd1f83a4be29d
+DynamicShapesExportTests.test_retracibility_dynamic_shapes = slowTest(  # noqa: F821
+    DynamicShapesExportTests.test_retracibility_dynamic_shapes  # noqa: F821
 )
 
 if __name__ == "__main__":

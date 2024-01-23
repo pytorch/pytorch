@@ -2,6 +2,7 @@ import abc
 import copy
 import operator
 from copy import deepcopy
+from itertools import chain
 from typing import Any, cast, Dict, List, Optional, Union
 
 import torch
@@ -171,8 +172,12 @@ class UnflattenedModule(torch.nn.Module):
                 name,
                 is_parameter=False,
             )
-        for fqn in self.graph_signature.inputs_to_lifted_tensor_constants.values():
-            constant = export_module.tensor_constants[fqn]
+
+        for fqn in chain(
+            self.graph_signature.lifted_tensor_constants,
+            self.graph_signature.lifted_custom_objs,
+        ):
+            constant = export_module.constants[fqn]
             if isinstance(constant, torch.Tensor):
                 constant = constant.clone()
             _assign_attr(
@@ -186,6 +191,7 @@ class UnflattenedModule(torch.nn.Module):
             **self.graph_signature.inputs_to_parameters,
             **self.graph_signature.inputs_to_buffers,
             **self.graph_signature.inputs_to_lifted_tensor_constants,
+            **self.graph_signature.inputs_to_lifted_custom_objs,
         }
 
         _sink_params(self, inputs_to_state, [])
