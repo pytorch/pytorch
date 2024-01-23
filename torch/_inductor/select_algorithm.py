@@ -928,9 +928,13 @@ class AlgorithmSelectorCache(PersistentCache):
         out_extern = torch.as_strided(
             out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
         )
+        expected = None
         if VERIFY:
-            choices[0].benchmark(*example_inputs_extern, out=out_extern)
-            expected = out_extern.clone()
+            for i in range(len(choices)):
+                if isinstance(choices[i], ExternKernelCaller):
+                    choices[i].benchmark(*example_inputs_extern, out=out_extern)
+                    expected = out_extern.clone()
+                    break
 
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
@@ -958,7 +962,7 @@ class AlgorithmSelectorCache(PersistentCache):
             else:
                 # triton templates want the base pointer for sliced tensors
                 result = choice.benchmark(*example_inputs, out=out)
-            if VERIFY:
+            if VERIFY and expected is not None:
                 torch.testing.assert_close(out_extern, expected, **VERIFY)
             torch.cuda.synchronize()  # shake out any CUDA errors
             return result
