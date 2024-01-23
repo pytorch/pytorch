@@ -116,7 +116,15 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self._check_backend_works("aot_eager_decomp_partition")
 
     def test_aot_ts(self):
-        self._check_backend_works("aot_ts")
+        from torch.fx import lazy_graph_module
+
+        try:
+            # LazyGraphModule does not work with torchscript well.
+            # Use the vanilla GraphModule instead.
+            lazy_graph_module._force_skip_lazy_graph_module = True
+            self._check_backend_works("aot_ts")
+        finally:
+            lazy_graph_module._force_skip_lazy_graph_module = False
 
     @requires_cuda()
     def test_aot_cudagraphs(self):

@@ -4,6 +4,7 @@ from torch.fx import GraphModule
 from ._compatibility import compatibility
 
 _use_lazy_graph_module = False
+_force_skip_lazy_graph_module = False  # used in unit test to skip lazy graph module
 
 
 @compatibility(is_backward_compatible=False)
@@ -12,7 +13,7 @@ def use_lazy_graph_module(should_use: bool):
     try:
         global _use_lazy_graph_module
         prior = _use_lazy_graph_module
-        _use_lazy_graph_module = should_use
+        _use_lazy_graph_module = should_use and not _force_skip_lazy_graph_module
         yield
     finally:
         _use_lazy_graph_module = prior
