@@ -417,7 +417,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _new_batch_norm_with_update_mps(
     bool cudnn_enabled) {
   Tensor output, save_mean, save_var;
   std::tie(output, save_mean, save_var) =
-      batch_norm_mps(input, weight_opt, bias_opt, running_mean_opt, running_var_opt, /*train*/true, momentum, eps);
+      batch_norm_mps(input, weight_opt, bias_opt, running_mean_opt, running_var_opt, /*train*/ true, momentum, eps);
   Tensor reserve = at::empty({0}, input.options().dtype(kByte));
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
 }
