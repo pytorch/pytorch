@@ -1,6 +1,6 @@
 import operator
 from collections import defaultdict, namedtuple
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict
 
 import torch
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_functional
