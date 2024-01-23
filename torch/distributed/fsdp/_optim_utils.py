@@ -404,6 +404,12 @@ def _shard_orig_param_state(
             and value.dim() > 0
             and fsdp_state.sharding_strategy != ShardingStrategy.NO_SHARD
         ):
+            if fsdp_state._device_mesh is not None:
+                # We have to call synchronize() if the tensor is gathered from
+                # DTensor.  Otherwise, the later `clone()` will cause errors.
+                # TODO: this is a temporary fix. We need to figure out the root
+                # cause
+                torch.cuda.synchronize()
             value = value.flatten()[
                 intra_param_start_idx : intra_param_end_idx + 1  # type: ignore[operator]
             ].clone()
@@ -466,7 +472,6 @@ def _flatten_optim_state_dict(
     all_state_keys = set(unflat_osd_state.keys())
 
     sync_threshold = 200
-    curr_numel = 0
     for param, fqns in param_to_fqns.items():
         fqn = fqns[0]
         if fqn not in unflat_osd_state:
@@ -522,14 +527,6 @@ def _flatten_optim_state_dict(
                     f"The state of {key} is empty. This should happen when "
                     "use_orig_params=True."
                 )
-
-            for t in flat_state.values():
-                if torch.is_tensor(t):
-                    curr_numel += t.numel()
-            # Call synchronize() to ensure the some temporary tensors being recycled.
-            if curr_numel > sync_threshold:
-                torch.cuda.synchronize()
-                curr_numel = 0
 
         else:  # do not flatten non-FSDP parameters' states
             assert len(fqns) == 1
