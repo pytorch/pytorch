@@ -736,7 +736,7 @@ static __global__ void barrierKernel(
     uint64_t mask,
     size_t rank,
     size_t worldSize) {
-  if (threadIdx.x < worldSize && mask & (1ULL << threadIdx.x)) {
+  if (threadIdx.x < worldSize && (mask & (1ULL << threadIdx.x))) {
     auto targetRank = threadIdx.x;
     releaseSignal(&p2pStates[targetRank]->signals0[0][rank]);
     acquireSignal(&p2pStates[rank]->signals0[0][targetRank]);
@@ -772,8 +772,8 @@ void IntraNodeComm::put(const at::Tensor& tensor, int64_t offset) {
       "intra node buffer size");
   // This results in "Memcpy PtoP" which does not use SMs for copying
   cudaMemcpyAsync(
-      buffers_[rank_],
-      static_cast<char*>(tensor.data_ptr()) + offset,
+      static_cast<char*>(buffers_[rank_]) + offset,
+      tensor.data_ptr(),
       sz,
       cudaMemcpyDeviceToDevice,
       at::cuda::getCurrentCUDAStream());
