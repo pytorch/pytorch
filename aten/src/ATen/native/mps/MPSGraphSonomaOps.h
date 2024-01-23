@@ -18,7 +18,7 @@ typedef NS_ENUM(NSUInteger, MPSGraphFFTScalingMode)
 +(nullable instancetype) descriptor;
 @end
 
-@compatibility_alias MPSGraphFFTDescriptor FakeMPSGraphFFTDescriptor
+@compatibility_alias MPSGraphFFTDescriptor FakeMPSGraphFFTDescriptor;
 #endif
 
 @interface MPSGraph (SonomaOps)
