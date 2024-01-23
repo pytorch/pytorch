@@ -1012,29 +1012,34 @@ void ProcessGroupNCCL::waitForDumpOrTimeout(
   TORCH_CHECK(fut.valid(), "Expected a valid future");
 
   auto futStatus = fut.wait_for(std::chrono::seconds(timeout_sec));
-  if (futStatus != std::future_status::ready) {
-    TORCH_CHECK(
-        futStatus != std::future_status::deferred,
-        "Expected the dump future to have been launched eagerly.");
+  TORCH_CHECK(
+      futStatus != std::future_status::deferred,
+      "Expected the dump future to have been launched eagerly.");
+  if (futStatus == std::future_status::ready) {
+    // Calling .get() will raise any exception stored in the promise associated
+    // with the future. (but we can ignore the return value, which will be false
+    // if dumping is not enabled)
+    try {
+      fut.get();
+      std::this_thread::sleep_until(wakeUpTime);
+    } catch (const std::exception& e) {
+      LOG(ERROR) << logPrefix()
+                 << "Caught exception during async debug dump: \"" << e.what()
+                 << "\"\n";
+    } catch (...) {
+      LOG(ERROR) << logPrefix()
+                 << "Caught unknown exception during async debug dump.";
+    }
+  } else {
     LOG(INFO)
         << logPrefix() << "Debug dump timed out and is being abandoned."
         << " This may be due to slow ADDR2LINE performance processing stacktraces."
         << " Try TORCH_DISABLE_ADDR2LINE=1 and TORCH_NCCL_TRACE_CPP_STACK=0 to work around.";
   }
-
-  // Calling .get() will raise any exception stored in the promise associated
-  // with the future. (but we can ignore the return value, which will be false
-  // if dumping is not enabled)
-  try {
-    fut.get();
-    std::this_thread::sleep_until(wakeUpTime);
-  } catch (const std::exception& e) {
-    LOG(ERROR) << logPrefix() << "Caught exception during async debug dump: \""
-               << e.what() << "\"\n";
-  } catch (...) {
-    LOG(ERROR) << logPrefix()
-               << "Caught unknown exception during async debug dump.";
-  }
+  // Ensure we sleep at least until wakeUpTime regardless of whether the future
+  // ran quickly or took the full timeout.
+  std::this_thread::sleep_until(wakeUpTime);
+  return;
 }
 
 void ProcessGroupNCCL::abortCommsFromMap(
