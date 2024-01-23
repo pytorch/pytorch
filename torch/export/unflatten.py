@@ -7,6 +7,7 @@ from typing import Any, cast, Dict, List, Optional, Union
 import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
+from torch.export import graph_signature
 from torch.export.exported_program import (
     ConstantArgument,
     ExportedProgram,
@@ -144,8 +145,16 @@ class UnflattenedModule(torch.nn.Module):
         self.flat_args_adapter = flat_args_adapter
         # Flag to indicate whether args have been adapted.
         self.adapted = False
+        self._inplace_buffer_mutations = inplace_buffer_mutations
+        # NOTE: if inplace_buffer_mutations is False, we need to keep track of
+        # mutated buffers.
+        self._mutated_buffer_dict: Dict[str, Any] = {
+            mutated_buffer_name: value
+            for mutated_buffer_name, value in export_module.state_dict.items()
+            if mutated_buffer_name in self.graph_signature.buffers_to_mutate.values()
+        }
 
-        if inplace_buffer_mutations:
+        if self._inplace_buffer_mutations:
             _inplace_buffer_mutations(export_graph, self.graph_signature)
         _outline_submodules(export_graph, self)
 
@@ -174,6 +183,16 @@ class UnflattenedModule(torch.nn.Module):
             **self.graph_signature.inputs_to_parameters,
             **self.graph_signature.inputs_to_buffers,
         }
+
+        if not self._inplace_buffer_mutations:
+            # Exclude sinking mutated buffers to `get_attr` from inputs_to_state
+            keys_to_delete = []
+            for buffer_name in self.graph_signature.buffers_to_mutate.values():
+                for k, v in inputs_to_state.items():
+                    if buffer_name == v:
+                        keys_to_delete.append(k)
+            for name in keys_to_delete:
+                del inputs_to_state[name]
 
         _sink_params(self, inputs_to_state, [])
         # Check all input nodes has been processed.
@@ -234,6 +253,12 @@ class UnflattenedModule(torch.nn.Module):
                         f"Exported module: {signature.in_spec.num_leaves}"
                     )
 
+        if not self._inplace_buffer_mutations:
+            additional_inputs = []
+            for input_ in self._mutated_buffer_dict.keys():
+                additional_inputs.append(self._mutated_buffer_dict[input_])
+            flat_args = additional_inputs + flat_args
+
         if self.check_input_constraints:
             # Import here to avoid an unfortunate circular dependency.
             # TODO(suo): untangle this.
@@ -242,9 +267,31 @@ class UnflattenedModule(torch.nn.Module):
             _check_input_constraints_for_graph(
                 self.input_placeholders, flat_args, self.range_constraints
             )
+
         tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
             *flat_args, enable_io_processing=False
         )
+
+        if not self._inplace_buffer_mutations:
+            # Update mutated buffers
+            # NOTE: mutated user inputs are not included
+            buffer_mutation = self.graph_signature.buffers_to_mutate
+            num_mutated = len(buffer_mutation)
+            mutated_values = tree_out[:num_mutated]
+
+            # Exclude dependency token from final result.
+            assertion_dep_token = self.graph_signature.assertion_dep_token
+            if assertion_dep_token is not None:
+                assertion_dep_token_index = next(iter(assertion_dep_token.keys()))
+                tree_out = tree_out[:assertion_dep_token_index]
+
+            tree_out = tree_out[num_mutated:]
+            for i, value in enumerate(mutated_values):
+                output_spec = self.graph_signature.output_specs[i]
+                if output_spec.kind == graph_signature.OutputKind.BUFFER_MUTATION:
+                    assert output_spec.target is not None
+                    self._mutated_buffer_dict[output_spec.target] = value
+
         return pytree.tree_unflatten(tree_out, signature.out_spec)
 
 
@@ -268,7 +315,7 @@ def unflatten(
         module (ExportedProgram): The ExportedProgram to unflatten.
         flat_args_adapter (Optional[FlatArgsAdapter]): Adapt flat args if input TreeSpec does not match with exported module's.
         inplace_buffer_mutations (bool): Whether to transform buffer mutations from their functionalized form into a
-            copy_ node in the graph.
+            copy_ node in the graph. Default is True.
 
     Returns:
         An instance of :class:`UnflattenedModule`, which has the same module

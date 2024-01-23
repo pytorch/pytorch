@@ -483,5 +483,37 @@ class TestUnflatten(TestCase):
                         call_module_input_order.append(sub_node.op)
         self.assertEqual(call_module_input_order, ["placeholder", "get_attr", "get_attr"])
 
+    def test_unflatten_not_inplace_buffer_mutations_match_export_program(self):
+        class Child(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("child2buffer", torch.ones(2, 3))
+
+            def forward(self, x):
+                self.child2buffer.add_(x)
+                return x - self.child2buffer
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = Child()
+                self.register_parameter(
+                    "rootparam", torch.nn.Parameter(torch.ones(2, 3))
+                )
+
+            def forward(self, x):
+                x = self.foo(x)
+                return x * self.rootparam
+
+        orig_eager = MyModule()
+        export_module = torch.export.export(orig_eager, (torch.rand(2, 3),), {})
+        unflattened_not_in_place = unflatten(export_module, inplace_buffer_mutations=False)
+
+        inputs = (torch.rand(2, 3),)
+        # compare the results if multiple runs to make sure mutated buffers are updated
+        for _ in range(5):
+            self.compare_outputs(export_module, unflattened_not_in_place, inputs)
+
+
 if __name__ == "__main__":
     run_tests()
