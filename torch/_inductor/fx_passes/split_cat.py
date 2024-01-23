@@ -353,6 +353,10 @@ def merge_splits(
     dim: int,
 ):
     node = match.output_node()
+    # it is possible that the split has no users,
+    # we check the corner case and skip the pattern
+    if len(node.users.keys()) == 0:
+        return
     graph = match.graph
     first_split = node.args[0].args[0]
     next_split_index = node.args[0].args[1]
@@ -809,8 +813,7 @@ class SplitCatSimplifier:
     ):
         to_remove = [split_node]
         counters["inductor"]["scmerge_split_removed"] += 1
-        for getitem_node in split_node.users.keys():
-            to_remove.append(getitem_node)
+        to_remove.extend(split_node.users.keys())
         for next_user in next_users:
             if next_user.target not in {torch.cat, torch.stack}:
                 continue
@@ -1174,6 +1177,10 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
                 indices.append(arg.args[1])
             # indices may not be necessarily sorted, we sort them first
             indices.sort()
+            # the gettitems to be merged must be consecutive, otherwise
+            # returned sliced tensor could be wrong
+            if indices[len(indices) - 1] - indices[0] + 1 != len(indices):
+                continue
             # update the arg of cat user, only keep the first getitem
             cat_user.update_arg(0, cat_user.args[0][0])
             # calculate the fused tensor sizes in the indices
@@ -1227,7 +1234,7 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
 #       /   ...    \             ...       /         \
 # getitem      getitem                 getitem     getitem -> user=1
 #    \           /
-#        stack (dim=0)  -> user=1
+#        stack (dim=0)  -> user=1, getitems to be consecutive
 #          |
 #         tahn  -> user=1
 #          |
@@ -1318,6 +1325,10 @@ def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
                 split_sections_for_unbind.append(split_sections[arg.args[1]])
             # indices may not be necessarily sorted, we sort them first
             indices.sort()
+            # the gettitems to be merged must be consecutive, otherwise
+            # returned sliced tensor could be wrong
+            if indices[len(indices) - 1] - indices[0] + 1 != len(indices):
+                continue
             # update the arg of stack user, only keep the first getitem
             user.update_arg(0, user.args[0][0])
             # calculate the fused tensor sizes in the indices

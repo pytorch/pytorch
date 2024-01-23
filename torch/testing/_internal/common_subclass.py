@@ -73,7 +73,7 @@ class DiagTensorBelow(WrapperTensor):
         # For everything else, call the handler:
         fn = cls.handled_ops.get(func.__name__, None)
         if fn:
-            return fn(*args, **kwargs or {})
+            return fn(*args, **(kwargs or {}))
         else:
             # Note that here, because we don't need to provide the autograd formulas
             # we can have a default "fallback" that creates a plain Tensor based

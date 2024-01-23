@@ -10,30 +10,37 @@ import threading
 import types
 from typing import Dict, List
 
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
 import torch._dynamo.config
 
 import torch.nn
 from torch._guards import TracingContext
 
 from .. import variables
-from ..allowed_functions import is_allowed
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, ODictGetItemSource, RandomValueSource
+from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
     all_hook_names,
     build_checkpoint_variable,
     check_constant_args,
     get_custom_getattr,
+    has_torch_function,
     is_namedtuple_cls,
     is_utils_checkpoint,
     istype,
     namedtuple_fields,
     object_has_getattribute,
+    proxy_args_kwargs,
+    tensortype_to_dtype,
 )
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
-from .dicts import ConstDictVariable
+from .dicts import DefaultDictVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -51,33 +58,141 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def python_type(self):
         return type(self.value)
 
+    def as_proxy(self):
+        return self.value
+
+    def __repr__(self):
+        return f"UserDefinedClassVariable({self.value})"
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def _constant_fold_classes():
+        return {
+            torch.device,
+            torch.finfo,
+            torch.iinfo,
+            torch.Size,
+        }
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def _in_graph_classes():
+        return set(tensortype_to_dtype.keys()) | {
+            torch.Tensor,
+            torch.cuda.Stream,
+            torch.cuda.Event,
+        }
+
+    def can_constant_fold_through(self):
+        return self.value in self._constant_fold_classes()
+
     def var_getattr(self, tx, name: str) -> "VariableTracker":
+        from .. import trace_rules
         from . import ConstantVariable
         from .builder import VariableBuilder
+
+        if name == "__name__":
+            return ConstantVariable.create(self.value.__name__)
 
         source = AttrSource(self.source, name) if self.source is not None else None
         try:
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
             obj = None
+
         if isinstance(obj, staticmethod):
-            return variables.UserFunctionVariable(
-                obj.__get__(self.value), source=source
-            )
+            func = obj.__get__(self.value)
+            if trace_rules.lookup(func) is not None:
+                return trace_rules.lookup(func).create_with_source(func, source=source)
+            else:
+                return variables.UserFunctionVariable(func, source=source)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source and inspect.ismemberdescriptor(obj):
             return VariableBuilder(tx, source)(obj.__get__(self.value))
 
-        if name in getattr(self.value, "__dict__", {}) or ConstantVariable.is_literal(
-            obj
+        # Special handling of collections.OrderedDict.fromkeys()
+        # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
+        # collections.defaultdict, and both will be handled at UserDefinedClassVariable.call_method().
+        # Otherwise, it would be wrapped as UserDefinedObjectVariable(collections.OrderedDict.fromkeys),
+        # and we need duplicate code to handle both cases.
+        if self.value is collections.OrderedDict and name == "fromkeys":
+            return super().var_getattr(tx, name)
+
+        if name in getattr(self.value, "__dict__", {}) or (
+            self.value.__module__.startswith("torch.")
+            or self.value.__module__ == "torch"
         ):
             if source:
                 return VariableBuilder(tx, source)(obj)
-            elif ConstantVariable.is_literal(obj):
-                return ConstantVariable.create(obj)
+        elif ConstantVariable.is_literal(obj):
+            return ConstantVariable.create(obj)
 
         return super().var_getattr(tx, name)
+
+    def _call_cross_entropy_loss(self, tx, args, kwargs):
+        """
+        functional: input, target, weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
+        label_smoothing=0.0
+
+        non functional ctor: weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
+        label_smoothing=0.0
+
+        non functional loss call: input, target, optional_output
+        """
+        from . import ConstantVariable
+
+        def normalize_args(
+            weight=ConstantVariable.create(None),
+            size_average=ConstantVariable.create(None),
+            ignore_index=ConstantVariable.create(-100),
+            reduce=ConstantVariable.create(None),
+            reduction=ConstantVariable.create("mean"),
+            label_smoothing=ConstantVariable.create(0.0),
+        ):
+            return (
+                weight,
+                size_average,
+                ignore_index,
+                reduce,
+                reduction,
+                label_smoothing,
+            )
+
+        (
+            weight,
+            size_average,
+            ignore_index,
+            reduce_arg,
+            reduction,
+            label_smoothing,
+        ) = normalize_args(*args, **kwargs)
+
+        def fake_cross_entropy_loss(input, target):
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.nn.functional.cross_entropy,
+                    *proxy_args_kwargs(
+                        [
+                            input,
+                            target,
+                            weight,
+                            size_average,
+                            ignore_index,
+                            reduce_arg,
+                            reduction,
+                            label_smoothing,
+                        ],
+                        {},
+                    ),
+                ),
+            )
+
+        return variables.LambdaVariable(fake_cross_entropy_loss)
 
     def call_method(
         self,
@@ -101,6 +216,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
 
             return variables.ListVariable(subs_as_vars, **options)
+        elif (
+            self.value in {collections.OrderedDict, collections.defaultdict}
+            and name == "fromkeys"
+        ):
+            from .builtin import BuiltinVariable
+
+            return BuiltinVariable.call_custom_dict_fromkeys(
+                tx, self.value, *args, **kwargs
+            )
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -108,15 +232,67 @@ class UserDefinedClassVariable(UserDefinedVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
-        from .builder import SourcelessBuilder
+        from .builder import SourcelessBuilder, wrap_fx_proxy
+        from .builtin import BuiltinVariable
 
-        if self.value is contextlib.nullcontext:
+        constant_args = check_constant_args(args, kwargs)
+
+        if self.can_constant_fold_through() and constant_args:
+            # constant fold
+            return variables.ConstantVariable.create(
+                self.as_python_constant()(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                ),
+            )
+        elif self.value is torch.nn.CrossEntropyLoss:
+            return self._call_cross_entropy_loss(tx, args, kwargs)
+        elif self.value is contextlib.nullcontext:
             return NullContextVariable()
+        elif self.value is collections.OrderedDict:
+            return BuiltinVariable.call_custom_dict(
+                tx, collections.OrderedDict, *args, **kwargs
+            )
+        elif (
+            self.value is collections.defaultdict
+            and len(args) <= 1
+            and DefaultDictVariable.is_supported_arg(args[0])
+        ):
+            return DefaultDictVariable(
+                {},
+                collections.defaultdict,
+                args[0],
+                mutable_local=MutableLocal(),
+            )
+        elif self.value is collections.deque and not kwargs:
+            if len(args) == 0:
+                items = []
+            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
+                items = args[0].unpack_var_sequence(tx)
+            else:
+                unimplemented("deque() with more than 1 arg not supported")
+            return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
+        elif self.value is functools.partial:
+            if not args:
+                unimplemented("functools.partial malformed")
+            # The first arg, a callable (the ctor below will assert on types)
+            fn = args[0]
+            rest_args = args[1:]
+            # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
+            # args and keywords
+            return variables.functions.FunctoolsPartialVariable(
+                fn, args=rest_args, keywords=kwargs
+            )
         elif (
             issubclass(type(self.value), type)
-            and hasattr(self.value, "__enter__")
-            and hasattr(self.value, "__exit__")
+            and hasattr(
+                self.value, "__enter__"
+            )  # TODO(voz): These can invoke user code!
+            and hasattr(
+                self.value, "__exit__"
+            )  # TODO(voz): These can invoke user code!
             and check_constant_args(args, kwargs)
+            and self.value.__init__ == object.__init__
             and len(kwargs) == 0  # TODO(ybliang): support kwargs
         ):
             unwrapped_args = [x.as_python_constant() for x in args]
@@ -124,6 +300,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 unwrapped_args,
                 cm_obj=self.value(*unwrapped_args),
             )
+
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             field_defaults = self.value._field_defaults
@@ -181,6 +358,48 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif variables.DataClassVariable.is_matching_cls(self.value):
             options = {"mutable_local": MutableLocal()}
             return variables.DataClassVariable.create(self.value, args, kwargs, options)
+        elif (
+            variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
+            and self.source
+        ):
+            return variables.RestrictedListSubclassVariable(
+                variables.BuiltinVariable(list).call_function(tx, args, kwargs).items,
+                user_cls=self.value,
+                user_cls_source=self.source,
+                mutable_local=MutableLocal(),
+            )
+        elif self.value in self._in_graph_classes():
+            # torch.LongTensor cannot accept a list of FakeTensors.
+            # So we stack the list of FakeTensors instead.
+            if (
+                np
+                and self.value in tensortype_to_dtype
+                and len(args) == 1
+                and isinstance(args[0], variables.ListVariable)
+                and len(args[0].items) > 1
+                and all(isinstance(x, variables.TensorVariable) for x in args[0].items)
+            ):
+                # Stack FakeTensor
+                stacked = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        torch.stack,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                )
+                args = [stacked]
+
+            tensor_variable = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+            )
+
+            return tensor_variable
 
         return super().call_function(tx, args, kwargs)
 
@@ -217,6 +436,32 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def python_type(self):
         return self.value_type
 
+    def torch_function_check(self):
+        assert has_torch_function(
+            self
+        ), f"calling torch function on object without __torch_function__ {self}"
+
+    def get_torch_fn(self, tx):
+        self.torch_function_check()
+        from .torch_function import build_torch_function_fn
+
+        return build_torch_function_fn(tx, self.value, self.source)
+
+    def call_torch_function(self, tx, fn, types, args, kwargs):
+        self.torch_function_check()
+
+        from .torch_function import _get_subclass_type_var, call_torch_function
+
+        return call_torch_function(
+            tx,
+            _get_subclass_type_var(tx, self),
+            self.get_torch_fn(tx),
+            fn,
+            types,
+            args,
+            kwargs,
+        )
+
     @staticmethod
     @functools.lru_cache(None)
     def _supported_random_functions():
@@ -227,6 +472,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             random.uniform,
         }
         return fns
+
+    def _maybe_get_baseclass_method(self, name):
+        if name not in getattr(self.value, "__dict__", {}):
+            try:
+                return inspect.getattr_static(type(self.value), name)
+            except AttributeError:
+                pass
+        return None
 
     def call_method(
         self,
@@ -242,17 +495,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             UserMethodVariable,
         )
 
-        if name not in getattr(self.value, "__dict__", {}):
-            try:
-                method = inspect.getattr_static(type(self.value), name)
-            except AttributeError:
-                method = None
+        method = self._maybe_get_baseclass_method(name)
+        if method is not None:
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
-            if method is collections.OrderedDict.keys and self.source:
+            # [NOTE] OrderedDict, dict subtypes must always have source
+            # We cannot instantiate such subtypes in-graph due to builtin __new__
+            if method is collections.OrderedDict.keys:
                 # subclass of OrderedDict
                 assert not (args or kwargs)
+                assert self.source  # OrderedDict, dict subtypes must always have source
                 keys = list(self.value.keys())
                 assert all(map(ConstantVariable.is_literal, keys))
                 install_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
@@ -266,16 +519,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 in (collections.OrderedDict.keys, dict.keys)
             ):
                 assert not kwargs
+                assert self.source  # OrderedDict, dict subtypes must always have source
                 install_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
                 return ConstantVariable.create(
                     args[0].as_python_constant() in self.value
                 )
 
-            if (
-                method is collections.OrderedDict.items
-                and isinstance(self.value, collections.OrderedDict)
-                and self.source
+            if method is collections.OrderedDict.items and isinstance(
+                self.value, collections.OrderedDict
             ):
+                assert self.source  # OrderedDict, dict subtypes must always have source
                 assert not (args or kwargs)
                 items = []
                 keys = self.call_method(tx, "keys", [], {})
@@ -289,6 +542,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             if method is collections.OrderedDict.__getitem__ and len(args) == 1:
                 assert not kwargs
+                assert self.source  # OrderedDict, dict subtypes must always have source
                 return self.odict_getitem(tx, args[0])
 
             # check for methods implemented in C++
@@ -303,7 +557,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     tx, args, kwargs
                 )
 
+            if method is list.__len__ and self.source and not (args or kwargs):
+                install_guard(self.source.make_guard(GuardBuilder.LIST_LENGTH))
+                return ConstantVariable(len(self.value))
+
         return super().call_method(tx, name, args, kwargs)
+
+    def unpack_var_sequence(self, tx):
+        if (
+            self.source
+            and self._maybe_get_baseclass_method("__iter__") is list.__iter__
+            and self._maybe_get_baseclass_method("__len__") is list.__len__
+            and self._maybe_get_baseclass_method("__getitem__") is list.__getitem__
+        ):
+            install_guard(self.source.make_guard(GuardBuilder.LIST_LENGTH))
+            return [
+                variables.LazyVariableTracker.create(
+                    self.value[k],
+                    source=GetItemSource(self.source, k),
+                )
+                for k in range(len(self.value))
+            ]
+        return super().unpack_var_sequence(tx)
 
     def is_supported_random(self):
         try:
@@ -356,7 +631,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).call_function(tx, [var], kwargs)
         elif (
             istype(self.value, functools.partial)
-            and is_allowed(self.value.func)
+            and trace_rules.lookup(self.value.func)
+            == variables.TorchInGraphFunctionVariable
             and all(
                 variables.ConstantVariable.is_literal(v)
                 for v in itertools.chain(self.value.args, self.value.keywords.values())
@@ -386,11 +662,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return build_checkpoint_variable().call_function(
                     tx, partial_args, partial_kwargs
                 )
-            return variables.TorchVariable(self.value.func).call_function(
-                tx, partial_args, partial_kwargs
-            )
+            return variables.TorchInGraphFunctionVariable(
+                self.value.func
+            ).call_function(tx, partial_args, partial_kwargs)
         elif callable(self.value):
-            install_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
+            if self.source:
+                install_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
 
         return super().call_function(tx, args, kwargs)
@@ -415,6 +692,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return subobj
 
     def var_getattr(self, tx, name):
+        from .. import trace_rules
         from . import ConstantVariable
         from .builder import VariableBuilder
 
@@ -447,9 +725,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 subobj.__get__.__func__, subobj_var, source=source
             ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
-            return variables.UserFunctionVariable(
-                subobj.__get__(self.value), source=source
-            )
+            func = subobj.__get__(self.value)
+            if trace_rules.lookup(func) is not None:
+                return trace_rules.lookup(func).create_with_source(func, source=source)
+            else:
+                return variables.UserFunctionVariable(func, source=source)
         elif isinstance(subobj, classmethod):
             return variables.UserMethodVariable(subobj.__func__, self, source=source)
         elif isinstance(subobj, types.FunctionType) or (
@@ -470,7 +750,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if dynamic_subobj.__self__ is not self.value:
                     unimplemented("__self__ mismatch for bound method")
                 func = subobj.__func__
-                source = AttrSource(source, "__func__") if source else None
             else:
                 assert isinstance(subobj, types.FunctionType)
                 func = subobj
@@ -480,9 +759,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
                     return build_checkpoint_variable(source=source)
-                elif is_allowed(func):
-                    return variables.TorchVariable(func, source=source)
-                return variables.UserFunctionVariable(func, source=source)
+                elif trace_rules.lookup(func) is not None:
+                    return trace_rules.lookup(func).create_with_source(
+                        func, source=source
+                    )
+                else:
+                    return variables.UserFunctionVariable(func, source=source)
 
         if (
             name in getattr(value, "__dict__", {})
@@ -505,6 +787,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and type(value).__module__.startswith("torch.")
             and "torch.optim" not in type(value).__module__
             and not callable(value)
+            and not isinstance(subobj, types.MethodDescriptorType)
         ):
             if not source:
                 assert getattr(
@@ -565,10 +848,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
+        from .dicts import is_hashable
+
+        # TODO this should probably be merged with the dict handling
 
         index = (
             key.source
-            if ConstDictVariable.is_valid_key(key) and key.source is not None
+            if is_hashable(key) and key.source is not None
             else key.as_python_constant()
         )
 

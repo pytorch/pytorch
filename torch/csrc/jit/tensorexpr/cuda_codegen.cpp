@@ -16,6 +16,14 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/registerizer.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty_strided_native.h>
+#endif
+
+#include <unordered_map>
+
 namespace torch::jit::tensorexpr {
 
 // A RAII wrapper to manage a variable and name pair in the look-up table.

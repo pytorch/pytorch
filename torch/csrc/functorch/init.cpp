@@ -217,6 +217,7 @@ int64_t dlevel(const Tensor& tensor) {
   if (!wrapped->is_alive()) {
     return -1;
   }
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return wrapped->level().value();
 }
 
@@ -340,6 +341,7 @@ static int64_t maybe_get_level(const Tensor& tensor) {
   auto* wrapped = maybeGetTensorWrapper(tensor);
   if (wrapped) {
     if (wrapped->level()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       return *wrapped->level();
     }
     // TODO: this is a weird special case...
@@ -366,6 +368,15 @@ static int64_t currentLevel() {
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t current_level = maybe_layer->layerId();
   return current_level;
+}
+
+static c10::optional<int64_t> maybe_current_level() {
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  if (maybe_layer.has_value()) {
+    int current_level = maybe_layer->layerId();
+    return current_level;
+  }
+  return nullopt;
 }
 
 static void tls_set_vmap_excluded(bool excluded) {
@@ -472,6 +483,7 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("get_unwrapped", &get_unwrapped);
   m.def("maybe_get_level", &maybe_get_level);
   m.def("maybe_get_bdim", &maybe_get_bdim);
+  m.def("maybe_current_level", &maybe_current_level);
   m.def("current_level", &currentLevel);
   m.def("tls_set_vmap_excluded", &tls_set_vmap_excluded);
   m.def("_set_dynamic_layer_keys_included", &_set_dynamic_layer_keys_included);

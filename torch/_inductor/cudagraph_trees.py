@@ -515,8 +515,10 @@ def _use_cuda_memory_pool_manager(device, mem_pool, stream):
         try:
             yield
         finally:
-            torch._C._cuda_endAllocateCurrentStreamToPool(device)
+            torch._C._cuda_endAllocateCurrentStreamToPool(device, mem_pool)
             torch._C._cuda_releasePool(device, mem_pool)
+
+    torch.cuda.current_stream().wait_stream(stream)
 
 
 def map_to_ref(t: Optional[Tensor]) -> Optional[StorageWeakRefWrapper]:
@@ -609,9 +611,6 @@ class CUDAWarmupNode:
             self.device_index, self.cuda_graphs_pool, self.stream
         ), get_history_recording():
             out = self.wrapped_function.model(new_inputs)
-
-        # sync up stream used in `_use_cuda_memory_pool_manager` - TODO - wait stream instead ?
-        torch.cuda.synchronize()
 
         assert len(new_inputs) == 0
 
@@ -1137,7 +1136,7 @@ class CUDAGraphNode:
                 continue
 
             torch._check(
-                o.is_cuda,
+                o.is_cuda or o.untyped_storage().data_ptr() == 0,
                 lambda: (
                     "Expected all cuda outputs in cuda graph recording. Non cuda output "
                     f"from {self.stack_traces[i] if self.stack_traces else '(unknown)'}"

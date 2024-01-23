@@ -24,6 +24,7 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     PatternPrettyPrinter,
     register_graph_pattern,
+    stable_topological_sort,
 )
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
@@ -50,10 +51,6 @@ class TestPatternMatcher(TestCase):
         if len(codes) == 1:
             codes = codes[0]
         torch.testing.assert_close(actual, expected)
-        if inductor_config.cpp_wrapper:
-            # CPP wrapper runs everything twice, so we'll match the pattern twice
-            expected_matches *= 2
-            expected_nodes *= 2
 
         self.assertEqual(
             counters["inductor"]["pattern_matcher_count"], expected_matches
@@ -482,6 +479,28 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(expect, actual)
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
 
+    def test_addmm_broadcasting_bias(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.functional.linear
+                self.linear_weight = torch.randn(4, 4).cuda()
+                self.bias = torch.randn(1, 4).cuda()
+
+            def forward(self, x):
+                x = self.linear(x, self.linear_weight, self.bias)
+                return x
+
+        input_tensor = torch.randn(1, 3, 4).cuda()
+
+        func = Model().cuda()
+
+        res1 = func(input_tensor)
+        jit_func = torch.compile(func)
+        res2 = jit_func(input_tensor)
+
+        self.assertEqual(res1, res2)
+
     def test_cat_mm(self):
         def fn(a, b, c):
             return torch.cat(
@@ -518,14 +537,7 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 2, 5)
 
-    def test_cat_slice_cat(self):
-        def check_counter(counter, expected):
-            if not inductor_config.cpp_wrapper:
-                self.assertEqual(counter, expected)
-            else:
-                # cpp_wrapper for the CUDA backend runs two passes
-                self.assertEqual(counter, 2 * expected)
-
+    def test_cat_slice_cat_cuda(self):
         def fn(a, b):
             cat_1 = torch.ops.aten.cat.default([a, b], 1)
             slice_1 = torch.ops.aten.slice.Tensor(cat_1, 0, 0, 9223372036854775807)
@@ -548,8 +560,8 @@ class TestPatternMatcher(TestCase):
         torch.testing.assert_close(actual, expected)
         # We don't recompile for dynamic-shape cases.
         if dynamo_config.assume_static_by_default:
-            check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-            check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
 
         # Verify we fallback to non-optimal path for negative `end`.
         def fn(a, b):
@@ -585,11 +597,10 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
+    # Constant folding was explicitly turned off due to issue #108388
+    # Turn it back on for test
+    @inductor_config.patch(joint_graph_constant_folding=True)
     def test_pointless_cumsum(self):
-        # Constant folding was explicitly turned off due to issue #108388
-        # Turn it back on for test
-        torch._inductor.config.joint_graph_constant_folding = True
-
         def fn1():
             ones = torch.full(
                 [1, 128], 1, layout=torch.strided, dtype=torch.float32
@@ -751,6 +762,77 @@ class TestPatternMatcher(TestCase):
             torch.randn(2, 5, device="cuda"),
         ]
         self.common(fn, args, 0, 0)
+
+    def test_symint_pattern_matching(self):
+        import torch._inductor.config as config
+        from torch._inductor.pattern_matcher import (
+            fwd_only,
+            PatternMatcherPass,
+            register_replacement,
+        )
+
+        saved_graph = None
+
+        class _CustomPass(PatternMatcherPass):
+            def __init__(self):
+                super().__init__()
+
+            def __call__(self, g: torch.fx.graph.Graph):
+                self.apply(g)
+                nonlocal saved_graph
+                saved_graph = g
+
+        with config.patch(
+            # leave custom pass only in post_grad_passes()
+            pattern_matcher=False,
+            # define pattern match as custom post grad opt pass
+            post_grad_custom_pre_pass=None,
+            post_grad_custom_post_pass=_CustomPass(),
+        ):
+
+            def add(x, y):
+                return x + y
+
+            # testing that
+            def sym_minus(x, y):
+                return (x - (-y.size(0))) - (y * -1) - y.size(0)
+
+            device = "cpu"
+            my_args = [
+                torch.empty([8, 1], device=device),
+                torch.empty([10], device=device),
+            ]
+
+            invoked = False
+
+            def extra_check(match):
+                nonlocal invoked
+                invoked = True
+                return True
+
+            register_replacement(
+                add,
+                sym_minus,
+                my_args,
+                fwd_only,
+                [config.post_grad_custom_post_pass],
+                extra_check=extra_check,
+            )
+
+            @torch.compile(dynamic=True)
+            def foo(x, y):
+                return x + y
+
+            x = torch.rand([8, 1])
+            y = torch.rand([10])
+
+            self.assertEqual(foo(x, y), x + y)
+
+            self.assertTrue(invoked)
+            # we trace out the y.sym_size in replacement
+            FileCheck().check("sym_size_int").check_same("num_users=2").check_same(
+                "target=torch.ops.aten.sym_size"
+            ).run(str(saved_graph))
 
     def test_match_with_mutation(self):
         counter = 0
@@ -1065,6 +1147,32 @@ class TestPatternMatcher(TestCase):
                 actual = torch.compile(fn)(*copy.deepcopy(args))
                 self.assertEqual(counter, 1)
                 torch.testing.assert_close(actual, expected)
+
+    def test_stable_topological_sort(self):
+        def fn1(a, b):
+            return a + b
+
+        graph = torch.fx.Graph()
+        a = graph.placeholder("x")
+        b = graph.placeholder("y")
+        c = graph.call_function(fn1, (a, b))
+        stable_topological_sort(graph)
+        self.assertEqual(list(graph.nodes), [a, b, c])
+
+        graph = torch.fx.Graph()
+        b = graph.placeholder("y")
+        a = graph.placeholder("x")
+        c = graph.call_function(fn1, (a, b))
+        stable_topological_sort(graph)
+        self.assertEqual(list(graph.nodes), [b, a, c])
+
+        graph = torch.fx.Graph()
+        a = graph.placeholder("x")
+        b = graph.placeholder("y")
+        c = graph.call_function(fn1, (b, a))
+        c.append(a)
+        stable_topological_sort(graph)
+        self.assertEqual(list(graph.nodes), [b, a, c])
 
 
 if __name__ == "__main__":

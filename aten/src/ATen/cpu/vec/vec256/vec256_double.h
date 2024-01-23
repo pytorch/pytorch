@@ -100,6 +100,10 @@ public:
   Vectorized<double> isnan() const {
     return _mm256_cmp_pd(values, _mm256_set1_pd(0.0), _CMP_UNORD_Q);
   }
+  bool has_inf_nan() const {
+    __m256d self_sub  = _mm256_sub_pd(values, values);
+    return (_mm256_movemask_epi8(_mm256_castpd_si256(self_sub)) & 0x77777777) != 0;
+  }
   Vectorized<double> map(double (*const f)(double)) const {
     __at_align__ double tmp[size()];
     store(tmp);
@@ -168,6 +172,9 @@ public:
   }
   Vectorized<double> expm1() const {
     return Vectorized<double>(Sleef_expm1d4_u10(values));
+  }
+  Vectorized<double> exp_u20() const {
+    return exp();
   }
   Vectorized<double> fmod(const Vectorized<double>& q) const {
     return Vectorized<double>(Sleef_fmodd4(values, q));

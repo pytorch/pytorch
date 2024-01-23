@@ -5,6 +5,7 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 from torch._dynamo.utils import detect_fake_mode
+from torch._utils_internal import print_graph
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -22,7 +23,7 @@ from ..pattern_matcher import (
     stable_topological_sort,
 )
 from ..utils import is_cpu_device
-from .group_batch_fusion import group_batch_fusion_pre_grad_passes
+from .group_batch_fusion import group_batch_fusion_passes
 from .misc_patterns import numpy_compat_normalization
 
 log = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ split_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 unbind_stack_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 efficient_conv_bn_eval_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 merge_getitem_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+predispatch_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalization_pass,
@@ -49,7 +51,7 @@ def lazy_init():
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401  # noqa: F401
 
     if config.is_fbcode():
-        from .fb import split_cat as split_cat_fb  # type: ignore[import]  # noqa: F401
+        from . import fb  # type: ignore[attr-defined]  # noqa: F401
 
 
 def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
@@ -67,23 +69,44 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
 
     if config.pattern_matcher:
         lazy_init()
-        gm = fuse_fx(gm, example_inputs)
-        numpy_compat_normalization(gm.graph)
-        group_batch_fusion_pre_grad_passes(gm.graph)
-        for pattern_matcher_pass in pattern_matcher_passes:
-            pattern_matcher_pass.apply(gm.graph)
+        if config.fx_passes_numeric_check["pre_grad"]:
+            gm_before_fx_passes = gm.__copy__()
+        # explicitly run with predispatch atenIR based passes
+        if config.is_predispatch:
+            group_batch_fusion_passes(gm.graph, pre_grad=True)
+            predispatch_pass.apply(gm.graph)
+        else:
+            gm = fuse_fx(gm, example_inputs)
+            numpy_compat_normalization(gm.graph)
+            print_graph(gm.graph, "Before group batch fusion in pre grad pass.")
+            group_batch_fusion_passes(gm.graph, pre_grad=True)
+            print_graph(gm.graph, "Before split cat in pre grad pass.")
+            for pattern_matcher_pass in pattern_matcher_passes:
+                pattern_matcher_pass.apply(gm.graph)
+                print_graph(
+                    gm.graph,
+                    "Apply split cat pattern matcher PatternMatcherPass in pre grad.",
+                )
 
+    if config.pre_grad_custom_pass is not None:
+        config.pre_grad_custom_pass(gm.graph)
     stable_topological_sort(gm.graph)
     gm.graph.lint()
     gm.recompile()
 
-    if config.is_fbcode():
-        from torch._inductor.fb.utils import get_everpaste_url  # type: ignore[import]
+    if config.pattern_matcher and config.fx_passes_numeric_check["pre_grad"]:
+        from .numeric_utils import numeric_check_if_enabled
 
-        log.info(
-            "Print graph after recompile in pre grad passes: %s",
-            get_everpaste_url(str(gm.graph)),
+        gm_after_fx_passes = gm.__copy__()
+        numeric_check_if_enabled(
+            gm_before_fx_passes,
+            gm_after_fx_passes,
+            example_inputs,
+            config.fx_passes_numeric_check["num_iterations"],
+            config.fx_passes_numeric_check["precision"],
         )
+
+    print_graph(gm.graph, "After recompile in pre grad pass.")
 
     return gm
 

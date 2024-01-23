@@ -15,7 +15,7 @@ struct LoadImpl {
 template <>
 struct LoadImpl<bool> {
   C10_HOST_DEVICE static bool apply(const void* src) {
-    static_assert(sizeof(bool) == sizeof(char), "");
+    static_assert(sizeof(bool) == sizeof(char));
     // NOTE: [Loading boolean values]
     // Protect against invalid boolean values by loading as a byte
     // first, then converting to bool (see gh-54789).

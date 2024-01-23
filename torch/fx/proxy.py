@@ -107,7 +107,7 @@ class TracerBase:
     scope : Scope
 
     # Records the module call stack
-    module_stack: OrderedDict[str, str]
+    module_stack: OrderedDict[str, Tuple[str, Any]]
 
     # Mapping of node name to module scope
     node_name_to_scope: Dict[str, Tuple[str, type]]
@@ -409,6 +409,9 @@ class Proxy:
 
         return self.tracer.iter(self)
 
+    def __abs__(self):
+        return self.tracer.create_proxy('call_function', operator.abs, (self,), {})
+
     def __bool__(self) -> bool:
         if self.tracer.trace_asserts:
             # check if this boolean is used in an assertion, bytecode pattern for assertions
@@ -507,7 +510,7 @@ class ParameterProxy(Proxy):
     """
     def __init__(self, tracer: TracerBase, node: Node, name, param):
         super().__init__(node, tracer)
-        assert(isinstance(param, torch.nn.Parameter))
+        assert isinstance(param, torch.nn.Parameter)
         self.param = param
         self.name = name
 

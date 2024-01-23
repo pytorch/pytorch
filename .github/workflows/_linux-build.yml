@@ -93,6 +93,15 @@ jobs:
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
+      - name: Use following to pull public copy of the image
+        id: print-ghcr-mirror
+        env:
+          ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        shell: bash
+        run: |
+          tag=${ECR_DOCKER_IMAGE##*/}
+          echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
+
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -117,6 +126,13 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
           job-name: ${{ steps.get-job-id.outputs.job-name }}
+
+      - name: Download pytest cache
+        uses: ./.github/actions/pytest-cache-download
+        continue-on-error: true
+        with:
+          cache_dir: .pytest_cache
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
 
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''

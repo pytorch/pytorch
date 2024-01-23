@@ -1,4 +1,5 @@
 # ${generated_comment}
+# mypy: disable-error-code="type-arg"
 
 import builtins
 from typing import (
@@ -32,6 +33,8 @@ from torch.types import (
     Device,
     Number,
 )
+
+from torch._prims_common import DeviceLikeType
 
 ${function_hints}
 

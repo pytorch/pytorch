@@ -2,7 +2,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NestedTensorImpl.h>
-#include <c10/util/Exception.h>
 
 #include <torch/library.h>
 

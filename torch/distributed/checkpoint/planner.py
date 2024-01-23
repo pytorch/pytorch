@@ -1,19 +1,13 @@
 import abc
-from dataclasses import dataclass
 import io
-from typing import List, Tuple, Any, Union, Optional
+from dataclasses import dataclass
+from enum import auto, Enum
+from typing import Any, List, Optional, Tuple, Union
 
-from enum import Enum, auto
 import torch
-
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 
-from .metadata import (
-    ChunkStorageMetadata,
-    MetadataIndex,
-    Metadata,
-    STATE_DICT_TYPE,
-)
+from .metadata import ChunkStorageMetadata, Metadata, MetadataIndex, STATE_DICT_TYPE
 
 
 __all__ = [
@@ -223,9 +217,7 @@ class SavePlanner(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def resolve_data(
-        self, write_item: WriteItem
-    ) -> Union[torch.Tensor, io.BytesIO]:
+    def resolve_data(self, write_item: WriteItem) -> Union[torch.Tensor, io.BytesIO]:
         """
         Transform and prepare ``write_item`` from ``state_dict`` for storage, ensuring idempotency and thread-safety.
 

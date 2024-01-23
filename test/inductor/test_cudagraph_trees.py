@@ -17,6 +17,7 @@ from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphi
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_LINUX,
@@ -41,11 +42,10 @@ importlib.import_module("filelock")
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
-HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
-    unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
+    unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
 
 
@@ -431,6 +431,28 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_unaligned_static_input_no_cudagraphs(self):
             self._test_unaligned_static_input_impl()
 
+        def test_sparsity(self):
+            def foo(view_6, buf31):
+                return aten._sparse_coo_tensor_with_dims_and_tensors(
+                    1,
+                    1,
+                    [1000000, 64],
+                    view_6,
+                    buf31,
+                    dtype=torch.float32,
+                    layout=torch.sparse_coo,
+                    device="cuda",
+                    pin_memory=None,
+                )
+
+            foo_opt = torch.compile(foo)
+
+            view_6 = torch.zeros([1, 102397], dtype=torch.int64, device="cuda")
+            buf31 = torch.rand([102397, 64], device="cuda")
+
+            for _ in range(3):
+                self.assertEqual(foo_opt(view_6, buf31), foo(view_6, buf31))
+
         def test_accumulate_multiple_recordings(self):
             def foo(x):
                 y = x + x + x
@@ -686,6 +708,26 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(node.cached_tensor_outputs, [None])
             self.assertEqual(node.unaliased_in_all_paths, [False])
 
+        def test_warmup_stream_sync(self):
+            def foo(args):
+                x = args[0]
+                args.clear()
+                x_orig = x
+                for _ in range(100):
+                    x = x @ x
+                return (x,)
+
+            inp = torch.rand([4096, 4096], device="cuda")
+            ref = foo([inp])[0]
+            torch.cuda.synchronize()
+
+            user_stream = torch.cuda.Stream()
+            with torch.cuda.stream(user_stream):
+                foo_cg = self.cudagraphify_impl(foo, [inp], (0,))
+                out = foo_cg([inp])[0]
+                y = out + 1
+                self.assertEqual(y, ref + 1)
+
         def test_unaligned_static_parameter(self):
             def gen_inp():
                 inp = torch.ones([20], device="cuda")
@@ -785,6 +827,19 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             # didnt do additional recordings
             self.assertTrue(self.get_manager().new_graph_id().id == 2)
+
+        def test_empty_cpu_tensor(self):
+            def foo(x):
+                return x @ x, torch.tensor([])
+
+            foo_opt = torch.compile(foo)
+            x = torch.rand([4], device="cuda")
+
+            for _ in range(3):
+                out_opt = foo_opt(x)
+                self.assertEqual(foo(x), out_opt)
+
+            self.assertTrue(self.get_manager().new_graph_id().id == 1)
 
         def test_output_alias(self):
             inp = torch.rand([20, 20], device="cuda")

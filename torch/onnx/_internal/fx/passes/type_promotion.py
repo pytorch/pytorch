@@ -8,7 +8,7 @@ import inspect
 import logging
 from types import ModuleType
 
-from typing import Any, Callable, Mapping, Optional, Sequence, Set
+from typing import Any, Callable, Mapping, Optional, Sequence, Set, Union
 
 import torch
 import torch._ops
@@ -24,7 +24,7 @@ from torch._prims_common import (
 from torch._refs import linalg as _linalg_refs, nn as _nn_refs, special as _special_refs
 from torch._refs.nn import functional as _functional_refs
 from torch._subclasses import fake_tensor
-from torch.fx.experimental import proxy_tensor
+from torch.fx.experimental import proxy_tensor, symbolic_shapes
 
 # Imported to resolve beartype issue when type checking node.Argument.
 from torch.fx.node import Node  # noqa: F401
@@ -70,14 +70,27 @@ class TypePromotionSnapshot:
 
 
 @_beartype.beartype
-def _fake_tensor_from_node_val(node: torch.fx.Node) -> fake_tensor.FakeTensor:
+def _fake_tensor_from_node_val(
+    node: torch.fx.Node,
+) -> Union[fake_tensor.FakeTensor, int, float, bool]:
     """Syntactic sugar for retrieving fake tensor from node.meta['val']."""
     val = node.meta.get("val", None)
-    if not isinstance(val, fake_tensor.FakeTensor):
+    if isinstance(val, fake_tensor.FakeTensor):
+        return val
+    elif isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        # For type promotion, the actual value should not matter. For example,
+        # we can return any `int` for a `torch.SymInt` node. Let's
+        # remove this assert and return dummy values (e.g., 0 for SymInt,
+        # 0.0 for SymFloat, and false for SymBool) if finding the hint
+        # becomes a problem.
+        assert symbolic_shapes.has_hint(
+            val.node
+        ), f"Cannot retrieve hint value from torch.Sym* node {node}."
+        return val.node.hint
+    else:
         raise RuntimeError(
             f"Cannot retrieve fake tensor from node {node}. Got type({type(val)}) instead."
         )
-    return val
 
 
 class TypePromotionRule(abc.ABC):
@@ -138,6 +151,12 @@ class TypePromotionRule(abc.ABC):
 class ElementwiseTypePromotionRule(TypePromotionRule):
     """Defines how to perform elementwise type promotion for 'torch.ops.{namespace}.{op_name}'."""
 
+    _USE_OPMATH: bool = False
+    """Whether to use opmath to compute the promoted input dtype.
+    If used, upcasts will be inserted everywhere for lower precision models.
+    Set to False and have torchlib handle upcasts in op implementation internally.
+    """
+
     def __init__(
         self,
         namespace: str,
@@ -180,6 +199,23 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
     def __hash__(self) -> int:
         return f"{type(self)}:{self.namespace}.{self.op_name}".__hash__()
 
+    def _consolidate_input_dtype(
+        self, computed_dtype: torch.dtype, result_dtype: torch.dtype
+    ) -> torch.dtype:
+        """
+        Although opmath is the right thing to do to retain on-par precision, it inserts
+        upcasts everywhere in the graph. This is particularly hard for backend to optimize
+        since there is no way to differentiate between inserted upcasts and model code
+        casts. Hence we consolidate the input dtype to the result dtype to avoid this.
+        """
+        if (
+            not self._USE_OPMATH
+            and self.promotion_kind
+            == _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        ):
+            return result_dtype
+        return computed_dtype
+
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
@@ -199,9 +235,13 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
             type_promotion_kind=self.promotion_kind,
         )
 
+        consolidated_input_dtype = self._consolidate_input_dtype(
+            computed_dtype, result_dtype
+        )
+
         return TypePromotionSnapshot(
-            {i: computed_dtype for i in candidate_args.keys()},
-            {name: computed_dtype for name in candidate_kwargs.keys()},
+            {i: consolidated_input_dtype for i in candidate_args.keys()},
+            {name: consolidated_input_dtype for name in candidate_kwargs.keys()},
             result_dtype,
         )
 
@@ -909,6 +949,9 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
     ),
     ElementwiseTypePromotionRule(
         "aten", "rsqrt_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    ),
+    ElementwiseTypePromotionRule(
+        "aten", "rsub", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
         "aten", "selu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -1654,7 +1697,9 @@ class InsertTypePromotion(_pass.Transform):
             diagnostic_context, module, type_promotion_table or TypePromotionTable()
         )
 
-    def _fetch_fake_args(self) -> Sequence[Optional[fake_tensor.FakeTensor]]:
+    def _fetch_fake_args(
+        self,
+    ) -> Sequence[Optional[Union[fake_tensor.FakeTensor, float, int, bool]]]:
         """Fetch fake args from fx graph.
 
         For each argument, try to fetch fake tensor from the matching placeholder node.

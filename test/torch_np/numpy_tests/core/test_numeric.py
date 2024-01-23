@@ -15,6 +15,7 @@ import pytest
 IS_WASM = False
 HAS_REFCOUNT = True
 
+import operator
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 from hypothesis import given, strategies as st
@@ -199,10 +200,9 @@ class TestNonarrayArgs(TestCase):
         s = np.float64(1.0)
         assert_equal(s.round(), 1.0)
 
-    @xpassIfTorchDynamo  # (reason="scalar instances")
     def test_round_2(self):
         s = np.float64(1.0)
-        assert_(isinstance(s.round(), np.float64))
+        assert_(isinstance(s.round(), (np.float64, np.ndarray)))
 
     @xpassIfTorchDynamo  # (reason="scalar instances")
     @parametrize(
@@ -233,7 +233,7 @@ class TestNonarrayArgs(TestCase):
             # pytest.param(
             #    2**31 - 1, -1, marks=pytest.mark.xfail(reason="Out of range of int32")
             # ),
-            subtest((2**31 - 1, -1), decorators=[xfail]),
+            subtest((2**31 - 1, -1), decorators=[xpassIfTorchDynamo]),
             subtest(
                 (2**31 - 1, 1 - math.ceil(math.log10(2**31 - 1))),
                 decorators=[xpassIfTorchDynamo],
@@ -344,7 +344,7 @@ class TestNonarrayArgs(TestCase):
     #      assert_(w[0].category is RuntimeWarning)
 
 
-@xpassIfTorchDynamo  # (reason="TODO")
+@xfail  # (reason="TODO")
 class TestIsscalar(TestCase):
     def test_isscalar(self):
         assert_(np.isscalar(3.1))
@@ -371,6 +371,7 @@ class TestBoolScalar(TestCase):
         assert_((t and s) is s)
         assert_((f and s) is f)
 
+    @xfailIfTorchDynamo
     def test_bitwise_or(self):
         f = np.False_
         t = np.True_
@@ -379,6 +380,7 @@ class TestBoolScalar(TestCase):
         assert_((t | f) is t)
         assert_((f | f) is f)
 
+    @xfailIfTorchDynamo
     def test_bitwise_and(self):
         f = np.False_
         t = np.True_
@@ -387,6 +389,7 @@ class TestBoolScalar(TestCase):
         assert_((t & f) is f)
         assert_((f & f) is f)
 
+    @xfailIfTorchDynamo
     def test_bitwise_xor(self):
         f = np.False_
         t = np.True_
@@ -398,6 +401,7 @@ class TestBoolScalar(TestCase):
 
 class TestBoolArray(TestCase):
     def setUp(self):
+        super().setUp()
         # offset for simd tests
         self.t = np.array([True] * 41, dtype=bool)[1::]
         self.f = np.array([False] * 41, dtype=bool)[1::]
@@ -483,8 +487,10 @@ class TestBoolArray(TestCase):
         assert_array_equal(self.im ^ False, self.im)
 
 
+@xfailIfTorchDynamo
 class TestBoolCmp(TestCase):
     def setUp(self):
+        super().setUp()
         self.f = np.ones(256, dtype=np.float32)
         self.ef = np.ones(self.f.size, dtype=bool)
         self.d = np.ones(128, dtype=np.float64)
@@ -698,25 +704,19 @@ class TestFloatExceptions(TestCase):
         # The value of tiny for double double is NaN, so we need to
         # pass the assert
         if not np.isnan(ft_tiny):
-            self.assert_raises_fpe(underflow, lambda a, b: a / b, ft_tiny, ft_max)
-            self.assert_raises_fpe(underflow, lambda a, b: a * b, ft_tiny, ft_tiny)
-        self.assert_raises_fpe(overflow, lambda a, b: a * b, ft_max, ftype(2))
-        self.assert_raises_fpe(overflow, lambda a, b: a / b, ft_max, ftype(0.5))
-        self.assert_raises_fpe(overflow, lambda a, b: a + b, ft_max, ft_max * ft_eps)
-        self.assert_raises_fpe(overflow, lambda a, b: a - b, -ft_max, ft_max * ft_eps)
+            self.assert_raises_fpe(underflow, operator.truediv, ft_tiny, ft_max)
+            self.assert_raises_fpe(underflow, operator.mul, ft_tiny, ft_tiny)
+        self.assert_raises_fpe(overflow, operator.mul, ft_max, ftype(2))
+        self.assert_raises_fpe(overflow, operator.truediv, ft_max, ftype(0.5))
+        self.assert_raises_fpe(overflow, operator.add, ft_max, ft_max * ft_eps)
+        self.assert_raises_fpe(overflow, operator.sub, -ft_max, ft_max * ft_eps)
         self.assert_raises_fpe(overflow, np.power, ftype(2), ftype(2**fi.nexp))
-        self.assert_raises_fpe(divbyzero, lambda a, b: a / b, ftype(1), ftype(0))
-        self.assert_raises_fpe(
-            invalid, lambda a, b: a / b, ftype(np.inf), ftype(np.inf)
-        )
-        self.assert_raises_fpe(invalid, lambda a, b: a / b, ftype(0), ftype(0))
-        self.assert_raises_fpe(
-            invalid, lambda a, b: a - b, ftype(np.inf), ftype(np.inf)
-        )
-        self.assert_raises_fpe(
-            invalid, lambda a, b: a + b, ftype(np.inf), ftype(-np.inf)
-        )
-        self.assert_raises_fpe(invalid, lambda a, b: a * b, ftype(0), ftype(np.inf))
+        self.assert_raises_fpe(divbyzero, operator.truediv, ftype(1), ftype(0))
+        self.assert_raises_fpe(invalid, operator.truediv, ftype(np.inf), ftype(np.inf))
+        self.assert_raises_fpe(invalid, operator.truediv, ftype(0), ftype(0))
+        self.assert_raises_fpe(invalid, operator.sub, ftype(np.inf), ftype(np.inf))
+        self.assert_raises_fpe(invalid, operator.add, ftype(np.inf), ftype(-np.inf))
+        self.assert_raises_fpe(invalid, operator.mul, ftype(0), ftype(np.inf))
 
     @skipif(IS_WASM, reason="no wasm fp exception support")
     def test_warnings(self):
@@ -1016,8 +1016,8 @@ class TestNonzeroAndCountNonzero(TestCase):
         assert_equal(np.count_nonzero(np.array([1], dtype="?")), 1)
         assert_equal(np.nonzero(np.array([1])), ([0],))
 
-    @xfailIfTorchDynamo  # numpy returns a python int, we return a 0D array
     def test_nonzero_trivial_differs(self):
+        # numpy returns a python int, we return a 0D array
         assert isinstance(np.count_nonzero([]), np.ndarray)
 
     def test_nonzero_zerod(self):
@@ -1027,8 +1027,8 @@ class TestNonzeroAndCountNonzero(TestCase):
         assert_equal(np.count_nonzero(np.array(1)), 1)
         assert_equal(np.count_nonzero(np.array(1, dtype="?")), 1)
 
-    @xfailIfTorchDynamo  # numpy returns a python int, we return a 0D array
     def test_nonzero_zerod_differs(self):
+        # numpy returns a python int, we return a 0D array
         assert isinstance(np.count_nonzero(np.array(1)), np.ndarray)
 
     def test_nonzero_onedim(self):
@@ -1037,8 +1037,8 @@ class TestNonzeroAndCountNonzero(TestCase):
         assert_equal(np.count_nonzero(x), 4)
         assert_equal(np.nonzero(x), ([0, 2, 3, 6],))
 
-    @xfailIfTorchDynamo  # numpy returns a python int, we return a 0D array
     def test_nonzero_onedim_differs(self):
+        # numpy returns a python int, we return a 0D array
         x = np.array([1, 0, 2, -1, 0, 0, 8])
         assert isinstance(np.count_nonzero(x), np.ndarray)
 
@@ -1294,6 +1294,7 @@ class TestArrayComparisons(TestCase):
 @instantiate_parametrized_tests
 class TestClip(TestCase):
     def setUp(self):
+        super().setUp()
         self.nr = 5
         self.nc = 3
 
@@ -1835,7 +1836,7 @@ class TestClip(TestCase):
         actual = np.clip(arr, amin, amax)
         assert_equal(actual, expected)
 
-    @xfail  # (reason="np.maximum(..., dtype=) needs implementing")
+    @skip  # hypothesis hynp.from_dtype fails on CI (versions?)
     @given(
         data=st.data(),
         arr=hynp.arrays(
@@ -2056,6 +2057,7 @@ class TestIsclose(TestCase):
         arr = np.array([1.0, np.nan])
         assert_array_equal(np.isclose(arr, arr, equal_nan=True), [True, True])
 
+    @xfailIfTorchDynamo  # scalars vs 0D
     def test_scalar_return(self):
         assert_(np.isscalar(np.isclose(1, 1)))
 
@@ -2076,6 +2078,7 @@ class TestIsclose(TestCase):
 
 class TestStdVar(TestCase):
     def setUp(self):
+        super().setUp()
         self.A = np.array([1, -1, 1, -1])
         self.real_var = 1
 
@@ -2133,7 +2136,8 @@ class TestCreationFuncs(TestCase):
     # Test ones, zeros, empty and full.
 
     def setUp(self):
-        # dtypes = {np.dtype(tp) for tp in itertools.chain(*np.sctypes.values())}
+        super().setUp()
+        # dtypes = {np.dtype(tp) for tp in itertools.chain.from_iterable(np.sctypes.values())}
         dtypes = {np.dtype(tp) for tp in "efdFDBbhil?"}
         self.dtypes = dtypes
         self.orders = {
@@ -2194,6 +2198,7 @@ class TestLikeFuncs(TestCase):
     """Test ones_like, zeros_like, empty_like and full_like"""
 
     def setUp(self):
+        super().setUp()
         self.data = [
             # Array scalars
             (np.array(3.0), None),
@@ -2613,7 +2618,7 @@ class TestRollaxis(TestCase):
         assert_raises(np.AxisError, np.rollaxis, a, 4, 0)
         assert_raises(np.AxisError, np.rollaxis, a, 0, 5)
 
-    @xpassIfTorchDynamo  # (reason="needs fancy indexing")
+    @xfail  # XXX: ndarray.attributes
     def test_results(self):
         a = np.arange(1 * 2 * 3 * 4).reshape(1, 2, 3, 4).copy()
         aind = np.indices(a.shape)
@@ -2987,14 +2992,14 @@ class TestBroadcast(TestCase):
         # gh-13455
         arrs = [np.empty((5, 6, 7))]
         mit = np.broadcast(*arrs)
-        mit2 = np.broadcast(*arrs, **{})
+        mit2 = np.broadcast(*arrs, **{})  # noqa: PIE804
         assert_equal(mit.shape, mit2.shape)
         assert_equal(mit.ndim, mit2.ndim)
         assert_equal(mit.nd, mit2.nd)
         assert_equal(mit.numiter, mit2.numiter)
         assert_(mit.iters[0].base is mit2.iters[0].base)
 
-        assert_raises(ValueError, np.broadcast, 1, **{"x": 1})
+        assert_raises(ValueError, np.broadcast, 1, **{"x": 1})  # noqa: PIE804
 
     @skip(reason="error messages do not match.")
     def test_shape_mismatch_error_message(self):

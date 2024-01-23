@@ -1,5 +1,5 @@
 import torch
-from typing import Any, List, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import builtins
 
@@ -34,7 +34,8 @@ Number = Union[builtins.int, builtins.float, builtins.bool]
 # Meta-type for "device-like" things.  Not to be confused with 'device' (a
 # literal device object).  This nomenclature is consistent with PythonArgParser.
 # None means use the default device (typically CPU)
-Device = Union[_device, str, _int, None]
+Device = Optional[Union[_device, str, _int]]
+del Optional
 
 # Storage protocol implemented by ${Type}StorageBase classes
 

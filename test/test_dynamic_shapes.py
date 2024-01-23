@@ -16,7 +16,7 @@ from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.sym_node import to_node, sym_sqrt, SymNode
+from torch.fx.experimental.sym_node import to_node, SymNode, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraints,
     DimDynamic,
@@ -27,6 +27,8 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
     ShapeEnv,
     is_symbolic,
+    StatelessSymbolicContext,
+    statically_known_true,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -136,8 +138,10 @@ def create_symbolic_tensor(name, arg, shape_env):
         shape_env.create_symbolic_sizes_strides_storage_offset(
             arg,
             source=ConstantSource(name),
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=dynamic_dims,
+                constraint_sizes=constraint_dims
+            ),
         )
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
@@ -391,7 +395,7 @@ class TestPySymInt(TestCase):
     def test_sym_sqrt(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 4)
-        r = sym_sqrt(a0)
+        r = torch._sym_sqrt(a0)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(sqrt(s0), 2)""")
@@ -494,7 +498,7 @@ def forward(self, x_1):
         self.assertTrue(expect_true(i0 <= s0))
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[i0 <= s0]"""
+            """[-s0 + u0 <= 0]"""
         )
         self.assertTrue(i0 <= s0)
         self.assertFalse(i0 > s0)
@@ -508,7 +512,7 @@ def forward(self, x_1):
         # Importantly, this is put in i1, not i0!
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i1_sym]]),
-            """[Eq(i0 + i1, 10)]"""
+            """[Eq(u0 + u1, 10)]"""
         )
         self.assertTrue(i0 + i1 == 10)
         # NB: We currently don't support deriving that we can substitute
@@ -522,17 +526,17 @@ def forward(self, x_1):
         i0 = shape_env.create_unbacked_symint()
         i1 = shape_env.create_unbacked_symint()
         self.assertTrue(expect_true(i0 == i1 * 4))
-        self.assertExpectedInline(str(i0), """4*i1""")
+        self.assertExpectedInline(str(i0), """4*u1""")
 
         i2 = shape_env.create_unbacked_symint()
         i3 = shape_env.create_unbacked_symint()
         self.assertTrue(expect_true(i2 * 4 == i3))
-        self.assertExpectedInline(str(i3), """4*i2""")
+        self.assertExpectedInline(str(i3), """4*u2""")
 
     def test_expect_true_double_digits(self):
         shape_env = ShapeEnv()
         ia = [shape_env.create_unbacked_symint() for _ in range(11)]  # allocate 10
-        self.assertEqual(str(ia[-1]), "i10")
+        self.assertEqual(str(ia[-1]), "u10")
         self.assertTrue(expect_true(sum(ia) == 20))
         self.assertEqual(len(shape_env.deferred_runtime_asserts[ia[-1].node.expr]), 1)
 
@@ -630,6 +634,37 @@ class f(torch.nn.Module):
         getitem_1: "b8[s0 + s2, 2*s1]" = native_dropout[1];  native_dropout = None
         return (getitem, getitem_1)""")  # noqa: B950
 
+    def test_statically_known_true(self):
+        shape_env = ShapeEnv()
+        s2, s3, s4 = (create_symint(shape_env, i) for i in range(2, 5))
+
+        # Statically known true
+        self.assertTrue(statically_known_true(True))
+        self.assertTrue(statically_known_true(s2 == s2))
+        self.assertTrue(statically_known_true(s2 * s3 > s3))
+        self.assertTrue(statically_known_true(s3 * s4 > s4))
+        self.assertTrue(statically_known_true((s3 + s3) % 2 == 0))
+
+        # Statically known false
+        self.assertFalse(statically_known_true(False))
+        self.assertFalse(statically_known_true(s3 * s4 <= s4))
+        self.assertFalse(statically_known_true((s3 + s3) % 2 == 1))
+
+        # True for hints, but not known statically
+        self.assertFalse(statically_known_true(s2 + s2 == s4))
+        self.assertFalse(statically_known_true(s4 % s2 == 0))
+        self.assertFalse(statically_known_true(s2 != s3))
+        self.assertFalse(statically_known_true(s3 * s4 > s2))
+
+        # False for hints, but not known statically
+        self.assertFalse(statically_known_true(s2 == s3))
+        self.assertFalse(statically_known_true(s2 > s3))
+        self.assertFalse(statically_known_true(s3 + s3 == s4))
+
+        # No guards should be generated
+        self.assertEqual(len(shape_env.guards), 0)
+
+
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestSymNumberMagicMethods(TestCase):
     def _do_test(self, fn, inp1, inp2, shape_env, is_unary_fn):
@@ -676,14 +711,7 @@ class TestSymNumberMagicMethods(TestCase):
             else:
                 return contextlib.nullcontext()
 
-        if fn in sym_node.magic_methods_on_math:
-            lambda_apply = getattr(math, fn)
-        elif fn in sym_node.magic_methods_on_submodule:
-            lambda_apply = getattr(sym_node, fn)
-        elif fn in sym_node.magic_methods_on_operator_with_trailing_underscore:
-            lambda_apply = getattr(operator, f"{fn}_")
-        else:
-            lambda_apply = getattr(operator, fn)
+        lambda_apply = method_to_operator(fn)
 
         def guard_fn(v):
             if type(v) in (SymBool, bool):
@@ -739,7 +767,7 @@ class TestSymNumberMagicMethods(TestCase):
         if fn not in sym_node.bool_magic_methods or fn == "sym_ite":
             self.skipTest(f"{fn} is non-bool")
 
-        is_unary_fn = fn in sym_node.unary_magic_methods
+        is_unary_fn = fn in sym_node.unary_methods
         shape_env = ShapeEnv()
         self._do_test(fn, True, False, shape_env, is_unary_fn)
 
@@ -752,7 +780,10 @@ class TestSymNumberMagicMethods(TestCase):
             # TODO: Hmm, this looks like we skip all floats
             self.skipTest(f"{fn} is not a float magic method")
 
-        is_unary_fn = fn in sym_node.unary_magic_methods
+        if (first_type == "int" or second_type == "int") and fn in sym_node.only_float_magic_methods:
+            self.skipTest(f"{fn} is not an int method")
+
+        is_unary_fn = fn in sym_node.unary_methods or fn == "round"
         # Second argument is ignored for unary function. So only run for one type
         if is_unary_fn and second_type == "float":
             self.skipTest(f"{fn} is unary and already tested")
@@ -765,7 +796,7 @@ class TestSymNumberMagicMethods(TestCase):
         values = (
             0.0,
             1.0,
-            2.5,
+            0.5 if fn in ("sym_acos", "sym_asin") else 2.5  # avoid math domain error
         )
 
         neg_values = tuple(-x for x in values)
@@ -797,7 +828,7 @@ class TestSymNumberMagicMethods(TestCase):
             create_symbool(shape_env, True),
             # We should be passing in float here, but create_symbol currently
             # only supports int
-            create_symfloat(shape_env, 3),
+            create_symfloat(shape_env, 3.0),
         )
 
         for x in unhashable:
@@ -1123,6 +1154,36 @@ class TestDimConstraints(TestCase):
         exprs.add(Eq(s / 2, 4))
         solution = reduce_inequalities(exprs, s).as_set()
         self.assertEqual(solution, {8})
+
+    def test_dim_constraints_reduce_inequalities_error(self):
+        from collections import defaultdict
+
+        from sympy import Symbol
+        from sympy.solvers.inequalities import reduce_inequalities
+        from torch._dynamo.source import LocalSource, TensorProperty, TensorPropertySource
+        from torch.fx.experimental.symbolic_shapes import DynamicDimConstraintPrinter
+
+        s0 = Symbol("s0", positive=True, integer=True)
+        exprs = {
+            4 * s0**3 - 4 * s0**2 + s0 <= 2147483647,
+            s0 >= 2,
+            s0**3 <= 2147483647,
+            s0 <= 2147483647,
+        }
+        answer = reduce_inequalities(exprs, s0)
+
+        symbol_to_source = defaultdict(list)
+        symbol_to_source[s0].append(
+            TensorPropertySource(
+                base=LocalSource(local_name="a"), prop=TensorProperty.SIZE, idx=0
+            )
+        )
+        dcp = DynamicDimConstraintPrinter(symbol_to_source, {})
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Unknown symbol.*created by constraints solver",
+        ):
+            dcp.doprint(answer)
 
     def test_dim_constraints_solve_full(self):
         from sympy import Eq, Integer, Ne, Symbol

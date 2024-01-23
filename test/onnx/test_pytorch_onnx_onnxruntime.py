@@ -483,7 +483,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(self, x_in):
                 x_out = {}
                 x_out["test_key_out"] = torch.add(
-                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]
+                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]  # noqa: RUF015
                 )
                 return x_out
 
@@ -3771,13 +3771,18 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_index_copy(self):
         class IndexCopyModel(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.dim = dim
+
             def forward(self, input):
                 index = torch.tensor([2, 0])
                 source = torch.ones(3, 2, 5)
-                return input.index_copy(1, index, source)
+                return input.index_copy(self.dim, index, source)
 
         x = torch.randn(3, 4, 5, requires_grad=True)
-        self.run_test(IndexCopyModel(), x)
+        for dim in (1, -2):
+            self.run_test(IndexCopyModel(dim), x)
 
     def test_select(self):
         class Select(torch.nn.Module):
@@ -3977,9 +3982,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         # As layer_norm works on the last D dimension, please keep
         # this test case at least three dimension to prevent the
         # situation of axis=2 mapping to the same axis as axis=-2
-        model = torch.nn.LayerNorm([10, 10, 10])
-        x = torch.randn(20, 5, 10, 10, 10)
-        self.run_test(model, x)
+        for elementwise_affine in (True, False):
+            for bias in (True, False):
+                model = torch.nn.LayerNorm(
+                    [10, 10, 10], elementwise_affine=elementwise_affine, bias=bias
+                )
+                x = torch.randn(20, 5, 10, 10, 10)
+                self.run_test(model, x)
 
     def test_batchnorm1d(self):
         x = torch.randn(10, 10)
@@ -5389,8 +5398,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(self, x):
                 return x.repeat_interleave(2)
 
-        x = torch.tensor([1, 2, 3])
-        self.run_test(FlattenModel(), (x,))
+        for shape in ([3], [3, 4], [2, 3, 4]):
+            x = torch.randn(shape)
+            self.run_test(FlattenModel(), (x,))
 
         class DimsModel(torch.nn.Module):
             def forward(self, x):
@@ -5893,7 +5903,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 split_list: List[Tensor] = input.split(split_sizes)
 
                 for ob in split_list:
-                    out.append(ob)
+                    out.append(ob)  # noqa: PERF402
                 return torch.cat(out, dim=0)
 
         x = torch.randn(6, 4, 3)
@@ -13600,7 +13610,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
                 self.bano1 = torch_geometric_nn.BatchNorm(512)
                 self.relu = torch.nn.ReLU()
-                self.dense1 = torch.nn.Seq(Lin(512, 1))
+                self.dense1 = torch.nn.Seq(Lin(512, 1))  # noqa: F821
                 self.sigmoid = torch.nn.Sigmoid()
 
             def forward(self, coords0, coords1, edge_from, edge_to):

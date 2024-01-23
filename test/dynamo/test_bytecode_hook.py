@@ -12,6 +12,7 @@ class BytecodeHookTests(torch._dynamo.test_case.TestCase):
         def hook(code, out_code):
             print(code)
             print(out_code)
+            return code
 
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(hook)

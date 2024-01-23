@@ -1,18 +1,15 @@
 #include <ATen/detail/XPUHooksInterface.h>
 
 #include <c10/util/CallOnce.h>
-#include <c10/util/Exception.h>
 
-#include <cstddef>
 #include <memory>
-#include <mutex>
 
 namespace at {
 namespace detail {
 
-static XPUHooksInterface *xpu_hooks = nullptr;
 
-const XPUHooksInterface &getXPUHooks() {
+const XPUHooksInterface& getXPUHooks() {
+  static XPUHooksInterface* xpu_hooks = nullptr;
   static c10::once_flag once;
   c10::call_once(once, [] {
     xpu_hooks =

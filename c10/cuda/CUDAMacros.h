@@ -39,6 +39,12 @@
 #endif
 
 /**
- * The maximum number of GPUs that we recognizes.
+ * The maximum number of GPUs that we recognizes. Increasing this beyond the
+ * initial limit of 16 broke Caffe2 testing, hence the ifdef guards.
  */
+#ifdef FBCODE_CAFFE2
+// fbcode depends on this value being 16
 #define C10_COMPILE_TIME_MAX_GPUS 16
+#else
+#define C10_COMPILE_TIME_MAX_GPUS 64
+#endif

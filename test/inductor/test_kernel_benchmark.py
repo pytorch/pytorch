@@ -8,8 +8,9 @@ import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor import config
 from torch._inductor.codecache import PyCodeCache
+from torch._inductor.utils import fresh_inductor_cache
 from torch.testing import FileCheck
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 class TestKernelBenchmark(TestCase):
@@ -38,14 +39,7 @@ class TestKernelBenchmark(TestCase):
         self.assertTrue(compiled_module is not None)
         return compiled_module
 
-    def test_kernel_benchmark(self):
-        @torch.compile
-        def f(x):
-            return torch.sin(x) + torch.cos(x)
-
-        inp = torch.rand(2, 3).cuda()
-        out = f(inp)
-
+    def verify_compiled_kernels(self):
         compiled_module = self.get_compiled_module()
 
         # now run the compiled module in subprocess and check its output
@@ -60,6 +54,31 @@ class TestKernelBenchmark(TestCase):
             1,
             exactly=1,
         ).run(bench_out)
+
+    def test_pw_kernel_benchmark(self):
+        @torch.compile
+        def f(x):
+            return torch.sin(x) + torch.cos(x)
+
+        inp = torch.rand(2, 3).to(device=GPU_TYPE)
+        out = f(inp)
+        self.verify_compiled_kernels()
+
+    @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @fresh_inductor_cache()
+    def test_matmul_triton_kernel_benchmark(self):
+        M = 12544
+        N = 256
+        K = 64
+        a = torch.rand(M, K, dtype=torch.float16, device=GPU_TYPE)
+        b = torch.rand(N, K, dtype=torch.float16, device=GPU_TYPE).t()
+
+        @torch.compile
+        def f(a, b):
+            return torch.relu(a @ b)
+
+        f(a, b)
+        self.verify_compiled_kernels()
 
     def test_bandwidth_computation(self):
         """
@@ -84,8 +103,8 @@ class TestKernelBenchmark(TestCase):
             return w
 
         M, N, K = 1000, 1000, 10
-        x = torch.rand(M, K).to("cuda")
-        y = torch.rand(K, N).to("cuda")
+        x = torch.rand(M, K).to(device=GPU_TYPE)
+        y = torch.rand(K, N).to(device=GPU_TYPE)
         out = f(x, y)
 
         compiled_module = self.get_compiled_module()
@@ -105,5 +124,5 @@ class TestKernelBenchmark(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
+    if HAS_GPU:
         run_tests()

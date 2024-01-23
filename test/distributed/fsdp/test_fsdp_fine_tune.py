@@ -36,7 +36,7 @@ class TestFSDPFineTune(FSDPTest):
 
     @property
     def world_size(self) -> int:
-        return 2
+        return min(torch.cuda.device_count(), 2)
 
     def _init_seq_module(self) -> nn.Module:
         torch.manual_seed(42)

@@ -128,6 +128,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     .. _`Xu et al.`: https://arxiv.org/abs/2004.13336
     .. _DeepSpeed: https://www.deepspeed.ai/
 
+    For advanced notes please refer to :ref:`fsdp_notes`.
+
     Example::
 
         >>> # xdoctest: +SKIP("undefined variables")
@@ -444,7 +446,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # over which sharding occurs, if sharding_strategy is {HYBRID_SHARD, _HYBRID_SHARD_ZERO2}.
         # Note that this is done before auto_wrapping, so that child FSDP modules simply pick up
         # the same process group state as the root FSDP module.
-        self.device_mesh = device_mesh
+        self._device_mesh = device_mesh
         _init_process_group_state(
             self,
             process_group,
@@ -466,6 +468,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 "limit_all_gathers": limit_all_gathers,
                 "use_orig_params": use_orig_params,
                 "ignored_states": self._ignored_params,
+                "device_mesh": device_mesh,
             }
             if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
                 # Share root process groups with children to maintain

@@ -38,7 +38,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'flake8==6.0.0',
+    'flake8==6.1.0',
     'flake8-bugbear==23.3.23',
     'flake8-comprehensions==3.12.0',
     'flake8-executable==2.1.3',
@@ -46,9 +46,9 @@ init_command = [
     'flake8-pyi==23.3.1',
     'flake8-simplify==0.19.3',
     'mccabe==0.7.0',
-    'pycodestyle==2.10.0',
-    'pyflakes==3.0.1',
-    'torchfix==0.1.1',
+    'pycodestyle==2.11.1',
+    'pyflakes==3.1.0',
+    'torchfix==0.2.0',
 ]
 
 
@@ -57,11 +57,15 @@ code = 'CLANGFORMAT'
 include_patterns = [
     'aten/src/ATen/*.h',
     'aten/src/ATen/mps/**/*.mm',
+    'aten/src/ATen/xpu/**/*.h',
+    'aten/src/ATen/xpu/**/*.cpp',
     'aten/src/ATen/native/mps/**/*.mm',
     'aten/src/ATen/native/vulkan/**/*.h',
     'aten/src/ATen/native/vulkan/**/*.cpp',
     'aten/src/ATen/native/cuda/MultiTensorApply.cuh',
     'aten/src/ATen/native/**/Foreach*.*',
+    'aten/src/ATen/native/cuda/fused*.*',
+    'aten/src/ATen/native/cuda/Fused*.cu',
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',
@@ -112,6 +116,7 @@ include_patterns = [
     'test/test_torch.py',
     'test/test_type_hints.py',
     'test/test_type_info.py',
+    'test/test_utils.py',
 ]
 exclude_patterns = [
     '**/fb/**',
@@ -133,7 +138,6 @@ exclude_patterns = [
     'torch/distributed/elastic/agent/server/api.py',
     'torch/testing/_internal/**',
     'torch/distributed/fsdp/fully_sharded_data_parallel.py',
-    'torch/distributed/distributed_c10d.py',
     # TODO(suo): these exclusions were added just to get lint clean on master.
     # Follow up to do more target suppressions and remove them.
     'torch/ao/quantization/fx/convert.py',
@@ -161,9 +165,10 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'numpy==1.26.0',
+    'numpy==1.24.3 ; python_version == "3.8"',
+    'numpy==1.26.0 ; python_version >= "3.9"',
     'expecttest==0.1.6',
-    'mypy==1.6.0',
+    'mypy==1.7.0',
     'types-requests==2.27.25',
     'types-PyYAML==6.0.7',
     'types-tabulate==0.8.8',
@@ -177,12 +182,10 @@ init_command = [
 ]
 
 [[linter]]
-code = 'MYPYNOFOLLOW'
+code = 'MYPYINDUCTOR'
 include_patterns = [
     'torch/_dynamo/**/*.py',
     'torch/_inductor/**/*.py',
-    'torch/_C/_dynamo/**/*.py',
-    'test/test_utils.py',  # used to by in MYPY but after importing op_db it took 10+ minutes
 ]
 exclude_patterns = [
     '**/fb/**',
@@ -194,8 +197,8 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
-    '--config=mypy-nofollow.ini',
-    '--code=MYPYNOFOLLOW',
+    '--config=mypy-inductor.ini',
+    '--code=MYPYINDUCTOR',
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -243,6 +246,10 @@ code = 'CLANGTIDY'
 include_patterns = [
     'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
+    'c10/**/*.h',
+    # Enable coverage of headers in torch/csrc and excluding sub-directories for now.
+    'torch/csrc/*.h',
+    'torch/csrc/autograd/**/*.h',
     'torch/csrc/**/*.cpp',
 ]
 exclude_patterns = [
@@ -251,8 +258,21 @@ exclude_patterns = [
     # CUDA files are also excluded.
     '**/fb/**',
     '**/*pb.h',
-    '**/*CUDA*',
     '**/cuda/*pp',
+    '**/*XPU*',
+    '**/xpu/*pp',
+    'c10/cuda/CUDAAlgorithm.h',
+    'c10/util/complex_math.h',
+    'c10/util/complex_utils.h',
+    'c10/util/flat_hash_map.h',
+    'c10/util/Float8*.h',
+    'c10/util/logging*.h',
+    'c10/util/hash.h',
+    'c10/util/strong_type.h',
+    'c10/util/SmallVector.h',
+    'c10/util/win32-headers.h',
+    'c10/util/*inl.h',
+    'c10/test/**/*.h',
     'aten/src/ATen/core/TensorImpl_test.cpp',
     'third_party/**/*',
     'torch/csrc/api/**',
@@ -329,17 +349,6 @@ command = [
     """,
     '--',
     '@{{PATHSFILE}}'
-]
-
-[[linter]]
-code = 'CIRCLECI'
-include_patterns=['.circleci/**']
-command = [
-    'python3',
-    'tools/linter/adapters/circleci_linter.py',
-    '--regen-script-working-dir=.circleci',
-    '--config-yml=.circleci/config.yml',
-    '--regen-script=generate_config_yml.py',
 ]
 
 [[linter]]
@@ -867,6 +876,76 @@ command = [
 ]
 
 [[linter]]
+code = 'TEST_HAS_MAIN'
+include_patterns = [
+    'test/**/test_*.py',
+]
+exclude_patterns = [
+    'test/run_test.py',
+    '**/fb/**',
+    'test/quantization/**',  # should be run through test/test_quantization.py
+    'test/jit/**',  # should be run through test/test_jit.py
+    'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
+    'test/fx/**',  # should be run through test/test_fx.py
+    'test/bottleneck_test/**',  # excluded by test/run_test.py
+    'test/package/**',  # excluded by test/run_test.py
+    'test/distributed/argparse_util_test.py',
+    'test/distributed/bin/test_script.py',
+    'test/distributed/elastic/agent/server/test/local_elastic_agent_test.py',
+    'test/distributed/elastic/multiprocessing/bin/test_script.py',
+    'test/distributed/elastic/multiprocessing/bin/zombie_test.py',
+    'test/distributed/elastic/multiprocessing/errors/api_test.py',
+    'test/distributed/elastic/multiprocessing/errors/error_handler_test.py',
+    'test/distributed/elastic/multiprocessing/redirects_test.py',
+    'test/distributed/elastic/multiprocessing/tail_log_test.py',
+    'test/distributed/elastic/rendezvous/api_test.py',
+    'test/distributed/elastic/rendezvous/c10d_rendezvous_backend_test.py',
+    'test/distributed/elastic/rendezvous/dynamic_rendezvous_test.py',
+    'test/distributed/elastic/rendezvous/etcd_rendezvous_backend_test.py',
+    'test/distributed/elastic/rendezvous/etcd_rendezvous_test.py',
+    'test/distributed/elastic/rendezvous/etcd_server_test.py',
+    'test/distributed/elastic/rendezvous/rendezvous_backend_test.py',
+    'test/distributed/elastic/rendezvous/static_rendezvous_test.py',
+    'test/distributed/elastic/rendezvous/utils_test.py',
+    'test/distributed/elastic/timer/api_test.py',
+    'test/distributed/elastic/utils/data/cycling_iterator_test.py',
+    'test/distributed/launcher/api_test.py',
+    'test/distributed/launcher/bin/test_script.py',
+    'test/distributed/launcher/bin/test_script_init_method.py',
+    'test/distributed/launcher/bin/test_script_is_torchelastic_launched.py',
+    'test/distributed/launcher/bin/test_script_local_rank.py',
+    'test/distributed/launcher/launch_test.py',
+    'test/distributed/launcher/run_test.py',
+    'test/distributed/optim/test_apply_optimizer_in_backward.py',
+    'test/distributed/optim/test_named_optimizer.py',
+    'test/distributed/test_c10d_spawn.py',
+    'test/distributed/test_collective_utils.py',
+    'test/distributions/test_distributions.py',
+    'test/inductor/test_aot_inductor_utils.py',
+    'test/lazy/test_bindings.py',
+    'test/lazy/test_extract_compiled_graph.py',
+    'test/lazy/test_meta_kernel.py',
+    'test/nn/test_init.py',
+    'test/onnx/model_defs/op_test.py',
+    'test/onnx/test_models_quantized_onnxruntime.py',
+    'test/onnx/test_onnxscript_no_runtime.py',
+    'test/onnx_caffe2/test_caffe2_common.py',
+    'test/optim/test_lrscheduler.py',
+    'test/optim/test_optim.py',
+    'test/optim/test_swa_utils.py',
+    'test/run_test.py',
+    'test/test_bundled_images.py',
+    'test/test_cuda_expandable_segments.py',
+    'test/test_hub.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/test_has_main_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+
+[[linter]]
 code = 'CALL_ONCE'
 include_patterns = [
     'c10/**',
@@ -1029,19 +1108,6 @@ exclude_patterns = [
     'test/distributed/algorithms/test_join.py',
     'test/distributed/argparse_util_test.py',
     'test/distributed/bin/test_script.py',
-    'test/distributed/checkpoint/test_2d_fsdp_dt_checkpoint.py',
-    'test/distributed/checkpoint/test_checkpoint.py',
-    'test/distributed/checkpoint/test_dedup_tensors.py',
-    'test/distributed/checkpoint/test_dtensor_checkpoint.py',
-    'test/distributed/checkpoint/test_file_system_checkpoint.py',
-    'test/distributed/checkpoint/test_file_system_checkpoint_cpu.py',
-    'test/distributed/checkpoint/test_fsdp_model_state.py',
-    'test/distributed/checkpoint/test_fsdp_optim_state.py',
-    'test/distributed/checkpoint/test_fsspec.py',
-    'test/distributed/checkpoint/test_nested_dict.py',
-    'test/distributed/checkpoint/test_planner.py',
-    'test/distributed/checkpoint/test_traverse.py',
-    'test/distributed/checkpoint/test_utils.py',
     'test/distributed/elastic/agent/server/test/__init__.py',
     'test/distributed/elastic/agent/server/test/api_test.py',
     'test/distributed/elastic/agent/server/test/local_elastic_agent_test.py',
@@ -1681,6 +1747,7 @@ exclude_patterns = [
     'torch/_higher_order_ops/__init__.py',
     'torch/_higher_order_ops/out_dtype.py',
     'torch/_higher_order_ops/wrap.py',
+    'torch/_vendor/**',
     'torch/ao/__init__.py',
     'torch/ao/nn/__init__.py',
     'torch/ao/nn/intrinsic/__init__.py',
@@ -1877,8 +1944,6 @@ exclude_patterns = [
     'torch/cuda/_memory_viz.py',  # mypy: Value of type "object" is not indexable
     'torch/distributed/__init__.py',
     'torch/distributed/_composable_state.py',
-    'torch/distributed/_functional_collectives.py',
-    'torch/distributed/_functional_collectives_impl.py',
     'torch/distributed/_shard/__init__.py',
     'torch/distributed/_shard/_utils.py',
     'torch/distributed/_shard/api.py',
@@ -1944,25 +2009,6 @@ exclude_patterns = [
     'torch/distributed/autograd/__init__.py',
     'torch/distributed/benchmarks/benchmark_ddp_rpc.py',
     'torch/distributed/c10d_logger.py',
-    'torch/distributed/checkpoint/__init__.py',
-    'torch/distributed/checkpoint/_dedup_tensors.py',
-    'torch/distributed/checkpoint/_fsspec_filesystem.py',
-    'torch/distributed/checkpoint/_nested_dict.py',
-    'torch/distributed/checkpoint/_sharded_tensor_utils.py',
-    'torch/distributed/checkpoint/_traverse.py',
-    'torch/distributed/checkpoint/api.py',
-    'torch/distributed/checkpoint/default_planner.py',
-    'torch/distributed/checkpoint/examples/fsdp_checkpoint_example.py',
-    'torch/distributed/checkpoint/filesystem.py',
-    'torch/distributed/checkpoint/metadata.py',
-    'torch/distributed/checkpoint/optimizer.py',
-    'torch/distributed/checkpoint/planner.py',
-    'torch/distributed/checkpoint/planner_helpers.py',
-    'torch/distributed/checkpoint/resharding.py',
-    'torch/distributed/checkpoint/state_dict_loader.py',
-    'torch/distributed/checkpoint/state_dict_saver.py',
-    'torch/distributed/checkpoint/storage.py',
-    'torch/distributed/checkpoint/utils.py',
     'torch/distributed/collective_utils.py',
     'torch/distributed/constants.py',
     'torch/distributed/distributed_c10d.py',
@@ -2088,7 +2134,6 @@ exclude_patterns = [
     'torch/futures/__init__.py',
     'torch/fx/__init__.py',
     'torch/fx/_compatibility.py',
-    'torch/fx/_pytree.py',
     'torch/fx/_symbolic_trace.py',
     'torch/fx/annotate.py',
     'torch/fx/config.py',
@@ -2133,7 +2178,6 @@ exclude_patterns = [
     'torch/fx/experimental/validator.py',
     'torch/fx/graph.py',
     'torch/fx/graph_module.py',
-    'torch/fx/immutable_collections.py',
     'torch/fx/interpreter.py',
     'torch/fx/node.py',
     'torch/fx/operator_schemas.py',
@@ -2376,7 +2420,6 @@ exclude_patterns = [
     'torch/testing/_internal/distributed/_shard/test_common.py',
     'torch/testing/_internal/distributed/_tensor/__init__.py',
     'torch/testing/_internal/distributed/_tensor/common_dtensor.py',
-    'torch/testing/_internal/distributed/checkpoint_utils.py',
     'torch/testing/_internal/distributed/ddp_under_dist_autograd_test.py',
     'torch/testing/_internal/distributed/distributed_test.py',
     'torch/testing/_internal/distributed/distributed_utils.py',
@@ -2519,7 +2562,6 @@ exclude_patterns = [
     'torch/utils/data/datapipes/utils/common.py',
     'torch/utils/data/datapipes/utils/decoder.py',
     'torch/utils/data/datapipes/utils/snapshot.py',
-    'torch/utils/data/dataset.py',
     'torch/utils/data/distributed.py',
     'torch/utils/data/graph.py',
     'torch/utils/data/graph_settings.py',
@@ -2561,7 +2603,7 @@ init_command = [
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
     '--no-black-binary',
-    'black==23.3.0',
+    'black==23.12.1',
     'ufmt==2.1.0',
     'usort==1.0.6',
 ]
@@ -2647,7 +2689,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.1.5',
+    'ruff==0.1.11',
 ]
 is_formatter = true
 

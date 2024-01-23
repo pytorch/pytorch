@@ -1,6 +1,10 @@
 #pragma once
 
+#include <c10/core/Device.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/InlineDeviceGuard.h>
+#include <c10/core/impl/VirtualGuardImpl.h>
+#include <c10/util/Optional.h>
 
 namespace c10 {
 

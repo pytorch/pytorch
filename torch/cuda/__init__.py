@@ -110,9 +110,9 @@ else:
         raise RuntimeError("PyTorch was compiled without CUDA support")
 
 
-# Global variables dynamically populated by native code
-has_magma: bool = False
-has_half: bool = False
+has_half: bool = True
+has_magma: bool = torch._C._has_magma
+
 default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 
@@ -148,15 +148,29 @@ def is_bf16_supported():
     if torch.version.hip:
         return True
 
-    cu_vers = torch.version.cuda
-    if cu_vers is not None:
-        cuda_maj_decide = int(cu_vers.split(".")[0]) >= 11
-    else:
-        cuda_maj_decide = False
-    return (
-        torch.cuda.get_device_properties(torch.cuda.current_device()).major >= 8
-        and cuda_maj_decide
-    )
+    device = torch.cuda.current_device()
+
+    # Check for CUDA version and device compute capability.
+    # This is a fast way to check for it.
+    cuda_version = torch.version.cuda
+    if (
+        cuda_version is not None
+        and int(cuda_version.split(".")[0]) >= 11
+        and torch.cuda.get_device_properties(device).major >= 8
+    ):
+        return True
+
+    # Finally try to create a bfloat16 device.
+    return _check_bf16_tensor_supported(device)
+
+
+@lru_cache(maxsize=16)
+def _check_bf16_tensor_supported(device: _device_t):
+    try:
+        torch.tensor([1.0], dtype=torch.bfloat16, device=device)
+        return True
+    except Exception:
+        return False
 
 
 def _sleep(cycles):
@@ -1274,12 +1288,28 @@ def _register_triton_kernels():
 
         return bsr_dense_mm(*args, skip_checks=True, **kwargs)
 
+    @_WrappedTritonKernel
+    def addmm_kernel_impl(*args, **kwargs):
+        from torch.sparse._triton_ops import bsr_dense_addmm
+
+        return bsr_dense_addmm(*args, skip_checks=True, **kwargs)
+
     has_triton = importlib.util.find_spec("triton") is not None
     if has_triton:
         torch._TritonLibrary.registerOp(
             "_triton_bsr_dense_mm_out",
             "_triton_bsr_dense_mm_out(Tensor bsr, Tensor dense, *, Tensor(a!) out) -> Tensor(a!)",
             kernel_impl,
+            "SparseCsrCUDA",
+        )
+
+        torch._TritonLibrary.registerOp(
+            "_triton_bsr_dense_addmm_out",
+            (
+                "_triton_bsr_dense_addmm_out(Tensor input, Tensor bsr, Tensor dense,"
+                " *, Scalar beta, Scalar alpha, Tensor(a!) out) -> Tensor(a!)"
+            ),
+            addmm_kernel_impl,
             "SparseCsrCUDA",
         )
 

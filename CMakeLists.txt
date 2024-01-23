@@ -57,7 +57,6 @@ if(LINUX)
   else()
     # Please note this is required in order to ensure compatibility between gcc 9 and gcc 7
     # This could be removed when all Linux PyTorch binary builds are compiled by the same toolchain again
-    include(CheckCXXCompilerFlag)
     append_cxx_flag_if_supported("-fabi-version=11" CMAKE_CXX_FLAGS)
   endif()
 endif()
@@ -187,7 +186,6 @@ cmake_dependent_option(
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
 option(BUILD_AOT_INDUCTOR_TEST "Build C++ test binaries for aot-inductor" OFF)
 option(BUILD_STATIC_RUNTIME_BENCHMARK "Build C++ binaries for static runtime benchmarks (need gbenchmark)" OFF)
-option(BUILD_TENSOREXPR_BENCHMARK "Build C++ binaries for tensorexpr benchmarks (need gbenchmark)" OFF)
 option(BUILD_MOBILE_BENCHMARK "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_MOBILE_TEST "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_JNI "Build JNI bindings" OFF)
@@ -201,6 +199,9 @@ option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 cmake_dependent_option(
+    USE_XPU "Use XPU. Only available on Linux." ON
+    "LINUX" OFF)
+cmake_dependent_option(
      BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -213,9 +214,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_CUSPARSELT "Use cuSPARSELt" ON
     "USE_CUDA" OFF)
-cmake_dependent_option(
-    USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" ON
-    "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
@@ -288,7 +286,7 @@ option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the 
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
-option(TORCH_DISABLE_GPU_ASSERTS "Disable GPU asserts by default" OFF)
+option(USE_ROCM_KERNEL_ASSERT "Use Kernel Assert for ROCm" OFF)
 # Ensure that an ITT build is the default for x86 CPUs
 cmake_dependent_option(
   USE_ITT "Use Intel(R) VTune Profiler ITT functionality" ON
@@ -328,9 +326,6 @@ cmake_dependent_option(
     USE_C10D_GLOO "USE C10D GLOO" ON "USE_DISTRIBUTED;USE_GLOO" OFF)
 cmake_dependent_option(
     USE_C10D_NCCL "USE C10D NCCL" ON "USE_DISTRIBUTED;USE_NCCL" OFF)
-cmake_dependent_option(
-    USE_NCCL_WITH_UCC "Enable UCC support for ProcessGroupNCCL. Only available if USE_C10D_NCCL is on." OFF
-    "USE_C10D_NCCL" OFF)
 cmake_dependent_option(
     USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
 cmake_dependent_option(
@@ -735,19 +730,23 @@ if(MSVC)
   append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
 endif()
 
-include(cmake/Dependencies.cmake)
-
-# Moved this cmake set option down here because CMAKE_CUDA_COMPILER_VERSION is not avaialble until now
+# CAVEAT: do NOT check USE_ROCM here, because USE_ROCM is always True until
+#         include(cmake/Dependencies.cmake)
 cmake_dependent_option(
   USE_FLASH_ATTENTION
-  "Whether to build the flash_attention kernel for scaled dot product attention" ON
-  "USE_CUDA AND NOT ROCM AND NOT MSVC AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
+  "Whether to build the flash_attention kernel for scaled dot product attention.\
+  Will be disabled if not supported by the platform" ON
+  "USE_CUDA AND NOT MSVC" OFF)
 
+# CAVEAT: Again, do not check USE_ROCM here
 # Flash Attention2 will error while building for sm52 while Mem Eff Attention won't
 cmake_dependent_option(
   USE_MEM_EFF_ATTENTION
-  "Enable memory-efficient attention for scaled dot product attention" ON
-  "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
+  "Enable memory-efficient attention for scaled dot product attention.\
+  Will be disabled if not supported by the platform" ON
+  "USE_CUDA" OFF)
+
+include(cmake/Dependencies.cmake)
 
 if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
@@ -1150,6 +1149,7 @@ if(BUILD_SHARED_LIBS)
       COMPONENT dev)
   install(FILES
       ${PROJECT_SOURCE_DIR}/cmake/public/cuda.cmake
+      ${PROJECT_SOURCE_DIR}/cmake/public/xpu.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/mkl.cmake
@@ -1169,6 +1169,10 @@ if(BUILD_SHARED_LIBS)
       COMPONENT dev)
   install(FILES
       ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUSPARSELT.cmake
+      DESTINATION share/cmake/Caffe2/
+      COMPONENT dev)
+  install(FILES
+      ${PROJECT_SOURCE_DIR}/cmake/Modules/FindSYCLToolkit.cmake
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
 

@@ -21,11 +21,11 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._tensor import DTensor
-from torch.distributed.checkpoint._state_dict_utils import (
+from torch.distributed._state_dict_utils import (
     _gather_state_dict,
     _offload_state_dict_to_cpu,
 )
+from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp import (
     FullOptimStateDictConfig,
     FullStateDictConfig,
@@ -157,7 +157,7 @@ def _get_fqns(model: nn.Module, name: str, skip_ddp_prefix: bool = True) -> FQNS
             if not skip_ddp_prefix:
                 fqn_obj_names.append(curr_obj_name)
         elif isinstance(curr_obj, FSDP):
-            if obj_names[i + 1] == FLAT_PARAM:
+            if i < len(obj_names) - 1 and obj_names[i + 1] == FLAT_PARAM:
                 prefix = ".".join(fqn_obj_names)
                 flat_param = getattr(curr_obj, FLAT_PARAM)
                 if prefix:
@@ -229,7 +229,9 @@ def _verify_options(
             )
             state_dict_type = StateDictType.FULL_STATE_DICT
         else:
-            state_dict_config = ShardedStateDictConfig()
+            state_dict_config = ShardedStateDictConfig(
+                offload_to_cpu=options.cpu_offload,
+            )
             optim_state_dict_config = ShardedOptimStateDictConfig(
                 offload_to_cpu=options.cpu_offload,
             )
@@ -405,7 +407,9 @@ def _load_model_state_dict(
     with info.fsdp_context():
         return cast(
             _IncompatibleKeys,
-            _state_dict_fn(model, "load_state_dict")(state_dict, strict=info.strict),
+            _state_dict_fn(model, "load_state_dict")(
+                state_dict=state_dict, strict=info.strict
+            ),
         )
 
 
@@ -562,7 +566,7 @@ def _load_optim_state_dict(
         # order in optim.param_groups[idx][PARAMS] is the same as the one in
         # optim_state_dict[PG][idx][PARAMS].
         _init_optim_state(optim)
-        _state_dict_fn(optim, "load_state_dict")(optim_state_dict)
+        _state_dict_fn(optim, "load_state_dict")(state_dict=optim_state_dict)
 
 
 def get_model_state_dict(
@@ -938,7 +942,7 @@ def _patch_model_state_dict(
     )
 
     def load_state_dict_call(state_dict: Dict[str, Any]):
-        _load_state_dict_call(model_state_dict=state_dict)[1]
+        _load_state_dict_call(model_state_dict=state_dict)
 
     model.load_state_dict = load_state_dict_call
 
@@ -1001,6 +1005,11 @@ def _patch_optimizer_state_dict(
 
     _patched_state_dict.add(state_dict_call)
     _patched_state_dict.add(load_state_dict_call)
+    optimizers = (
+        (optimizers,)
+        if isinstance(optimizers, torch.optim.Optimizer)
+        else tuple(optimizers)
+    )
     for optim in optimizers:
         optim.state_dict = state_dict_call
         optim.load_state_dict = load_state_dict_call

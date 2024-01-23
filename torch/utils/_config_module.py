@@ -20,7 +20,7 @@ def install_config_module(module):
     """
     Converts a module-level config into a `ConfigModule()`.
 
-    See config_typing.pyi for instructions on how to get the converted module to typecheck.
+    See _config_typing.pyi for instructions on how to get the converted module to typecheck.
     """
 
     class ConfigModuleInstance(ConfigModule):
@@ -111,7 +111,7 @@ def get_assignments_with_compile_ignored_comments(module):
 
 
 class ConfigModule(ModuleType):
-    # NOTE: This should be kept in sync with config_typing.pyi.
+    # NOTE: This should be kept in sync with _config_typing.pyi.
 
     # The default values of the configuration settings.  This can be used to
     # determine if the config has been changed or not.

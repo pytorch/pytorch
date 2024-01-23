@@ -216,6 +216,26 @@ class ModuleProperty(torch.nn.Module):
         return x * self.scale_alias
 
 
+class NestedModuleList(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList([])
+        for _ in range(3):
+            self.layers.append(
+                torch.nn.ModuleList(
+                    [
+                        torch.nn.Linear(10, 10),
+                        torch.nn.ReLU(),
+                    ]
+                )
+            )
+
+    def forward(self, x):
+        for layer, act in self.layers:
+            x = act(layer(x))
+        return x
+
+
 class ConstLoop(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -798,7 +818,7 @@ class ConvTransposeCallSuperForwardDirectly(torch.nn.ConvTranspose2d):
             )
         ]
         output_shape = [x.shape[0], self.bias.shape[0]] + output_shape
-        return _NewEmptyTensorOp.apply(x, output_shape)
+        return _NewEmptyTensorOp.apply(x, output_shape)  # noqa: F821
 
 
 class ModuleNameString(torch.nn.Module):
@@ -1046,6 +1066,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_cfgmod = make_test(CfgModule())
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
+    test_modulelist_nested = make_test(NestedModuleList())
     test_modulelist_custom = make_test(CustomGetItemModuleList())
     test_moduledict = make_test(ModuleDict())
     test_moduledict_custom = make_test(CustomGetItemModuleDict())

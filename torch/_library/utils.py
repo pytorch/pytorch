@@ -64,6 +64,11 @@ def lookup_op(qualname: str) -> torch._ops.OpOverloadPacket:
     return getattr(packet, overload)
 
 
+def is_builtin(op: torch._ops.OpOverload) -> bool:
+    assert isinstance(op, torch._ops.OpOverload)
+    return op.namespace in {"aten", "prim", "prims"}
+
+
 def is_functional_schema(schema: Any) -> bool:
     """Check if the schema is functional.
 

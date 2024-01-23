@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import pathlib
+import shutil
 from typing import Any, Callable, cast, Dict, List, Optional, Union
 from urllib.request import urlopen
 
@@ -26,6 +27,7 @@ TEST_FILE_RATINGS_FILE = "test-file-ratings.json"
 TEST_CLASS_RATINGS_FILE = "test-class-ratings.json"
 TD_HEURISTIC_PROFILING_FILE = "td_heuristic_profiling.json"
 TD_HEURISTIC_HISTORICAL_EDITED_FILES = "td_heuristic_historical_edited_files.json"
+TD_HEURISTIC_PREVIOUSLY_FAILED = "previous_failures.json"
 
 FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
 
@@ -150,6 +152,16 @@ def get_td_heuristic_profiling_json() -> Dict[str, Any]:
         "td_heuristic_profiling.json",
         TD_HEURISTIC_PROFILING_FILE,
         "Couldn't download td_heuristic_profiling.json not reordering...",
+    )
+
+
+def copy_pytest_cache() -> None:
+    original_path = REPO_ROOT / ".pytest_cache/v/cache/lastfailed"
+    if not original_path.exists():
+        return
+    shutil.copyfile(
+        original_path,
+        REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / TD_HEURISTIC_PREVIOUSLY_FAILED,
     )
 
 

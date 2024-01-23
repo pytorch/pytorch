@@ -8,11 +8,6 @@
 #include <c10/util/Registry.h>
 
 #include <cstddef>
-#include <functional>
-
-namespace at {
-class Context;
-}
 
 namespace at {
 
@@ -31,7 +26,7 @@ struct TORCH_API MPSHooksInterface {
   virtual bool hasMPS() const {
     return false;
   }
-  virtual bool isOnMacOS13orNewer(unsigned minor = 0) const {
+  virtual bool isOnMacOSorNewer(unsigned major = 13, unsigned minor = 0) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
   virtual const Generator& getDefaultMPSGenerator() const {

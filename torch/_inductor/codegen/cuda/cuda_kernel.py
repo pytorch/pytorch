@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, TYPE_CHECKING
 
 from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
@@ -10,6 +10,9 @@ from ...virtualized import V
 
 from ..common import IndentedBuffer, Kernel, OpOverrides
 from ..cpp import CppPrinter, DTYPE_TO_CPP
+
+if TYPE_CHECKING:
+    from torch._inductor.codegen.cuda.cuda_template import CUDATemplate
 
 log = logging.getLogger(__name__)
 
@@ -134,7 +137,7 @@ class CUDATemplateKernel(CUDAKernel):
         return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
 
     def call_kernel(
-        self, name: str, node: "CUDATemplateBuffer", epilogue_nodes: List[ir.Buffer]  # type: ignore[name-defined]
+        self, name: str, node: "CUDATemplateBuffer", epilogue_nodes: List[ir.Buffer]
     ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
@@ -295,7 +298,7 @@ class CUDATemplateCaller(ChoiceCaller):
         layout: Layout,
         make_kernel_render: Callable[[CUDATemplateBuffer, Optional[List[IRNode]]], str],
         bmreq: CUDABenchmarkRequest,
-        template: "CUDATemplate",  # type: ignore[name-defined]
+        template: "CUDATemplate",
     ):
         super().__init__(name, input_nodes, layout)
         self.category = category
