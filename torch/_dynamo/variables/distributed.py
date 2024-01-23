@@ -169,6 +169,24 @@ class DeviceMeshVariable(DistributedVariable):
             return ConstantVariable.create(self.value.ndim)
         return super().var_getattr(tx, name)
 
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "size":
+            const_args = [x.as_python_constant() for x in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            return ConstantVariable.create(self.value.size(*const_args, **const_kwargs))
+        if name == "get_coordinate":
+            return ConstantVariable.create(self.value.get_coordinate())
+        if name == "get_group":
+            return ConstantVariable.create(self.value.get_group())
+
+        return super().call_method(tx, name, args, kwargs)
+
 
 class ProcessGroupVariable(DistributedVariable):
     """
