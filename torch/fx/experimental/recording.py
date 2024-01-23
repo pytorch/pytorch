@@ -116,12 +116,6 @@ class ShapeEnvEvent:
                 # Don't do anything to x if it's not an FX node.
                 return x
 
-            if not shape_env._translation_validation_enabled:
-                assert not hasattr(
-                    shape_env, "name_to_node"
-                ), "Translation validation is not on, we shouldn't have name_to_node."
-                return x.name
-
             # If, at some point, we created an FX node, it means that translation validation is on.
             # It also means we are building an FX graph for symbolic shapes at shape_env.graph, and
             # we are tracking node names at shape_env.name_to_node.
