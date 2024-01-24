@@ -1,3 +1,5 @@
+import functools
+
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -11,18 +13,19 @@ from torch.distributed._composable_state import (
     _State,
 )
 from torch.distributed.utils import _to_kwargs
-from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_flatten, tree_map
 from torch.utils.hooks import RemovableHandle
+from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_collectives import AllGatherStateHolder
-from ._fsdp_common import TrainingState
+from ._fsdp_common import _cast_floating_point_tensor, TrainingState
 from ._fsdp_param import FSDPParam
-
 from ._fsdp_param_group import FSDPParamGroup
 
 
 class FSDPState(_State):
     _module: nn.Module  # permit ref cycle since module and state lifetimes are 1:1
     _device: torch.device
+    _mp_policy: MixedPrecisionPolicy
     _default_stream: torch.cuda.Stream
     _all_gather_copy_in_stream: torch.cuda.Stream
     _all_gather_stream: torch.cuda.Stream
@@ -45,10 +48,13 @@ class FSDPState(_State):
         self._root_post_backward_final_callback_queued: Optional[bool] = None
 
     # Define a separate init since `__init__` is called in the contract
-    def init(self, module: nn.Module, device: torch.device) -> None:
+    def init(
+        self, module: nn.Module, device: torch.device, mp_policy: MixedPrecisionPolicy
+    ) -> None:
         _insert_module_state(module, self)
         self._module = module
         self._device = device
+        self._mp_policy = mp_policy
         self._pre_forward_hook_handle = self._module.register_forward_pre_hook(
             self._pre_forward, prepend=True, with_kwargs=True
         )
@@ -140,6 +146,12 @@ class FSDPState(_State):
             return args, kwargs
         self._training_state = TrainingState.FORWARD
         args, kwargs = self._root_pre_forward(module, args, kwargs)
+        if self._mp_policy.cast_forward_inputs and self._mp_policy.param_dtype:
+            with torch.profiler.record_function("FSDP::cast_forward_inputs"):
+                cast_fn = functools.partial(
+                    _cast_floating_point_tensor, self._mp_policy.param_dtype
+                )
+                args, kwargs = tree_map(cast_fn, args), tree_map(cast_fn, kwargs)
         if self._fsdp_param_group:
             args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
         return args, kwargs
@@ -157,6 +169,15 @@ class FSDPState(_State):
             self._all_gather_copy_in_stream.wait_event(all_gather_state.event)
             self._all_gather_stream.wait_event(all_gather_state.event)
             del all_gather_state  # free
+        if self._mp_policy.output_dtype is not None:
+            with torch.profiler.record_function("FSDP::cast_forward_outputs"):
+                output = tree_map(
+                    functools.partial(
+                        _cast_floating_point_tensor, self._mp_policy.output_dtype
+                    ),
+                    output,
+                )
+        return output
 
     def _pre_backward(self, *unused: Any) -> None:
         self._training_state = TrainingState.PRE_BACKWARD
