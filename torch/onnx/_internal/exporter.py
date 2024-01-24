@@ -1436,12 +1436,26 @@ def dynamo_export(
         ) from e
 
 
-def common_pre_export_passes(
+def common_pre_export_passes_shared_by_exporter_and_dynamo_backend(
     options: ResolvedExportOptions,
-    original_model: Union[torch.nn.Module, Callable],
     fx_module: torch.fx.GraphModule,
     fx_module_args: Sequence[Any],
+    functionalize_module: bool = True,
 ):
+    """
+    This function
+      - implicitly copies (via passes.Decompose) the input `fx_module`
+      - applies a series of pre-export passes needed in dynamo `onnxrt`
+        backend and pytorch-to-onnx exporter.
+
+    Args:
+      options (ResolvedExportOptions): The resolved export options.
+      fx_module (torch.fx.GraphModule): The graph module representation of the model.
+      fx_module_args (Sequence[Any]): The arguments to be passed to the graph module.
+
+    Returns:
+      torch.fx.GraphModule: The modified graph module after applying the pre-export passes.
+    """
     # TODO: Import here to prevent circular dependency
     from torch.onnx._internal.fx import analysis, passes
 
@@ -1458,24 +1472,67 @@ def common_pre_export_passes(
 
     # ONNX does not support views and mutations.
     # Functionalize to get a semantically equivalent graph without mutations.
-    module = passes.Functionalize(
-        diagnostic_context,
-        module,
-        enable_dynamic_axes=options.dynamic_shapes,
-        allow_fake_constant=options.fake_context is not None,
-    ).run(*fx_module_args)
+    if functionalize_module:
+        module = passes.Functionalize(
+            diagnostic_context,
+            module,
+            enable_dynamic_axes=options.dynamic_shapes,
+            allow_fake_constant=options.fake_context is not None,
+        ).run(*fx_module_args)
 
-    # Input mutations are detected and distilled after `Functionalize` pass.
-    # Remove them since ONNX inference does not need them.
-    module = passes.RemoveInputMutation(diagnostic_context, module).run(*fx_module_args)
+        # Input mutations are detected and distilled after `Functionalize` pass.
+        # Remove them since ONNX inference does not need them.
+        module = passes.RemoveInputMutation(diagnostic_context, module).run(
+            *fx_module_args
+        )
 
     # ONNX does not support concept of (implicit) type promotion.
     # Insert type casts explicitly where needed.
     module = passes.InsertTypePromotion(diagnostic_context, module).run()
 
+    # Tell if some operators cannot be exported to ONNX.
     analysis.UnsupportedFxNodesAnalysis(
         diagnostic_context, module, options.onnxfunction_dispatcher
     ).analyze(infra.levels.ERROR)
+
+    return module
+
+
+def common_pre_export_passes(
+    options: ResolvedExportOptions,
+    original_model: Union[torch.nn.Module, Callable],
+    fx_module: torch.fx.GraphModule,
+    fx_module_args: Sequence[Any],
+):
+    """
+    This function is used in ONNX exporter, not `onnxrt` backend for dynamo.
+    This function extends
+    common_pre_export_passes_shared_by_exporter_and_dynamo_backend(...)
+    by adding more passes to adjust model input and output formats.
+    It also recovers model hierarchy when possible.
+
+    Args:
+      options (ResolvedExportOptions): The resolved export options.
+      original_model (Union[torch.nn.Module, Callable]): The original model to be exported.
+      fx_module (torch.fx.GraphModule): The graph module representation of the model.
+      fx_module_args (Sequence[Any]): The arguments to be passed to the graph module.
+
+    Returns:
+      torch.fx.GraphModule: The modified graph module after applying the pre-export passes.
+    """
+
+    # TODO: Import here to prevent circular dependency
+    from torch.onnx._internal.fx import passes
+
+    # Apply decomposition, functionalization, etc.
+    # This pass doesn't change input and output schemas.
+    # This pass doesn't try to make changes to model
+    # structure (unlike passes.Modularize).
+    module = common_pre_export_passes_shared_by_exporter_and_dynamo_backend(
+        options, fx_module, fx_module_args
+    )
+
+    diagnostic_context = options.diagnostic_context
 
     if isinstance(original_model, torch.nn.Module):
         module = passes.RestoreParameterAndBufferNames(

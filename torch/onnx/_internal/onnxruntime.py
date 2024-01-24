@@ -45,6 +45,9 @@ try:
     import torch.onnx._internal.exporter
     import torch.onnx._internal.fx.decomposition_table
     import torch.onnx._internal.fx.passes
+    from torch.onnx._internal.exporter import (
+        common_pre_export_passes_shared_by_exporter_and_dynamo_backend,
+    )
     from torch.onnx._internal.fx import fx_onnx_interpreter
     from torch.onnx._internal.fx.type_utils import (
         _TORCH_DTYPE_TO_NUMPY_DTYPE,
@@ -174,27 +177,6 @@ class OrtOperatorSupport(OperatorSupport):
             type(node.target),
         )
         return False
-
-
-def _move_placeholder_to_front(graph_module: torch.fx.GraphModule) -> None:
-    """
-    In torch.fx.Graph, placeholder is a special assignment node. If it's not
-    executed in the beginning, it could overwrite values computed by upstream
-    nodes.
-    """
-
-    graph = graph_module.graph
-    placeholders = []
-    first_not_placeholder = None
-    for node in graph.nodes:
-        if node.op == "placeholder":
-            placeholders.append(node)
-        if first_not_placeholder is None and node.op != "placeholder":
-            first_not_placeholder = node
-    if first_not_placeholder is None:
-        return
-    for placeholder in placeholders:
-        first_not_placeholder.prepend(placeholder)
 
 
 def _infer_ep_from_device(*args) -> Tuple[str, ...]:
@@ -826,47 +808,42 @@ class OrtBackend:
         else:
             # It's first time seeing such as graph. Let's make a new session
             # (type: onnxruntime.InferenceSession) for it.
-            original_module = graph_module
 
-            graph_module = torch.onnx._internal.fx.passes.MovePlaceholderToFront(
-                self._resolved_onnx_exporter_options.diagnostic_context,
-                graph_module,
-            ).run()
+            modified_graph_module = (
+                torch.onnx._internal.fx.passes.MovePlaceholderToFront(
+                    self._resolved_onnx_exporter_options.diagnostic_context,
+                    graph_module,
+                ).run()
+            )
             # Generate reference outputs. They are used to indicate output
             # tensors' types and devices when calling ORT.
             #
             # WARNING: The downstream code should not change prim_outputs and
             # this backend should always produces output with schema identical to prim_outputs'.
 
-            # Apply decomposition table to the input graph
+            graph_module_args = [
+                node.meta["val"]
+                for node in modified_graph_module.graph.nodes
+                if node.op == "placeholder"
+            ]
+
+            # This step mainly applies decomposition to the input graph.
             # so that torch.relu becomes torch.ops.aten.relu.
-            graph_module = torch.onnx._internal.fx.passes.Decompose(
-                self._resolved_onnx_exporter_options.diagnostic_context,
+            # Instead of changing existing model, this step shall create a new model.
+            # Otherwise, model caching mechanism will be broken and it will be hard to
+            # debug mutable graphs.
+            modified_graph_module = common_pre_export_passes_shared_by_exporter_and_dynamo_backend(
+                self._resolved_onnx_exporter_options,
                 graph_module,
-                self._resolved_onnx_exporter_options.decomposition_table,
-                enable_dynamic_axes=self._resolved_onnx_exporter_options.dynamic_shapes,
-                allow_fake_constant=self._resolved_onnx_exporter_options.fake_context is not None,
-            ).run(*args)
-
-            # Remove in-place ops since ONNX is a single-static-assignment language.
-            graph_module = torch.onnx._internal.fx.passes.Functionalize(
-                self._resolved_onnx_exporter_options.diagnostic_context,
-                graph_module,
-                enable_dynamic_axes=self._resolved_onnx_exporter_options.dynamic_shapes,
-                allow_fake_constant=self._resolved_onnx_exporter_options.fake_context is not None,
-            ).run(*args)
-
-            # Input mutations are detected and distilled after `Functionalize` pass.
-            # Remove them since ONNX inference does not need them.
-            graph_module = torch.onnx._internal.fx.passes.RemoveInputMutation(
-                self._resolved_onnx_exporter_options.diagnostic_context,
-                graph_module,
-            ).run(*args)
+                graph_module_args,
+                # functionalization cannot be called from here.
+                functionalize_module=False,
+            )
 
             if self._resolved_onnx_exporter_options.dynamic_shapes:
                 # No pre-allocation when dynamic shape is enabled.
                 self.preallocate_output = False
-                extracted_outputs = _extract_graph_module_outputs(graph_module)
+                extracted_outputs = _extract_graph_module_outputs(modified_graph_module)
 
                 def maybe_map_to_meta_val(value):
                     if hasattr(value, "meta") and "val" in value.meta:
@@ -881,11 +858,17 @@ class OrtBackend:
                 )
             else:
                 try:
-                    prim_outputs = FakeTensorProp(graph_module).propagate(
+                    # Output tensors' types and devices are inferred by
+                    # running `FakeTensorProp` with the current input args and kwargs.
+                    # The values stored in node.meta["val"] are not used because
+                    # pre-allocation cannnot use dynamic shapes.
+                    prim_outputs = FakeTensorProp(modified_graph_module).propagate(
                         *args, **kwargs
                     )
                 except Exception:
-                    logger.warning("FakeTensorProb failed for %s", graph_module)
+                    logger.warning(
+                        "FakeTensorProb failed for %s", modified_graph_module
+                    )
                     # When FakeTensorProp fails, it is not possible to preallocate output buffers
                     # because the output shapes are not inferred.
                     self.preallocate_output = False
@@ -901,13 +884,14 @@ class OrtBackend:
             # Cast FX variables if they will result schema-mismatch when searching
             # for ONNX operator. E.g., add(double_tensor, int_tensor) is fine in PyTorch,
             # but ONNX expects add(double_tensor, double_tensor).
-            graph_module = torch.onnx._internal.fx.passes.InsertTypePromotion(
-                self._resolved_onnx_exporter_options.diagnostic_context, graph_module
+            modified_graph_module = torch.onnx._internal.fx.passes.InsertTypePromotion(
+                self._resolved_onnx_exporter_options.diagnostic_context,
+                modified_graph_module,
             ).run()
             # Start the per-node exporting process. It's conceptually a for loop
             # scanning through the nodes in the graph.
             exported = fx_interpreter.run(
-                fx_graph_module=graph_module,
+                fx_graph_module=modified_graph_module,
                 onnxfunction_dispatcher=self._resolved_onnx_exporter_options.onnxfunction_dispatcher,
                 op_level_debug=self._resolved_onnx_exporter_options.op_level_debug,
             )
@@ -928,7 +912,7 @@ class OrtBackend:
             onnx_session = onnxruntime.InferenceSession(
                 path_or_bytes=onnx_model.SerializeToString(),
                 sess_options=self._options.ort_session_options,
-                providers=self._select_eps(graph_module, *args),
+                providers=self._select_eps(modified_graph_module, *args),
             )
 
             # Cache ORT session. It's reused for the same "graph_module".
@@ -959,7 +943,7 @@ class OrtBackend:
             )
 
             self._all_ort_execution_info.cache_session_execution_info(
-                original_module, execution_info_per_session
+                graph_module, execution_info_per_session
             )
 
         self.execution_count += 1

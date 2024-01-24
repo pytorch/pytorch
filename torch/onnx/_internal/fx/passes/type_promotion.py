@@ -24,7 +24,7 @@ from torch._prims_common import (
 from torch._refs import linalg as _linalg_refs, nn as _nn_refs, special as _special_refs
 from torch._refs.nn import functional as _functional_refs
 from torch._subclasses import fake_tensor
-from torch.fx.experimental import proxy_tensor, symbolic_shapes
+from torch.fx.experimental import proxy_tensor
 
 # Imported to resolve beartype issue when type checking node.Argument.
 from torch.fx.node import Node  # noqa: F401
@@ -72,7 +72,15 @@ class TypePromotionSnapshot:
 @_beartype.beartype
 def _fake_tensor_from_node_val(
     node: torch.fx.Node,
-) -> Union[fake_tensor.FakeTensor, int, float, bool]:
+) -> Union[
+    fake_tensor.FakeTensor,
+    int,
+    float,
+    bool,
+    torch.SymInt,
+    torch.SymFloat,
+    torch.SymBool,
+]:
     """Syntactic sugar for retrieving fake tensor from node.meta['val']."""
     val = node.meta.get("val", None)
     if isinstance(val, fake_tensor.FakeTensor):
@@ -83,10 +91,7 @@ def _fake_tensor_from_node_val(
         # remove this assert and return dummy values (e.g., 0 for SymInt,
         # 0.0 for SymFloat, and false for SymBool) if finding the hint
         # becomes a problem.
-        assert symbolic_shapes.has_hint(
-            val.node
-        ), f"Cannot retrieve hint value from torch.Sym* node {node}."
-        return val.node.hint
+        return val
     else:
         raise RuntimeError(
             f"Cannot retrieve fake tensor from node {node}. Got type({type(val)}) instead."
@@ -1699,7 +1704,19 @@ class InsertTypePromotion(_pass.Transform):
 
     def _fetch_fake_args(
         self,
-    ) -> Sequence[Optional[Union[fake_tensor.FakeTensor, float, int, bool]]]:
+    ) -> Sequence[
+        Optional[
+            Union[
+                fake_tensor.FakeTensor,
+                float,
+                int,
+                bool,
+                torch.SymInt,
+                torch.SymFloat,
+                torch.SymBool,
+            ]
+        ]
+    ]:
         """Fetch fake args from fx graph.
 
         For each argument, try to fetch fake tensor from the matching placeholder node.
