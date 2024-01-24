@@ -1,6 +1,7 @@
 import contextlib
+import functools
 
-from typing import Any, cast, Dict, List, Optional, Tuple
+from typing import Any, cast, Dict, List, Optional, Set, Tuple
 
 import torch
 import torch.distributed as dist
@@ -8,6 +9,7 @@ import torch.nn as nn
 
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils.hooks import RemovableHandle
 from ._fsdp_collectives import (
     AllGatherResult,
     AllGatherState,
@@ -24,6 +26,8 @@ from ._fsdp_common import (
     TrainingState,
 )
 from ._fsdp_param import FSDPParam, ShardedState
+
+_ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
 
 
 class FSDPParamGroup:
@@ -51,6 +55,11 @@ class FSDPParamGroup:
         self._sharded_state = ShardedState.SHARDED
         self._init_mp_dtypes()
         self._module_fqn: Optional[str] = None  # prefixed from root module
+
+        # - Hook state
+        self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
+        self._module_to_pre_load_state_dict_hook_handle: _ModuleToHandleDict = {}
+        self._register_state_dict_hooks()
 
         # - Communication and communication/computation overlap
         default_stream = torch.cuda.current_stream()
@@ -265,6 +274,13 @@ class FSDPParamGroup:
                 ):
                     target_fsdp_param_group.unshard()
 
+    # State Dict #
+    def _pre_save_state_dict_hook(self, module: nn.Module, *args, **kwargs):
+        self._to_sharded()
+
+    def _pre_load_state_dict_hook(self, module: nn.Module, *args, **kwargs):
+        self._to_sharded()
+
     # Utilities #
     def _to_sharded(self):
         if self._sharded_state != ShardedState.SHARDED:
@@ -319,6 +335,24 @@ class FSDPParamGroup:
         args = tree_unflatten(args_list, args_spec)
         kwargs = tree_unflatten(kwargs_list, kwargs_spec)
         return args, kwargs
+
+    def _register_state_dict_hooks(self) -> None:
+        assert len(self._module_to_pre_save_state_dict_hook_handle) == 0
+        assert len(self._module_to_pre_load_state_dict_hook_handle) == 0
+        modules_with_fsdp_params: Set[nn.Module] = {
+            fsdp_param._module_info.module for fsdp_param in self.fsdp_params
+        }
+        for module in modules_with_fsdp_params:
+            self._module_to_pre_save_state_dict_hook_handle[
+                module
+            ] = module.register_state_dict_pre_hook(
+                functools.partial(self._pre_save_state_dict_hook, module)
+            )
+            self._module_to_pre_load_state_dict_hook_handle[
+                module
+            ] = module._register_load_state_dict_pre_hook(
+                functools.partial(self._pre_load_state_dict_hook, module)
+            )
 
     # Properties #
     @property
