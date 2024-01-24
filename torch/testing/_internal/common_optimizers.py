@@ -1383,11 +1383,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
             ),
-            DecorateInfo(
-                unittest.skip("Missing complex support, see #118148"),
-                "TestOptimRenewed",
-                "test_complex",
-            ),
         ),
     ),
     OptimizerInfo(
