@@ -424,7 +424,19 @@ class ExportGraphSignature:
         """
         assert isinstance(old, str)
         assert isinstance(new, str)
+        arg_types = (TensorArgument, SymIntArgument, CustomObjArgument)
         for o in self.output_specs:
-            if isinstance(o.arg, TensorArgument):
+            if isinstance(o.arg, arg_types):
                 if o.arg.name == old:
                     o.arg.name = new
+        for i in self.input_specs:
+            if isinstance(i.arg, arg_types):
+                if i.arg.name == old:
+                    i.arg.name = new
+
+    def get_replace_hook(self):
+        def _(old, new, user):
+            if user.op in ("output", "input"):
+                self.replace_all_uses(old.name, new)
+
+        return _
