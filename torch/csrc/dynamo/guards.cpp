@@ -797,6 +797,27 @@ class LENGTH_CHECK : public LeafGuard {
   Py_ssize_t _length;
 };
 
+class DICT_KEYS : public LeafGuard {
+ public:
+  DICT_KEYS(py::object keys, py::object guard_str)
+      : LeafGuard(guard_str), _keys(PyDict_Keys(keys.ptr())) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    PyObject* keys = PyDict_Keys(value); // new ref - of type PyListObject
+    bool result = PyObject_RichCompareBool(keys, _keys, Py_EQ);
+    Py_DECREF(keys);
+    return result;
+  }
+
+  std::string repr_prefix() override {
+    return "DICT_KEYS";
+  }
+
+ private:
+  // keys to compare against.
+  PyObject* _keys;
+};
+
 /**
  * Relational guards compare more than one value. We implement Relational guards
  * by capturing some state in the guard object. For example for tensor aliasing
@@ -1527,6 +1548,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "LENGTH_CHECK")
       .def(py::init<py::object, py::str>())
       .def("__call__", &LENGTH_CHECK::check);
+  py::class_<DICT_KEYS, LeafGuard, std::shared_ptr<DICT_KEYS>>(
+      py_m, "DICT_KEYS")
+      .def(py::init<py::object, py::str>())
+      .def("__call__", &DICT_KEYS::check);
   py::class_<NoTensorAliasingGuard, std::shared_ptr<NoTensorAliasingGuard>>(
       py_m, "NoTensorAliasingGuard");
 
@@ -1616,6 +1641,13 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object guard_str) -> void {
             self.add_leaf_guard(
                 std::make_shared<LENGTH_CHECK>(value, guard_str));
+          })
+      .def(
+          "add_dict_keys_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object guard_str) -> void {
+            self.add_leaf_guard(std::make_shared<DICT_KEYS>(value, guard_str));
           })
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
