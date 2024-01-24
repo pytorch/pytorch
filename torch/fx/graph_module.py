@@ -1,3 +1,4 @@
+import contextlib
 import copy
 import itertools
 import linecache
@@ -445,6 +446,7 @@ class GraphModule(torch.nn.Module):
 
         # Dictionary to store metadata
         self.meta: Dict[str, Any] = {}
+        self._replace_hook = None
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -799,6 +801,7 @@ class {module_name}(torch.nn.Module):
             "_state_dict_hooks",
             "_load_state_dict_pre_hooks",
             "_load_state_dict_post_hooks",
+            "_replace_hook",
         ]
         for attr in extra_preserved_attrs:
             if attr in self.__dict__:
@@ -848,6 +851,21 @@ class {module_name}(torch.nn.Module):
         new_gm = self.__copy__()
         new_gm._is_replica = True
         return new_gm
+
+    @contextlib.contextmanager
+    def _set_replace_hook(self, f):
+        """
+        Takes a callable which will be called everytime when we replace a node
+        to a new node, or change the node's name. Callable takes three arguments:
+        the old node we're changing, and NAME of the new node, followed by the
+        user node which consumes the old node to be replaced.
+        """
+        assert callable(f), "Replace hook must be a callable."
+        prev, self._replace_hook = self._replace_hook, f
+        try:
+            yield
+        finally:
+            self._replace_hook = prev
 
 
 # workarounds for issues in __torch_function__

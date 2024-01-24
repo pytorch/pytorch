@@ -742,11 +742,11 @@ DEFAULT_FORMATTER = _default_formatter()
 
 
 class TorchLogsFilter(logging.Filter):
-    def __init__(self, ranks):
-        self.ranks = set(ranks)
+    def __init__(self, ranks: Set[int]):
+        self.ranks = ranks
         super().__init__()
 
-    def filter(self, record) -> bool:
+    def filter(self, _record) -> bool:
         if dist.is_available() and dist.is_initialized():
             return dist.get_rank() in self.ranks
 
@@ -758,10 +758,11 @@ def _default_filter() -> Optional[TorchLogsFilter]:
     if ranks_str is None:
         return None
 
-    ranks = [int(rank_str) for rank_str in ranks_str.split(",")]
-    if not ranks:
+    try:
+        ranks = set(map(int, ranks_str.split(",")))
+    except:
         raise ValueError(
-            "Expected comma separated list of int (e.g. 0,1,2,3), received {ranks_str}"
+            "Expected TORCH_LOGS_RANKS as a comma separated list of int (e.g. \"0,1,2,3\")"
         )
 
     return TorchLogsFilter(ranks)
