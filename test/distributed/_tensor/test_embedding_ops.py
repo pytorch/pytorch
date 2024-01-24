@@ -25,6 +25,8 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
+funcol = torch.ops.c10d_functional
+
 class TestEmbeddingOp(DTensorTestBase):
     def _apply_sharding(self, embedding_mod, shard_dim, device_mesh):
         def shard_embedding_fn(name, module, device_mesh):
@@ -96,21 +98,21 @@ class TestEmbeddingOp(DTensorTestBase):
 
         # Use a sample cross entry loss to verify backward and grad computation.
         loss = torch.nn.CrossEntropyLoss()
-        attn_loss = loss(
+        emb_loss = loss(
             output,
             target,
         )
-        attn_dup_loss = loss(
+        emb_dup_loss = loss(
             local_output,
             target,
         )
 
         # local embedding backward
-        attn_loss.backward()
+        emb_dup_loss.backward()
 
         # sharded embedding bwd computation, ensure no comm happened
         with CommDebugMode() as bwd_mode:
-            attn_dup_loss.backward()
+            emb_loss.backward()
             self.assertEqual(bwd_mode.get_total_counts(), 0)
 
         gradient = sharded_embedding.weight.grad.full_tensor()
@@ -149,7 +151,7 @@ class TestEmbeddingOp(DTensorTestBase):
         mesh = self.build_device_mesh()
         with self.assertRaisesRegex(
             NotImplementedError,
-            "does not have a sharding strategy registered.",
+            "aten.embedding_renorm_.default does not have a sharding strategy registered.",
         ):
             self._run_embedding_op_test(
                 mesh, 1, [8, 6, 5, 4], 23, 13, padding_idx=12, max_norm=2.0
@@ -163,14 +165,22 @@ class TestEmbeddingOp(DTensorTestBase):
         self._run_embedding_op_test(mesh, 0, [6, 7, 6], 13, 22)
         self._run_embedding_op_test(mesh, 0, [34], 15, 14, padding_idx=10)
 
+        from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
+
         # test collectives
         embedding_mod = torch.nn.Embedding(10, 20, device=self.device_type)
         sharded_embedding = self._apply_sharding(embedding_mod, 0, mesh)
         inp = torch.randint(0, 10, (8, 8), device=self.device_type)
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
         output = sharded_embedding(replicated_inp)
-        print(output._spec)
+        self.assertIsInstance(output.placements[0], _MaskPartial)
 
+        comm_mode = CommDebugMode()
+
+        with comm_mode:
+            output.full_tensor()
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+            self.assertEqual(comm_mode.get_comm_counts()[funcol.all_reduce], 1)
 
 if __name__ == "__main__":
     run_tests()
