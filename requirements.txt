@@ -4,6 +4,7 @@ expecttest!=0.2.0
 hypothesis
 numpy
 psutil
+pynvml
 pyyaml
 requests
 setuptools
