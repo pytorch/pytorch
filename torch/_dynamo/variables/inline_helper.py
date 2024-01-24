@@ -6,8 +6,8 @@ def dummy_user_function_to_inline_gm(gm, args):
     return gm(*args)
 
 
-def dummy_user_function_to_inline_gm_with_kwargs(gm, args, kwargs):
-    return gm(*args, **kwargs)
+def dummy_user_function_to_inline_wrapped_gm(wrapped_gm, args, kwargs):
+    return wrapped_gm(args, kwargs)
 
 
 def dummy_accumulate_grad_(t1, t2):
@@ -38,9 +38,7 @@ def should_decompose_torch_op(fn):
     )
 
 
-def decompose_and_inline_function_with_makefx(tx, op, args, kwargs):
-    import inspect
-
+def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs):
     from functorch import make_fx
 
     from torch._dispatch.python import enable_python_dispatcher
@@ -67,50 +65,26 @@ def decompose_and_inline_function_with_makefx(tx, op, args, kwargs):
             # mostly handle tuple and scalar
             fake_value_kwargs[key] = value.as_proxy()
 
-    def get_full_args_with_default_value(func, args):
-        try:
-            signature = inspect.signature(func)
-        except ValueError as ve:
-            # no signature found, just return an empty dict
-            return args
+    # Wrap the function before calling make_fx to avoid make_fx modify the kwargs's key.
+    def wrapper_fn(fn):
+        def inner(arg, kwargs):
+            return fn(*arg, **kwargs)
 
-        keys = signature.parameters.keys()
-        # function takes `args` and `kwargs`, below method won't be able to
-        # tell if it has any default arguments. Return args directly.
-        if len(keys) == 2 and "args" in keys and "kwargs" in keys:
-            return args
+        return inner
 
-        current_i = 0
-        res = []
-        for _, v in signature.parameters.items():
-            if v.default is inspect.Parameter.empty or current_i < len(args):
-                # this arg does not have default value or caller provided the args.
-                assert current_i < len(args)
-                res.append(args[current_i])
-                current_i += 1
-            else:
-                # use default value
-                res.append(v.default)
+    wrapped_fn = wrapper_fn(fn)
 
-        # All args should be used at this point.
-        assert current_i == len(args)
-        return res
-
-    # make_fx requires caller to pass into all args including
-    # those with default value. Note that we don't need to provide the exact
-    # value even if they are provided as kwargs.
-    complete_fake_value_args = get_full_args_with_default_value(op, fake_value_args)
     with enable_python_dispatcher():
-        fx_g = make_fx(op, pre_dispatch=True)(*complete_fake_value_args)
+        fx_g = make_fx(wrapped_fn, pre_dispatch=True)(
+            fake_value_args, fake_value_kwargs
+        )
 
     print("\nfx code")
     print(fx_g.code)
 
     # now inline this fx graph and return the output
-    # question: will there be a loop? How do I tell if op is CompositeImplicitAutograd
-    user_fn_variable = SourcelessBuilder()(tx, dummy_user_function_to_inline_gm)
     user_fn_variable_with_kwargs = SourcelessBuilder()(
-        tx, dummy_user_function_to_inline_gm_with_kwargs
+        tx, dummy_user_function_to_inline_wrapped_gm
     )
     gm_variable = SourcelessBuilder()(tx, fx_g)
     cls = BaseListVariable.cls_for(list)
@@ -118,24 +92,15 @@ def decompose_and_inline_function_with_makefx(tx, op, args, kwargs):
         args,
         mutable_local=MutableLocal(),
     )
-    if len(kwargs) > 0:
-        updated_kwargs = {}
-        # make_fx will modify the key for kwargs, try to reverse engineering the
-        # key mapping.
-        for k, v in kwargs.items():
-            updated_kwargs[k + "_1"] = v
-        input_kwargs_variable = ConstDictVariable(
-            updated_kwargs,
-            dict,
-            mutable_local=MutableLocal(),
-        )
-        res = tx.inline_user_function_return(
-            user_fn_variable_with_kwargs,
-            (gm_variable, input_args_variable, input_kwargs_variable),
-            {},
-        )
-    else:
-        res = tx.inline_user_function_return(
-            user_fn_variable, (gm_variable, input_args_variable), {}
-        )
+
+    input_kwargs_variable = ConstDictVariable(
+        kwargs,
+        dict,
+        mutable_local=MutableLocal(),
+    )
+    res = tx.inline_user_function_return(
+        user_fn_variable_with_kwargs,
+        (gm_variable, input_args_variable, input_kwargs_variable),
+        {},
+    )
     return res
