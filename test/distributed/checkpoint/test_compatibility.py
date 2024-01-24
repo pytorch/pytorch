@@ -39,7 +39,7 @@ class TestDCPCompatbility(TestCase):
                 "The change may break the BC of distributed checkpoint."
             ) from e
 
-    def test_shardedtensor_dependency(self) -> None:
+    def test_sharded_tensor_dependency(self) -> None:
         # Ensure that we can load the existing DCP checkpoints back even if the
         # metadata contain # _shard.sharded_tensor.metadata.
         from torch.distributed._shard.sharded_tensor.metadata import (
