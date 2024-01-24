@@ -139,9 +139,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
         out_layout = FlexibleLayout(
             device=layout.device, dtype=layout.dtype, size=layout.size
         )
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
-            choices, out_layout, [mat1, mat2]
-        )
+        CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, out_layout, [mat1, mat2])
 
     use_aten = use_aten_gemm_kernels()
 
