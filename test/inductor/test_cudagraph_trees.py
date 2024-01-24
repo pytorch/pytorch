@@ -232,7 +232,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with capture_stderr() as captured_output:
                 out = foo(torch.rand([20, 20], device="cuda"))
 
-            FileCheck().check("skipping cudagraphs due to incompatible.").check(
+            FileCheck().check("skipping cudagraphs due to incompatible").check(
                 "torch.multinomial"
             ).run(captured_output[0])
 
