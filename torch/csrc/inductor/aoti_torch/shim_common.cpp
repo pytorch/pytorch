@@ -17,6 +17,7 @@
 #else
 
 #include <ATen/ops/_addmm_activation.h>
+#include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_mm.h>
 #include <ATen/ops/addmm.h>
@@ -424,6 +425,44 @@ AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
       ret6,
       ret7,
       ret8);
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch__scaled_dot_product_efficient_attention(
+    AtenTensorHandle query,
+    AtenTensorHandle key,
+    AtenTensorHandle value,
+    AtenTensorHandle attn_bias, // optional argument
+    int compute_log_sumexp,
+    double dropout_p,
+    int is_causal,
+    double* scale, // optional argument
+    AtenTensorHandle* ret0, // returns new reference
+    AtenTensorHandle* ret1, // returns new reference
+    AtenTensorHandle* ret2, // returns new reference
+    AtenTensorHandle* ret3 // returns new reference
+) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* query_tensor = tensor_handle_to_tensor_pointer(query);
+    at::Tensor* key_tensor = tensor_handle_to_tensor_pointer(key);
+    at::Tensor* value_tensor = tensor_handle_to_tensor_pointer(value);
+    auto optional_attn_bias =
+        pointer_to_optional(tensor_handle_to_tensor_pointer(attn_bias));
+    auto optional_scale = pointer_to_optional(scale);
+    auto [r0, r1, r2, r3] = at::_scaled_dot_product_efficient_attention(
+        *query_tensor,
+        *key_tensor,
+        *value_tensor,
+        optional_attn_bias,
+        compute_log_sumexp,
+        dropout_p,
+        is_causal,
+        optional_scale);
+    *ret0 = new_tensor_handle(std::move(r0));
+    *ret1 = new_tensor_handle(std::move(r1));
+    *ret2 = new_tensor_handle(std::move(r2));
+    *ret3 = new_tensor_handle(std::move(r3));
+  });
 }
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
