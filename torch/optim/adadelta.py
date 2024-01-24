@@ -286,11 +286,11 @@ def _multi_tensor_adadelta(
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, square_avgs, acc_deltas])
     for ((device_params, device_grads, device_square_avgs, device_acc_deltas), _) in grouped_tensors.values():
-        if maximize:
-            device_grads = torch._foreach_neg(device_grads)
-
         if has_complex:
             _view_as_real(device_params, device_grads, device_square_avgs, device_acc_deltas)
+
+        if maximize:
+            device_grads = torch._foreach_neg(device_grads)
 
         if weight_decay != 0:
             # Re-use the intermediate memory (device_grads) already allocated for maximize
