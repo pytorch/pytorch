@@ -1,10 +1,12 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <ostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>

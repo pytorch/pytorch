@@ -4,6 +4,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import _check_input_constraints_pre_hook
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+
 from .exported_program import ExportedProgram
 
 
@@ -68,17 +69,17 @@ def _unlift(
 
     if (
         in_spec.type == tuple
-        and len(in_spec.children_specs) == 2
+        and in_spec.num_children == 2
         and in_spec.children_specs[0].type == tuple
         and in_spec.children_specs[1].type == dict
     ):
         # if in_spec contains the args (tuple) and kwargs (dict)
-
-        num_args = len(in_spec.children_specs[0].children_specs) + len(
-            in_spec.children_specs[1].children_specs
+        num_args = (
+            in_spec.children_specs[0].num_children
+            + in_spec.children_specs[1].num_children
         )
     else:
-        num_args = len(in_spec.children_specs)
+        num_args = in_spec.num_children
 
     names = [f"arg_{i}" for i in range(num_args)]
 
@@ -136,29 +137,41 @@ def _unlift(
                 buffers_to_mutate,
             )
         if node.op == "call_function" and node.target.__name__ == "map_impl":
-            body_graph, num_mapped, *operands = node.args
+            body_graph, mapped_args, operands = node.args
+            num_mapped = len(mapped_args)
             body_gm = getattr(gm, body_graph.name)
             inp_pos_to_buffer_name_for_submod = {}
-            real_operands = []
             # TODO Fix situation here to replace dot with underscore...
             state_dict_for_lookup = {
                 key.replace(".", "_"): value for key, value in state_dict.items()
             }
-            for ix, operand in enumerate(operands):
-                if operand.target in inp_pos_to_param_buffer_name.values():
-                    inp_pos_to_buffer_name_for_submod[ix] = operand.target
-                    if operand.target in state_dict_for_lookup:
-                        value = state_dict_for_lookup[operand.target]
-                    elif operand.target in tensor_constants:
-                        value = tensor_constants[operand.target]
-                    else:
-                        raise RuntimeError(f"Unable to find value for {operand.target}")
-                    body_gm.register_buffer(operand.target, value)
-                else:
-                    real_operands.append(operand)
-            node.args = (body_graph, num_mapped, *real_operands)
 
-            _, in_spec = pytree.tree_flatten(real_operands)
+            def _find_real_operands(operands, start_ix):
+                real_operands = []
+                for ix, operand in enumerate(operands):
+                    if operand.target in inp_pos_to_param_buffer_name.values():
+                        inp_pos_to_buffer_name_for_submod[
+                            ix + start_ix
+                        ] = operand.target
+                        if operand.target in state_dict_for_lookup:
+                            value = state_dict_for_lookup[operand.target]
+                        elif operand.target in tensor_constants:
+                            value = tensor_constants[operand.target]
+                        else:
+                            raise RuntimeError(
+                                f"Unable to find value for {operand.target}"
+                            )
+
+                        body_gm.register_buffer(operand.target, value)
+                    else:
+                        real_operands.append(operand)
+                return real_operands
+
+            real_mapped_args = _find_real_operands(mapped_args, 0)
+            real_mapped_operands = _find_real_operands(operands, num_mapped)
+            node.args = (body_graph, real_mapped_args, real_mapped_operands)
+
+            _, in_spec = pytree.tree_flatten(real_mapped_args + real_mapped_operands)
 
             _unlift(
                 body_gm,
@@ -181,6 +194,7 @@ def _construct_inp_pos_to_param_buffer_name(
     # TODO Fix the period in params/buffers names later
     # maybe a pass to replace graph signature with fixed names
     param_buffer_name_to_corrected_name = {}
+    constant_name_to_corrected_name = {}
 
     for name, value in state_dict.items():
         if name in graph_signature.buffers:
@@ -200,8 +214,15 @@ def _construct_inp_pos_to_param_buffer_name(
         assert hasattr(graph_signature, "lifted_tensor_constants")
         for name, value in tensor_constants.items():
             if name in graph_signature.lifted_tensor_constants:
-                new_gm.register_buffer(name, value)
-                param_buffer_name_to_corrected_name[name] = name
+                if isinstance(value, torch.Tensor):
+                    new_gm.register_buffer(name.replace(".", "_"), value)
+                else:
+                    setattr(new_gm, name.replace(".", "_"), value)
+                constant_name_to_corrected_name[name] = name.replace(".", "_")
+            elif name in graph_signature.lifted_custom_objs:
+                assert isinstance(value, torch.ScriptObject)
+                setattr(new_gm, name.replace(".", "_"), value)
+                constant_name_to_corrected_name[name] = name.replace(".", "_")
 
     count = 0
     inp_pos_to_param_buffer_name = {}
@@ -225,9 +246,25 @@ def _construct_inp_pos_to_param_buffer_name(
                     inp_pos_to_param_buffer_name[count] = param_name
             if hasattr(graph_signature, "inputs_to_lifted_tensor_constants"):
                 if node.name in graph_signature.inputs_to_lifted_tensor_constants:
-                    inp_pos_to_param_buffer_name[
-                        count
-                    ] = graph_signature.inputs_to_lifted_tensor_constants[node.name]
+                    constant_name = graph_signature.inputs_to_lifted_tensor_constants[
+                        node.name
+                    ]
+                    if constant_name in constant_name_to_corrected_name:
+                        inp_pos_to_param_buffer_name[
+                            count
+                        ] = constant_name_to_corrected_name[constant_name]
+                    else:
+                        inp_pos_to_param_buffer_name[count] = constant_name
+                elif node.name in graph_signature.inputs_to_lifted_custom_objs:
+                    constant_name = graph_signature.inputs_to_lifted_custom_objs[
+                        node.name
+                    ]
+                    if constant_name in constant_name_to_corrected_name:
+                        inp_pos_to_param_buffer_name[
+                            count
+                        ] = constant_name_to_corrected_name[constant_name]
+                    else:
+                        inp_pos_to_param_buffer_name[count] = constant_name
             count += 1
 
     return inp_pos_to_param_buffer_name
@@ -243,30 +280,28 @@ class _StatefulGraphModuleFactory(type):
             f"{cls.__module__}.{cls.__qualname__} has no public constructor. "
         )
 
-    def _create(cls, root, graph, range_constraints=None, equality_constraints=None):
+    def _create(cls, root, graph, range_constraints=None):
         return super().__call__(
             root,
             graph,
             range_constraints=range_constraints,
-            equality_constraints=equality_constraints,
         )
 
 
 class _StatefulGraphModule(torch.fx.GraphModule, metaclass=_StatefulGraphModuleFactory):
-    def __init__(self, root, graph, range_constraints=None, equality_constraints=None):
+    def __init__(self, root, graph, range_constraints=None):
         super().__init__(root, graph)
         self.range_constraints = range_constraints or []
-        self.equality_constraints = equality_constraints or []
 
 
 def _create_stateful_graph_module(
-    plain_graph_module: torch.fx.GraphModule, range_constraints, equality_constraints
+    plain_graph_module: torch.fx.GraphModule,
+    range_constraints,
 ):
     stateful_gm = _StatefulGraphModule._create(
         plain_graph_module,
         plain_graph_module.graph,
         range_constraints=range_constraints,
-        equality_constraints=equality_constraints,
     )
     stateful_gm.register_forward_pre_hook(
         _check_input_constraints_pre_hook, with_kwargs=True
@@ -288,8 +323,6 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         ep.tensor_constants,
         ep.graph_signature.buffers_to_mutate,
     )
-    unlift_gm = _create_stateful_graph_module(
-        new_gm, ep.range_constraints, ep.equality_constraints
-    )
+    unlift_gm = _create_stateful_graph_module(new_gm, ep.range_constraints)
     unlift_gm.meta.update(ep.graph_module.meta)
     return unlift_gm

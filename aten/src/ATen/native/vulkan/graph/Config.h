@@ -9,7 +9,7 @@ namespace native {
 namespace vulkan {
 
 struct GraphConfig final {
-  api::ContextConfig context_config;
+  api::ContextConfig contextConfig;
 };
 
 } // namespace vulkan

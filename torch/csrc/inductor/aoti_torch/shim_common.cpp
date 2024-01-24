@@ -25,9 +25,11 @@
 #include <ATen/ops/convolution.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/from_blob.h>
+#include <ATen/ops/index_put.h>
 #include <ATen/ops/mm.h>
 #include <ATen/ops/nonzero.h>
 #include <ATen/ops/scatter.h>
+#include <ATen/ops/scatter_reduce.h>
 
 #endif
 
@@ -70,6 +72,14 @@ int32_t aoti_torch_dtype_float8_e5m2() {
 
 int32_t aoti_torch_dtype_float8_e4m3fn() {
   return (int32_t)c10::ScalarType::Float8_e4m3fn;
+}
+
+int32_t aoti_torch_dtype_float8_e5m2fnuz() {
+  return (int32_t)c10::ScalarType::Float8_e5m2fnuz;
+}
+
+int32_t aoti_torch_dtype_float8_e4m3fnuz() {
+  return (int32_t)c10::ScalarType::Float8_e4m3fnuz;
 }
 
 int32_t aoti_torch_dtype_bfloat16() {
@@ -610,6 +620,51 @@ AOTITorchError aoti_torch_scatter_out(
     at::Tensor* index_tensor = tensor_handle_to_tensor_pointer(index);
     at::Tensor* src_tensor = tensor_handle_to_tensor_pointer(src);
     at::scatter_out(*out_tensor, *self_tensor, dim, *index_tensor, *src_tensor);
+  });
+}
+
+AOTITorchError aoti_torch_scatter_reduce_out(
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    int64_t dim,
+    AtenTensorHandle index,
+    AtenTensorHandle src,
+    const char* reduce,
+    int32_t include_self) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* out_tensor = tensor_handle_to_tensor_pointer(out);
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor* index_tensor = tensor_handle_to_tensor_pointer(index);
+    at::Tensor* src_tensor = tensor_handle_to_tensor_pointer(src);
+    at::scatter_reduce_out(
+        *out_tensor,
+        *self_tensor,
+        dim,
+        *index_tensor,
+        *src_tensor,
+        reduce,
+        (bool)include_self);
+  });
+}
+
+AOTITorchError aoti_torch_index_put_out(
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    const AtenTensorHandle* indices,
+    const uint32_t num_indices,
+    const AtenTensorHandle values,
+    bool accumulate) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::List<std::optional<at::Tensor>> indices_;
+    indices_.reserve(num_indices);
+    for (size_t i = 0; i < num_indices; i++) {
+      indices_.emplace_back(*tensor_handle_to_tensor_pointer(indices[i]));
+    }
+    at::Tensor* out_tensor = tensor_handle_to_tensor_pointer(out);
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor* values_tensor = tensor_handle_to_tensor_pointer(values);
+    at::index_put_out(
+        *out_tensor, *self_tensor, indices_, *values_tensor, accumulate);
   });
 }
 

@@ -31,10 +31,17 @@ Argument = Optional[Union[
     BaseArgumentTypes
 ]]
 
+_side_effectful_need_to_be_preserved_pre_dispatch: Set[Callable] = {
+    torch._C._set_grad_enabled,
+    torch.amp._enter_autocast,
+    torch.amp._exit_autocast,
+}
+
 _side_effectful_functions: Set[Callable] = {
     torch._assert,
     torch._assert_async,
     _ops.aten._assert_async.msg,
+    _ops.aten._assert_scalar.default,
     _ops.aten.copy_.default,
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
@@ -42,7 +49,7 @@ _side_effectful_functions: Set[Callable] = {
     _ops.profiler._record_function_enter_new,
     _ops.profiler._record_function_exit,
     _ops.inductor.accumulate_grad_.default,
-}
+} | _side_effectful_need_to_be_preserved_pre_dispatch
 
 
 @compatibility(is_backward_compatible=False)
@@ -76,7 +83,7 @@ def _type_repr(obj):
             return obj.__qualname__
         return f'{obj.__module__}.{obj.__qualname__}'
     if obj is ...:
-        return('...')
+        return '...'
     if isinstance(obj, types.FunctionType):
         return obj.__name__
     return repr(obj)
