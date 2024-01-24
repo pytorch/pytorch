@@ -1258,6 +1258,23 @@ def init_process_group(
     _backend = _world.pg_map[not_none(GroupMember.WORLD)][0]
     _default_pg_init_method = init_method
 
+    old_hook = sys.excepthook
+
+    def _distributed_excepthook(*args):
+        old_stderr = sys.stderr
+        sys.stderr = buf = io.StringIO()
+        try:
+            old_hook(*args)
+        finally:
+            sys.stderr = old_stderr
+        msg = buf.getvalue()
+        prefix = f"[rank{get_rank()}]"
+        msg = "\n".join(f"{prefix}: {s}" if s != "" else "" for s in msg.split("\n"))
+        sys.stderr.write(msg)
+        sys.stderr.flush()
+
+    sys.excepthook = _distributed_excepthook
+
     if _is_barrier_after_init() == 1:
         # barrier at the end to ensure that once we return from this method, all
         # process groups including global variables (if any) are updated
