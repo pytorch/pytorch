@@ -87,6 +87,7 @@ class UninitializedTensorMixin:
         torch.Tensor.__hash__,
         torch.Tensor.size,
         torch.Tensor.copy_,
+        torch.Tensor.is_complex,
         torch.Tensor.is_floating_point,
         torch.Tensor.half,
         torch.Tensor.float,
@@ -100,7 +101,6 @@ class UninitializedTensorMixin:
         torch.Tensor.to,
         torch.Tensor.get_device,
         torch._has_compatible_shallow_copy_type,
-        torch.is_complex,
     ]
 
     def materialize(self, shape, device=None, dtype=None):

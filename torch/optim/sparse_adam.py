@@ -26,7 +26,7 @@ class SparseAdam(Optimizer):
             for d_index, d_param in enumerate(param_group['params']):
                 if d_param.is_sparse:
                     sparse_params.append([index, d_index])
-                if torch.is_complex(d_param):
+                if d_param.is_complex():
                     complex_params.append([index, d_index])
         if sparse_params:
             raise ValueError(

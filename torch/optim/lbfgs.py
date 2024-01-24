@@ -241,7 +241,7 @@ class LBFGS(Optimizer):
                              "(parameter groups)")
 
         self._params = self.param_groups[0]['params']
-        if any(torch.is_complex(p) for p in self._params):
+        if any(p.is_complex() for p in self._params):
             raise ValueError("LBFGS doesn't support complex parameters, see #118148")
 
         self._numel_cache = None
