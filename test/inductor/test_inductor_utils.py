@@ -6,6 +6,7 @@ import logging
 import torch
 
 from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.inductor_utils import HAS_GPU, GPU_TYPE
 
 from torch._inductor.utils import do_bench, do_bench_using_profiling
 
@@ -17,8 +18,8 @@ class TestBench(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        x = torch.rand(1024, 10).cuda().half()
-        w = torch.rand(512, 10).cuda().half()
+        x = torch.rand(1024, 10).to(device=GPU_TYPE).half()
+        w = torch.rand(512, 10).to(device=GPU_TYPE).half()
         cls._bench_fn = functools.partial(torch.nn.functional.linear, x, w)
 
     def test_do_bench(self):
@@ -33,4 +34,5 @@ class TestBench(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests("cuda")
+    if HAS_GPU:
+        run_tests()

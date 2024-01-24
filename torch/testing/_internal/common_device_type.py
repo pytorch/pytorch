@@ -526,6 +526,9 @@ class CUDATestBase(DeviceTypeTestBase):
         # Acquires the current device as the primary (test) device
         cls.primary_device = f'cuda:{torch.cuda.current_device()}'
 
+class XPUTestBase(DeviceTypeTestBase):
+    device_type = 'xpu'
+
 # See Note [Lazy Tensor tests in device agnostic testing]
 lazy_ts_backend_init = False
 class LazyTestBase(DeviceTypeTestBase):
@@ -603,12 +606,19 @@ def get_device_type_test_bases():
             # Skip if sanitizer is enabled
             if not TEST_WITH_ASAN and not TEST_WITH_TSAN and not TEST_WITH_UBSAN:
                 test_bases.append(CUDATestBase)
+                # Need comment for this: should we add this in this PR?
+                test_bases.append(XPUTestBase)
+
         else:
             test_bases.append(CPUTestBase)
     else:
         test_bases.append(CPUTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
+
+        if torch.xpu.is_available():
+            test_bases.append(XPUTestBase)
+
         device_type = torch._C._get_privateuse1_backend_name()
         device_mod = getattr(torch, device_type, None)
         if hasattr(device_mod, "is_available") and device_mod.is_available():
@@ -989,6 +999,12 @@ class skipCUDAIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='cuda')
 
+# Skips a test on CUDA if the condition is true.
+class skipXPUIf(skipIf):
+
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type='xpu')
+
 # Skips a test on Lazy if the condition is true.
 class skipLazyIf(skipIf):
 
@@ -1277,6 +1293,15 @@ def onlyCPU(fn):
 def onlyCUDA(fn):
     return onlyOn('cuda')(fn)
 
+def onlyGPU(fn):
+    @wraps(fn)
+    def only_fn(self, *args, **kwargs):
+        if self.device_type not in ('cuda', 'xpu'):
+            reason = f"onlyGPU: doesn't run on {self.device_type}"
+            raise unittest.SkipTest(reason)
+
+        return fn(self, *args, **kwargs)
+    return only_fn
 
 def onlyMPS(fn):
     return onlyOn('mps')(fn)

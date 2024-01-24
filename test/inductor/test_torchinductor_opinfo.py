@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     skipCPUIf,
     skipCUDAIf,
+    skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import op_db, skipOps
 from torch.testing._internal.common_utils import (
@@ -42,7 +43,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_XPU
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
@@ -194,6 +195,20 @@ inductor_skips["cuda"] = {
     "_native_batch_norm_legit": {f16, f32, f64},
 }
 
+inductor_skips["xpu"] = {
+    # Jiterator kernel is not expected to work with inductor
+    "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
+    "jiterator_4inputs_with_extra_args": {b8, f16, f32, f64, i32, i64},
+    "jiterator_binary": {b8, f16, f32, f64, i32, i64},
+    "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
+    "jiterator_unary": {b8, f16, f32, f64, i32, i64},
+    # flaky
+    "nn.functional.cosine_embedding_loss": {b8},
+    "native_batch_norm": {f16, f32, f64},
+    "_native_batch_norm_legit": {f16, f32, f64},
+}
+
+
 if not SM80OrLater:
     inductor_skips["cuda"]["bfloat16"] = {b8, f16, f32, f64, i32, i64}
 
@@ -243,7 +258,18 @@ inductor_expected_failures_single_sample["cuda"] = {
     "torch.ops.aten._flash_attention_forward": {f16, bf16, f32},
 }
 
-
+inductor_expected_failures_single_sample["xpu"] = {
+    "_upsample_bilinear2d_aa": {f16, f32, f64},
+    "cholesky": {f32, f64},
+    "multinomial": {f16, f32, f64},
+    "nn.functional.normalize": {f16},
+    ("normal", "in_place"): {f16, f32, f64},
+    ("normal", "number_mean"): {f16, f32, f64},
+    "sparse.sampled_addmm": {f32, f64},
+    "to_sparse": {f16, f32, f64},
+    "torch.ops.aten._efficient_attention_forward": {f16, bf16, f32},
+    "torch.ops.aten._flash_attention_forward": {f16, bf16, f32},
+}
 # intentionally not handled
 intentionally_not_handled = {
     ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
@@ -252,6 +278,7 @@ intentionally_not_handled = {
 }
 
 inductor_expected_failures_single_sample["cuda"].update(intentionally_not_handled)
+inductor_expected_failures_single_sample["xpu"].update(intentionally_not_handled)
 
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
@@ -260,6 +287,10 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "nn.functional.normalize": {f16},
 }
 
+inductor_gradient_expected_failures_single_sample["xpu"] = {
+    "nn.functional.normalize": {f16},
+    "tanh": {f16},
+}
 if not TEST_WITH_ROCM:
     inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
 
@@ -269,6 +300,7 @@ if not TEST_MKL:
 inductor_should_fail_with_exception = defaultdict(dict)
 inductor_should_fail_with_exception["cpu"] = {}
 inductor_should_fail_with_exception["cuda"] = {}
+inductor_should_fail_with_exception["xpu"] = {}
 
 
 def get_skips_and_xfails(from_dict, xfails=True):
@@ -315,52 +347,91 @@ inductor_override_kwargs = {
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
     ("addr", "cuda", f16): {"reference_in_float": True},
+    ("addr", "xpu", f16): {"reference_in_float": True},
     ("baddbmm", "cuda", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
+    ("baddbmm", "xpu", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
     ("angle", "cuda", f64): {"reference_in_float": True},
+    ("angle", "xpu", f64): {"reference_in_float": True},
     ("asin", "cuda", f16): {"reference_in_float": True},
+    ("asin", "xpu", f16): {"reference_in_float": True},
     ("atanh", "cuda", f16): {"reference_in_float": True},
+    ("atanh", "xpu", f16): {"reference_in_float": True},
     ("cauchy", "cuda"): {"reference_in_float": True},
+    ("cauchy", "uda"): {"reference_in_float": True},
     ("cummax", "cuda", f16): {"atol": 5e-4, "rtol": 0.002},
+    ("cummax", "xpu", f16): {"atol": 5e-4, "rtol": 0.002},
     ("cumprod", "cuda"): {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
+    ("cumprod", "xpu"): {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
     ("exponential", "cuda"): {"reference_in_float": True},
+    ("exponential", "xpu"): {"reference_in_float": True},
     ("geometric", "cuda"): {"reference_in_float": True},
+    ("geometric", "xpu"): {"reference_in_float": True},
     ("kron", "cuda", f16): {"reference_in_float": True},
+    ("kron", "xpu", f16): {"reference_in_float": True},
     ("log_normal", "cuda"): {"reference_in_float": True},
+    ("log_normal", "xpu"): {"reference_in_float": True},
     ("masked.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
+    ("masked.softmin", "xpu", f16): {"atol": 1e-4, "rtol": 0.01},
     ("nn.functional.batch_norm", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.batch_norm", "xpu", f16): {"reference_in_float": True},
     ("nn.functional.batch_norm.without_cudnn", "cuda", f16): {
         "reference_in_float": True
     },
+    ("nn.functional.batch_norm.without_cudnn", "xpu", f16): {
+        "reference_in_float": True
+    },
     ("nn.functional.cosine_similarity", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.cosine_similarity", "xpu", f16): {"reference_in_float": True},
     ("nn.functional.instance_norm", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.instance_norm", "xpu", f16): {"reference_in_float": True},
     ("nn.functional.local_response_norm", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.local_response_norm", "xpu", f16): {"reference_in_float": True},
     ("nn.functional.soft_margin_loss", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.soft_margin_loss", "xpu", f16): {"reference_in_float": True},
     ("nn.functional.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
+    ("nn.functional.softmin", "xpu", f16): {"atol": 1e-4, "rtol": 0.01},
     ("nn.functional.softsign", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.softsign", "xpu", f16): {"reference_in_float": True},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
+    ("nn.functional.tanhshrink", "xpu", f16): {"atol": 3e-4, "rtol": 0.001},
     ("outer", "cuda", f16): {"reference_in_float": True},
+    ("outer", "xpu", f16): {"reference_in_float": True},
     ("round.decimals_3", "cuda", f16): {"reference_in_float": True},
+    ("round.decimals_3", "xpu", f16): {"reference_in_float": True},
     ("nn.functional.triplet_margin_loss", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
+    ("nn.functional.triplet_margin_loss", "xpu", f16): {"atol": 1e-4, "rtol": 0.02},
     ("nn.functional.triplet_margin_with_distance_loss", "cuda", f16): {
+        "atol": 1e-4,
+        "rtol": 0.02,
+    },
+    ("nn.functional.triplet_margin_with_distance_loss", "xpu", f16): {
         "atol": 1e-4,
         "rtol": 0.02,
     },
     ("softmax", "cpu", f16): {"atol": 1e-4, "rtol": 0.02},
     ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
+    ("softmax", "xpu", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
+    ("_softmax_backward_data", "xpu", f16): {"atol": 0.008, "rtol": 0.002},
     ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
+    ("special.log_ndtr", "xpu", f64): {"atol": 1e-6, "rtol": 1e-5},
     ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
+    ("std_mean.unbiased", "xpu", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
+    ("uniform", "xpu"): {"reference_in_float": True},
     # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
     ("nn.functional.interpolate.bilinear", "cpu", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.upsample_bilinear", "cpu", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.interpolate.bilinear", "cuda", f64): {"atol": 5e-4, "rtol": 0},
+    ("nn.functional.interpolate.bilinear", "xpu", f64): {"atol": 5e-4, "rtol": 0},
     ("nn.functional.upsample_bilinear", "cuda", f64): {"atol": 5e-4, "rtol": 0},
+    ("nn.functional.upsample_bilinear", "xpu", f64): {"atol": 5e-4, "rtol": 0},
     # Temporarily skip interpolat bicubic tests:
     "nn.functional.interpolate.bicubic": {
         "assert_equal": False,
         "check_gradient": False,
     },
+    ("cumsum", "xpu", f16): {"reference_in_float": True},
 }
 
 
@@ -434,6 +505,7 @@ class TestInductorOpInfo(TestCase):
         True
     )  # inductor kernels failing this test intermittently
     @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
+    @skipXPUIf(not HAS_XPU, "Skipped! Triton not found")
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
@@ -449,8 +521,10 @@ class TestInductorOpInfo(TestCase):
         torch._dynamo.reset()
         with torch.no_grad():
             # TODO: should we move empty_cache to the common device interface
-            if device == "cuda":
-                torch.cuda.empty_cache()
+            device_type = torch.device(device).type
+            if hasattr(getattr(torch, device_type), "empty_cache"):
+                getattr(torch, device_type).empty_cache()
+
         op_name = op.name
         if op.variant_test_name:
             op_name += f".{op.variant_test_name}"

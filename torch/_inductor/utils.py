@@ -1207,3 +1207,8 @@ class Placeholder(enum.Enum):
     # The descriptive name of the triton kernel; when unique_kernel_names = False, this
     # placeholder will be replaced with a string with more information.
     DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
+
+
+def device_need_guard(device: str):
+    assert isinstance(device, str)
+    return device in ["cuda", "xpu"]

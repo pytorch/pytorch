@@ -110,6 +110,11 @@ def get_device_op_overrides(device: str):
 
         return CUDADeviceOpOverrides()
 
+    elif device == "xpu":
+        from .xpu.device_op_overrides import XPUDeviceOpOverrides
+
+        return XPUDeviceOpOverrides()
+
     return DeviceOpOverrides()
 
 

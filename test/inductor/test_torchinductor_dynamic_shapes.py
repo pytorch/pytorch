@@ -14,7 +14,7 @@ from torch._dynamo.testing import make_test_cls_with_patches
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
-    onlyCUDA,
+    onlyGPU,
 )
 from torch.testing._internal.common_utils import (
     IS_ARM64,
@@ -52,8 +52,10 @@ importlib.import_module("filelock")
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # calling div on only symint args
-    "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_conv_inference_heuristics_dynamic_shapes": TestFailure("cuda"),
+    "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
+    "test_conv_inference_heuristics_dynamic_shapes": TestFailure("cuda", "xpu"),
 }
 
 if TEST_WITH_ROCM:
@@ -106,7 +108,7 @@ class TestInductorDynamic(TestCase):
     compile_fn = partial(torch.compile, dynamic=True)
 
     def setUp(self):
-        # HAS_CUDA also checks compute capability to skip tests
+        # HAS_GPU also checks compute capability to skip tests
         # on older devices
         if not HAS_GPU:
             self.skipTest("Triton not available")
@@ -382,8 +384,7 @@ class TestInductorDynamic(TestCase):
         res1 = opt(x1)
         self.assertEqual(ref1, res1)
 
-    # Need to comment: is xpu need this? if yes we may need to add onlyGPU
-    @onlyCUDA
+    @onlyGPU
     def test_pad_dynamic(self, device):
         def get_same_padding(x: int, k: int, s: int, d: int):
             return max((math.ceil(x / s) - 1) * s + (k - 1) * d + 1 - x, 0)

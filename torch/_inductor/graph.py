@@ -178,6 +178,12 @@ class GraphLowering(torch.fx.Interpreter):
             # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
             register_backend_for_device("cuda", CUDACombinedScheduling, WrapperCodeGen)
 
+        if get_scheduling_for_device("xpu") is None:
+            from .codegen.triton import TritonScheduling
+
+            # Intel GPU Backend registration
+            register_backend_for_device("xpu", TritonScheduling, WrapperCodeGen)
+
     def __init__(
         self,
         gm: torch.fx.GraphModule,
