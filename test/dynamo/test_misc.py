@@ -1380,6 +1380,17 @@ utils_device.CURRENT_DEVICE == None""".split(
             expected_ops_dynamic=ifdynstaticdefault(3, 6),
         )
 
+    def test_element_size(self):
+        def fn(a):
+            return (a + a.element_size(), a - a.element_size())
+
+        return torch._dynamo.testing.standard_test(
+            self,
+            fn=fn,
+            nargs=1,
+            expected_ops=2,
+        )
+
     def test_pair(self):
         def fn(a):
             return (
