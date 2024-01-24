@@ -41,7 +41,7 @@ class FSDPParamGroup:
         self._init_mp_dtypes()
         self._module_fqn: Optional[str] = None  # prefixed from root module
 
-        # Communication and communication/computation overlap
+        # - Communication and communication/computation overlap
         default_stream = torch.cuda.current_stream()
         self.default_stream: torch.cuda.Stream = default_stream
         self.all_gather_copy_in_stream: torch.cuda.Stream = default_stream
