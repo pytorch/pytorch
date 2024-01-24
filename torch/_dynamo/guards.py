@@ -168,6 +168,7 @@ CLOSURE_VARS = {
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
+    "__numpy_isnan": np.isnan,
     "inf": float("inf"),
     "__load_module": importlib.import_module,
     "utils_device": torch.utils._device,
@@ -431,6 +432,10 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         code = f"not {ref}"
         self._produce_guard_code(guard, [code])
+        # We dont need any type id check as BOOL_FALSE is used in special case.
+        # self.get_guard_manager(guard).add_length_check_guard(
+        #     0, self.get_guard_str(guard, [code])
+        # )
 
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
@@ -545,6 +550,13 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"__math_isnan({ref})")
             self._produce_guard_code(guard, code)
             return
+        # Python math library doesn't support complex nan, so we need to use numpy
+        elif istype(val, complex) and np.isnan(val):
+            code = list()
+            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+            code.append(f"__numpy_isnan({ref})")
+            self._produce_guard_code(guard, code)
+            return
 
         code = list()
 
@@ -592,6 +604,10 @@ class GuardBuilder(GuardBuilderBase):
             # TODO: Why doesn't this use produce_guard_code?
             self.code.append(
                 GuardCodeList([f"{ref}.training == {val.training}"], guard)
+            )
+            self.get_guard_manager(guard).training.add_equals_match_guard(
+                val.training,
+                self.get_guard_str(guard, [f"{ref}.training == {val.training}"]),
             )
 
         if hasattr(val, "training"):
@@ -1175,6 +1191,7 @@ class CheckFunctionManager:
         # Check that the check_fn is True for this frame
         assert self.check_fn(output_graph.local_scope)
         if config.enable_cpp_guard_manager:
+            # breakpoint()
             print(self.guard_manager)
             debug_guard_check = self.guard_manager.root.check_verbose(
                 output_graph.local_scope
