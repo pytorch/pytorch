@@ -134,6 +134,10 @@ class FSDPState(_State):
     def _pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        # When composing with module-hook-based activation checkpointing, the
+        # the pre-backward hook is responsible for the unshard
+        if self._training_state == TrainingState.PRE_BACKWARD:
+            return args, kwargs
         self._training_state = TrainingState.FORWARD
         args, kwargs = self._root_pre_forward(module, args, kwargs)
         if self._fsdp_param_group:
@@ -141,6 +145,10 @@ class FSDPState(_State):
         return args, kwargs
 
     def _post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
+        # When composing with module-hook-based activation checkpointing, the
+        # post-backward hook is responsible for the reshard
+        if self._training_state == TrainingState.PRE_BACKWARD:
+            return output
         if self._fsdp_param_group:
             output = self._fsdp_param_group.post_forward(module, input, output)
         output = self._register_pre_backward_hook(output)

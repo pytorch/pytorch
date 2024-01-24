@@ -8,7 +8,12 @@ from typing import Iterable, List, Tuple, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from _test_fully_shard_common import MLP, patch_all_gather, patch_reduce_scatter
+from _test_fully_shard_common import (
+    check_1d_sharded_parity,
+    MLP,
+    patch_all_gather,
+    patch_reduce_scatter,
+)
 from torch.distributed._composable import checkpoint, replicate
 from torch.distributed._composable.fsdp import FSDP, fully_shard
 from torch.distributed._tensor import DTensor, init_device_mesh
@@ -268,6 +273,77 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                         torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
                     _optim.step()
                 self.assertEqual(losses[0], losses[1])
+
+
+class TestFullyShard1DTrainingCompose(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        # Since these tests run with a larger transformer model, they may see
+        # some numeric drift with >2 GPUs
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_train_parity_with_activation_checkpointing(self):
+        """
+        Tests train parity against DDP when composing with activation
+        checkpointing.
+        """
+        self.run_subtests(
+            {
+                "reshard_after_forward": [True, False, 2],
+                "checkpoint_impl": ["utils", "composable"],
+            },
+            self._test_train_parity_with_activation_checkpointing,
+        )
+
+    def _test_train_parity_with_activation_checkpointing(
+        self, reshard_after_forward: Union[bool, int], checkpoint_impl: str
+    ):
+        assert checkpoint_impl in ("composable", "utils")
+        foreach = True
+        torch.manual_seed(42)
+        vocab_size = 1024
+        with torch.device(torch.device("cuda")):
+            model_args = ModelArgs(
+                n_layers=3,
+                n_heads=4,
+                vocab_size=vocab_size,
+                max_seq_len=64,
+                dropout_p=0.1,
+                checkpoint_activations=(checkpoint_impl == "utils"),
+            )
+            model = Transformer(model_args)
+        ref_model = replicate(copy.deepcopy(model), device_ids=[self.rank])
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
+        fully_shard_fn = functools.partial(
+            fully_shard,
+            reshard_after_forward=reshard_after_forward,
+        )
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                if checkpoint_impl == "composable":
+                    checkpoint(module)
+                fully_shard_fn(module)
+        fully_shard_fn(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
+
+        torch.manual_seed(42 + self.rank)
+        # Reuse the same input across iterations to avoid loss explosion from
+        # trying to learn from random inputs
+        inp = torch.randint(0, vocab_size, (3, 64), device="cuda")
+        check_1d_sharded_parity(self, ref_model, model, check_grads=False)
+        for iter_idx in range(10):
+            losses: List[torch.Tensor] = []
+            for _model in (ref_model, model):
+                torch.manual_seed(iter_idx + 1)  # for dropout determinism
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+            check_1d_sharded_parity(self, ref_model, model)
+            self.assertEqual(losses[0], losses[1])
+            for _optim in (ref_optim, optim):
+                _optim.step()
+                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            check_1d_sharded_parity(self, ref_model, model)
 
 
 class TestFullyShardSharedParams(FSDPTest):
