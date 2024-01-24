@@ -194,8 +194,8 @@ sycl::queue& XPUStream::queue() const {
 }
 
 // Returns a stream from the requested pool
-// Note: when called the first time on a device, this will create the stream
-// pools for that device.
+// Note: The stream pools will be initialized if needed, at the first vocation
+// to this function.
 XPUStream getStreamFromPool(const int priority, DeviceIndex device) {
   initXPUStreamsOnce();
   if (device == -1) {
@@ -215,8 +215,15 @@ XPUStream getStreamFromPool(const int priority, DeviceIndex device) {
   return XPUStreamForId(device, makeStreamId(id_type, idx));
 }
 
-// Note: when called the first time on a device, this will create the stream
-// pools for that device.
+XPUStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
+  initXPUStreamsOnce();
+  // If isHighPriority is true, return the stream with the highest priority.
+  int priority = isHighPriority ? -max_compile_time_stream_priorities + 1 : 0;
+  return getStreamFromPool(priority, device);
+}
+
+// Note: The stream pools will be initialized if needed, at the first vocation
+// to this function.
 XPUStream getCurrentXPUStream(DeviceIndex device) {
   initXPUStreamsOnce();
   if (device == -1) {
@@ -228,13 +235,8 @@ XPUStream getCurrentXPUStream(DeviceIndex device) {
   return XPUStreamForId(device, current_streams[device]);
 }
 
-XPUStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
-  initXPUStreamsOnce();
-  // If isHighPriority is true, return the stream with the highest priority.
-  int priority = isHighPriority ? -max_compile_time_stream_priorities + 1 : 0;
-  return getStreamFromPool(priority, device);
-}
-
+// Note: The stream pools will be initialized if needed, at the first vocation
+// to this function.
 void setCurrentXPUStream(XPUStream stream) {
   initXPUStreamsOnce();
   current_streams[stream.device_index()] = stream.id();
@@ -244,9 +246,9 @@ std::ostream& operator<<(std::ostream& stream, const XPUStream& s) {
   return stream << s.unwrap();
 }
 
-// Note: when called the first time on a device, this will create the stream
-// pools for that device.
-void streams_synchronize_on_device(DeviceIndex device) {
+// Note: The stream pools will be initialized if needed, at the first vocation
+// to this function.
+void syncStreamsOnDevice(DeviceIndex device) {
   initXPUStreamsOnce();
   if (device == -1) {
     device = c10::xpu::current_device();
