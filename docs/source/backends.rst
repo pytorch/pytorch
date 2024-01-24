@@ -68,8 +68,6 @@ torch.backends.cuda
 
 .. autofunction:: torch.backends.cuda.preferred_linalg_library
 
-.. autoclass:: torch.backends.cuda.SDPBackend
-
 .. autoclass:: torch.backends.cuda.SDPAParams
 
 .. autofunction:: torch.backends.cuda.flash_sdp_enabled
