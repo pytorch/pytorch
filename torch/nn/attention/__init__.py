@@ -57,7 +57,7 @@ def _raise_kernel_warnings(params: SDPAParams) -> None:
 
 
 @contextlib.contextmanager
-def sdpa_kernel(backend: Union[List[SDPBackend], SDPBackend]):
+def sdpa_kernel(backends: List[SDPBackend]):
     r"""
     Context manager to select which backend to use for scaled dot product attention.
 
@@ -69,11 +69,11 @@ def sdpa_kernel(backend: Union[List[SDPBackend], SDPBackend]):
     This context manager can be used to select which backend to use for scaled dot product attention.
     Upon exiting the context manager, the previous state of the flags will be restored, enabling all backends.
     """
-    assert backend is None or isinstance(
-        backend, (SDPBackend, list)
+    assert backends is None or isinstance(
+        backends, list
     ), "Backend must be an instance of SDPBackend or a list of SDPBackend instances"
 
-    backends = set(backend) if isinstance(backend, list) else {backend}
+    backends = set(backends)
     previous_flash: bool = flash_sdp_enabled()
     previous_mem_efficient: bool = mem_efficient_sdp_enabled()
     previous_math: bool = math_sdp_enabled()
