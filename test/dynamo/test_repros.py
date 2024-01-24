@@ -4000,6 +4000,73 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 # frame_count should stay at 1.
                 self.assertEqual(cnt.frame_count, 1)
 
+    def test_user_ctor_ctx_manager(self):
+        class UserCtxManager:
+            def __enter__(self):
+                return 1
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+        def fn(x, y):
+            ucm = UserCtxManager()
+            return x * x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
+        x = torch.rand([2, 2])
+        opt_fn(x, x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_user_ctor_ctx_manager_custom_init(self):
+        class UserCtxManager:
+            def __init__(self, x):
+                x[0] = 10
+
+            def __enter__(self):
+                return 1
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+        def fn(x, y):
+            ucm = UserCtxManager(y)
+            return x * y[0]
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
+        x = torch.rand([2, 2])
+        self.assertEqual(opt_fn(x, [5]), fn(x, [5]))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_user_ctor_ctx_manager_custom_init_graph_break(self):
+        counter = [0]
+
+        class UserCtxManager:
+            def __init__(self, k):
+                k[0] += 1
+
+            def __enter__(self):
+                return 1
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+        def fn(x, counter):
+            x = x * x
+            ucm = UserCtxManager(counter)
+            return x * x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        x = torch.rand([2, 2])
+        self.assertEqual(opt_fn(x, counter), fn(x, counter))
+        self.assertEqual(counter[0], 2)
+        for i in range(0, 10):
+            opt_fn(x, counter)
+        self.assertEqual(counter[0], 12)
+        self.assertEqual(cnt.frame_count, torch._dynamo.utils.ifdynstaticdefault(3, 2))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
