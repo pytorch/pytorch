@@ -12,7 +12,6 @@ from .optimizer import (
     _foreach_doc,
     _get_scalar_dtype,
     _get_value,
-    _stack_if_compiling,
     _use_grad_for_differentiable,
     _view_as_real,
 )
@@ -475,7 +474,7 @@ def _multi_tensor_radam(
             unrectified = [0 if rect > 0 else 1.0 for rect in rect]
 
             bias_correction1 = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
-            unrect_step_size = _stack_if_compiling([(lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)])
+            unrect_step_size = [(lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)]
             bias_correction2 = [
                 _dispatch_sqrt(1 - beta2 ** _get_value(step)) * (lr * rect / bc) * -1
                 for step, rect, bc in zip(grouped_state_steps, rect, bias_correction1)

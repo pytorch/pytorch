@@ -1298,6 +1298,20 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115607"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
+            ),
         ),
     ),
     OptimizerInfo(
