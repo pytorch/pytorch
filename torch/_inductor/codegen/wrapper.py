@@ -1857,13 +1857,34 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.header.splice(f"\n{kernel}\n")
 
     def codegen_scalar_to_tensor(self, buffer: ir.ShapeAsConstantBuffer):
-        name = f"scalar_to_tensor_{next(self.scalar_to_tensor_id)}"
         expr = buffer.shape
-        # TODO: we may need to handle the case that expr is not a single symbol
-        assert expr in V.graph.symbol_to_dtype, (
-            "%s is not seen in V.graph.symbol_to_dtype" % expr
-        )
-        dtype_str = str(V.graph.symbol_to_dtype[expr]).split(".")[-1]
+        candidate_dtypes = set()
+        for sym in expr.free_symbols:
+            if sym in V.graph.symbol_to_dtype:
+                new_dtype = V.graph.symbol_to_dtype[sym]
+                assert new_dtype in (
+                    torch.float64,
+                    torch.float32,
+                    torch.int64,
+                    torch.int32,
+                ), "codegen_scalar_to_tensor needs to support" + str(new_dtype)
+                candidate_dtypes.add(V.graph.symbol_to_dtype[sym])
+        dtype = None
+        # very limited dtype promotion rules
+        for t in [
+            torch.float64,
+            torch.float32,
+            torch.int64,
+            torch.int32,
+        ]:
+            if t in candidate_dtypes:
+                dtype = t
+                break
+
+        assert dtype, "Not able to decide the dtype from " + str(expr)
+        dtype_str = str(dtype).split(".")[-1]
+
+        name = f"scalar_to_tensor_{next(self.scalar_to_tensor_id)}"
         self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
         self.wrapper_call.writeline(
             f"aoti_torch_scalar_to_tensor_{dtype_str}({buffer.codegen_reference()}, &{name}_handle);"
@@ -1922,11 +1943,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
             for idx, output in enumerate(output_refs):
                 if config.aot_inductor.abi_compatible:
-                    if isinstance(V.graph.graph_outputs[idx], ir.ShapeAsConstantBuffer):
+                    output_buffer = V.graph.graph_outputs[idx]
+                    if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
                         # Need to wrap scalar into tensor as the output is vector of tensors
-                        output_tensor = self.codegen_scalar_to_tensor(
-                            V.graph.graph_outputs[idx]
-                        )
+                        output_tensor = self.codegen_scalar_to_tensor(output_buffer)
                         self.wrapper_call.writeline(
                             f"output_handles[{idx}] = {output_tensor}.release();"
                         )
