@@ -3,7 +3,6 @@
 #include <complex>
 #include <type_traits>
 #include <c10/core/ScalarType.h>
-#include <c10/util/C++17.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
 
