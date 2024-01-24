@@ -126,7 +126,7 @@ class TestFullyShardStateDict(FSDPTest):
             self.assertTrue(isinstance(tensor, DTensor))
             if param_name_to_data_ptr[param_name] == 0:
                 # Check that this is padding (added by DTensor)
-                self.assertGreater(self.rank, 0)  # TODO: can make more strict
+                self.assertGreater(self.rank, 0)
                 self.assertEqual(torch.count_nonzero(tensor._local_tensor).item(), 0)
             else:
                 self.assertEqual(
