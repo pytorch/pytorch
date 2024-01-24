@@ -56,6 +56,29 @@ class TestOptimRenewed(TestCase):
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
 
+    @optims(optim_db, dtypes=[torch.complex64])
+    def test_complex(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
+        for optim_input in all_optim_inputs:
+            complex_params = [torch.randn(2, 3, device=device, dtype=dtype, requires_grad=True) for _ in range(3)]
+            real_params = [torch.view_as_real(p).detach().clone().requires_grad_(True) for p in complex_params]
+
+            complex_optimizer = optim_cls(complex_params, **optim_input.kwargs)
+            real_optimizer = optim_cls(real_params, **optim_input.kwargs)
+
+            for _ in range(3):
+                for (c, r) in zip(complex_params, real_params):
+                    c.grad = torch.randn_like(c)
+                    r.grad = torch.view_as_real(c.grad)
+                complex_optimizer.step()
+                real_optimizer.step()
+
+                for (c, r) in zip(complex_params, real_params):
+                    self.assertEqual(torch.view_as_real(c), r)
+
+
     def _test_derived_optimizers(self, device, dtype, optim_info, flag, reduced_precision=False, assert_step_dtype=None):
         """
         Given a flag 'fused' or 'foreach', test for parity of optimizer state

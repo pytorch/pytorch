@@ -264,9 +264,7 @@ def get_error_inputs_for_all_optims(device, dtype):
 def optim_inputs_func_adadelta(device=None):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
-        OptimizerInput(
-            params=None, kwargs={"lr": 0.01}, desc="non-default lr"
-        ),  # TODO: Move out to testing in param_group?
+        OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
         OptimizerInput(
             params=None, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
         ),
@@ -277,7 +275,7 @@ def optim_inputs_func_adadelta(device=None):
         ),
         OptimizerInput(
             params=None, kwargs={"rho": 0.95, "weight_decay": 0.9}, desc="rho"
-        ),  # TODO: Move out to testing in param_group?
+        ),
     ]
 
 
@@ -494,6 +492,7 @@ def optim_inputs_func_asgd(device=None):
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 0.02}, desc="non-default lr"),
         OptimizerInput(params=None, kwargs={"t0": 100}, desc="t0"),
+        OptimizerInput(params=None, kwargs={"maximize": True}, desc="maximize"),
         OptimizerInput(
             params=None, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
         ),
@@ -545,6 +544,21 @@ def optim_error_inputs_func_lbfgs(device, dtype):
 def optim_inputs_func_nadam(device=None):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.9, "momentum_decay": 6e-3, "capturable": True},
+            desc="weight_decay, capturable",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "weight_decay": 0.9,
+                "momentum_decay": 6e-3,
+                "decoupled_weight_decay": True,
+                "capturable": True,
+            },
+            desc="decoupled_weight_decay, capturable",
+        ),
     ]
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
@@ -1201,6 +1215,11 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_param_groups_weight_decay",
             ),
+            DecorateInfo(
+                unittest.skip("Missing complex support, see #118148"),
+                "TestOptimRenewed",
+                "test_complex",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1530,6 +1549,11 @@ optim_db: List[OptimizerInfo] = [
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                unittest.skip("Missing complex support, see #118153"),
+                "TestOptimRenewed",
+                "test_complex",
             ),
         ),
     ),
