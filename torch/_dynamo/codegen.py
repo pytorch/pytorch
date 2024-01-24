@@ -125,7 +125,7 @@ class PyCodegen:
             self.load_graph_output(graph_outputs[graph_outputs_key].index)
             output.append(
                 self.create_load_global(
-                    value.global_mangled_class_name(self.tx), False, add=True
+                    value.global_mangled_class_name(), False, add=True
                 )
             )
             output.extend(create_call_function(2, True))
