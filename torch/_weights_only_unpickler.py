@@ -17,6 +17,7 @@
 # weights = torch.load(buf, weights_only = True)
 
 import functools as _functools
+import io
 from collections import OrderedDict
 from pickle import (
     APPEND,
@@ -56,6 +57,21 @@ from pickle import (
     TUPLE2,
     TUPLE3,
     UnpicklingError,
+    # Protocol 3
+    BINBYTES,
+    SHORT_BINBYTES,
+    # Protocol 4
+    SHORT_BINUNICODE,
+    BINUNICODE8,
+    BINBYTES8,
+    ADDITEMS,
+    FROZENSET,
+    NEWOBJ_EX,
+    STACK_GLOBAL,
+    MEMOIZE,
+    FRAME,
+    # Protocol 5 (no out-of-band buffer support)
+    BYTEARRAY8,
 )
 from struct import unpack
 from sys import maxsize
@@ -122,11 +138,68 @@ def _get_allowed_globals():
     return rc
 
 
+class _Unframer:
+
+    def __init__(self, file_read, file_readline, file_tell=None):
+        self.file_read = file_read
+        self.file_readline = file_readline
+        self.current_frame = None
+
+    def readinto(self, buf):
+        if self.current_frame:
+            n = self.current_frame.readinto(buf)
+            if n == 0 and len(buf) != 0:
+                self.current_frame = None
+                n = len(buf)
+                buf[:] = self.file_read(n)
+                return n
+            if n < len(buf):
+                raise UnpicklingError(
+                    "pickle exhausted before end of frame")
+            return n
+        else:
+            n = len(buf)
+            buf[:] = self.file_read(n)
+            return n
+
+    def read(self, n):
+        if self.current_frame:
+            data = self.current_frame.read(n)
+            if not data and n != 0:
+                self.current_frame = None
+                return self.file_read(n)
+            if len(data) < n:
+                raise UnpicklingError(
+                    "pickle exhausted before end of frame")
+            return data
+        else:
+            return self.file_read(n)
+
+    def readline(self):
+        if self.current_frame:
+            data = self.current_frame.readline()
+            if not data:
+                self.current_frame = None
+                return self.file_readline()
+            if data[-1] != b'\n'[0]:
+                raise UnpicklingError(
+                    "pickle exhausted before end of frame")
+            return data
+        else:
+            return self.file_readline()
+
+    def load_frame(self, frame_size):
+        if self.current_frame and self.current_frame.read() != b'':
+            raise UnpicklingError(
+                "beginning of a new frame before end of current frame")
+        self.current_frame = io.BytesIO(self.file_read(frame_size))
+
+
 class Unpickler:
     def __init__(self, file, *, encoding: str = "bytes"):
         self.encoding = encoding
-        self.readline = file.readline
-        self.read = file.read
+        self._file_readline = file.readline
+        self._file_read = file.read
         self.memo: Dict[int, Any] = {}
 
     def load(self):
@@ -134,11 +207,16 @@ class Unpickler:
 
         Return the reconstituted object hierarchy specified in the file.
         """
+        self._unframer = _Unframer(self._file_read, self._file_readline)
+        self.read = self._unframer.read
+        self.readline = self._unframer.readline
+        self.readinto = self._unframer.readinto
         self.metastack = []
         self.stack: List[Any] = []
         self.append = self.stack.append
         read = self.read
         readline = self.readline
+        readinto = self.readinto
         while True:
             key = read(1)
             if not key:
@@ -236,11 +314,11 @@ class Unpickler:
             elif key[0] == BININT[0]:
                 self.append(unpack("<i", read(4))[0])
             elif key[0] == BININT1[0]:
-                self.append(self.read(1)[0])
+                self.append(read(1)[0])
             elif key[0] == BININT2[0]:
                 self.append(unpack("<H", read(2))[0])
             elif key[0] == BINFLOAT[0]:
-                self.append(unpack(">d", self.read(8))[0])
+                self.append(unpack(">d", read(8))[0])
             elif key[0] == BINUNICODE[0]:
                 strlen = unpack("<I", read(4))[0]
                 if strlen > maxsize:
@@ -288,6 +366,79 @@ class Unpickler:
             elif key[0] == STOP[0]:
                 rc = self.stack.pop()
                 return rc
+            # Protocol 3
+            elif key[0] == BINBYTES[0]:
+                n, = unpack('<I', read(4))
+                if n > maxsize:
+                    raise UnpicklingError("BINBYTES exceeds system's maximum size "
+                                          "of %d bytes" % maxsize)
+                self.append(read(n))
+            elif key[0] == SHORT_BINBYTES[0]:
+                n = read(1)[0]
+                self.append(read(n))
+            # Protocol 4
+            elif key[0] == SHORT_BINUNICODE[0]:
+                n = read(1)[0]
+                self.append(str(read(n), 'utf-8', 'surrogatepass'))
+            elif key[0] == BINUNICODE8[0]:
+                n, = unpack('<Q', read(8))
+                if n > maxsize:
+                    raise UnpicklingError("BINUNICODE8 exceeds system's maximum size "
+                                          "of %d bytes" % maxsize)
+                self.append(str(read(n), 'utf-8', 'surrogatepass'))
+            elif key[0] == BINBYTES8[0]:
+                n, = unpack('<Q', read(8))
+                if n > maxsize:
+                    raise UnpicklingError("BINBYTES8 exceeds system's maximum size "
+                                          "of %d bytes" % maxsize)
+                self.append(read(n))
+            elif key[0] == EMPTY_SET[0]:
+                self.append(set())
+            elif key[0] == ADDITEMS[0]:
+                items = self.pop_mark()
+                set_obj = self.stack[-1]
+                if isinstance(set_obj, set):
+                    set_obj.update(items)
+                else:
+                    add = set_obj.add
+                    for item in items:
+                        add(item)
+            elif key[0] == FROZENSET[0]:
+                items = self.pop_mark()
+                self.append(frozenset(items))
+            elif key[0] == NEWOBJ_EX[0]:
+                kwargs = self.stack.pop()
+                args = self.stack.pop()
+                cls = self.stack.pop()
+                obj = cls.__new__(cls, *args, **kwargs)
+                self.append(obj)
+            elif key[0] == STACK_GLOBAL[0]:
+                name = self.stack.pop()
+                module = self.stack.pop()
+                if type(name) is not str or type(module) is not str:
+                    raise UnpicklingError("STACK_GLOBAL requires str")
+                full_path = f"{module}.{name}"
+                if full_path in _get_allowed_globals():
+                    self.append(_get_allowed_globals()[full_path])
+                else:
+                    raise RuntimeError(f"Unsupported class {full_path}")
+            elif key[0] == MEMOIZE[0]:
+                memo = self.memo
+                memo[len(memo)] = self.stack[-1]
+            elif key[0] == FRAME[0]:
+                frame_size, = unpack('<Q', read(8))
+                if frame_size > maxsize:
+                    raise ValueError("frame size > sys.maxsize: %d" % frame_size)
+                self._unframer.load_frame(frame_size)
+            # Protocol 5 (no out-of-band buffer support)
+            elif key[0] == BYTEARRAY8[0]:
+                n, = unpack('<Q', read(8))
+                if n > maxsize:
+                    raise UnpicklingError("BYTEARRAY8 exceeds system's maximum size "
+                                          "of %d bytes" % maxsize)
+                b = bytearray(n)
+                readinto(b)
+                self.append(b)
             else:
                 raise RuntimeError(f"Unsupported operand {key[0]}")
 
