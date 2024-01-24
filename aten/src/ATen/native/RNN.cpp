@@ -71,6 +71,12 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
                                 (detail::getCUDAHooks().compiledWithMIOpen()) &&
                                 (input.is_cuda()) &&
                                 (at::globalContext().userEnabledCuDNN());
+    // MIOpen functions returns miopenStatusBadParm on empty
+    // tensors. Maybe some functions actually support empty tensors, but
+    // native kernels shouldn't be much slower because the output is also
+    // likely empty.
+    if (input.sym_numel() == 0) return false;
+
     return is_miopen_acceptable;
 }
 

@@ -516,6 +516,58 @@ class SymPyValueRangeAnalysis:
                     init_range = init_range | expr_range
         return init_range
 
+    @staticmethod
+    def cos(x):
+        # TODO: We should tighten value ranges
+        # If input range span is pi + 2*pi*k, then output range is (-1, 1)
+        # otherwise the minimum of the value of the function on the extremes
+        return ValueRanges(-1.0, 1.0)
+
+    @staticmethod
+    def cosh(x):
+        x = ValueRanges.wrap(x)
+        if x.lower > 0:
+            return ValueRanges.increasing_map(x, sympy.cosh)
+        elif x.upper < 0:
+            return ValueRanges.decreasing_map(x, sympy.cosh)
+        return ValueRanges(0.0, sympy.oo)
+
+    @staticmethod
+    def sin(x):
+        # TODO: We should tighten value ranges
+        # See details on cos
+        return ValueRanges(-1.0, 1.0)
+
+    @staticmethod
+    def sinh(x):
+        return ValueRanges.increasing_map(x, sympy.sinh)
+
+    @staticmethod
+    def tan(x):
+        return ValueRanges(-sympy.oo, sympy.oo)
+
+    @staticmethod
+    def tanh(x):
+        return ValueRanges.increasing_map(x, sympy.tanh)
+
+    @staticmethod
+    def asin(x):
+        x = ValueRanges.wrap(x)
+        if -1 <= x.lower and x.upper <= 1:
+            return ValueRanges.increasing_map(x, sympy.asin)
+        return ValueRanges.unknown()
+
+    @staticmethod
+    def acos(x):
+        x = ValueRanges.wrap(x)
+        if -1 <= x.lower and x.upper <= 1:
+            return ValueRanges.decreasing_map(x, sympy.acos)
+        return ValueRanges.unknown()
+
+    @staticmethod
+    def atan(x):
+        return ValueRanges.increasing_map(x, sympy.atan)
+
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     def __init__(self):

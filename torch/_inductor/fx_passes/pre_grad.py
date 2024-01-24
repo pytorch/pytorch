@@ -34,6 +34,7 @@ split_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 unbind_stack_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 efficient_conv_bn_eval_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 merge_getitem_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+predispatch_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalization_pass,
@@ -68,9 +69,12 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
 
     if config.pattern_matcher:
         lazy_init()
+        if config.fx_passes_numeric_check["pre_grad"]:
+            gm_before_fx_passes = gm.__copy__()
         # explicitly run with predispatch atenIR based passes
         if config.is_predispatch:
             group_batch_fusion_passes(gm.graph, pre_grad=True)
+            predispatch_pass.apply(gm.graph)
         else:
             gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
@@ -89,6 +93,18 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     stable_topological_sort(gm.graph)
     gm.graph.lint()
     gm.recompile()
+
+    if config.pattern_matcher and config.fx_passes_numeric_check["pre_grad"]:
+        from .numeric_utils import numeric_check_if_enabled
+
+        gm_after_fx_passes = gm.__copy__()
+        numeric_check_if_enabled(
+            gm_before_fx_passes,
+            gm_after_fx_passes,
+            example_inputs,
+            config.fx_passes_numeric_check["num_iterations"],
+            config.fx_passes_numeric_check["precision"],
+        )
 
     print_graph(gm.graph, "After recompile in pre grad pass.")
 
