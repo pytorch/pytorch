@@ -9,9 +9,8 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 
-from _test_fully_shard_common import DoubleLinear
+from _test_fully_shard_common import check_1d_sharded_parity, DoubleLinear
 from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._tensor import DTensor
 from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
@@ -22,31 +21,6 @@ class TestFullyShardAutograd(FSDPTest):
     @property
     def world_size(self) -> int:
         return min(4, torch.cuda.device_count())
-
-    def _check_1d_sharded_parity(
-        self,
-        replicated_module: nn.Module,
-        sharded_module: nn.Module,
-        group: Optional[dist.ProcessGroup] = None,
-        check_grads: bool = True,
-    ):
-        group = group or dist.distributed_c10d._get_default_group()
-        rank, world_size = group.rank(), group.size()
-        for (replicated_name, replicated_param), (sharded_name, sharded_param) in zip(
-            replicated_module.named_parameters(), sharded_module.named_parameters()
-        ):
-            self.assertEqual(replicated_name, sharded_name)
-            self.assertIsInstance(sharded_param, DTensor)
-            param_chunks = torch.chunk(replicated_param, world_size, dim=0)
-            self.assertEqual(sharded_param._local_tensor, param_chunks[rank])
-            if not check_grads:
-                continue
-            if replicated_param.grad is None:
-                self.assertIsNone(sharded_param.grad)
-                continue
-            self.assertIsNotNone(sharded_param.grad)
-            grad_chunks = torch.chunk(replicated_param.grad, world_size, dim=0)
-            self.assertEqual(sharded_param.grad._local_tensor, grad_chunks[rank])
 
     def _reduce_1d_partial_grads(
         self, module: nn.Module, group: Optional[dist.ProcessGroup] = None
@@ -100,7 +74,7 @@ class TestFullyShardAutograd(FSDPTest):
             self.assertEqual(loss, ref_loss)
             optim.zero_grad(set_to_none=(iter_idx % 2))
             ref_optim.zero_grad(set_to_none=(iter_idx % 2))
-            self._check_1d_sharded_parity(ref_model, model)
+            check_1d_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
     def test_unused_forward_module(self):
@@ -139,7 +113,7 @@ class TestFullyShardAutograd(FSDPTest):
             self._reduce_1d_partial_grads(ref_model)
             dist.all_reduce(losses[1])  # partial -> replicated
             self.assertEqual(losses[0], losses[1])
-            self._check_1d_sharded_parity(ref_model, model)
+            check_1d_sharded_parity(self, ref_model, model)
             for _optim in (optim, ref_optim):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
@@ -249,7 +223,7 @@ class TestFullyShardAutograd(FSDPTest):
             self._reduce_1d_partial_grads(ref_model)
             dist.all_reduce(losses[1])  # partial -> replicated
             self.assertEqual(losses[0], losses[1])
-            self._check_1d_sharded_parity(ref_model, model)
+            check_1d_sharded_parity(self, ref_model, model)
             for _optim in (optim, ref_optim):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2))

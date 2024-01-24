@@ -1,14 +1,18 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
-from typing import Callable, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
+from torch.distributed._composable.fsdp._fsdp_param_group import (
+    FSDPParamGroup,
+    RegisterPostBackwardHook,
+)
+from torch.distributed._tensor import DTensor
 
 
 class MLP(nn.Module):
@@ -96,3 +100,58 @@ def patch_post_backward(new_post_backward: Callable):
         yield
     finally:
         FSDPParamGroup._post_backward = orig_post_backward
+
+
+@contextlib.contextmanager
+def patch_register_post_backward_hook_backward(new_backward: Callable):
+    orig_backward = RegisterPostBackwardHook.backward
+    RegisterPostBackwardHook.backward = new_backward
+    try:
+        yield
+    finally:
+        RegisterPostBackwardHook.backward = orig_backward
+
+
+def reduce_scatter_with_assert(
+    cls,
+    orig_reduce_scatter: Callable,
+    assert_fn: Callable,  # `assert_fn(output: Tensor)`
+    *args: Tuple[Any, ...],
+    **kwargs: Dict[str, Any],
+):
+    if len(args) > 0:
+        output = args[0]
+    elif "output" in kwargs:
+        output = kwargs["output"]
+    else:
+        raise AssertionError(
+            f"Cannot get reduce-scatter output from\nargs: {args}\nkwargs: {kwargs}"
+        )
+    assert_fn(output)
+    return orig_reduce_scatter(*args, **kwargs)
+
+
+def check_1d_sharded_parity(
+    cls,  # unit test class
+    replicated_module: nn.Module,
+    sharded_module: nn.Module,
+    group: Optional[dist.ProcessGroup] = None,
+    check_grads: bool = True,
+):
+    group = group or dist.distributed_c10d._get_default_group()
+    rank, world_size = group.rank(), group.size()
+    for (replicated_name, replicated_param), (sharded_name, sharded_param) in zip(
+        replicated_module.named_parameters(), sharded_module.named_parameters()
+    ):
+        cls.assertEqual(replicated_name, sharded_name)
+        cls.assertIsInstance(sharded_param, DTensor)
+        param_chunks = torch.chunk(replicated_param, world_size, dim=0)
+        cls.assertEqual(sharded_param._local_tensor, param_chunks[rank])
+        if not check_grads:
+            continue
+        if replicated_param.grad is None:
+            cls.assertIsNone(sharded_param.grad)
+            continue
+        cls.assertIsNotNone(sharded_param.grad)
+        grad_chunks = torch.chunk(replicated_param.grad, world_size, dim=0)
+        cls.assertEqual(sharded_param.grad._local_tensor, grad_chunks[rank])
