@@ -405,8 +405,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         alpha: Union[float, int] = 1,
         beta: Union[float, int] = 0,
         input_reorder: Optional[List[int]] = None,
-        fuseable: bool = True,
-        non_fuseable: bool = True,
         **extra_kwargs,
     ) -> None:
         """
@@ -421,78 +419,32 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             alpha (float,int): Scaling factor, defaults to 1.
             beta (float,int): Offset, defaults to 0.
             input_reorder (list, optional): Order of the inputs, defaults to None.
-            fuseable (bool): Indicates if Cutlass operator configs which are capable of epilogue fusion should be added,
-                            defaults to True.
-            non_fuseable (bool): Indicates if Cutlass operator configs which are not capable of epilogue fusion should
-                            be added, defaults to True.
             **extra_kwargs: Additional keyword arguments.
 
         """
-        non_fuseable = non_fuseable and (
-            not inductor_cuda_config.cutlass_prefer_evt_capable_ops
+
+        cutlass_template = CUTLASSGemmTemplate(
+            input_nodes,  # type: ignore[arg-type]
+            layout,
+            alpha=alpha,
+            beta=beta,
+            input_reorder=input_reorder,
         )
-        no_evt_fallback = False
-        if fuseable:
-            cutlass_template_evt = CUTLASSGemmTemplate(
-                input_nodes,  # type: ignore[arg-type]
-                layout,
-                alpha=alpha,
-                beta=beta,
-                input_reorder=input_reorder,
-                can_fuse_epilogue=True,
+        ops = cutlass_template.gen_ops()
+        for op in ops:
+            cutlass_template.maybe_append_choice(
+                choices,
+                op=op,
             )
-            if "epilogue_nodes" in extra_kwargs:
-                no_evt_fallback = True
-                epilogue_nodes = extra_kwargs["epilogue_nodes"]
-                template_buffer_node = extra_kwargs.get("template_buffer_node", None)
-                assert (
-                    template_buffer_node is not None
-                ), "Passing epilogue_nodes requires template_buffer_node to be also passed"
-                # This change of output node can change the output layout, which affects which ops
-                # are available
-                cutlass_template_evt.update_output_node_given_epilogue(
-                    epilogue_nodes, template_buffer_node
-                )
-            # This will list only ops capable of EVT fusion
-            ops_evt = cutlass_template_evt.gen_ops()
-            for op in ops_evt:
-                cutlass_template_evt.maybe_append_choice(choices, op=op, **extra_kwargs)
-        else:
-            ops_evt = []
-        if non_fuseable or (len(ops_evt) == 0 and not no_evt_fallback):
-            if fuseable:
-                # list both fuseable and non-fuseable ops, and treat them all as non-fuseable
-                can_fuse_epilogue = False
-            else:
-                can_fuse_epilogue = None
-
-            cutlass_template = CUTLASSGemmTemplate(
-                input_nodes,  # type: ignore[arg-type]
-                layout,
-                alpha=alpha,
-                beta=beta,
-                input_reorder=input_reorder,
-                can_fuse_epilogue=can_fuse_epilogue,
-            )
-            ops = cutlass_template.gen_ops()
-            for op in ops:
-                cutlass_template.maybe_append_choice(
-                    choices,
-                    op=op,
-                )
-        else:
-            ops = []
-
-        if (len(ops_evt) == 0 and fuseable) or (len(ops) == 0 and non_fuseable):
+        if len(ops) == 0:
             input_layouts = [node.get_layout() for node in input_nodes]
             input_strides = [node.get_stride() for node in input_nodes]
             output_layout = layout
-            warning_msg = f"No suitable Cutlass GEMM configs found, fallbacks used ( {fuseable=}, {non_fuseable=}, {len(ops_evt)=}, {len(ops)=}, {output_layout=}, {input_layouts=}, {input_strides=}"  # noqa: B950
+            warning_msg = f"No suitable Cutlass GEMM configs found, fallbacks used ( {len(ops)=}, {output_layout=}, {input_layouts=}, {input_strides=} )"  # noqa: B950
             log.warning(warning_msg)
         log.debug(
-            "Added %d Cutlass gemm configs and %d fuseable gemm configs.",
+            "Added %d Cutlass gemm configs.",
             len(ops),
-            len(ops_evt),
         )
 
     def generate_retune_choices(
@@ -912,6 +864,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             == cutlass_lib.OpcodeClass.Simt
         ):
             return None
+
         supports_evt: bool = self.supports_evt(op)
         if (self.can_fuse_epilogue is not None) and (
             self.can_fuse_epilogue != supports_evt
@@ -921,9 +874,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         # and might take forever during autotuning. @TODO kadeng: investigate
         if op.tile_scheduler == cutlass_lib.TileSchedulerType.StreamK:
             return None
+
         # Only keep GemmUniversal kernels
         if op.gemm_kind not in {
-            cutlass_lib.GemmKind.Universal,
             cutlass_lib.GemmKind.Universal3x,
         }:
             return None

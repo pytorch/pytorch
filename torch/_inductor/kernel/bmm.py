@@ -115,7 +115,7 @@ def tuned_bmm(mat1, mat2, *, layout=None):
         from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
-            choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
+            choices, layout, [mat1, mat2]
         )
     use_aten = use_aten_gemm_kernels()
     if len(choices) == 0 and not use_aten:
@@ -161,8 +161,6 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             alpha=alpha,
             beta=beta,
             input_reorder=[2, 0, 1],
-            fuseable=True,
-            non_fuseable=True,
         )
 
     return autotune_select_algorithm("baddbmm", choices, [inp, mat1, mat2], layout)
