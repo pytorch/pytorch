@@ -18,8 +18,10 @@
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
+#include <ATen/native/nested/NestedTensorUtils.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -1925,6 +1927,10 @@ Call this whenever a new thread is created in order to propagate values from
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
     std::cout << "Included: " << toString(local_keyset.included_) << "\n";
     std::cout << "Excluded: " << toString(local_keyset.excluded_) << "\n";
+  });
+
+  py_module.def("_nested_sizes_from_sym_sizes", [](const c10::SymIntArrayRef& sizes) {
+    return at::native::get_nested_sizes_from_sym_sizes(sizes);
   });
 
   py_module.def(

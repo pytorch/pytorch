@@ -374,16 +374,36 @@ class TestNestedTensor(TestCase):
             a1 = constructor([torch.randn([1, 2, 3]), torch.randn(1, 2, 0)])
             self.assertEqual(a1.numel(), 6)
 
-    # TODO: Fix this
-    # @torch.inference_mode()
-    # def test_size(self):
-    #     for constructor in _iter_constructors():
-    #         a1 = constructor([])
-    #         self.assertRaisesRegex(
-    #             RuntimeError,
-    #             "NestedTensorImpl doesn't support sizes",
-    #             lambda: a1.size(),
-    #         )
+    @torch.inference_mode()
+    def test_size(self):
+        for constructor in _iter_constructors():
+            a1 = constructor([])
+            a1.size()
+
+    def test_reconstruct_nested_size_from_symsize(self):
+        # Currently only used internally to saving sizes for backward
+        def check(dims):
+            nt = random_nt_from_dims(dims)
+            reconstructed = torch._C._nested_sizes_from_sym_sizes(nt.size())
+            self.assertEqual(reconstructed, nt._nested_tensor_size())
+
+        check([5, None, 10])
+        check([5, None, None])
+
+        nt = torch.nested.nested_tensor([])
+        reconstructed = torch._C._nested_sizes_from_sym_sizes(nt.size())
+        # TODO: figure out why we are returning floating point sizes
+        self.assertEqual(reconstructed, nt._nested_tensor_size().to(torch.int64))
+
+        # Only C++ NestedTensor is supported for this path
+        nt = torch.nested.nested_tensor([
+            torch.randn(2, 5),
+            torch.randn(3, 5),
+            torch.randn(4, 5),
+        ], layout=torch.jagged)
+
+        with self.assertRaisesRegex(RuntimeError, r"created from C\+\+ NestedTensor"):
+            torch._C._nested_sizes_from_sizes(nt.size())
 
     def test_size_dim(self):
         a = torch.nested.nested_tensor([])

@@ -51,7 +51,7 @@ static inline DispatchKeySet computeDispatchKeySet(
 inline void updateDispatchKeySetFromSize(DispatchKeySet& ks, c10::SymIntArrayRef sizes) {
   for (const auto& x : sizes) {
     if (x.is_heap_allocated()) {
-      ks = ks | x.toSymNodeImplUnowned()->key_set_;
+      ks = ks | x.toSymNodeImplUnowned()->key_set();
     }
   }
 }
@@ -170,7 +170,8 @@ public:
       } else if (C10_UNLIKELY(ivalue.isSymIntList())) {
         for (const auto& elt : ivalue.toListRef()) {
           if (elt.isSymInt()) {
-            ks = ks | elt.toSymNodeImpl()->key_set_;
+            // IValues tagged SymInt are guaranteed to be heap_allocated
+            ks = ks | elt.toSymNodeImplUnowned()->key_set();
           }
         }
       }

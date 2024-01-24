@@ -11,6 +11,7 @@
 #include <ATen/ops/_nested_tensor_storage_offsets_native.h>
 #include <ATen/ops/_nested_tensor_strides_native.h>
 #include <ATen/ops/chunk_native.h>
+#include <ATen/ops/ones.h>
 #include <ATen/ops/split_with_sizes_native.h>
 #endif
 
@@ -169,7 +170,11 @@ std::vector<Tensor> split_with_sizes_nested(
   return splits;
 }
 
-Tensor get_nested_sizes_from_sym_sizes(SymIntArrayRef size) {
+Tensor get_nested_sizes_from_sym_sizes(const c10::SymIntArrayRef& size) {
+  if (size.size() == 1) {
+    auto out = at::ones({}, TensorOptions().dtype(at::kLong));
+    return out;
+  }
   const int64_t B = static_cast<int64_t>(size[0].expect_int());
   auto nt_sizes = at::empty({B, static_cast<int64_t>(size.size() - 1)},
                             TensorOptions().dtype(at::kLong));
@@ -180,7 +185,14 @@ Tensor get_nested_sizes_from_sym_sizes(SymIntArrayRef size) {
     }
     if (size[idx].is_heap_allocated() && size[idx].toSymNodeImplUnowned()->is_singleton()) {
       auto vec = c10::get_singleton_vec(size[idx].toSymNodeImplUnowned());
-      TORCH_INTERNAL_ASSERT(vec.size(0) == B);
+      // NB: singleton_vec in the C++ nested tensor case holds lengths not offsets
+      //     so if the sizes came from jagged NT, we could support it by computing
+      //     lengths from offsets. But not supporting to for now because it's not
+      //     very useful and to get good performance we'd want to cache the result.
+      TORCH_CHECK(
+          size[idx].toSymNodeImplUnowned()->key_set().has(DispatchKey::NestedTensor),
+          "Expected singleton to have been created from C++ NestedTensor sizes");
+      TORCH_INTERNAL_ASSERT(vec.size(0) == B, vec.size(0), " != ", B);
       nt_sizes.select(1, idx - 1).copy_(vec);
     } else {
       nt_sizes.select(1, idx - 1).fill_(size[i]);

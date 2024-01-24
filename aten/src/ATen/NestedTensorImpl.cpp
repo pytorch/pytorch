@@ -280,6 +280,10 @@ IntArrayRef NestedTensorImpl::sizes_custom() const {
 c10::SymIntArrayRef NestedTensorImpl::sym_sizes_custom() const {
   // C++ NT should not support any ops that do metadata mutation
   if (C10_UNLIKELY(!sym_sizes_.has_value())) {
+    if (nested_sizes_.dim() == 0) {
+      sym_sizes_ = std::vector<c10::SymInt>({c10::SymInt(0)});
+      return c10::SymIntArrayRef(*sym_sizes_);
+    }
     int64_t out_len = nested_sizes_.size(1) + 1;
     std::vector<c10::SymInt> sym_sizes(out_len);
     for (const auto i : c10::irange(out_len)) {
@@ -292,7 +296,7 @@ c10::SymIntArrayRef NestedTensorImpl::sym_sizes_custom() const {
           c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(-1, -1, std::move(vec), -1, c10::SingletonVariant::CPP)));
       }
     }
-    sym_sizes_ = sym_sizes;
+    sym_sizes_ = std::move(sym_sizes);
   }
   return c10::SymIntArrayRef(*sym_sizes_);
 }
