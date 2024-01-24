@@ -1578,6 +1578,25 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
+    @skipIfRocm
+    def test_scaled_dot_product_efficient_attention(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, q, k, v, attn_bias):
+                return torch.ops.aten._scaled_dot_product_efficient_attention(
+                    q, k, v, attn_bias, False
+                )[0]
+
+        example_inputs = (
+            torch.randn(4, 4, 36, 36, device="cuda"),
+            torch.randn(4, 4, 36, 36, device="cuda"),
+            torch.randn(4, 4, 36, 36, device="cuda"),
+            torch.randn(4, 4, 36, 36, device="cuda"),
+        )
+        self.check_model(Model(), example_inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
