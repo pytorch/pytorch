@@ -22,7 +22,6 @@ from .utils import hashable, is_function, NP_SUPPORTED_MODULES
 from .variables import (
     FunctorchVmapHigherOrderVariable,
     SkipFilesVariable,
-    TorchCtxManagerClassVariable,
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
 )
@@ -31,26 +30,22 @@ from .variables.base import VariableTracker
 
 
 """
-Map of torch objects to their tracing rules (Dynamo variables).
+Map of function objects to their tracing rules (Dynamo variables).
 * TorchInGraphFunctionVariable: The functions should be put into the FX graph or can be constant folded. E.g.,
   - torch.add: should be put into the FX graph.
   - torch.is_floating_point: constant folded.
-* TorchCtxManagerClassVariable: The context manager classes are supported by Dynamo. E.g., torch.no_grad
 * SkipFilesVariable: The objects should be skipped from tracing.
 * UserFunctionVariable: The functions should be inlined.
 
-We explicitly list torch objects which should be wrapped as TorchCtxManagerClassVariable.
-The initial list comes from the heuristic in test/dynamo/test_trace_rules.py:generate_allow_list.
-
 For developers: If you add/remove a torch level API, it may trigger failures from
-test/dynamo/test_trace_rules.py:test_torch_name_rule_map. To fix the failures:
+test/dynamo/test_trace_rules.py:test_torch_name_rule_map_updated. To fix the failures:
 If you are adding a new torch level API or Dynamo implementation:
-* Add the name with TorchCtxManagerClassVariable to this map
-  if you are adding Dynamo implementation for that context manager.
-* Remove the object name from test/dynamo/test_trace_rules.ignored_torch_name_rule_set if it's there.
+* Add the name with the corresponding tracing rule to this map
+  if you are adding a new in graph function or Dynamo implementation for an existing function.
+* Remove the object name from test/dynamo/test_trace_rules.ignored_c_binding_in_graph_function_names if it's there.
 
 If you are removing an existing torch level API:
-* Remove the entry represented the API from this map or test/dynamo/test_trace_rules.ignored_torch_name_rule_set
+* Remove the entry represented the API from this map or test/dynamo/test_trace_rules.ignored_c_binding_in_graph_function_names
   depends on where it is.
 
 TODO: We would consolidate the skipfiles.check rules into trace_rules.lookup later.
@@ -59,9 +54,6 @@ and trace_rules.lookup consolidation is done. Then the explicit listing of skip/
 a higher priority, which can be used to override the skipfiles.check rules in some cases.
 """
 manual_torch_name_rule_map = {
-    "torch.profiler.profiler.profile": TorchCtxManagerClassVariable,
-    "torch.autograd.profiler.profile": TorchCtxManagerClassVariable,
-    "torch.autograd.profiler.record_function": TorchCtxManagerClassVariable,
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
@@ -159,23 +151,6 @@ manual_torch_name_rule_map = {
     "torch._functorch.vmap.unwrap_batched": UserFunctionVariable,
     "torch._functorch.vmap.vmap_impl": FunctorchVmapHigherOrderVariable,
     "torch._functorch.vmap.wrap_batched": UserFunctionVariable,
-}
-
-
-# Dynamo implemented context managers
-torch_ctx_manager_classes = {
-    k: TorchCtxManagerClassVariable
-    for k in [
-        "torch._C.DisableTorchFunctionSubclass",
-        "torch._functorch.vmap.vmap_increment_nesting",
-        "torch.amp.autocast_mode.autocast",
-        "torch.autograd.grad_mode.enable_grad",
-        "torch.autograd.grad_mode.inference_mode",
-        "torch.autograd.grad_mode.no_grad",
-        "torch.autograd.grad_mode.set_grad_enabled",
-        "torch.cpu.amp.autocast_mode.autocast",
-        "torch.cuda.amp.autocast_mode.autocast",
-    ]
 }
 
 
@@ -2748,10 +2723,10 @@ torch_non_c_binding_in_graph_functions = {
 
 torch_name_rule_map = [
     manual_torch_name_rule_map,
-    torch_ctx_manager_classes,
     torch_c_binding_in_graph_functions,
     torch_non_c_binding_in_graph_functions,
 ]
+
 
 """
 Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
@@ -2998,8 +2973,8 @@ def is_numpy(obj) -> bool:
 
 
 """
-Main entry point for looking up the trace rule (the Dynamo variable) for a given object.
-E.g, the lookup result of `torch.amp.autocast_mode.autocast` is `TorchCtxManagerClassVariable`.
+Main entry point for looking up the trace rule (the Dynamo variable) for a given function object.
+E.g, the lookup result of `torch.sin` is `TorchInGraphFunctionVariable`.
 """
 
 

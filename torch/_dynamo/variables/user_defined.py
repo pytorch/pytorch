@@ -612,8 +612,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             obj = self.value.__self__
             if (
                 func is torch.utils._contextlib._DecoratorContextManager.clone
-                and trace_rules.lookup(obj.__class__)
-                == variables.TorchCtxManagerClassVariable
+                and variables.TorchCtxManagerClassVariable.is_matching_cls(
+                    obj.__class__
+                )
                 and not (args or kwargs)
             ):
                 return variables.TorchCtxManagerClassVariable(
