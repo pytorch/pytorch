@@ -3,7 +3,7 @@
 import copy
 import os
 import tempfile
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 import torch
 import torch.distributed as dist
