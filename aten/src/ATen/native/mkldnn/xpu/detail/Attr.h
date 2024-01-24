@@ -341,7 +341,7 @@ class Attr {
     // [dst.shape], no broadcast and eltwise-wise binary operations on dst
 
     auto engine =
-        GpuEngineManager::Instance().get_engine({c10::kXPU, current_device()});
+        GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
     for (size_t i = 0; i < ops_params_.size(); ++i) {
       kind_t kind = ops_params_[i].kind_;
       if (kind == kind_t::binary) {
