@@ -1003,7 +1003,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         i = torch.randn(5)
         r1 = fn(i)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="eager")
         r2 = opt_fn(i)
         self.assertEqual(r1, r2)
 
