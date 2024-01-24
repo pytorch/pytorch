@@ -457,7 +457,20 @@ class GraphModuleSerializer:
                 path, ty = val
 
                 assert isinstance(path, str)
-                normalized_ty = ty.__module__ + "." + ty.__qualname__
+
+                # node.meta["nn_module_stack"] could have two forms:
+                # 1. (path: str, module_type: 'type'), e.g.
+                #    ('', <class 'sigmoid.inference.MySimpleModel'>)
+                # 2. (path: str, module_type: str), e.g.
+                #    ('', 'sigmoid.inference.MySimpleModel')
+                # ExportedProgram directly produced by torch.export() has form 1
+                # ExportedProgram deserialized from disk has form 2
+                # TODO: This is not ideal, we should fix this.
+                if isinstance(ty, str):
+                    normalized_ty = ty
+                else:
+                    normalized_ty = ty.__module__ + "." + ty.__qualname__
+
                 return path + "," + normalized_ty
 
             # Serialize to "key,orig_path,type_str"
