@@ -31,24 +31,24 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class LinearUnusedInput(nn.Linear):
-    def forward(self, frozon_input, learnable_input):
-        return super().forward(frozon_input)
+    def forward(self, frozen_input, learnable_input):
+        return super().forward(frozen_input)
 
 
 class ModelUnusedInput(nn.Module):
     def __init__(self, freeze: bool):
         super().__init__()
         self.layer0 = LinearUnusedInput(4, 4, device="cuda")
-        self.layer1_frozon = LinearUnusedInput(4, 4, device="cuda")
+        self.layer1_frozen = LinearUnusedInput(4, 4, device="cuda")
         if freeze:
-            for param in self.layer1_frozon.parameters():
+            for param in self.layer1_frozen.parameters():
                 param.requires_grad = False
         self.layer2 = LinearUnusedInput(4, 4, device="cuda")
 
-    def forward(self, frozon_input, learnable_input):
-        x = self.layer0(frozon_input, learnable_input)
-        y = self.layer1_frozon(frozon_input, learnable_input)
-        z = self.layer2(frozon_input, learnable_input)
+    def forward(self, frozen_input, learnable_input):
+        x = self.layer0(frozen_input, learnable_input)
+        y = self.layer1_frozen(frozen_input, learnable_input)
+        z = self.layer2(frozen_input, learnable_input)
         return torch.concat([x, y, z, learnable_input])
 
 
@@ -300,9 +300,9 @@ class TestFSDPFineTune(FSDPTest):
             losses.clear()
 
     @skip_if_lt_x_gpu(2)
-    def test_parity_with_non_frozon_fsdp(self):
+    def test_parity_with_non_frozen_fsdp(self):
         """
-        For frozon modules with unused input, reshard could happen without unshard
+        For frozen modules with unused input, reshard could happen without unshard
         Verify numerical parity between `_post_backward_reshard_only_hook` and
         `_post_backward_hook` path
         """
@@ -327,10 +327,10 @@ class TestFSDPFineTune(FSDPTest):
                     BackwardPrefetch.BACKWARD_POST,
                 ],
             },
-            self._test_parity_with_non_frozon_fsdp,
+            self._test_parity_with_non_frozen_fsdp,
         )
 
-    def _test_parity_with_non_frozon_fsdp(
+    def _test_parity_with_non_frozen_fsdp(
         self,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
@@ -357,17 +357,17 @@ class TestFSDPFineTune(FSDPTest):
             [
                 param
                 for name, param in ref_model.named_parameters()
-                if not name.startswith("_fsdp_wrapped_module.layer1_frozon")
+                if not name.startswith("_fsdp_wrapped_module.layer1_frozen")
             ],
             lr=1e-2,
         )
         torch.manual_seed(self.rank + 1)
         losses = []
         for idx in range(6):
-            frozon_input = torch.randn((4, 4), device="cuda", requires_grad=False)
+            frozen_input = torch.randn((4, 4), device="cuda", requires_grad=False)
             learnable_input = torch.randn((4, 4), device="cuda", requires_grad=True)
             for _model, _optim in ((model, model_optim), (ref_model, ref_model_optim)):
-                loss = _model(frozon_input, frozon_input).sum()
+                loss = _model(frozen_input, frozen_input).sum()
                 losses.append(loss)
                 loss.backward()
                 _optim.step()
