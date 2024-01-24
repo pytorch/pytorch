@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     make_tensor,
     NOTEST_CPU
 )
+from torch._dynamo.testing import CompileCounterWithBackend
 
 
 from torch.testing._internal.common_methods_invocations import wrapper_set_seed
@@ -3208,9 +3209,9 @@ class TestSDPACudaOnly(NNTestCase):
 
 class TestAttnBias(NNTestCase):
 
-    def run_test(self, device, compile, make_q, make_kv, attn_bias=None,
-                 forw_tolerances: Optional[Tolerances] = None, grad_tolerances: Optional[Tolerances] = None):
-        if compile:
+    def run_test(self, device, make_q, make_kv, attn_bias=None,
+                 forw_tolerances: Optional[Tolerances] = None, grad_tolerances: Optional[Tolerances] = None, backend = None):
+        if backend is not None:
             torch._dynamo.reset()
 
         query, key, value = make_q(), make_kv(), make_kv()
@@ -3222,8 +3223,8 @@ class TestAttnBias(NNTestCase):
         )
 
         sdpa_op = (
-            torch.compile(scaled_dot_product_attention, fullgraph=True, backend="aot_eager")
-            if compile
+            torch.compile(scaled_dot_product_attention, backend=backend)
+            if backend is not None
             else scaled_dot_product_attention
         )
         sdpa_output = sdpa_op(
@@ -3278,7 +3279,7 @@ class TestAttnBias(NNTestCase):
         else:
             attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
 
-        self.run_test(device, False, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol)
+        self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=None)
 
     @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
     @parametrize(
@@ -3286,6 +3287,7 @@ class TestAttnBias(NNTestCase):
         [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
     )
     def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
+        cnts = CompileCounterWithBackend("aot_eager")
         make_tensor = partial(
             torch.rand, device=device, dtype=torch.float16, requires_grad=True
         )
@@ -3305,7 +3307,8 @@ class TestAttnBias(NNTestCase):
         else:
             attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
 
-        self.run_test(device, True, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol)
+        self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=cnts)
+        self.assertEqual(cnts.frame_count, 1, "Compiled graph should have 1 frame!")
 
     @parametrize("shape", [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)])
     def test_is_causal_equals_upper_left(self, device, shape: List[Tuple[int]]):
