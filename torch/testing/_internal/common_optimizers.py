@@ -605,18 +605,18 @@ def optim_inputs_func_radam(device=None):
             params=None,
             kwargs={
                 "capturable": True,
-                "weight_decay": 0.9,
+                "weight_decay": 0.1,
             },
-            desc="capturable",
+            desc="capturable, weight_decay",
         ),
         OptimizerInput(
             params=None,
             kwargs={
                 "capturable": True,
-                "weight_decay": 0.9,
+                "weight_decay": 0.1,
                 "decoupled_weight_decay": True,
             },
-            desc="capturable",
+            desc="capturable, weight_decay, decoupled_weight_decay",
         ),
     ]
     return [

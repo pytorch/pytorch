@@ -295,6 +295,8 @@ def _single_tensor_radam(
     capturable: bool,
     has_complex: bool,
 ):
+    if capturable:
+        raise RuntimeError("capturable is not supported for single tensor radam")
 
     for i, param in enumerate(params):
         grad = grads[i]
