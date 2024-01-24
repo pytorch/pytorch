@@ -28,7 +28,7 @@ static inline void matmul(
       "oneDNN input matrixes must have the same ranks");
   TORCH_CHECK(result.defined(), "oneDNN matmul result should be defined");
 
-  at::Device cur_device = at::Device(at::kXPU, current_device());
+  at::Device cur_device = at::Device(at::kXPU, c10::xpu::current_device());
   auto engine = GpuEngineManager::Instance().get_engine(cur_device);
   auto stream = GpuStreamManager::Instance().get_stream();
 
@@ -184,7 +184,7 @@ static inline void matmul(
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
   if (m1_dt == dnnl::memory::data_type::f32) {
-    pattr.set_fpmath_mode(dnnl::fpmath_mode::strict)
+    pattr.set_fpmath_mode(dnnl::fpmath_mode::strict);
   }
 
   // STEP3: create primitive
@@ -203,9 +203,9 @@ static inline void matmul(
   dst_usr_md = dnnl::memory::desc(dst_dims, dst_usr_dt, dst_strides);
 
   // STEP4: create memory
-  auto m1_usr_m = xpu_onednn_memory(m1_usr_md, engine, m1.data_ptr())
-  auto m2_usr_m = xpu_onednn_memory(m2_usr_md, engine, m2.data_ptr())
-  auto dst_usr_m = xpu_onednn_memory(dst_usr_md, engine, dst.data_ptr())
+  auto m1_usr_m = xpu_onednn_memory(m1_usr_md, engine, m1.data_ptr());
+  auto m2_usr_m = xpu_onednn_memory(m2_usr_md, engine, m2.data_ptr());
+  auto dst_usr_m = xpu_onednn_memory(dst_usr_md, engine, dst.data_ptr());
 
   auto expected_m1_md = matmul_pd.src_desc();
   auto expected_m2_md = matmul_pd.weights_desc();
