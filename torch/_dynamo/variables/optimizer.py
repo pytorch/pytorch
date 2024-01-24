@@ -187,11 +187,23 @@ class OptimizerVariable(UserDefinedObjectVariable):
     def update_list_args(self, tx, args, kwargs, py_args, py_kwargs):
         """Update the args and kwargs to the traced optimizer call"""
         for arg, py_arg in zip(args, py_args):
-            if isinstance(arg, ListVariable) and all(
-                isinstance(t, torch.Tensor) for t in py_arg
-            ):
-                tx.output.side_effects.mutation(arg)
-                arg.items.extend([self.wrap_tensor(tx, t) for t in py_arg])
+            if isinstance(arg, ListVariable):
+                assert isinstance(
+                    py_arg, list
+                ), "py_arg should be a list in optimizer variable"
+                for i, val in enumerate(py_arg):
+                    tx.output.side_effects.mutation(arg)
+                    if isinstance(val, torch.Tensor):
+                        arg.items.append(self.wrap_tensor(tx, val))
+                    else:
+                        from .builder import SourcelessBuilder, VariableBuilder
+
+                        if arg.source:
+                            arg.items.append(
+                                VariableBuilder(tx, GetItemSource(arg.source, i))(val)
+                            )
+                        else:
+                            arg.items.append(SourcelessBuilder()(tx, val))
 
     def create_finalizer(self, tx):
         names_to_delete = self.static_tensor_names
