@@ -15,6 +15,7 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._dynamo.exc import TorchDynamoException
 from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.builtin import BuiltinVariable
