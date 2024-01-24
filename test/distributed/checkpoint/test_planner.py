@@ -10,7 +10,9 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensorMetadata,
     ShardMetadata,
 )
-from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
+from torch.distributed._shard.sharded_tensor.metadata import (
+    TensorProperties as TensorProperties_Shard,
+)
 from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
 
 from torch.distributed.checkpoint.default_planner import (
@@ -23,6 +25,7 @@ from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,
     MetadataIndex,
+    TensorProperties,
     TensorStorageMetadata,
 )
 from torch.distributed.checkpoint.planner import LoadItemType, WriteItemType
@@ -73,7 +76,7 @@ def create_sharded_tensor(rank, world_size, shards_per_rank, shard_size=8):
     sharded_tensor_md = ShardedTensorMetadata(
         shards_metadata=shards_metadata,
         size=torch.Size([shard_size * len(shards_metadata)]),
-        tensor_properties=TensorProperties.create_from_tensor(torch.zeros(1)),
+        tensor_properties=TensorProperties_Shard.create_from_tensor(torch.zeros(1)),
     )
 
     return ShardedTensor._init_from_local_shards_and_global_metadata(
