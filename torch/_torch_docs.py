@@ -3419,7 +3419,7 @@ Example::
     >>> a
     tensor([13,  7,  3, 10, 13,  3, 15, 10,  9, 10])
     >>> torch.cumsum(a, dim=0)
-    ttensor([13, 20, 23, 33, 46, 49, 64, 74, 83, 93])
+    tensor([13, 20, 23, 33, 46, 49, 64, 74, 83, 93])
 """.format(
         **reduceops_common_args
     ),
