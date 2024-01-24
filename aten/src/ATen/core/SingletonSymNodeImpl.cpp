@@ -77,7 +77,7 @@ c10::SymNode SingletonSymNodeImpl::mul(const c10::SymNode& other) {
 
 // TODO: it would be nice to have a version of this that does not bump the
 // refcount.
-at::Tensor get_singleton_vec(const c10::SymNode& node) {
+at::Tensor get_singleton_vec(const c10::SymNodeImpl* node) {
   TORCH_INTERNAL_ASSERT(node->is_singleton());
   return at::Tensor(c10::intrusive_ptr<c10::TensorImpl>::reclaim_copy(node->singleton_vec()));
 }

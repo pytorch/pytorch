@@ -40,7 +40,7 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual bool is_float() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual bool is_singleton() {
+  virtual bool is_singleton() const {
     return false;
   };
   virtual SymNode add(const SymNode& other) {
@@ -189,10 +189,10 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual c10::optional<int64_t> singleton_int() {
     return c10::nullopt;
   }
-  virtual TensorImpl* singleton_vec() {
+  virtual TensorImpl* singleton_vec() const {
     TORCH_CHECK(false, "NYI");
   }
-  virtual int64_t singleton_sum_vec() {
+  virtual int64_t singleton_sum_vec() const {
     TORCH_CHECK(false, "NYI");
   }
   virtual c10::optional<int64_t> singleton_coeff() {
