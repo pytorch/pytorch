@@ -12,6 +12,7 @@
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
 #include <torch/version.h>
 
 #ifndef _WIN32
@@ -456,10 +457,38 @@ void TuningContext::SetFilename(const std::string& filename) {
 
 std::string TuningContext::GetFilename() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_FILENAME");
-  if (env != nullptr) {
-    return env;
+  std::string filename = (env == nullptr) ? filename_ : env;
+  if (filename.empty()) {
+    TUNABLE_LOG("no filename from TuningContext::GetFilename()");
+    return filename;
   }
-  return filename_;
+
+  // differentiate filename based on device ordinal to avoid
+  // use case of one process per device writing to same file
+  auto device = c10::str(int(c10::cuda::current_device()));
+  TUNABLE_LOG("current device ", device);
+
+  // does filename contain %d to insert device ordinal in specific location?
+  const std::string TOKEN("%d");
+  std::size_t found = filename.find(TOKEN);
+  if (found != std::string::npos) {
+    filename.replace(found, TOKEN.length(), device);
+    TUNABLE_LOG("filename contained ", TOKEN, ", new name ", filename);
+  }
+  else {
+    // no %d present, so append device ordinal before final '.'
+    found = filename.rfind(".");
+    if (found != std::string::npos) {
+      filename.insert(found, device);
+      TUNABLE_LOG("filename contained '.', new name ", filename);
+    }
+    else {
+      // all else fails, just prepend
+      filename.insert(0, device);
+      TUNABLE_LOG("filename default behavior, new name ", filename);
+    }
+  }
+  return filename;
 }
 
 void TuningContext::ReadFile(const std::string& filename) {
