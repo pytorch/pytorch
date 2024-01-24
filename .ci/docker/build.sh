@@ -277,6 +277,7 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     DOCS=yes
+    UNINSTALL_DILL=yes
     ;;
   pytorch-linux-jammy-py3-clang12-executorch)
     ANACONDA_PYTHON_VERSION=3.10
