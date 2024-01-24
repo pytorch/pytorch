@@ -477,6 +477,26 @@ def forward(self, x_1, output_1):
         self.assertEqual(torch_result, compiled_result)
 
     @requires_cuda()
+    @skipIfRocm
+    def test_triton_kernel_reinplace_inplaceable_pass(self):
+        def call_triton(
+            x: torch.Tensor,
+            y: torch.Tensor,
+        ):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_autotuned[grid](x, y, output, n_elements)
+            add_kernel_autotuned[grid](output, x, output, n_elements)
+            return output
+
+        t1 = torch.rand(5, device="cuda")
+        t2 = torch.rand(5, device="cuda")
+        torch_result = call_triton(t1, t2)
+        compiled_result = torch.compile(call_triton)(t1, t2)
+        self.assertEqual(torch_result, compiled_result)
+
+    @requires_cuda()
     @common_utils.parametrize("grad", [False, True])
     def test_triton_kernel_multi_kernel(self, grad):
         @triton.jit
@@ -851,6 +871,23 @@ def forward(self, x_1, output_1):
 
         eager_out = f(inp)
         compiled_out = torch.compile(f)(inp)
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda()
+    def test_triton_kernel_fallback(self):
+        def f(x, y):
+            out = torch.zeros_like(x)
+            out2 = torch.zeros_like(x)
+            # torch.mm is ExternKernelOut
+            add_kernel[(4,)](x, torch.mm(x, y), out, 4, 16)
+            # torch.sort creates fallback kernel and hence MultiOutput
+            add_kernel[(4,)](x, torch.sort(y).values, out, 4, 16)
+            return out, out2
+
+        x = torch.randn(4, 4, device="cuda")
+        y = torch.randn(4, 4, device="cuda")
+        eager_out = f(x, y)
+        compiled_out = torch.compile(f)(x, y)
         self.assertEqual(compiled_out, eager_out)
 
 
