@@ -66,6 +66,8 @@ DTYPE_TO_CPP = {
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
     torch.complex64: "complex64",
+    torch.float8_e4m3fn: "float8_e4m3fn",
+    torch.float8_e5m2: "float8_e5m2",
 }
 
 DTYPE_TO_ATEN = {
@@ -85,6 +87,8 @@ DTYPE_TO_ATEN = {
     torch.complex64: "at::kComplexFloat",
     torch.float8_e4m3fn: "at::kFloat8_e4m3fn",
     torch.float8_e5m2: "at::kFloat8_e5m2",
+    torch.float8_e4m3fnuz: "at::kFloat8_e4m3fnuz",
+    torch.float8_e5m2fnuz: "at::kFloat8_e5m2fnuz",
 }
 
 DEVICE_TO_ATEN = {
@@ -855,7 +859,7 @@ class CppOverrides(OpOverrides):
         elif bug == "accuracy":
             return f"{x} + decltype({x})(1)"
         elif bug is None:
-            return f"{x} * ({x}>0)"
+            return f"std::max({x}, decltype({x})(0))"
         else:
             raise AssertionError(
                 f"unrecognized config cpp.inject_relu_bug_TESTING_ONLY = {bug!r}"
@@ -1345,6 +1349,8 @@ class CppVecOverrides(CppOverrides):
             return f"vec_convert_to_mask({x})"
         if opt_ctx_x.dtype == torch.bool and dtype in (torch.float, torch.float32):
             return f"mask_convert_to_float({x})"
+        if opt_ctx_x.dtype == torch.bool and dtype in DTYPE_LOWP_FP:
+            return f"mask_convert_to_lowp<{DTYPE_TO_CPP[dtype]}>({x})"
         if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype in DTYPE_LOWP_FP:
             return f"cvt_fp32_to_lowp_fp<{DTYPE_TO_CPP[dtype]}>({x})"
         if opt_ctx_x.dtype in DTYPE_LOWP_FP and dtype in (torch.float, torch.float32):
@@ -3376,7 +3382,6 @@ class KernelGroup:
         kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
         arg_defs, call_args, arg_types = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
-        arg_types = ",".join(arg_types)
         code = BracesBuffer()
         # TODO: support kernel profile on other platforms
         enable_kernel_profile = (
@@ -3403,7 +3408,7 @@ class KernelGroup:
 
         codecache_def = IndentedBuffer()
         if not V.graph.cpp_wrapper:
-            codecache_def.writeline("async_compile.cpp('''")
+            codecache_def.writeline(f"async_compile.cpp_pybinding({arg_types!r}, '''")
         codecache_def.splice(code)
         if not V.graph.cpp_wrapper:
             codecache_def.writeline("''')")
