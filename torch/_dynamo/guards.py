@@ -117,6 +117,7 @@ CLOSURE_VARS = {
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
+    "__numpy_isnan": np.isnan,
     "inf": float("inf"),
     "__load_module": importlib.import_module,
     "utils_device": torch.utils._device,
@@ -360,6 +361,15 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, [code], provided_guarded_object=self.get(base))
 
+    def FUNCTORCH_CURRENT_LEVEL_MATCH(self, guard: Guard):
+        # Invalidate the graph if a call to vmap has been made prior to this
+        # This is super conservative as the interpreter stack may not contain
+        # vmap
+        code = [
+            "torch._C._functorch.maybe_current_level() is None",
+        ]
+        self._produce_guard_code(guard, code)
+
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
@@ -409,6 +419,13 @@ class GuardBuilder(GuardBuilderBase):
             code = list()
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
             code.append(f"__math_isnan({ref})")
+            self._produce_guard_code(guard, code)
+            return
+        # Python math library doesn't support complex nan, so we need to use numpy
+        elif istype(val, complex) and np.isnan(val):
+            code = list()
+            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+            code.append(f"__numpy_isnan({ref})")
             self._produce_guard_code(guard, code)
             return
 
