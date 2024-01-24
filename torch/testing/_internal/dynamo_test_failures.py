@@ -2845,10 +2845,8 @@ dynamo_expected_failures = {
     "TestFX.test_custom_traceback_raised_when_exception_source_is_graphmodule",  # test_fx
     "TestConstFold.test_check_skip_folding_quant_dequant_pattern",  # test_fx
     "TestFX.test_immutable_list_pytree_ops",  # test_fx
-    "TestFX.test_annotation_with_future",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_TakeList_cpu",  # test_fx
     "TestPassManager.test_pass_manager",  # test_fx
-    "TestFX.test_pytree",  # test_fx
     "TestFX.test_user_friendly_call_provenance_with_function",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_MutationMetadata_cpu",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_MutationTorchTensorCall_cpu",  # test_fx
