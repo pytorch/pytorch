@@ -106,7 +106,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -223,7 +223,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -350,7 +350,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -468,7 +468,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -596,7 +596,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -714,7 +714,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -841,7 +841,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -958,7 +958,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -1085,7 +1085,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -1203,7 +1203,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -1331,7 +1331,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -1449,7 +1449,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -1576,7 +1576,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -1693,7 +1693,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -1820,7 +1820,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -1938,7 +1938,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -2066,7 +2066,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -2184,7 +2184,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -2311,7 +2311,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -2428,7 +2428,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -2555,7 +2555,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -2673,7 +2673,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -2801,7 +2801,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -2919,7 +2919,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -3046,7 +3046,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -3163,7 +3163,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -3290,7 +3290,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -3408,7 +3408,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -3536,7 +3536,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
@@ -3654,7 +3654,7 @@ jobs:
       - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: test_nightly_build
+          ref: fix_nightly_build
           submodules: recursive
           repository: mantaionut/builder
           path: builder
