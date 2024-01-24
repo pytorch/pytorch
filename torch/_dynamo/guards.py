@@ -106,6 +106,7 @@ CLOSURE_VARS = {
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
+    "__numpy_isnan": np.isnan,
     "inf": float("inf"),
     "__load_module": importlib.import_module,
     "utils_device": torch.utils._device,
@@ -407,6 +408,13 @@ class GuardBuilder(GuardBuilderBase):
             code = list()
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
             code.append(f"__math_isnan({ref})")
+            self._produce_guard_code(guard, code)
+            return
+        # Python math library doesn't support complex nan, so we need to use numpy
+        elif istype(val, complex) and np.isnan(val):
+            code = list()
+            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+            code.append(f"__numpy_isnan({ref})")
             self._produce_guard_code(guard, code)
             return
 
