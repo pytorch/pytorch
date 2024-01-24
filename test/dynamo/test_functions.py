@@ -559,6 +559,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return b.type(m.type())
 
     @make_test
+    def test_tensor_element_size(a):
+        if a.element_size() > 1:
+            return (a + a.element_size(), a - a.element_size())
+        return (a - a.element_size(), a + a.element_size())
+
+    @make_test
     def test_ndim(x):
         if x.ndim == 2 and x.ndimension() == 2 and x.dim() == 2:
             return x + 1

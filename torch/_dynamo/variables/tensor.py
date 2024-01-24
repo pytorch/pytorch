@@ -510,9 +510,7 @@ class TensorVariable(VariableTracker):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable.create(index)
         elif name == "element_size":
-            constant_result = ConstantVariable.create(
-                torch._utils._element_size(self.dtype)
-            )
+            constant_result = ConstantVariable.create(self.dtype.itemsize)
         else:
             constant_result = None
 
