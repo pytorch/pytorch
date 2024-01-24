@@ -371,9 +371,7 @@ static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
   auto& self_ = THPVariable_Unpack(self);
   // TODO: change the condition to `self_.dim() != 0` once we expose scalars
   // in PyTorch.
-  if (!isIntegralType(self_.scalar_type(), /*includeBool=*/true) || self_.sym_numel() != 1) {
-    C10_THROW_ERROR(TypeError, "only integer tensors of a single element can be converted to an index");
-  }
+  TORCH_CHECK_TYPE(isIntegralType(self_.scalar_type(), /*includeBool=*/true) && self_.sym_numel() == 1, "only integer tensors of a single element can be converted to an index");
   return wrap(dispatch_to<int64_t>(self_));
   END_HANDLE_TH_ERRORS
 }
@@ -390,9 +388,7 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
     return handle_torch_function(self, "__invert__", args);
   }
   auto& self_ = THPVariable_Unpack(self);
-  if (!isIntegralType(self_.scalar_type(), /*includeBool=*/true)) {
-    C10_THROW_ERROR(TypeError, "~ (operator.invert) is only implemented on integer and Boolean-type tensors");
-  }
+  TORCH_CHECK_TYPE(isIntegralType(self_.scalar_type(), /*includeBool=*/true), "~ (operator.invert) is only implemented on integer and Boolean-type tensors");
   return THPVariable_Wrap(dispatch_invert(self_));
   END_HANDLE_TH_ERRORS
 }
