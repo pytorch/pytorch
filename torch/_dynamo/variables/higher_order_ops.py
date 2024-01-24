@@ -1168,6 +1168,8 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # E.g. in `for i in range(10)`, there is a `STORE_FAST i``
         assert loop_body_instructions[0].opname == "STORE_FAST"
         co_code: List[int] = []
+        if sys.version_info >= (3, 11):
+            co_code.extend((opcode.opmap["RESUME"], 0))
 
         loop_body = loop_body_instructions[1:-1]
         if not loop_body:
@@ -1344,107 +1346,6 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         previous_locals = list(previous_locals)
         previous_locals[self.store_target] = i
         return previous_locals
-
-
-class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def __init__(
-        self, value, fwd_bwd_tracer=None, source: Optional[Source] = None, **kwargs
-    ):
-        super().__init__(value, source, **kwargs)
-        # The fwd_bwd_tracer is owned by AutogradFunctionVariable and passed
-        # in for speculation. It allows us to share tracing information about proxies
-        # across fwd bwd, such as when users stash tensors on a context.
-        self.fwd_bwd_tracer = fwd_bwd_tracer
-
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        from . import UserFunctionVariable
-        from .builder import wrap_fx_proxy
-
-        tracer = self.fwd_bwd_tracer
-
-        if len(kwargs) > 0:
-            unimplemented(
-                "kwargs have not been implemented for torch.autograd.Function"
-            )
-
-        from . import TorchInGraphFunctionVariable
-
-        always_restore = self.value.__name__ == "trampoline_autograd_bwd"
-        if (
-            self.value.__name__ == "trampoline_autograd_bwd"
-            or self.value.__name__ == "trampoline_autograd_fwd"
-        ):
-            fn = UserFunctionVariable(self.value, source=self.source)
-        else:
-            fn = TorchInGraphFunctionVariable(self.value)
-        # TODO(jansel): BUG!!! we aren't copying on the line below, so the post-pre check below is pointless
-        pre_guards = tx.output.guards
-        # In eager-mode PyTorch, if we only compute first-order gradients,
-        # then the grad_mode is False during the backward pass.
-        # torch.compile assumes that we only compute first-order gradients,
-        # so we want to speculate the backward pass with the grad mode disabled.
-        enable_grad = (
-            False if self.value.__name__ == "trampoline_autograd_bwd" else None
-        )
-
-        # TODO: Support kwargs
-        (
-            (body_r, _),
-            body_graph,
-            body_lifted_freevars,
-        ) = speculate_subgraph(
-            tx,
-            fn,
-            [
-                *args,
-            ],
-            {},
-            "the user-defined autograd.Function",
-            source_target=self.value,
-            # Backwards should never, ever be stored!
-            always_restore=always_restore,
-            restore_side_effects=False,
-            tracer=tracer,
-            enable_grad=enable_grad,
-        )
-        post_guards = tx.output.guards
-        if body_lifted_freevars:
-            unimplemented("NYI - freevars in autograd function.")
-
-        if always_restore:
-            if post_guards - pre_guards:
-                unimplemented("NYI - New guards discovered in a restoring state")
-            # Nothing left to do here
-            return None
-
-        # don't add call module to parent graph if speculating forward
-        # return the result directly
-        if self.value.__name__ == "trampoline_autograd_fwd":
-            return body_r
-
-        p_args = (
-            *(arg.as_proxy() for arg in args),
-            *(arg for arg in body_lifted_freevars.keys()),
-        )
-        example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            body_r.as_proxy(),
-        )
-
-        # Store the invocation as a call
-        return wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                self.value,
-                args=tuple(p_args),
-                kwargs={},
-            ),
-            example_value=example_value,
-        )
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
