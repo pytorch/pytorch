@@ -1729,6 +1729,12 @@ class TestAutograd(TestCase):
         # version of x.
         self.assertEqual(a.grad, torch.tensor([1.]))
 
+        # If the base did not originally require grad, there should be no hook
+        # to move. Make sure this case runs without error.
+        x = torch.zeros(4).retain_grad()
+        y = x.view(2, 2)
+        y.add_(torch.randn(2, 2, requires_grad=True))
+
     def test_retains_grad_inplace_multiple_outputs(self):
         class DoubleMul(Function):
             @staticmethod
