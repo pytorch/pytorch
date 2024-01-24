@@ -433,13 +433,20 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 push and self.push(value)
                 self.jump(inst)
         else:
-            # TODO link the torch.cond doc later
-            raise exc.UserError(
-                exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
-                "Dynamic control flow is not supported at the moment. Please use "
-                "functorch.experimental.control_flow.cond to explicitly capture the control flow.",
-                case_name="cond_operands",
-            )
+            from .source import is_constant_source
+
+            if value.source is not None and is_constant_source(value.source):
+                if truth_fn(value.get_real_value()):
+                    push and self.push(value)
+                    self.jump(inst)
+            else:
+                # TODO link the torch.cond doc later
+                raise exc.UserError(
+                    exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
+                    "Dynamic control flow is not supported at the moment. Please use "
+                    "functorch.experimental.control_flow.cond to explicitly capture the control flow.",
+                    case_name="cond_operands",
+                )
 
     return inner
 
@@ -875,7 +882,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             else:
                 mangled_name = f"___unnamed_scope_{id(self.f_globals)}"
                 if mangled_name not in self.output.global_scope:
-                    self.output.install_global(mangled_name, self.f_globals)
+                    self.output.install_global_unsafe(mangled_name, self.f_globals)
                 source = GetItemSource(GlobalSource(mangled_name), name)
         return source
 
@@ -1885,7 +1892,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def store_global_weakref(self, name, value):
         install_guard(GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE))
         if name not in self.output.global_scope:
-            self.output.install_global(name, weakref.ref(value))
+            self.output.install_global_unsafe(name, weakref.ref(value))
 
     @property
     def fake_mode(self):
@@ -2050,6 +2057,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             speculation_log=speculation_log,
         )
 
+        self._throw_if_in_vmap()
+
         # as soon as we create the tracing context we should keep it active, so any calls
         # into dynamo apis can rely on finding it
         with tracing(self.output.tracing_context), self.set_current_tx():
@@ -2085,6 +2094,22 @@ class InstructionTranslator(InstructionTranslatorBase):
             for name in self.code_options["co_freevars"]:
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])
+
+    def _throw_if_in_vmap(self):
+        # Fallback to eager in case of a graph break inside vmap
+        eager = torch._dynamo.lookup_backend("eager")
+        compiler_fn = inspect.getattr_static(
+            self.output.compiler_fn, "compiler_fn", self.output.compiler_fn
+        )
+        ci = torch._C._functorch.peek_interpreter_stack()
+        if (
+            ci is not None
+            and ci.key() == torch._C._functorch.TransformType.Vmap
+            and compiler_fn is not eager
+        ):
+            # if it reaches here, it means Dynamo failed to inline vmap
+            msg = "torch.vmap(fn) requires the function to be inlined by dynamo"
+            unimplemented(msg)
 
     def get_example_value(self, source: Source):
         if isinstance(source, LocalSource):
@@ -2180,7 +2205,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         if new_code.co_freevars:
             cg.make_function_with_closure(name, new_code, True, stack_len)
         else:
-            self.output.install_global(
+            self.output.install_global_unsafe(
                 name, types.FunctionType(new_code, self.f_globals, name)
             )
             cg.extend_output(cg.load_function_name(name, True, stack_len))
