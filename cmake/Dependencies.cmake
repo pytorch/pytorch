@@ -1222,6 +1222,9 @@ endif(USE_LLVM)
 
 # ---[ cuDNN
 if(USE_CUDNN)
+  if(CUDNN_VERSION VERSION_LESS 8.5)
+    message(FATAL_ERROR "PyTorch is compatible with CuDNN-8.5.+, but found ${CUDNN_VERSION}")
+  endif()
   set(CUDNN_FRONTEND_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/cudnn_frontend/include)
   target_include_directories(torch::cudnn INTERFACE ${CUDNN_FRONTEND_INCLUDE_DIR})
 endif()
