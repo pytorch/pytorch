@@ -355,12 +355,13 @@ inline PythonArgs PythonArgParser::parse(
     PyObject* args,
     PyObject* kwargs,
     ParsedArgs<N>& dst) {
-  if (N < max_args) {
-    throw ValueError(
-        "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected %d (got %d)",
-        (int)max_args,
-        N);
-  }
+  TORCH_CHECK_VALUE(
+      N >= max_args,
+      "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected ",
+      max_args,
+      " (got ",
+      N,
+      ")");
   return raw_parse(self, args, kwargs, dst.args);
 }
 
@@ -807,6 +808,11 @@ inline at::Device toDevice(PyObject* obj) {
   if (THPUtils_checkLong(obj)) {
     const auto device_index = THPUtils_unpackLong(obj);
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
+    if (c10::is_privateuse1_backend_registered()) {
+      return at::Device(
+          c10::DeviceType::PrivateUse1,
+          static_cast<c10::DeviceIndex>(device_index));
+    }
     return at::Device(
         c10::DeviceType::CUDA, static_cast<c10::DeviceIndex>(device_index));
   }
