@@ -8620,7 +8620,18 @@ for shape in [(1,), ()]:
                     )
                 )
                 hook_id += 1
-                return out[0] + out[1]
+                return out
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod1 = MultiOutputModule()
+                self.mod2 = MultiOutputModule()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                y = self.mod1(x)
+                z = y[0] + y[1]
+                return self.mod2(z)
 
         hook_order: List[int] = []
         hook_count = 0
@@ -8632,7 +8643,7 @@ for shape in [(1,), ()]:
             hook_order.append(hook_id)
 
         # Any hooks: IDs 1 and 3; regular hooks: IDs 0 and 2
-        model = nn.Sequential(MultiOutputModule(), MultiOutputModule())
+        model = Model()
         inp = torch.randn((2, 3))
         out = model(inp)
         (out[0] + out[1]).sum().backward()
@@ -11244,6 +11255,7 @@ class TestMultithreadAutograd(TestCase):
         count = [0]
         err_count = [0]
         bw_count = [0]
+        bw_count_lock = threading.Lock()
 
         class Func(torch.autograd.Function):
             @staticmethod
@@ -11252,7 +11264,8 @@ class TestMultithreadAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, gO):
-                bw_count[0] += 1
+                with bw_count_lock:
+                    bw_count[0] += 1
                 if bw_count[0] == 1:
                     raise RuntimeError("error message")
                 else:
@@ -11304,11 +11317,12 @@ class TestMultithreadAutograd(TestCase):
         self.assertEqual(count[0], 5)
         self.assertEqual(res, [True, True])
 
-        # Raise an error in on thread's backward
+        # Raise an error in one thread's backward
         res = None
         count = [0]
         err_count = [0]
         bw_count = [0]
+        bw_count_lock = threading.Lock()
 
         class Func(torch.autograd.Function):
             @staticmethod
@@ -11317,7 +11331,8 @@ class TestMultithreadAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, gO):
-                bw_count[0] += 1
+                with bw_count_lock:
+                    bw_count[0] += 1
                 if bw_count[0] == 1:
                     raise RuntimeError("error message")
                 else:
