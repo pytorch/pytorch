@@ -392,9 +392,7 @@ def register_multi_grad_hook(
     have their gradients computed.
 
     Under the ``"any"`` mode, the hook will be called after the first gradient
-    with respect to a tensor in :attr:`tensors` has been computed. Similar to
-    ``"all"``, tensors in :attr:`tensors` not part of the graph or not needed
-    to compute gradients are not considered.
+    with respect to a tensor in :attr:`tensors` has been computed.
 
     The hook should not modify its arguments.
 
@@ -484,7 +482,7 @@ def register_multi_grad_hook(
         ran_hook: Dict[int, bool] = defaultdict(bool)
 
         @functools.wraps(fn)
-        def wrapped_fn(*args, **kwargs):
+        def wrapped_fn(grad: torch.Tensor):
             nonlocal lock, ran_hook
             id = torch._C._current_graph_task_id()
             assert id != -1, "expected this hook to be called inside a backward call"
@@ -492,7 +490,7 @@ def register_multi_grad_hook(
                 prev, ran_hook[id] = ran_hook[id], True
             if prev:
                 return
-            fn(*args, **kwargs)
+            fn(grad)
 
         handles = tuple(
             tensor.register_hook(wrapped_fn)
