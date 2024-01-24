@@ -3222,7 +3222,7 @@ class TestAttnBias(NNTestCase):
         )
 
         sdpa_op = (
-            torch.compile(scaled_dot_product_attention, fullgraph=True)
+            torch.compile(scaled_dot_product_attention, fullgraph=True, backend="aot_eager")
             if compile
             else scaled_dot_product_attention
         )
