@@ -3,6 +3,11 @@ ARG UBUNTU_VERSION
 FROM ubuntu:${UBUNTU_VERSION}
 
 ARG UBUNTU_VERSION
+ARG HTTP_PROXY
+
+ENV ftp_proxy="${HTTP_PROXY}"
+ENV http_proxy="${HTTP_PROXY}"
+ENV https_proxy="${HTTP_PROXY}"
 
 ENV DEBIAN_FRONTEND noninteractive
 

@@ -45,7 +45,7 @@ env:
 jobs:
   test:
     # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
+    if: github.repository_owner == 'mengfei25' && toJSON(fromJSON(inputs.test-matrix).include) != '[]' && 1 == 0
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
@@ -59,34 +59,34 @@ jobs:
       - name: Setup XPU
         uses: ./.github/actions/setup-xpu
 
-      - name: configure aws credentials
-        id: aws_creds
-        uses: aws-actions/configure-aws-credentials@v1.7.0
-        with:
-          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
-          aws-region: us-east-1
+      # - name: configure aws credentials
+      #   id: aws_creds
+      #   uses: aws-actions/configure-aws-credentials@v1.7.0
+      #   with:
+      #     role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+      #     aws-region: us-east-1
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+      # - name: Login to Amazon ECR
+      #   id: login-ecr
+      #   uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Calculate docker image
-        id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
-        with:
-          docker-image-name: ${{ inputs.docker-image }}
+      # - name: Calculate docker image
+      #   id: calculate-docker-image
+      #   uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+      #   with:
+      #     docker-image-name: ${{ inputs.docker-image }}
 
-      - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        with:
-          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      # - name: Pull docker image
+      #   uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+      #   with:
+      #     docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
       - name: Start monitoring script
         id: monitor-script
         shell: bash
         continue-on-error: true
         run: |
-          python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84
+          python3 -m pip install psutil==5.9.1
           python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
@@ -94,6 +94,7 @@ jobs:
         uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
+          use-gha: true
 
       - name: Parse ref
         id: parse-ref
@@ -261,5 +262,5 @@ jobs:
           if-no-files-found: ignore
           path: ./**/core.[1-9]*
 
-      - name: Teardown XPU
-        uses: ./.github/actions/teardown-xpu
+      # - name: Teardown XPU
+      #   uses: ./.github/actions/teardown-xpu

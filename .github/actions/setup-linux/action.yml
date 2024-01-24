@@ -35,21 +35,21 @@ runs:
             echo "Starting docker deamon..." && sudo systemctl start docker;
         fi
 
-    - name: Log in to ECR
-      uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
-      env:
-        AWS_RETRY_MODE: standard
-        AWS_MAX_ATTEMPTS: "5"
-        AWS_DEFAULT_REGION: us-east-1
-      with:
-        shell: bash
-        timeout_minutes: 5
-        max_attempts: 3
-        retry_wait_seconds: 30
-        command: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+    # - name: Log in to ECR
+    #   uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+    #   env:
+    #     AWS_RETRY_MODE: standard
+    #     AWS_MAX_ATTEMPTS: "5"
+    #     AWS_DEFAULT_REGION: us-east-1
+    #   with:
+    #     shell: bash
+    #     timeout_minutes: 5
+    #     max_attempts: 3
+    #     retry_wait_seconds: 30
+    #     command: |
+    #       AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+    #       aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+    #           --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
 
     - name: Preserve github env variables for use in docker
       shell: bash
@@ -64,7 +64,7 @@ runs:
         # shellcheck disable=SC2046
         docker stop $(docker ps -q) || true
         # Prune all of the docker images
-        docker system prune -af
+        # docker system prune -af
 
     - name: Manually resolve download.pytorch.org
       shell: bash
