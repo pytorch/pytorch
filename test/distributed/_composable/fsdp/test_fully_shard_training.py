@@ -80,7 +80,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self.assertIsInstance(param, DTensor)
 
 
-class TestFullyShardTrainingCoreParity(FSDPTest):
+class TestFullyShard1DTrainingCore(FSDPTest):
     @property
     def world_size(self) -> int:
         return min(8, torch.cuda.device_count())
