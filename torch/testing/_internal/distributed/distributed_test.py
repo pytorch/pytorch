@@ -9983,7 +9983,7 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_but_pass_in_sandcastle_if(
-            True, "Skipped due to flakiness"
+            BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
         )
         def test_ddp_hook_pickling_powerSGD(self):
 
