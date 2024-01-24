@@ -1,6 +1,6 @@
 import torch
 import torch._dynamo
-import depyf
+
 
 def h(x):
     a = x.cos()

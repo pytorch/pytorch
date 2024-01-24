@@ -1,6 +1,7 @@
+import depyf
 import torch
 import torch._dynamo
-import depyf
+
 
 def foo():
     def h(x):
@@ -34,5 +35,6 @@ def foo():
     # breakpoint()
     assert torch.equal(eager, compiled)
 
-# with depyf.prepare_debug("./dump_src_dir"):
-foo()
+
+with depyf.prepare_debug("./dump_src_dir"):
+    foo()

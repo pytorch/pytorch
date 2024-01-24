@@ -69,20 +69,19 @@ from .utils import (
     counters,
     cprofile_wrapper,
     dynamo_timed,
-    format_bytecode,
     frame_phase_timing,
     gen_record_file_name,
     increment_frame,
     is_namedtuple,
     istype,
     LazyString,
+    log_bytecode,
     orig_code_map,
     record_compilation_metrics,
     reset_graph_break_dup_checker,
     setup_compile_debug,
     troubleshooting_url,
     write_record_to_file,
-    log_bytecode,
 )
 
 log = logging.getLogger(__name__)
@@ -275,7 +274,6 @@ def convert_frame_assert(
         frame: types.FrameType, cache_entry, hooks: Hooks, frame_state
     ):
         increment_frame()
-
         code = frame.f_code
 
         cache_size = compute_cache_size(frame, cache_entry)
@@ -385,7 +383,7 @@ def convert_frame_assert(
 
         return _compile(
             frame.f_code,
-            frame.f_func,
+            getattr(frame, "f_func", None),  # 3.11+
             frame.f_globals,
             frame.f_locals,
             frame.f_builtins,
@@ -601,7 +599,7 @@ def _compile(
         msg = "free var mismatch: "
         msg += f"old code object has free var {code.co_freevars}, "
         msg += f"new code object has free var {out_code.co_freevars}"
-        # assert code.co_freevars == out_code.co_freevars, (msg, code, breakpoint())
+        assert code.co_freevars == out_code.co_freevars, (msg, code, breakpoint())
 
         msg = "cell var mismatch: "
         msg += f"old code object has cell var {code.co_cellvars}, "

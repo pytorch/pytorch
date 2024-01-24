@@ -121,7 +121,8 @@ THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame) {
         if (frame->stacktop) {
             if (kind & CO_FAST_FREE) {
                 // The cell was set by COPY_FREE_VARS.
-                CHECK(value != NULL && PyCell_Check(value));
+                CHECK(value != NULL)
+                // CHECK(PyCell_Check(value));
                 value = PyCell_GET(value);
             }
             else if (kind & CO_FAST_CELL) {

@@ -71,8 +71,8 @@ from .utils import (
     graph_break_dup_warning_checker,
     istype,
     LazyString,
+    log_bytecode,
     proxy_args_kwargs,
-    log_bytecode
 )
 from .variables.base import (
     _is_top_level_scope,
@@ -132,30 +132,30 @@ trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 tls = threading.local()
 
 
-def update_collection(a, b):
-    """Update a collection 'a' with another collection 'b'."""
-    if isinstance(a, dict) and isinstance(b, dict):
-        for key, b_val in b.items():
-            if key in a:
-                a_val = a[key]
-                if isinstance(a_val, (dict, list, tuple)) and isinstance(
-                    b_val, (dict, list, tuple)
-                ):
-                    a[key] = update_collection(a_val, b_val)
-                # Non-collection values in a dictionary are left unchanged
-            else:
-                # If key in 'b' is not in 'a', add it to 'a'
-                a[key] = b_val
-    elif isinstance(a, list) and isinstance(b, list):
-        a.extend(b)
-    elif isinstance(a, tuple) and isinstance(b, tuple):
-        # breakpoint()
-        # combined_set = set(a) | set(b)
-        a = tuple(set(a + b))
-    else:
-        # If 'a' and 'b' are of different types, replace 'a' with 'b'
-        return b
-    return a
+def invert_dict_with_transitive_relationships(orig_dict):
+    inverted_dict = {}
+
+    def add_to_inverted(key, value):
+        if value in inverted_dict:
+            inverted_dict[value].add(key)
+        else:
+            inverted_dict[value] = {key}
+
+    def follow_chain(key, value):
+        if value in orig_dict:
+            for next_value in orig_dict[value]:
+                add_to_inverted(key, next_value)
+                follow_chain(key, next_value)
+
+    for key, values in orig_dict.items():
+        for value in values:
+            add_to_inverted(key, value)
+            follow_chain(key, value)
+
+    for key in inverted_dict:
+        inverted_dict[key] = list(inverted_dict[key])
+
+    return inverted_dict
 
 
 @dataclasses.dataclass
@@ -703,82 +703,62 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.push(UnknownVariable())
         if isinstance(self, InstructionTranslator):
             outs = []
-            co_names = ()
-            co_freevars = ()
-            co_varnames = ()
             cg = PyCodegen(self)
-            cg_options = copy.deepcopy(cg.code_options)
+            closure_chain = {}
             for tracer in tracers:
-                co_names = (
-                    cg.code_options["co_names"]
-                    + tracer.code_options["co_names"]
-                    + co_names
-                )
-                co_freevars = (
-                    cg.code_options["co_freevars"]
-                    + tracer.code_options["co_freevars"]
-                    + co_freevars
-                )
-                co_varnames = (
-                    cg.code_options["co_varnames"]
-                    + tracer.code_options["co_varnames"]
-                    + co_varnames
-                )
-                func_name = tracer.code_options['co_name']
-                tracer_freevars = tracer.code_options['co_freevars']
-                if not tracer_freevars:
-                    tracer_freevars = None
-                resume_at_insts = tracer.create_call_resume_at(
-                    tracer.next_instruction
-                )
+                func_name = tracer.code_options["co_name"]
+                tracer_freevars = tracer.code_options["co_freevars"]
+                closure_chain[func_name] = tracer_freevars
+
+                resume_at_insts = tracer.create_call_resume_at(tracer.next_instruction)
                 outs = outs + resume_at_insts[:-1]
-            co_names = tuple(set(co_names))
-            co_freevars = tuple(set(co_freevars))
-            co_varnames = tuple(set(co_varnames))
 
-            # breakpoint()
-            self._cell_and_freevars += co_freevars
+            resume_at = outs + self.create_call_resume_at(self.next_instruction)
+            root_fn_name = self.code_options["co_name"]
+            closure_chain[root_fn_name] = self.code_options["co_freevars"]
+            chain_paths = invert_dict_with_transitive_relationships(closure_chain)
+            new_resume = []
 
+            def assert_in_chain(func, idx):
+                assert func is not None
+                if len(idx) == 0:
+                    return
+                next_fn = func.__closure__[0].cell_contents
+                assert_in_chain(next_fn, idx[1:])
 
             cg = PyCodegen(self)
-            for name in co_names:
-                if name not in self.code_options["co_names"]:
-                    self.code_options["co_names"] += (name,)
-
-            for freevar in co_freevars:
-                if freevar not in self.code_options["co_freevars"]:
-                    # breakpoint()
-                    self.code_options["co_freevars"] += (freevar,)
-
-            for varname in co_varnames:
-                if varname not in self.code_options["co_varnames"]:
-                    self.code_options["co_varnames"] += (varname,)
-
-            for name in co_names:
-                if name not in self.output.code_options["co_names"]:
-                    self.output.code_options["co_names"] += (name,)
-
-            for freevar in co_freevars:
-                if freevar not in self.output.code_options["co_freevars"]:
-                    # breakpoint()
-                    self.output.code_options["co_freevars"] += (freevar,)
-
-            for varname in co_varnames:
-                if varname not in self.output.code_options["co_varnames"]:
-                    self.output.code_options["co_varnames"] += (varname,)
-
-            resume_at = outs + self.create_call_resume_at(
-                self.next_instruction
-            )
-            # breakpoint()
-            # self.code_options['co_names'] += co_names
-            cg = PyCodegen(self)
-            print("Func:", cg.code_options['co_name'])
+            for inst in resume_at:
+                if inst.opname == "LOAD_CLOSURE":
+                    assert inst.argval in chain_paths
+                    chain = chain_paths[inst.argval]
+                    if self.f_funcobj:
+                        # 3.11 +
+                        assert_in_chain(self.f_funcobj, chain)
+                    if len(chain) == 1:
+                        # Top level, already present in closures
+                        new_resume.append(inst)
+                    else:
+                        reverse_chain = list(reversed(chain))
+                        for fn_name in reverse_chain:
+                            if fn_name == root_fn_name:
+                                continue
+                            if fn_name in closure_chain[root_fn_name]:
+                                new_resume.append(
+                                    create_instruction("LOAD_DEREF", argval=fn_name)
+                                )
+                                continue
+                        new_resume.extend(cg.create_load_attrs("__closure__"))
+                        new_resume.append(cg.create_load_const(0))
+                        new_resume.append(create_instruction("BINARY_SUBSCR"))
+                        new_resume.extend(cg.create_load_attrs("cell_contents"))
+                else:
+                    new_resume.append(inst)
+            print("Func:", cg.code_options["co_name"])
             print(f"cg: {id(cg.code_options)} -> {cg.code_options['co_freevars']}")
             print(
                 f"self: {id(self.code_options)} -> {self.code_options['co_freevars']}"
             )
-            self.output.add_output_instructions(resume_at)
+            self.output.add_output_instructions(new_resume)
 
             raise NestedGraphBreak()
         else:
@@ -1531,7 +1511,29 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             new_code.co_firstlineno,
             new_code,
         )
-        print("Free vars?", self.f_code.co_name, new_code.co_freevars, cg.code_options['co_freevars'])
+
+        cg.code_options["co_freevars"] = self.cell_and_freevars()
+        self.output.code_options["co_freevars"] = self.cell_and_freevars()
+        print(
+            """
+Free vars? {}
+    self.f_code.co_name: {}
+    self.output.code_options['co_freevars']: {}
+    self.code_options['co_freevars']: {}
+    new_code.co_freevars: {}
+    cg.code_options['co_freevars']: {}
+    self.cell_and_freevars(): {}
+    """.format(
+                id(self),
+                self.f_code.co_name,
+                self.output.code_options["co_freevars"],
+                self.code_options["co_freevars"],
+                new_code.co_freevars,
+                cg.code_options["co_freevars"],
+                self.cell_and_freevars(),
+            )
+        )
+
         # breakpoint()
 
         # Add original GraphModule context to the resume function to handle
@@ -1556,7 +1558,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         cg.extend_output(create_call_function(nargs, False))
         cg.append_output(create_instruction("RETURN_VALUE"))
         return cg.get_instructions()
-
 
     def should_compile_partial_graph(self):
         return all(b.can_restore() for b in self.block_stack) and not self.one_graph
@@ -2543,7 +2544,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             export=parent.export,
             inline_depth=parent.inline_depth + 1,
             speculation_log=parent.speculation_log,
-            f_funcobj=parent.f_funcobj
+            f_funcobj=parent.f_funcobj,
         )
         self.parent = parent
         self.symbolic_result = None

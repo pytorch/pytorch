@@ -2455,6 +2455,4 @@ def log_bytecode(prefix, name, filename, line_no, code):
     bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 
     if bytecode_log.isEnabledFor(logging.DEBUG):
-        bytecode_log.debug(
-            format_bytecode(prefix, name, filename, line_no, code)
-        )
+        bytecode_log.debug(format_bytecode(prefix, name, filename, line_no, code))
