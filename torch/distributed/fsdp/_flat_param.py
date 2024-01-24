@@ -1729,7 +1729,8 @@ class FlatParamHandle:
 
     def _free_unsharded_flat_param(self):
         """
-        Free the padded unsharded flat parameter.
+        Free the padded unsharded flat parameter. We allow this
+        function to be called even when storage is not allocated
 
         The tensor to free depends
         on the calling context since the unshard may have forced full
