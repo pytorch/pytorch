@@ -847,10 +847,6 @@ class WrapperCodeGen(CodeGen):
         # define the variable and assign it None
         self.writeline(f"{node.get_name()} = None")
 
-    def codegen_scalar_to_tensor(self, expr, dtype):
-        # Only needed for cpp wrapper
-        pass
-
     def benchmark_compiled_module(self, output):
         def add_fake_input(name, shape, stride, device, dtype):
             output.writeline(
@@ -1860,6 +1856,30 @@ class CppWrapperCodeGen(WrapperCodeGen):
     ):
         self.header.splice(f"\n{kernel}\n")
 
+    def codegen_scalar_to_tensor(self, buffer: ir.ShapeAsConstantBuffer):
+        name = f"scalar_to_tensor_{next(self.scalar_to_tensor_id)}"
+        expr = buffer.shape
+        # TODO: we may need to handle the case that expr is not a single symbol
+        assert expr in V.graph.symbol_to_dtype, (
+            "%s is not seen in V.graph.symbol_to_dtype" % expr
+        )
+        dtype_str = str(V.graph.symbol_to_dtype[expr]).split(".")[-1]
+        self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
+        self.wrapper_call.writeline(
+            f"aoti_torch_scalar_to_tensor_{dtype_str}({buffer.codegen_reference()}, &{name}_handle);"
+        )
+        self.wrapper_call.writeline(f"RAIIAtenTensorHandle {name}({name}_handle);")
+        return name
+
+    @cache_on_self
+    def get_output_refs(self):
+        return [
+            f"at::scalar_tensor({x.codegen_reference(self.wrapper_call)})"
+            if isinstance(x, ir.ShapeAsConstantBuffer)
+            else x.codegen_reference(self.wrapper_call)
+            for x in V.graph.graph_outputs
+        ]
+
     def generate_return(self, output_refs):
         if V.graph.aot_mode:
             cst_names = V.graph.constants.keys()
@@ -1902,6 +1922,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
             for idx, output in enumerate(output_refs):
                 if config.aot_inductor.abi_compatible:
+                    if isinstance(V.graph.graph_outputs[idx], ir.ShapeAsConstantBuffer):
+                        # Need to wrap scalar into tensor as the output is vector of tensors
+                        output_tensor = self.codegen_scalar_to_tensor(
+                            V.graph.graph_outputs[idx]
+                        )
+                        self.wrapper_call.writeline(
+                            f"output_handles[{idx}] = {output_tensor}.release();"
+                        )
+                        continue
+
                     output_is_tensor_handle_expr = (
                         f"std::is_same_v<std::decay_t<decltype({output})>,"
                         "RAIIAtenTensorHandle> || "
@@ -2250,16 +2280,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     "at::k", "to"
                 )
                 self.writeline(f"auto {node.sym} = {data}.item().{convert_type}();")
-
-    def codegen_scalar_to_tensor(self, expr, dtype):
-        name = f"scalar_to_tensor_{next(self.scalar_to_tensor_id)}"
-        dtype_str = str(dtype).split(".")[-1]
-        self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
-        self.wrapper_call.writeline(
-            f"aoti_torch_scalar_to_tensor_{dtype_str}({expr}, &{name}_handle);"
-        )
-        self.wrapper_call.writeline(f"RAIIAtenTensorHandle {name}({name}_handle);")
-        return name
 
     def can_stack_allocate_buffer(self, buffer):
         return (
