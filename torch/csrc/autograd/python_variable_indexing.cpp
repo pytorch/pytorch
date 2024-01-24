@@ -447,11 +447,11 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
 
   const auto& self_ = THPVariable_Unpack(self);
-  if (self_.layout() == kSparse || self_.layout() == kSparseCsr ||
-      self_.layout() == kSparseCsc || self_.layout() == kSparseBsr ||
-      self_.layout() == kSparseBsc) {
-    C10_THROW_ERROR(TypeError, "Cannot assign to a sparse tensor");
-  }
+  TORCH_CHECK_TYPE(
+      self_.layout() != kSparse && self_.layout() != kSparseCsr &&
+          self_.layout() != kSparseCsc && self_.layout() != kSparseBsr &&
+          self_.layout() != kSparseBsc,
+      "Cannot assign to a sparse tensor");
   OptionalDeviceGuard device_guard(device_of(self_));
   at::Device self_device = self_.device();
   Variable value;

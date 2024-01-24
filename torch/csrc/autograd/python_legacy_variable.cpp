@@ -57,12 +57,10 @@ static PyObject* THPVariable_pynew(
   TORCH_CHECK_VALUE(
       !is_volatile || !requires_grad,
       "Variable can't be volatile and require_grad at the same time!");
-  if (grad_fn && !THPFunction_Check(grad_fn)) {
-    TORCH_CHECK_TYPE(
-        false,
-        "_grad_fn has to be a Function object or None, but got ",
-        Py_TYPE(grad_fn)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      !grad_fn || THPFunction_Check(grad_fn),
+      "_grad_fn has to be a Function object or None, but got ",
+      Py_TYPE(grad_fn)->tp_name);
   Variable var;
   if (!data || data == Py_None) {
     // For legacy serialization code, create an empty tensor. This is also used

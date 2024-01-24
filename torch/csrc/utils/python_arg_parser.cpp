@@ -1402,7 +1402,7 @@ static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {
   }
 
   // this should never be hit
-  C10_THROW_ERROR(TypeError, "invalid keyword arguments");
+  TORCH_CHECK_TYPE(false, "invalid keyword arguments");
 }
 
 bool FunctionSignature::parse(
@@ -1650,7 +1650,7 @@ void PythonArgParser::print_error(
   auto options = get_signatures();
   auto msg =
       torch::format_invalid_args(args, kwargs, function_name + "()", options);
-  C10_THROW_ERROR(TypeError, msg);
+  TORCH_CHECK_TYPE(false, msg);
 }
 
 std::vector<std::string> PythonArgParser::get_signatures() const {
