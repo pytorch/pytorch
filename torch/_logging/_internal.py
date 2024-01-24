@@ -760,10 +760,10 @@ def _default_filter() -> Optional[TorchLogsFilter]:
 
     try:
         ranks = set(map(int, ranks_str.split(",")))
-    except:
+    except Exception as e:
         raise ValueError(
-            "Expected TORCH_LOGS_RANKS as a comma separated list of int (e.g. \"0,1,2,3\")"
-        )
+            'Expected TORCH_LOGS_RANKS as a comma separated list of int (e.g. "0,1,2,3")'
+        ) from e
 
     return TorchLogsFilter(ranks)
 
