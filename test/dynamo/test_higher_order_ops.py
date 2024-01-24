@@ -3816,6 +3816,8 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         ):
             _assert_tensors_nonaliasing(a, a)
 
+
+class RangeHigherOrderTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(for_loop_medium_size_boundary=10)
     def test_loop_to_higher_order_simple(self):
         counters.clear()
@@ -3893,7 +3895,7 @@ class GraphModule(torch.nn.Module):
             add = res_0 + _lambda_;  res_0 = None
             add_1 = add + res;  add = None
             return (res, add_1, _lambda_)
-""",
+""",  # noqa: B950
         )
         self.assertEqual(cnt.frame_count, 1)
         self.assertLessEqual(cnt.op_count, 39)
@@ -3974,7 +3976,7 @@ class GraphModule(torch.nn.Module):
             add = res_0 + _lambda_;  res_0 = None
             add_1 = add + res;  add = None
             return (res, add_1, _lambda_)
-""",
+""",  # noqa: B950
         )
         self.assertEqual(cnt.frame_count, 1)
         self.assertLessEqual(cnt.op_count, 39)
@@ -4056,10 +4058,25 @@ class GraphModule(torch.nn.Module):
             add = res_0 + _lambda_;  res_0 = None
             add_1 = add + res;  add = None
             return (res, add_1, _lambda_)
-""",
+""",  # noqa: B950
         )
         self.assertEqual(cnt.frame_count, 1)
         self.assertLessEqual(cnt.op_count, 39)
+
+    @torch._dynamo.config.patch(for_loop_medium_size_boundary=2)
+    def test_loop_to_higher_order_reject_comprehensions(self):
+        counters.clear()
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        def f(x):
+            return [i for i in range(len(x))]  # noqa: C416
+
+        x = [1, 2, 3, 4, 5]
+        f = torch._dynamo.optimize(cnt)(f)
+        result = f(x)
+        # Just not crashing is good enough.
+        self.assertEqual(result, f(x))
 
 
 if __name__ == "__main__":

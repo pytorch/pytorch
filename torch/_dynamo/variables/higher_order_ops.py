@@ -424,7 +424,7 @@ def speculate_subgraph(
                     (TensorVariable, ConstantVariable, SymNodeVariable)
                     if allow_constant_outputs
                     else (TensorVariable, SymNodeVariable),
-                    allow_none=True
+                    allow_none=True,
                 ):
                     unimplemented(
                         "HigherOrderOperator body's output must consist of tensors only"
@@ -1275,6 +1275,10 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # right RETURN_VALUEs (see code below for how to do that).
         "JUMP_BACKWARD",
         "JUMP_ABSOLUTE",
+        # list, set, dictionary comprehensions
+        "LIST_APPEND",
+        "SET_ADD",
+        "MAP_ADD",
     }
 
     store_target: int
@@ -1294,8 +1298,6 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         loop_body_instructions: List["Instruction"],
         symbolic_locals: Dict[str, VariableTracker],
     ):
-        from . import ConstantVariable
-
         if (
             loop_items := len(value.unpack_var_sequence(tx))
         ) < torch._dynamo.config.for_loop_medium_size_boundary:
@@ -1318,8 +1320,6 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # E.g. in `for i in range(10)`, there is a `STORE_FAST i``
         assert loop_body_instructions[0].opname == "STORE_FAST"
         co_code: List[int] = []
-
-        iter_name = loop_body_instructions[0].argval
 
         loop_body = loop_body_instructions[1:-1]
         if not loop_body:
@@ -1414,15 +1414,13 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         obj = RangeHigherOrderVariable(value)
         obj.func = types.FunctionType(code_object, real_globals)
-        obj.args = [
-            symbolic_locals.get(k) or ConstantVariable.create(None) for k in varnames
-        ]
+        obj.args = [symbolic_locals.get(k) for k in varnames]
         store_target = loop_body_instructions[0].arg
         assert store_target >= 0
         obj.store_target = store_target
         return obj
 
-    def functionalize(self, tx) -> VariableTracker:
+    def functionalize(self, tx) -> tuple:
         """Converts a for loop into a series of function calls. Returns the modified
         locals as a tuple of Proxies and VariableTrackers.
         """
