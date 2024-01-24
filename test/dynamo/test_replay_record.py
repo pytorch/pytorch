@@ -7,9 +7,7 @@ import unittest
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch.testing._internal.common_utils import TEST_DILL
-
-requires_dill = unittest.skipIf(not TEST_DILL, "requires dill")
+from torch.testing._internal.common_utils import skipIfNoDill
 
 
 class ReplayRecordTests(torch._dynamo.test_case.TestCase):
@@ -76,7 +74,7 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
         else:
             self.fail("Replayed frame didn't raise an exception")
 
-    @requires_dill
+    @skipIfNoDill
     def test_unsuccessful_inline(self):
         def level2():
             a = {10}
@@ -93,7 +91,7 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
 
         self.check_replay(level0, exp_exc_name="RuntimeError")
 
-    @requires_dill
+    @skipIfNoDill
     def test_successful_inline(self):
         def test_fn():
             x = torch.ones(2, 2)
@@ -107,7 +105,7 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
 
         self.check_replay(test_fn, exp_exc_name="RuntimeError")
 
-    @requires_dill
+    @skipIfNoDill
     def test_nonlocal_fn_call(self):
         def nonlocal_fn(x):
             return x + torch.ones(2, 2)
@@ -119,7 +117,7 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
 
         self.check_replay(test_fn, exp_exc_name="RuntimeError")
 
-    @requires_dill
+    @skipIfNoDill
     def test_nonlocal_module_fn_call(self):
         # replay when we use a module
         # not defined in the replay env
@@ -135,7 +133,7 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
 
         self.check_replay(test_fn, exp_exc_name="RuntimeError")
 
-    @requires_dill
+    @skipIfNoDill
     def test_nonlocal_module_class(self):
         try:
             from .mock_modules import mock_module2
@@ -149,7 +147,7 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
 
         self.check_replay(test_fn, exp_exc_name="RuntimeError")
 
-    @requires_dill
+    @skipIfNoDill
     def test_local_module(self):
         try:
             from .mock_modules import mock_module3 as _  # noqa: F401
@@ -171,7 +169,7 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
         self.check_replay(test_fn, torch.ones(1, 1), exp_exc_name="RuntimeError")
 
     # Verify that we replay when we have tensor arguments to the frame being replayed
-    @requires_dill
+    @skipIfNoDill
     def test_fn_call_args(self):
         def test_fn(x, y):
             return x + y + torch.zeros(2, 2)
