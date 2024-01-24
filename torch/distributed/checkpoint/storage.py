@@ -163,7 +163,7 @@ class StorageReader(abc.ABC):
     """
 
     @abc.abstractmethod
-    def reset(self, checkpoint_id: Union[str, os.PathLike]) -> None:
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         """
         Calls to indicates a brand new checkpoint read is going to happen.
         A checkpoint_id may be present if users set the checkpoint_id for

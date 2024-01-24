@@ -175,7 +175,7 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
     def __init__(self, fail_conf):
         super().__init__(fail_conf)
 
-    def reset(self, checkpoint_id: Union[str, os.PathLike, None]) -> None:
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         return
 
     def set_up_storage_writer(self, is_coordinator: bool) -> None:
