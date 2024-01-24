@@ -60,22 +60,31 @@ def _construct_sharded_state_dict(fp_name: str, world_size: int) -> Dict[str, An
     # source checkpoint. For other checkpoint formats, one can do incremental
     # load if possible to avoid CPU OOM.
     state_dict = torch.load(fp_name, map_location="cpu")
-    state_dict_metadata = {}
-    storage_data = {}
     device_mesh = init_device_mesh("cuda", [world_size])
     placement = [Shard(0)]
     for key, value in state_dict.items():
         # Sharded the tensor into a DTensor with each rank contains a shard.
-        state_dict[key] = DTensor.from_local(
-            value.cuda(), device_mesh, [Replicate()], run_check=False
-        ).redistribute(
-            placements=placement,
-        )
+        if torch.is_tensor(value):
+            state_dict[key] = DTensor.from_local(
+                value.cuda(), device_mesh, [Replicate()], run_check=False
+            ).redistribute(
+                placements=placement,
+            )
+        else:
+            raise RuntimeError(
+                "We don't support conversion of objects other than tensors. If "
+                "this is required, you have to convert the object to a bytes "
+                "stream."
+            )
 
     return state_dict
 
 
 def _offline_convert(fp_name: str, target_dir: str, world_size: int):
+    # The definition of offline conversion is to convert the existing
+    # checkpoints without running a real trainer to do training or
+    # inference.
+    #
     # For offline conversion, we only need to create a state_dict with
     # FQN->DTensor mapping and save it with DCP.save().
     state_dict = _construct_sharded_state_dict(fp_name, world_size)
@@ -90,6 +99,10 @@ def _construct_state_dict_and_metadata(
     source checkpoint format is torch.save(), we can only do torch.load() to
     construct the state_dict.
     """
+
+    # TODO: formalize this an public API in DCP, and consider to include the
+    # logic in TorchSaveReader.
+    # https://github.com/pytorch/pytorch/issues/118207
 
     # Not much we can do to save the memory because of the way we save the
     # source checkpoint. For other checkpoint formats, one can do incremental
@@ -162,6 +175,9 @@ class ConversionReader(StorageReader):
         else:
             self.reader = TorchSaveReader(fp_name, world_size)
 
+    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+        return
+
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         return self.reader.read_data(plan, planner)
 
@@ -183,6 +199,10 @@ class TestTorchSaveToDCP(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
     def test_offline_conversion(self) -> None:
+        # The definition of offline conversion is to convert the existing
+        # checkpoints without running a real trainer to do training or
+        # inference.
+
         model = TestDummyModel()
         with tempfile.NamedTemporaryFile() as fp:
             if self.rank == 0:
@@ -207,7 +227,10 @@ class TestTorchSaveToDCP(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    def test_onine_conversion(self) -> None:
+    def test_online_conversion(self) -> None:
+        # The definition of online conversion is to convert the existing
+        # checkpoints when the training is about to use the checkpoints.
+
         model = TestDummyModel()
         with tempfile.NamedTemporaryFile() as fp:
             if self.rank == 0:
