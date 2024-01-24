@@ -1548,90 +1548,6 @@ class AotCodeCompiler:
             specified_dir=specified_output_path,
         )
 
-        def _compile_consts_linux(consts: bytes) -> str:
-            _, consts_path = write(
-                consts,
-                "bin",
-                specified_dir=specified_output_path,
-            )
-
-            consts_o = os.path.splitext(consts_path)[0] + ".o"
-            if fbcode_aot_cpu_re:
-                cmd = f"{ld_command} -r -b binary -o {os.path.basename(consts_o)} {os.path.basename(consts_path)}"
-                compile_file(consts_path, consts_o, cmd.split())
-                os.chmod(consts_o, 0o644)
-            else:
-                cmd = f"{ld_command} -r -b binary -o {consts_o} {consts_path}"
-                run_command_and_check(cmd)
-            log.debug("aot constant binary command: %s", cmd)
-
-            cmd = (
-                f"{objcopy_command} --rename-section"
-                " .data=.lrodata,alloc,load,readonly,data,contents"
-                f" {consts_o} {consts_o}"
-            )
-            log.debug("aot constant obj command: %s", cmd)
-            run_command_and_check(cmd)
-
-            cmd = f"rm {consts_path}"
-            log.debug("aot constant bin removal command: %s", cmd)
-            run_command_and_check(cmd)
-
-            if fbcode_aot_cpu_re:
-                body = re.sub(r"[\W]", "_", os.path.basename(consts_path))
-            else:
-                body = re.sub(r"[\W]", "_", consts_path)
-
-            symbol_list = []
-            symbol_list.append(
-                f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"
-            )
-            symbol_list.append(
-                f"{objcopy_command} --redefine-sym _binary_{body}_size=_binary_constants_bin_size {consts_o}"
-            )
-            symbol_list.append(
-                f"{objcopy_command} --redefine-sym _binary_{body}_end=_binary_constants_bin_end {consts_o}"
-            )
-            log.debug("aot constant binary redefine symbol: %s", " ".join(symbol_list))
-            for cmd in symbol_list:
-                run_command_and_check(cmd)
-            return consts_o
-
-        def _compile_consts_darwin(consts: bytes) -> str:
-            is_large_consts = len(consts) > 1024
-            consts_asm = "\t.section\t__TEXT,__const\n"
-            consts_asm += "\t.globl\t__binary_constants_bin_start\n"
-            consts_asm += "__binary_constants_bin_start:\n"
-            if not is_large_consts:
-                for c in consts:
-                    consts_asm += f"\t.byte {c}\n"
-            else:
-                consts_asm += "\t.quad 0x1234567899abcdef\n"
-                consts_asm += f"\t.space {len(consts) - 8}\n"
-            consts_asm += ".globl\t__binary_constants_bin_end\n"
-            consts_asm += "__binary_constants_bin_end:\n"
-            _, consts_path = write(
-                consts_asm,
-                "S",
-                specified_dir=specified_output_path,
-            )
-            consts_o = os.path.splitext(consts_path)[0] + ".o"
-            cmd = f"{cpp_compiler()} -c -o {consts_o} {consts_path}"
-            run_command_and_check(cmd)
-            if is_large_consts:
-                with open(consts_o, "r+b") as f:
-                    f.seek(0)
-                    hdr = f.read(1024)
-                    # Search for magic number and write the actual data over it
-                    start_idx = hdr.find(b"\xef\xcd\xab\x99\x78\x56\x34\x12")
-                    assert start_idx != -1
-                    f.seek(start_idx)
-                    pos = 0
-                    while pos < len(consts):
-                        rc = f.write(consts[pos:])
-                        pos += rc
-            return consts_o
-
         from filelock import FileLock
 
         lock_dir = get_lock_dir()
@@ -1686,10 +1602,53 @@ class AotCodeCompiler:
             aot_constants = b"".join(
                 _to_bytes(tensor) for tensor in graph.constants.values()
             )
-            consts_o = {
-                "linux": _compile_consts_linux,
-                "darwin": _compile_consts_darwin,
-            }[sys.platform](aot_constants)
+
+            _, consts_path = write(
+                aot_constants,
+                "bin",
+                specified_dir=specified_output_path,
+            )
+
+            consts_o = os.path.splitext(consts_path)[0] + ".o"
+            if fbcode_aot_cpu_re:
+                cmd = f"{ld_command} -r -b binary -o {os.path.basename(consts_o)} {os.path.basename(consts_path)}"
+                compile_file(consts_path, consts_o, cmd.split())
+                os.chmod(consts_o, 0o644)
+            else:
+                cmd = f"{ld_command} -r -b binary -o {consts_o} {consts_path}"
+                run_command_and_check(cmd)
+            log.debug("aot constant binary command: %s", cmd)
+
+            cmd = (
+                f"{objcopy_command} --rename-section"
+                " .data=.lrodata,alloc,load,readonly,data,contents"
+                f" {consts_o} {consts_o}"
+            )
+            log.debug("aot constant obj command: %s", cmd)
+            run_command_and_check(cmd)
+
+            cmd = f"rm {consts_path}"
+            log.debug("aot constant bin removal command: %s", cmd)
+            run_command_and_check(cmd)
+
+            if fbcode_aot_cpu_re:
+                body = re.sub(r"[\W]", "_", os.path.basename(consts_path))
+            else:
+                body = re.sub(r"[\W]", "_", consts_path)
+
+            symbol_list = []
+            symbol_list.append(
+                f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"
+            )
+            symbol_list.append(
+                f"{objcopy_command} --redefine-sym _binary_{body}_size=_binary_constants_bin_size {consts_o}"
+            )
+            symbol_list.append(
+                f"{objcopy_command} --redefine-sym _binary_{body}_end=_binary_constants_bin_end {consts_o}"
+            )
+            log.debug("aot constant binary redefine symbol: %s", " ".join(symbol_list))
+            for cmd in symbol_list:
+                run_command_and_check(cmd)
 
             cmd = cpp_compile_command(
                 input=[output_o, consts_o],

@@ -438,7 +438,7 @@ class cpp:
         # "g++-11",
         # "g++-10",
         # "clang++",
-        os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),
+        os.environ.get("CXX", "g++"),
         # "g++.par",
     )
     # Allow kernel performance profiling via PyTorch profiler
