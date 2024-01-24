@@ -9,6 +9,7 @@ from .ctx_manager import (
     InferenceModeVariable,
     StreamContextVariable,
     StreamVariable,
+    VmapIncrementNestingCtxManagerVariable,
     WithExitFunctionVariable,
 )
 from .dicts import (
@@ -25,6 +26,7 @@ from .functions import (
 )
 from .higher_order_ops import (
     CannotConvertRangeToHigherOrder,
+    FunctorchVmapHigherOrderVariable,
     TorchHigherOrderOperatorVariable,
 )
 from .iter import (
