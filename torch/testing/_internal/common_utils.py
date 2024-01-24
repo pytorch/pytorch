@@ -77,7 +77,11 @@ from torch.nn import (
     ParameterList,
     Sequential,
 )
-from .dynamo_test_failures import dynamo_expected_failures, dynamo_skips, FIXME_default_non_strict
+from .dynamo_test_failures import (
+    dynamo_expected_failures,
+    dynamo_skips,
+    FIXME_inductor_non_strict,
+)
 from torch.onnx import (
     register_custom_op_symbolic,
     unregister_custom_op_symbolic,
@@ -825,7 +829,7 @@ def wait_for_process(p, timeout=None):
         else:
             p.kill()
             raise
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as timeout_exception:
         # send SIGINT to give pytest a chance to make xml
         p.send_signal(signal.SIGINT)
         exit_status = None
@@ -839,7 +843,9 @@ def wait_for_process(p, timeout=None):
             return exit_status
         else:
             p.kill()
-        raise
+        # Provide more info about the timeout (specifically that it timed out
+        # after the keyboard interrupt as well)
+        raise RuntimeError(f"Subprocess failed to exit smoothly after timeout {timeout} expired") from timeout_exception
     except:  # noqa: B001,E722, copied from python core library
         p.kill()
         raise
@@ -2703,7 +2709,10 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 match = re.match(r".*/test/(.*).py", full_path)
                 if match is not None:
                     filename = match.group(1)
-                    strict_default = filename not in FIXME_default_non_strict
+                    if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
+                        strict_default = filename not in FIXME_inductor_non_strict
+                    else:
+                        strict_default = True
             # inspect.getfile can fail with these
             except (OSError, TypeError):
                 pass

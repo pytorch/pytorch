@@ -72,6 +72,7 @@ from .utils import (
     istype,
     LazyString,
     proxy_args_kwargs,
+    log_bytecode
 )
 from .variables.base import (
     _is_top_level_scope,
@@ -465,13 +466,20 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 push and self.push(value)
                 self.jump(inst)
         else:
-            # TODO link the torch.cond doc later
-            raise exc.UserError(
-                exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
-                "Dynamic control flow is not supported at the moment. Please use "
-                "functorch.experimental.control_flow.cond to explicitly capture the control flow.",
-                case_name="cond_operands",
-            )
+            from .source import is_constant_source
+
+            if value.source is not None and is_constant_source(value.source):
+                if truth_fn(value.get_real_value()):
+                    push and self.push(value)
+                    self.jump(inst)
+            else:
+                # TODO link the torch.cond doc later
+                raise exc.UserError(
+                    exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
+                    "Dynamic control flow is not supported at the moment. Please use "
+                    "functorch.experimental.control_flow.cond to explicitly capture the control flow.",
+                    case_name="cond_operands",
+                )
 
     return inner
 
@@ -698,10 +706,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             co_names = ()
             co_freevars = ()
             co_varnames = ()
+            cg = PyCodegen(self)
+            cg_options = copy.deepcopy(cg.code_options)
             for tracer in tracers:
-                cg = PyCodegen(self)
-                resume_at_insts = tracer.create_call_resume_at(tracer.next_instruction)
-                cg_options = copy.deepcopy(cg.code_options)
                 co_names = (
                     cg.code_options["co_names"]
                     + tracer.code_options["co_names"]
@@ -717,24 +724,33 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     + tracer.code_options["co_varnames"]
                     + co_varnames
                 )
-                cg_options["co_names"] = co_names
-                cg_options["co_freevars"] = co_freevars
-                out = torch._dynamo.bytecode_transformation.clean_and_assemble_instructions(
-                    resume_at_insts,
-                    torch._dynamo.bytecode_transformation.get_code_keys(),
-                    cg_options,
+                func_name = tracer.code_options['co_name']
+                # tracer_freevars = list(co_freevars)
+                # if func_name in tracer_freevars:
+                    # tracer_freevars.remove(func_name)
+                # tracer._cell_and_freevars += co_freevars
+                # tracer.output.code_options['co_freevars'] = tuple(tracer_freevars)
+                # for k, v in self.f_locals.items():
+                #     if k not in tracer.f_locals:
+                # #         breakpoint()
+                #         tracer.f_locals[k] = self.f_locals[k]
+                # tracer.prune_dead_locals()
+                # tracer.output.code_options['co_freevars'] = tuple(tracer_freevars)
+                tracer_freevars = tracer.code_options['co_freevars']
+                if not tracer_freevars:
+                    tracer_freevars = None
+                resume_at_insts = tracer.create_call_resume_at(
+                    tracer.next_instruction, [], None, tracer_freevars, None
                 )
-
-                outs = outs + out[0][:-1]
+                outs = outs + resume_at_insts[:-1]
             co_names = tuple(set(co_names))
             co_freevars = tuple(set(co_freevars))
             co_varnames = tuple(set(co_varnames))
 
+            # breakpoint()
             self._cell_and_freevars += co_freevars
 
-            resume_at = outs + self.create_call_resume_at(
-                self.next_instruction, [], [], [], []
-            )
+
             cg = PyCodegen(self)
             for name in co_names:
                 if name not in self.code_options["co_names"]:
@@ -742,6 +758,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
             for freevar in co_freevars:
                 if freevar not in self.code_options["co_freevars"]:
+                    # breakpoint()
                     self.code_options["co_freevars"] += (freevar,)
 
             for varname in co_varnames:
@@ -754,20 +771,24 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
             for freevar in co_freevars:
                 if freevar not in self.output.code_options["co_freevars"]:
+                    # breakpoint()
                     self.output.code_options["co_freevars"] += (freevar,)
 
             for varname in co_varnames:
                 if varname not in self.output.code_options["co_varnames"]:
                     self.output.code_options["co_varnames"] += (varname,)
 
+            resume_at = outs + self.create_call_resume_at(
+                self.next_instruction, [], None, co_freevars, None
+            )
             # breakpoint()
             # self.code_options['co_names'] += co_names
             cg = PyCodegen(self)
+            print("Func:", cg.code_options['co_name'])
             print(f"cg: {id(cg.code_options)} -> {cg.code_options['co_freevars']}")
             print(
                 f"self: {id(self.code_options)} -> {self.code_options['co_freevars']}"
             )
-            # breakpoint()
             self.output.add_output_instructions(resume_at)
 
             raise NestedGraphBreak()
@@ -1456,9 +1477,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self,
         inst,
         prelude: List[Instruction] = [],  # noqa: B006
-        new_co_names: List[str] = [],  # noqa: B006
-        new_co_freevars: List[str] = [],
-        new_co_varnames: List[str] = [],  # noqa: B006
+        new_co_names = None,  # noqa: B006
+        new_co_freevars = None,
+        new_co_varnames = None,  # noqa: B006
     ):
         """
         If prelude is non-empty, it will first run the prelude within the resume at.
@@ -1507,7 +1528,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         name = unique_id(f"__resume_at_{inst.offset}")
         # fail = True
         # count = self.code_object["co_nlocals"]
-        # breakpoint()
         new_code: types.CodeType = ContinueExecutionCache.lookup(
             self.f_code,
             self.lineno,
@@ -1518,10 +1538,22 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             tuple(b.resume_fn() for b in self.block_stack),
             tuple(null_idxes),
             tuple(prelude),
-            tuple(new_co_names),
-            tuple(new_co_freevars),
-            tuple(new_co_varnames),
+            new_co_names,
+            new_co_freevars,
+            new_co_varnames,
         )
+
+        # breakpoint()
+        # new_insts = torch._dynamo.bytecode_transformation.code_to_insts(new_code)
+        log_bytecode(
+            f"RESUME FUNCTION: {name} formerly {self.f_code.co_name}",
+            new_code.co_name,
+            new_code.co_filename,
+            new_code.co_firstlineno,
+            new_code,
+        )
+        print("Free vars?", self.f_code.co_name, new_code.co_freevars)
+        # breakpoint()
 
         # Add original GraphModule context to the resume function to handle
         # the case of a graph break while tracing a GraphModule
@@ -1545,6 +1577,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         cg.extend_output(create_call_function(nargs, False))
         cg.append_output(create_instruction("RETURN_VALUE"))
         return cg.get_instructions()
+
 
     def should_compile_partial_graph(self):
         return all(b.can_restore() for b in self.block_stack) and not self.one_graph
@@ -2135,6 +2168,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         symbolic_locals: Dict[str, VariableTracker],
         symbolic_globals: Dict[str, VariableTracker],
         f_code: types.CodeType,
+        f_funcobj,
         export: bool,
         inline_depth: int,
         speculation_log: SpeculationLog,
@@ -2168,6 +2202,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.f_builtins: Dict[str, Any] = f_builtins
         self.code_options: Dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
+        self.f_funcobj = f_funcobj
 
         # Execution record for replaying errors
         self.exec_recorder = ExecutionRecorder(code=f_code, code_options=code_options)
@@ -2222,6 +2257,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         self,
         instructions: List[Instruction],
         f_code,
+        f_funcobj,
         f_locals,
         f_globals,
         f_builtins,
@@ -2262,6 +2298,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             export=export,
             inline_depth=0,
             speculation_log=speculation_log,
+            f_funcobj=f_funcobj,
         )
 
         # as soon as we create the tracing context we should keep it active, so any calls
@@ -2527,6 +2564,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             export=parent.export,
             inline_depth=parent.inline_depth + 1,
             speculation_log=parent.speculation_log,
+            f_funcobj=parent.f_funcobj
         )
         self.parent = parent
         self.symbolic_result = None

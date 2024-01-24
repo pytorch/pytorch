@@ -1,18 +1,17 @@
 import torch
 import torch._dynamo
-
+import depyf
 
 def foo():
     def h(x):
         a = x.cos()
-        print(x)
+        print(x, g)
         b = a.cos()
         return b
 
     def g(x):
         x = x.sin()
         x = h(x)
-        # print(x)
         x = x.tan()
         return x
 
@@ -35,5 +34,5 @@ def foo():
     # breakpoint()
     assert torch.equal(eager, compiled)
 
-
+# with depyf.prepare_debug("./dump_src_dir"):
 foo()

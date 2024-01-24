@@ -1032,7 +1032,18 @@ def get_code_keys() -> List[str]:
     return keys
 
 
+def code_to_insts(code, safe=False):
+    def no_op_transform(x, y):
+        pass
+
+    return _transform_code_object(code, no_op_transform, safe=safe)[0]
+
+
 def transform_code_object(code, transformations, safe=False) -> types.CodeType:
+    return _transform_code_object(code, transformations, safe=safe)[1]
+
+
+def _transform_code_object(code, transformations, safe=False) -> types.CodeType:
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
@@ -1044,7 +1055,7 @@ def transform_code_object(code, transformations, safe=False) -> types.CodeType:
     transformations(instructions, code_options)
     print("transformations:", transformations)
     print(f"post transform: {id(code_options)} -> {code_options['co_freevars']}")
-    return clean_and_assemble_instructions(instructions, keys, code_options)[1]
+    return clean_and_assemble_instructions(instructions, keys, code_options)
 
 
 def clean_and_assemble_instructions(

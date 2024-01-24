@@ -317,6 +317,8 @@ class PyCodegen:
         output.append(self.create_load_const(code))
         if sys.version_info < (3, 11):
             output.append(self.create_load_const(fn_name))
+        print("Func:", fn_name)
+        print("  freevars:", freevars)
         output.append(create_instruction("MAKE_FUNCTION", arg=0x08))
         output.extend(self.rot_n(num_on_stack + 1))
         self.clear_tos()

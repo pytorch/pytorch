@@ -28,6 +28,7 @@ import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from pathlib import Path
+from types import MethodWrapperType
 from typing import (
     Any,
     Callable,
@@ -1062,11 +1063,13 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     return found
 
 
-def tensor_or_module_to_id(value):
-    return [
-        id(k) if isinstance(k, (torch.Tensor, torch.nn.Module)) else k
-        for k in value.keys()
-    ]
+def key_is_id(k):
+    """Returns whether it indexes dictionaries using its id"""
+    return isinstance(k, (torch.Tensor, torch.nn.Module, MethodWrapperType))
+
+
+def key_to_id(value):
+    return [id(k) if key_is_id(k) else k for k in value.keys()]
 
 
 def const_repr(x, *, local) -> str:
@@ -2445,3 +2448,13 @@ def maybe_enable_compiled_autograd(should_enable):
             yield ctx
     else:
         yield
+
+
+def log_bytecode(prefix, name, filename, line_no, code):
+    log = logging.getLogger(__name__)
+    bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
+
+    if bytecode_log.isEnabledFor(logging.DEBUG):
+        bytecode_log.debug(
+            format_bytecode(prefix, name, filename, line_no, code)
+        )

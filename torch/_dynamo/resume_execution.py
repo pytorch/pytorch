@@ -398,15 +398,19 @@ class ContinueExecutionCache:
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
             )
-            for name in updated_co_names:
-                if name not in code_options["co_names"]:
-                    code_options["co_names"] += (name,)
-            for name in updated_co_freevars:
-                if name not in code_options["co_freevars"]:
-                    code_options["co_freevars"] += (name,)
-            for name in updated_co_varnames:
-                if name not in code_options["co_varnames"]:
-                    code_options["co_varnames"] += (name,)
+            if updated_co_names:
+                for name in updated_co_names:
+                    if name not in code_options["co_names"]:
+                        code_options["co_names"] += (name,)
+            # for name in updated_co_freevars:
+                # if name not in code_options["co_freevars"]:
+                    # code_options["co_freevars"] += (name,)
+            if updated_co_freevars is not None:
+                code_options["co_freevars"] = updated_co_freevars
+            if updated_co_varnames:
+                for name in updated_co_varnames:
+                    if name not in code_options["co_varnames"]:
+                        code_options["co_varnames"] += (name,)
             target = next(i for i in instructions if i.offset == offset)
 
             prefix = []
