@@ -1,9 +1,8 @@
 # Owner(s): ["module: dynamo"]
 import functools
 import math
-import unittest
 import sys
-import unittest
+import unittest  # noqa: F811
 from importlib import import_module
 
 import torch
