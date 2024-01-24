@@ -5,7 +5,7 @@ import torch
 from ..decorators import mark_static_address
 
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GetItemSource, GlobalWeakRefSource
+from ..source import AttrSource, ConstDictKeySource, GetItemSource, GlobalWeakRefSource
 from ..utils import global_key_name
 
 from .base import VariableTracker
@@ -128,9 +128,11 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # so we manually generate them here
         state_source = AttrSource(self.source, "state")
         install_guard(state_source.make_guard(GuardBuilder.DICT_KEYS))
-        for p, value in self.value.state.items():
+        for idx, (p, value) in enumerate(self.value.state.items()):
             tx.store_global_weakref(global_key_name(p), p)
-            p_state_source = GetItemSource(state_source, self.tensor_to_source[p])
+            p_state_source = GetItemSource(
+                state_source, ConstDictKeySource(state_source, idx)
+            )
             install_guard(p_state_source.make_guard(GuardBuilder.DICT_KEYS))
             for k, v in value.items():
                 if (
@@ -185,11 +187,23 @@ class OptimizerVariable(UserDefinedObjectVariable):
     def update_list_args(self, tx, args, kwargs, py_args, py_kwargs):
         """Update the args and kwargs to the traced optimizer call"""
         for arg, py_arg in zip(args, py_args):
-            if isinstance(arg, ListVariable) and all(
-                isinstance(t, torch.Tensor) for t in py_arg
-            ):
-                tx.output.side_effects.mutation(arg)
-                arg.items.extend([self.wrap_tensor(tx, t) for t in py_arg])
+            if isinstance(arg, ListVariable):
+                assert isinstance(
+                    py_arg, list
+                ), "py_arg should be a list in optimizer variable"
+                for i, val in enumerate(py_arg):
+                    tx.output.side_effects.mutation(arg)
+                    if isinstance(val, torch.Tensor):
+                        arg.items.append(self.wrap_tensor(tx, val))
+                    else:
+                        from .builder import SourcelessBuilder, VariableBuilder
+
+                        if arg.source:
+                            arg.items.append(
+                                VariableBuilder(tx, GetItemSource(arg.source, i))(val)
+                            )
+                        else:
+                            arg.items.append(SourcelessBuilder()(tx, val))
 
     def create_finalizer(self, tx):
         names_to_delete = self.static_tensor_names

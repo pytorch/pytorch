@@ -25,9 +25,9 @@ coremltools==5.0b5
 #Pinned versions:
 #test that import:
 
-dill
+dill==0.3.7
 #Description: dill extends pickle with serializing and de-serializing for most built-ins
-#Pinned versions:
+#Pinned versions: 0.3.7
 #test that import: dynamo/test_replay_record.py test_dataloader.py test_datapipe.py test_serialization.py
 
 expecttest==0.1.6
@@ -303,3 +303,8 @@ pywavelets==1.4.1
 # it here because 1.5.0 conflicts with numpy 1.21.2 used in CI
 #Pinned versions: 1.4.1
 #test that import:
+
+lxml==5.0.0.
+#Description: This is a requirement of unittest-xml-reporting
+
+# Python-3.9 binaries

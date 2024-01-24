@@ -85,16 +85,19 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
   list(APPEND Caffe2_MPS_SRCS ${ATen_MPS_SRCS})
+  list(APPEND Caffe2_XPU_SRCS ${ATen_XPU_SRCS})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
   list(APPEND Caffe2_MPS_TEST_SRCS ${ATen_MPS_TEST_SRCS})
   list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
   list(APPEND Caffe2_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS})
+  list(APPEND Caffe2_XPU_TEST_SRCS ${ATen_XPU_TEST_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
   list(APPEND Caffe2_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS})
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CPU_INCLUDE})
   list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
   list(APPEND Caffe2_HIP_INCLUDE ${ATen_HIP_INCLUDE})
+  list(APPEND Caffe2_XPU_INCLUDE ${ATen_XPU_INCLUDE})
   list(APPEND Caffe2_VULKAN_INCLUDE ${ATen_VULKAN_INCLUDE})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS})
   list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
@@ -233,6 +236,11 @@ if(PRINT_CMAKE_DEBUG_INFO)
     message(STATUS "  " ${tmp})
   endforeach()
 
+  message(STATUS "XPU sources: ")
+  foreach(tmp ${Caffe2_XPU_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
+
   message(STATUS "HIP test sources: ")
   foreach(tmp ${Caffe2_HIP_TEST_SRCS})
     message(STATUS "  " ${tmp})
@@ -255,6 +263,11 @@ if(PRINT_CMAKE_DEBUG_INFO)
 
   message(STATUS "ATen HIP test sources: ")
   foreach(tmp ${ATen_HIP_TEST_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
+
+  message(STATUS "ATen XPU test sources: ")
+  foreach(tmp ${ATen_XPU_TEST_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
 
@@ -698,7 +711,7 @@ if(USE_ROCM)
   add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
   target_link_libraries(caffe2_nvrtc ${PYTORCH_HIP_LIBRARIES} ${ROCM_HIPRTC_LIB})
   target_include_directories(caffe2_nvrtc PRIVATE ${CMAKE_BINARY_DIR})
-  target_compile_definitions(caffe2_nvrtc PRIVATE USE_ROCM __HIP_PLATFORM_HCC__)
+  target_compile_definitions(caffe2_nvrtc PRIVATE USE_ROCM __HIP_PLATFORM_AMD__)
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
 
@@ -955,6 +968,9 @@ endif()
 if(USE_ROCM)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
+  if(USE_FLASH_ATTENTION)
+    target_link_libraries(torch_hip PRIVATE __caffe2_oort)
+  endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_hip)  # see cmake/public/utils.cmake
   # TODO: Not totally sure if this is live or not
@@ -1056,6 +1072,13 @@ elseif(USE_CUDA)
     target_precompile_headers(torch_cuda PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
   endif()
+endif()
+
+if(USE_XPU)
+  add_library(torch_xpu ${Caffe2_XPU_SRCS})
+  torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
+  target_compile_options_if_supported(torch_xpu "-Wno-deprecated-copy")  # see cmake/public/utils.cmake
+  target_compile_definitions(torch_xpu PRIVATE USE_XPU)
 endif()
 
 if(NOT MSVC AND USE_XNNPACK)
@@ -1305,6 +1328,9 @@ if(USE_ROCM)
     /opt/rocm/rocblas/include
     /opt/rocm/hipsparse/include
     )
+  if(USE_FLASH_ATTENTION)
+    target_compile_definitions(torch_hip PRIVATE USE_FLASH_ATTENTION)
+  endif()
 endif()
 
 if(BUILD_LITE_INTERPRETER)
@@ -1414,10 +1440,8 @@ elseif(USE_ROCM)
   target_compile_definitions(torch_hip PRIVATE TORCH_HIP_BUILD_MAIN_LIB)
 endif()
 
-if(USE_EXPERIMENTAL_CUDNN_V8_API)
-  if(USE_CUDA)
-    target_compile_definitions(torch_cuda PRIVATE "-DUSE_EXPERIMENTAL_CUDNN_V8_API")
-  endif()
+if(USE_XPU)
+  target_compile_definitions(torch_xpu PRIVATE TORCH_XPU_BUILD_MAIN_LIB)
 endif()
 
 set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
@@ -1509,6 +1533,10 @@ elseif(USE_ROCM)
   caffe2_interface_library(torch_hip torch_hip_library)
 endif()
 
+if(USE_XPU)
+  caffe2_interface_library(torch_xpu torch_xpu_library)
+endif()
+
 caffe2_interface_library(torch torch_library)
 
 install(TARGETS torch_cpu torch_cpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -1518,6 +1546,11 @@ if(USE_CUDA)
 elseif(USE_ROCM)
   install(TARGETS torch_hip torch_hip_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
+
+if(USE_XPU)
+  install(TARGETS torch_xpu torch_xpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+endif()
+
 install(TARGETS torch torch_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 target_link_libraries(torch PUBLIC torch_cpu_library)
@@ -1526,6 +1559,10 @@ if(USE_CUDA)
   target_link_libraries(torch PUBLIC torch_cuda_library)
 elseif(USE_ROCM)
   target_link_libraries(torch PUBLIC torch_hip_library)
+endif()
+
+if(USE_XPU)
+  target_link_libraries(torch PUBLIC torch_xpu_library)
 endif()
 
 if(PRINT_CMAKE_DEBUG_INFO)
@@ -1565,6 +1602,19 @@ if(USE_CUDA)
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
   target_link_libraries(torch_cuda PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+endif()
+
+# ---[ XPU library.
+if(USE_XPU)
+  target_link_libraries(torch_xpu INTERFACE torch::xpurt)
+  target_link_libraries(torch_xpu PUBLIC c10_xpu)
+
+  target_include_directories(
+      torch_xpu INTERFACE $<INSTALL_INTERFACE:include>)
+  target_include_directories(
+      torch_xpu PRIVATE ${Caffe2_XPU_INCLUDE})
+
+  target_link_libraries(torch_xpu PUBLIC torch_cpu_library)
 endif()
 
 # ---[ Metal(OSX) modification
@@ -1658,14 +1708,6 @@ if(BUILD_STATIC_RUNTIME_BENCHMARK)
   add_executable(static_runtime_test "${STATIC_RUNTIME_TEST_SRCS}")
   target_link_libraries(static_runtime_bench torch_library benchmark)
   target_link_libraries(static_runtime_test torch_library gtest_main)
-endif()
-
-if(BUILD_TENSOREXPR_BENCHMARK)
-  add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/tensorexpr ${CMAKE_BINARY_DIR}/tensorexpr_bench)
-endif()
-
-if(BUILD_CPP_BENCHMARKS)
-  add_subdirectory(${TORCH_ROOT}/benchmarks/cpp ${PROJECT_BINARY_DIR}/bin)
 endif()
 
 if(BUILD_MOBILE_BENCHMARK)
@@ -1791,6 +1833,20 @@ if(BUILD_TEST)
         if(MSVC AND BUILD_SHARED_LIBS)
           install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
         endif()
+      endif()
+    endforeach()
+  endif()
+
+  if(USE_XPU)
+    foreach(test_src ${Caffe2_XPU_TEST_SRCS})
+      get_filename_component(test_name ${test_src} NAME_WE)
+      add_executable(${test_name} "${test_src}")
+      target_link_libraries(${test_name} torch_library gtest_main)
+      target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+      target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
+      add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+      if(INSTALL_TEST)
+        install(TARGETS ${test_name} DESTINATION test)
       endif()
     endforeach()
   endif()
@@ -1979,6 +2035,9 @@ if(BUILD_PYTHON)
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE ${Caffe2_CPU_INCLUDE})
     target_link_libraries(caffe2_pybind11_state_gpu PRIVATE
         torch_library python::python pybind::pybind11)
+    if(USE_MKLDNN)
+        target_link_libraries(caffe2_pybind11_state_gpu PRIVATE caffe2::mkldnn)
+    endif()
     if(WIN32)
       target_link_libraries(caffe2_pybind11_state_gpu PRIVATE onnx_proto)
     endif(WIN32)
