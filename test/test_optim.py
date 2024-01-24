@@ -36,7 +36,6 @@ class TestOptimRenewed(TestCase):
 
         for error_input in error_inputs:
             optim_input = error_input.optimizer_error_input
-            print(optim_input)
             params, kwargs = optim_input.params, optim_input.kwargs
             if error_input.error_on == OptimizerErrorEnum.CONSTRUCTION_ERROR:
                 if issubclass(error_input.error_type, Warning):
