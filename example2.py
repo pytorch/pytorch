@@ -5,7 +5,7 @@ import depyf
 def foo():
     def h(x):
         a = x.cos()
-        print(x, g)
+        print(x)
         b = a.cos()
         return b
 

@@ -725,22 +725,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     + co_varnames
                 )
                 func_name = tracer.code_options['co_name']
-                # tracer_freevars = list(co_freevars)
-                # if func_name in tracer_freevars:
-                    # tracer_freevars.remove(func_name)
-                # tracer._cell_and_freevars += co_freevars
-                # tracer.output.code_options['co_freevars'] = tuple(tracer_freevars)
-                # for k, v in self.f_locals.items():
-                #     if k not in tracer.f_locals:
-                # #         breakpoint()
-                #         tracer.f_locals[k] = self.f_locals[k]
-                # tracer.prune_dead_locals()
-                # tracer.output.code_options['co_freevars'] = tuple(tracer_freevars)
                 tracer_freevars = tracer.code_options['co_freevars']
                 if not tracer_freevars:
                     tracer_freevars = None
                 resume_at_insts = tracer.create_call_resume_at(
-                    tracer.next_instruction, [], None, tracer_freevars, None
+                    tracer.next_instruction
                 )
                 outs = outs + resume_at_insts[:-1]
             co_names = tuple(set(co_names))
@@ -779,7 +768,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     self.output.code_options["co_varnames"] += (varname,)
 
             resume_at = outs + self.create_call_resume_at(
-                self.next_instruction, [], None, co_freevars, None
+                self.next_instruction
             )
             # breakpoint()
             # self.code_options['co_names'] += co_names
@@ -1476,22 +1465,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def create_call_resume_at(
         self,
         inst,
-        prelude: List[Instruction] = [],  # noqa: B006
-        new_co_names = None,  # noqa: B006
-        new_co_freevars = None,
-        new_co_varnames = None,  # noqa: B006
     ):
         """
         If prelude is non-empty, it will first run the prelude within the resume at.
         """
         self.instruction_pointer = None
 
-        if inst.opname == "RETURN_VALUE" and len(prelude) == 0:
+        if inst.opname == "RETURN_VALUE":
             return [create_instruction("RETURN_VALUE")]
 
         reads = livevars_analysis(self.instructions, inst)
-        if prelude:
-            reads.update(livevars_analysis(prelude, prelude[0]))
         argnames = tuple(
             k
             for k in self.symbolic_locals.keys()
@@ -1537,10 +1520,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             argnames,
             tuple(b.resume_fn() for b in self.block_stack),
             tuple(null_idxes),
-            tuple(prelude),
-            new_co_names,
-            new_co_freevars,
-            new_co_varnames,
         )
 
         # breakpoint()
@@ -1552,7 +1531,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             new_code.co_firstlineno,
             new_code,
         )
-        print("Free vars?", self.f_code.co_name, new_code.co_freevars)
+        print("Free vars?", self.f_code.co_name, new_code.co_freevars, cg.code_options['co_freevars'])
         # breakpoint()
 
         # Add original GraphModule context to the resume function to handle
