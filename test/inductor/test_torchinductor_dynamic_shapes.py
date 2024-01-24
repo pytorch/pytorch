@@ -187,7 +187,7 @@ class TestInductorDynamic(TestCase):
         opt_r = opt_f(x, y)
         self.assertEqual(r, opt_r)
 
-    @expectedFailure
+    @unittest.expectedFailure
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unwrap_storage_didnt_work_repro(self, device):
         def f():
