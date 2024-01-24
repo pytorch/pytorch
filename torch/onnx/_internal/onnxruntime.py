@@ -809,21 +809,11 @@ class OrtBackend:
             # It's first time seeing such as graph. Let's make a new session
             # (type: onnxruntime.InferenceSession) for it.
 
-            modified_graph_module = (
-                torch.onnx._internal.fx.passes.MovePlaceholderToFront(
-                    self._resolved_onnx_exporter_options.diagnostic_context,
-                    graph_module,
-                ).run()
-            )
-            # Generate reference outputs. They are used to indicate output
-            # tensors' types and devices when calling ORT.
-            #
-            # WARNING: The downstream code should not change prim_outputs and
-            # this backend should always produces output with schema identical to prim_outputs'.
-
+            # Extract inputs from metadata because they are tensors with dynamic shapes.
+            # The input `args` are tensors with static shapes, so we don't want to use them.
             graph_module_args = [
                 node.meta["val"]
-                for node in modified_graph_module.graph.nodes
+                for node in graph_module.graph.nodes
                 if node.op == "placeholder"
             ]
 
@@ -834,6 +824,8 @@ class OrtBackend:
             # debug mutable graphs.
             modified_graph_module = common_pre_export_passes_shared_by_exporter_and_dynamo_backend(
                 self._resolved_onnx_exporter_options,
+                # Cannot copy.deepcopy(graph_module) because it leads to
+                # copying of OrtBackend.
                 graph_module,
                 graph_module_args,
                 # functionalization cannot be called from here.
@@ -858,11 +850,14 @@ class OrtBackend:
                 )
             else:
                 try:
+                    # Generate reference outputs. They are used to indicate output
+                    # tensors' types and devices when calling ORT.
+                    #
                     # Output tensors' types and devices are inferred by
                     # running `FakeTensorProp` with the current input args and kwargs.
                     # The values stored in node.meta["val"] are not used because
                     # pre-allocation cannnot use dynamic shapes.
-                    prim_outputs = FakeTensorProp(modified_graph_module).propagate(
+                    prim_outputs = FakeTensorProp(graph_module).propagate(
                         *args, **kwargs
                     )
                 except Exception:

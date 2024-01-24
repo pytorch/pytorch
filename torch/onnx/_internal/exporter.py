@@ -1470,6 +1470,11 @@ def common_pre_export_passes_shared_by_exporter_and_dynamo_backend(
         allow_fake_constant=options.fake_context is not None,
     ).run(*fx_module_args)
 
+    module = passes.MovePlaceholderToFront(
+        diagnostic_context,
+        module,
+    ).run()
+
     # ONNX does not support views and mutations.
     # Functionalize to get a semantically equivalent graph without mutations.
     if functionalize_module:
