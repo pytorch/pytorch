@@ -90,21 +90,21 @@ class TestEmbeddingOp(DTensorTestBase):
 
         # Use a sample cross entry loss to verify backward and grad computation.
         loss = torch.nn.CrossEntropyLoss()
-        attn_loss = loss(
+        emb_loss = loss(
             output,
             target,
         )
-        attn_dup_loss = loss(
+        emb_dup_loss = loss(
             local_output,
             target,
         )
 
         # local embedding backward
-        attn_loss.backward()
+        emb_dup_loss.backward()
 
         # sharded embedding bwd computation, ensure no comm happened
         with CommDebugMode() as bwd_mode:
-            attn_dup_loss.backward()
+            emb_loss.backward()
             self.assertEqual(bwd_mode.get_total_counts(), 0)
 
         gradient = sharded_embedding.weight.grad.full_tensor()
@@ -141,7 +141,7 @@ class TestEmbeddingOp(DTensorTestBase):
     def test_sharded_embedding_colwise_max_norm_errors(self):
         with self.assertRaisesRegex(
             NotImplementedError,
-            "does not have a sharding strategy registered.",
+            "aten.embedding_renorm_.default does not have a sharding strategy registered.",
         ):
             self._run_embedding_op_test(
                 1, [8, 6, 5, 4], 23, 13, padding_idx=12, max_norm=2.0

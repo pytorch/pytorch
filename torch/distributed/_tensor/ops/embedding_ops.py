@@ -44,7 +44,7 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     output_emd_dim = len(indices_shape)
 
     # guard rowwise sharding not implemented for now
-    weight_spec = weight_strategy.strategies[0].out_spec
+    weight_spec = weight_strategy.strategies[0].output_spec
     if any(placement.is_shard(0) for placement in weight_spec.placements):
         raise NotImplementedError(
             "DTensor does not support row-wise sharded embedding operation yet!"
@@ -57,8 +57,8 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 
         # placement list stores placements of [output, weight, input_indices]
         # first we always have replicate all for inputs and output
-        placement_list: List[Placement] = [Replicate()] * 3
-        single_mesh_dim_strategies.append(placement_list)
+        all_replicate: List[Placement] = [Replicate()] * 3
+        single_mesh_dim_strategies.append(all_replicate)
 
         # colwise sharding, output shard on last dim, weight shard on dim 1, input replicate
         colwise_sharding = [Shard(output_emd_dim), Shard(1), Replicate()]
@@ -89,7 +89,7 @@ def embedding_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
                 generate_redistribute_costs(indices_strategy, indices_spec),
             ]
             strat = PlacementStrategy(
-                output_spec=spec_list[0],
+                output_specs=spec_list[0],
                 input_specs=spec_list[1:],
                 redistribute_cost=redistribute_cost,
             )
@@ -121,8 +121,8 @@ def embedding_dense_backward_strategy(
 
         # placement list stores placements of [output, weight, input_indices]
         # first we always have replicate all for inputs and output
-        placement_list: List[Placement] = [Replicate()] * 3
-        single_mesh_dim_strategies.append(placement_list)
+        all_replicate: List[Placement] = [Replicate()] * 3
+        single_mesh_dim_strategies.append(all_replicate)
 
         # colwise sharding backward, grad_out shard on last dim, input replicate,
         # weight grad shard colwise
@@ -159,7 +159,7 @@ def embedding_dense_backward_strategy(
                 generate_redistribute_costs(indices_strategy, indices_spec),
             ]
             strat = PlacementStrategy(
-                output_spec=spec_list[0],
+                output_specs=spec_list[0],
                 input_specs=spec_list[1:],
                 redistribute_cost=redistribute_cost,
             )

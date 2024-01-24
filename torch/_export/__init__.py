@@ -97,6 +97,7 @@ def capture_pre_autograd_graph(
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
 ) -> torch.nn.Module:
     """
     A helper function that is intended to trace a module before any pre-autograd
@@ -111,17 +112,49 @@ def capture_pre_autograd_graph(
 
       kwargs: optional example keyword inputs.
 
-      constraints: A optional list of constraints on the dynamic arguments specifying
-            their possible range of their shapes
+      constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
+         An optional list of constraints on the dynamic arguments
+         that specify their possible range of shapes. By default, shapes of
+         input torch.Tensors are assumed to be static. If an input torch.Tensor
+         is expected to have dynamic shapes, please use :func:`dynamic_dim`
+         to define :class:`Constraint` objects that specify the dynamics and the possible
+         range of shapes. See :func:`dynamic_dim` docstring for examples on
+         how to use it.
+
+      dynamic_shapes: Should either be:
+         1) a dict from argument names of ``f`` to their dynamic shape specifications,
+         2) a tuple that specifies dynamic shape specifications for each input in original order.
+         If you are specifying dynamism on keyword args, you will need to pass them in the order that
+         is defined in the original function signature.
+
+         The dynamic shape of a tensor argument can be specified as either
+         (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
+         not required to include static dimension indices in this dict, but when they are,
+         they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
+         where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
+         are denoted by None. Arguments that are dicts or tuples / lists of tensors are
+         recursively specified by using mappings or sequences of contained specifications.
 
     Returns:
         An nn.Module containing the traced method.
 
     """
     from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG
+    from torch.export.dynamic_shapes import _process_dynamic_shapes
 
     if kwargs is None:
         kwargs = {}
+
+    if constraints is not None:
+        warnings.warn(
+            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
+            "and will not be supported in the future. "
+            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    else:
+        constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
 
     decomp_table = {op: op.decompose for op in FunctionalTensor.maybe_aliasing_or_mutating_ops}
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
@@ -392,7 +425,7 @@ def aot_load(so_path: str, device: str) -> Callable:
         call_spec = runner.get_call_spec()  # type: ignore[attr-defined]
         in_spec = pytree.treespec_loads(call_spec[0])
         out_spec = pytree.treespec_loads(call_spec[1])
-        flat_inputs = fx_pytree.tree_flatten_spec((*args, kwargs), in_spec)
+        flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
         flat_outputs = runner.run(flat_inputs)  # type: ignore[attr-defined]
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
