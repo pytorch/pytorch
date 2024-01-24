@@ -51,5 +51,5 @@ TEST(ScalarTest, Equality) {
 TEST(ScalarTest, LongsAndLongLongs) {
   Scalar longOne = 1L;
   Scalar longlongOne = 1LL;
-  ASSERT_EQ(longOne, longlongOne);
+  ASSERT_EQ(longOne.toInt(), longlongOne.toInt());
 }
