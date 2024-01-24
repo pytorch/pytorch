@@ -53,11 +53,7 @@ using invoke_result_t = typename invoke_result<F, args...>::type;
 // std::is_trivial are introduced in C++11, std::conjunction has been introduced
 // in C++17.
 template <typename T>
-#if defined(__cpp_lib_logical_traits) && __cpp_lib_logical_traits >= 201510L
 using is_pod = std::conjunction<std::is_standard_layout<T>, std::is_trivial<T>>;
-#else
-using is_pod = std::is_pod<T>;
-#endif
 
 template <typename T>
 constexpr bool is_pod_v = is_pod<T>::value;
