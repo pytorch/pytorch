@@ -2170,31 +2170,39 @@ TEST_F(VulkanAPITest, copy) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, cumsum) {
-  c10::InferenceMode mode;
+void test_cumsum(const at::IntArrayRef input_shape, const int64_t dim) {
+  const auto in_cpu = at::rand(input_shape, at::TensorOptions(at::kCPU).dtype(at::kFloat));
 
-  const auto in_cpu = at::rand({1, 17, 37, 49}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  // 0 do nothing
-  // 1 frame
-  // not implemented
-
-  // 2 height
-  const auto out_cpu2 = at::cumsum(in_cpu, 2);
-  const auto out_vulkan2 = at::cumsum(in_cpu.vulkan(), 2);
-  const auto check2 = almostEqual(out_cpu2, out_vulkan2.cpu());
-  if (!check2) {
-    showRtol(out_cpu2, out_vulkan2.cpu());
+  const auto out_cpu = at::cumsum(in_cpu, dim);
+  const auto out_vulkan = at::cumsum(in_cpu.vulkan(), dim);
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
   }
-  ASSERT_TRUE(check2);
+  ASSERT_TRUE(check);
+}
 
-  // 3 width
-  const auto out_cpu3 = at::cumsum(in_cpu, 3);
-  const auto out_vulkan3 = at::cumsum(in_cpu.vulkan(), 3);
-  const auto check3 = almostEqual(out_cpu3, out_vulkan3.cpu());
-  if (!check3) {
-    showRtol(out_cpu3, out_vulkan3.cpu());
+TEST_F(VulkanAPITest, cumsum_1d) {
+  test_cumsum({37}, 0);
+  test_cumsum({37}, -1);
+}
+
+TEST_F(VulkanAPITest, cumsum_2d) {
+  for (int64_t i = -1; i <= 1; i++) {
+    test_cumsum({17, 37}, i);
   }
-  ASSERT_TRUE(check3);
+}
+
+TEST_F(VulkanAPITest, cumsum_3d) {
+  for (int64_t i = -2; i <= 2; i++) {
+    test_cumsum({17, 37, 49}, i);
+  }
+}
+
+TEST_F(VulkanAPITest, cumsum_4d) {
+  for (int64_t i = -3; i <= 3; i++) {
+    test_cumsum({12, 17, 37, 49}, i);
+  }
 }
 
 void test_div(const at::IntArrayRef input_shape, const at::IntArrayRef other_shape) {
