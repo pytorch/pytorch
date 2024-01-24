@@ -3,11 +3,8 @@
 #define C10_UTIL_CPP17_H_
 
 #include <c10/macros/Macros.h>
-#include <cstdlib>
 #include <functional>
 #include <memory>
-#include <sstream>
-#include <string>
 #include <type_traits>
 #include <utility>
 
