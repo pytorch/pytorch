@@ -783,6 +783,7 @@ class TestFunctionalIterDataPipe(TestCase):
                 datapipe = dpipe(custom_input, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
                 self._serialization_test_for_single_dp(datapipe)
 
+    @skipIfTorchDynamo("Dict with function as keys")
     def test_serializable_with_dill(self):
         """Only for DataPipes that take in a function as argument"""
         input_dp = dp.iter.IterableWrapper(range(10))

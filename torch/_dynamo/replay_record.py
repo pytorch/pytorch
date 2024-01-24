@@ -20,6 +20,10 @@ class DummyModule:
     name: str
     is_torch: bool = False
 
+    @property
+    def __name__(self):
+        return self.name
+
 
 @dataclasses.dataclass
 class ExecutionRecord:
