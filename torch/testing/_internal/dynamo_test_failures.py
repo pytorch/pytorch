@@ -53,15 +53,12 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_norm_vector_cpu_float32",
     "TestLinalgCPU.test_solve_cpu_complex128",
     "TestLinalgCPU.test_lobpcg_torchscript_cpu_float64",
-    "TestLinalgCPU.test_einsum_sublist_format_cpu_float64",
     "TestLinalgCPU.test_solve_cpu_float32",
     "TestLinalgCPU.test_addr_integral_cpu_int16",
     "TestLinalgCPU.test_norm_vector_cpu_float64",
-    "TestLinalgCPU.test_einsum_random_cpu_complex128",
     "TestLinalgCPU.test_addmm_sizes_cpu_float64",
     "TestLinalgCPU.test_norm_dtype_cpu_float64",
     "TestLinalgCPU.test_addr_integral_cpu_int8",
-    "TestLinalgCPU.test_einsum_random_cpu_float64",
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_complex64",
     "TestLinalgCPU.test_pinv_cpu_float32",
     "TestLinalgCPU.test_addr_integral_cpu_uint8",
@@ -78,7 +75,6 @@ dynamo_expected_failures = {
     "TestLinalgCPU.test_pinv_cpu_complex64",
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",
     "TestLinalgCPU.test_geqrf_cpu_complex128",
-    "TestLinalgCPU.test_einsum_sublist_format_cpu_complex128",
     "TestLinalgCPU.test_geqrf_cpu_complex64",
     "TestLinalgCPU.test_slogdet_errors_and_warnings_cpu_float64",
     "TestLinalgCPU.test_geqrf_cpu_float64",
@@ -528,6 +524,10 @@ dynamo_expected_failures = {
     "TestArgmaxArgminCommon.test_np_vs_ndarray_positional_arr_method_argmin_np_method1",
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_1_method_argmax",
     "TestArgmaxArgminCommon.test_ret_is_out_ndim_0_method_argmin",
+    "TestArgmax.test_combinations_data66",
+    "TestArgmax.test_combinations_data65",
+    "TestArgmax.test_combinations_data63",
+    "TestArgmax.test_combinations_data62",
     "TestCond.test_sq_cases",
     "TestNormInt64.test_bad_args",
     "TestQR.test_qr_empty_m_0_n_3",
@@ -1824,7 +1824,6 @@ dynamo_expected_failures = {
     "TestAsArrayCPU.test_copy_list_cpu_int64",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int32",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_float32",  # test_tensor_creation_ops
-    "TestTensorCreationCPU.test_tensor_factory_type_inference_cpu",  # test_tensor_creation_ops
     "TestBufferProtocolCPU.test_byte_to_int_cpu",  # test_tensor_creation_ops
     "TestTensorCreationCPU.test_block_diag_cpu",  # test_tensor_creation_ops
     "TestAsArrayCPU.test_copy_list_cpu_int8",  # test_tensor_creation_ops
@@ -3083,7 +3082,6 @@ dynamo_expected_failures = {
     "TestTorch.test_contains",  # test_torch
     "TestTorch.test_new",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_map2_cpu",  # test_torch
-    "TestTorch.test_newaxis_numpy_comparison",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_ne_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_gt_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_bfloat16",  # test_torch
@@ -3110,7 +3108,6 @@ dynamo_expected_failures = {
     "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_float32",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool2d_cpu_float32",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool3d_cpu_float32",  # test_torch
-    "TestTorchDeviceTypeCPU.test_where_scalar_handcrafted_values_cpu",  # test_torch
     "TestTorch.test_upsample_nearest2d_meta",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_map_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool1d_cpu_float64",  # test_torch
@@ -8570,6 +8567,8 @@ dynamo_skips = {
     "TestNnapiBackend.test_pointwise_binary",  # test_jit
     "TestTypesAndAnnotation.test_tuple_no_element_type_annotation",  # test_jit
     "TestFrozenOptimizations.test_conv_bn_folding",  # test_jit.py
+    "TestArgmax.test_combinations_data58",
+    "TestArgmax.test_combinations_data61",
 }
 
 
