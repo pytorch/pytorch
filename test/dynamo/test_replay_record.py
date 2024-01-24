@@ -80,7 +80,7 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
     def test_unsuccessful_inline(self):
         def level2():
             a = {10}
-            z = a['z']  # RuntimeError, Illegal to getitem on a set
+            z = a["z"]  # RuntimeError, Illegal to getitem on a set
             return z * torch.ones(1)
 
         def level1():
