@@ -130,6 +130,8 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
+  # setting PYTHON_TEST_EXTRA_OPTION
+  export PYTHON_TEST_EXTRA_OPTION="--xpu"
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
@@ -250,14 +252,14 @@ test_python_shard() {
 
   # Bare --include flag is not supported and quoting for lint ends up with flag not being interpreted correctly
   # shellcheck disable=SC2086
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
 
   assert_git_not_dirty
 }
 
 test_python() {
   # shellcheck disable=SC2086
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --verbose
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --verbose $PYTHON_TEST_EXTRA_OPTION
   assert_git_not_dirty
 }
 
@@ -268,31 +270,13 @@ test_dynamo_shard() {
     exit 1
   fi
   python tools/dynamo/verify_dynamo.py
-  # Temporarily disable test_fx for dynamo pending the investigation on TTS
-  # regression in https://github.com/pytorch/torchdynamo/issues/784
+  # PLEASE DO NOT ADD ADDITIONAL EXCLUDES HERE.
+  # Instead, use @skipIfTorchDynamo on your tests.
   time python test/run_test.py --dynamo \
+    --exclude-inductor-tests \
     --exclude-jit-executor \
     --exclude-distributed-tests \
-    --exclude \
-      test_ao_sparsity \
-      test_autograd \
-      test_jit \
-      test_quantization \
-      test_public_bindings \
-      test_dataloader \
-      test_reductions \
-      test_namedtensor \
-      profiler/test_profiler \
-      profiler/test_profiler_tree \
-      test_python_dispatch \
-      test_fx \
-      test_package \
-      test_legacy_vmap \
-      test_custom_ops \
-      test_content_store \
-      export/test_db \
-      functorch/test_dims \
-      functorch/test_aotdispatch \
+    --exclude-torch-export-tests \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
