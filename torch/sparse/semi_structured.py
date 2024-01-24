@@ -1,8 +1,10 @@
 import warnings
 from collections import namedtuple
-from typing import Any, Optional
+from typing import Any, Optional, Tuple, List
+
 
 import torch
+from torch.sparse._semi_structured_conversions import (sparse_semi_structured_from_dense_cutlass, sparse_semi_structured_to_dense_cutlass)
 
 __all__ = [
     "SparseSemiStructuredTensor",
@@ -129,6 +131,47 @@ class SparseSemiStructuredTensor(torch.Tensor):
         self.alg_id_cusparselt = alg_id_cusparselt
 
     @classmethod
+    def _validate_device_dim_dtype_shape(cls, original_tensor) -> None:
+        # check device
+        if not original_tensor.is_cuda:
+            raise RuntimeError(
+                f"Error original_tensor.device= {original_tensor.device} is not supported! "
+                "Only CUDA tensors are currently supported."
+            )
+
+        # check dim
+        if original_tensor.dim() != 2:
+            raise RuntimeError(
+                f"Error original_tensor.dim = {original_tensor.dim()} is not supported! "
+                "Only 2d tensors are currently supported."
+            )
+
+        # check contiguous
+        if not original_tensor.is_contiguous():
+            raise RuntimeError(
+                "Error original_tensor is not contiguous!"
+                "Only contiguous tensors are currently supported."
+            )
+
+        # check dtype
+        if original_tensor.dtype not in cls._DTYPE_SHAPE_CONSTRAINTS:
+            raise RuntimeError(
+                f"Error original_tensor.dtype {original_tensor.dtype} is not a supported dtype! "
+                "dtype must be one of: {cls._DTYPE_SHAPE_CONSTRAINTS}"
+            )
+
+        # check shape
+        m, n = original_tensor.shape
+        min_rows = cls._DTYPE_SHAPE_CONSTRAINTS[original_tensor.dtype].sparse_min_rows
+        min_cols = cls._DTYPE_SHAPE_CONSTRAINTS[original_tensor.dtype].sparse_min_cols
+        if m < min_rows or m % min_rows or n < min_cols or n % min_cols:
+            # TODO in the future we can add in padding to support sparse dimensions that aren't perfect multiples
+            raise RuntimeError(
+                f"Error original_tensor.shape {original_tensor.shape} is not supported! "
+                f"Both dimensions must be larger or equal than and a multiple of ({min_rows}, {min_cols})"
+            )
+
+    @classmethod
     def _pad_dense_input(cls, dense_input: torch.Tensor) -> torch.Tensor:
         """
         Calculates padding for dense tensor and pads tensor if necessary.
@@ -188,10 +231,21 @@ class SparseSemiStructuredTensor(torch.Tensor):
             NotImplementedError: If the dispatched operation is not implemented.
         """
         if func is torch.ops.aten.values.default:
-            return args[0].values()
+            if args[0].compressed_tensor_cusparselt is None:
+                return args[0].sparse_tensor_cutlass.detach()
+            else:
+                m, k = args[0].shape
+                num_kept_elements = m * k // 2
+                return args[0].compressed_tensor_cusparselt[:num_kept_elements:].view(m, -1)
 
         if func is torch.ops.aten.indices.default:
-            return args[0].indices()
+            if args[0].compressed_tensor_cusparselt is None:
+                return args[0].meta_tensor_cutlass
+            else:
+                m, k = args[0].shape
+                num_kept_elements = m * k // 2
+                metadata = args[0].compressed_tensor_cusparselt[num_kept_elements:].view(m, -1)
+                return metadata.view(torch.int32 if args[0].dtype == torch.int32 else torch.int16)
 
         # Since this code runs below autograd, a detach corresponds to only returning a new object
         if func is torch.ops.aten.detach.default:
@@ -243,8 +297,10 @@ class SparseSemiStructuredTensor(torch.Tensor):
             elif isinstance(input_B, cls) and input_B.transposed:
                 row, col = input_A.shape
                 input_A_padded = cls._pad_dense_input(input_A)
-                res = input_B.sparse_addmm(input_A_padded.t(), bias)
-                res = res if input_B.fuse_transpose_cusparselt else res.t():
+                if input_B.fuse_transpose_cusparselt:
+                    res = input_B.sparse_addmm(input_A_padded.t(), bias)
+                else:
+                    res = input_B.sparse_addmm(input_A_padded.t(), bias).t()
                 return res[:row, :]
 
         error_string = "\n".join(
@@ -316,12 +372,6 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             self.meta_tensor_cutlass,
             bias=bias).t()
 
-    def values(self):
-        return self.sparse_tensor_cutlass.detach()
-
-    def indices(self):
-        return self.meta_tensor_cutlass
-
 class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
     """
     This subclass connects cuSPARSELt to the user.
@@ -340,13 +390,13 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
         return ["compressed_tensor_cusparselt"], (
             self.original_shape,
             self.transposed,
-            self.fuse_transpose,
+            self.fuse_transpose_cusparselt,
             self.alg_id_cusparselt,
         )
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        original_shape, transposed, fuse_transpose, alg_id_cusparselt = meta
+        original_shape, transposed, fuse_transpose_cusparselt, alg_id_cusparselt = meta
         assert (
             len(inner_tensors) == 1
         ), f"Expected 1 inner tensors but got {len(inner_tensors)}"
@@ -356,7 +406,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
             original_shape,
             compressed_tensor_cusparselt=compressed_tensor_cusparselt,
             transposed=transposed,
-            fuse_transpose=fuse_transpose,
+            fuse_transpose_cusparselt=fuse_transpose_cusparselt,
             alg_id_cusparselt=alg_id_cusparselt,
         )
 
@@ -364,7 +414,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
     def from_dense(cls, original_tensor):
         cls._validate_device_dim_dtype_shape(original_tensor)
         compressed_tensor_cusparselt = torch._cslt_compress(original_tensor)
-        return cls(compressed_tensor_cusparselt=compressed_tensor_cusparselt, original_tensor.shape)
+        return cls(original_tensor.shape, compressed_tensor_cusparselt=compressed_tensor_cusparselt)
 
     def to_dense(self):
         col = self.shape[-1]
@@ -372,22 +422,11 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
 
     def sparse_addmm(self, dense, bias):
         return torch._cslt_sparse_mm(
-            dense,
             self.compressed_tensor_cusparselt,
-            bias=bias
-            fuse_transpose=self.fuse_transpose_cusparselt,
+            dense,
+            bias=bias,
+            transpose_result=self.fuse_transpose_cusparselt,
             alg_id=self.alg_id_cusparselt)
-
-    def values(self):
-        m, k = self.shape
-        num_kept_elements = m * k // 2
-        return self.compressed_tensor_cusparselt[:num_kept_elements:].view(m, -1)
-
-    def indices(self):
-        m, k = self.shape
-        num_kept_elements = m * k // 2
-        metadata = self.compressed_tensor_cusparselt[num_kept_elements:].view(m, -1)
-        return metadata.view(torch.int32 if self.dtype == torch.int32 else torch.int16)
 
 def to_sparse_semi_structured(
     original_tensor: torch.Tensor,
