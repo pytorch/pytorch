@@ -7793,6 +7793,20 @@ for shape in [(1,), ()]:
             with self.assertRaisesRegex(RuntimeError, "You should return None at that position instead"):
                 FuncWrong.apply(x_dual, y)
 
+        # returns non-tensor
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone(), object()
+
+            @staticmethod
+            def jvp(ctx, x_tangent):
+                return x_tangent, None
+
+        with fwAD.dual_level():
+            x_dual = fwAD.make_dual(x, x_tangent)
+            out_dual, _ = Func.apply(x_dual)
+            self.assertEqual(fwAD.unpack_dual(out_dual).tangent, x_tangent)
 
     def test_custom_function_local_inplace(self):
         class MyFn(torch.autograd.Function):
