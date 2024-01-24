@@ -54,6 +54,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
   if [ "$ANACONDA_PYTHON_VERSION" = "3.12" ]; then
     conda_install numpy=1.26.0 astunparse pyyaml mkl=2023.1.0 mkl-include=2023.1.0 setuptools
+    export CMAKE_PREFIX_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib:$PATH"
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.11" ]; then
     conda_install numpy=1.26.0 ${CONDA_COMMON_DEPS}
   else
